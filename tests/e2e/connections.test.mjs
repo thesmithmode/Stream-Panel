@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { launchBrowser } from "../helpers/browser.mjs";
-import { startCoverage, saveCoverage } from "../helpers/browser-coverage.mjs";
+import {
+  startCoverage,
+  saveCoverage,
+  goto,
+  reload,
+} from "../helpers/browser-coverage.mjs";
 import { application, seed } from "../helpers/application.mjs";
 import { provider, until } from "../helpers/provider.mjs";
 test(
@@ -76,23 +81,19 @@ test(
       const context = await browser.newContext(),
         page = await context.newPage();
       await startCoverage(page);
-      await page.goto(a.bootstrap());
+      await goto(page, a.bootstrap());
       await page
         .getByRole("button", { name: "Подключить сервисы", exact: true })
         .click();
-      const twitch = page
-        .locator("section.settings")
-        .filter({
-          has: page.getByRole("heading", { name: "Twitch", exact: true }),
-        });
-      const da = page
-        .locator("section.settings")
-        .filter({
-          has: page.getByRole("heading", {
-            name: "DonationAlerts",
-            exact: true,
-          }),
-        });
+      const twitch = page.locator("section.settings").filter({
+        has: page.getByRole("heading", { name: "Twitch", exact: true }),
+      });
+      const da = page.locator("section.settings").filter({
+        has: page.getByRole("heading", {
+          name: "DonationAlerts",
+          exact: true,
+        }),
+      });
       await twitch.getByRole("button", { name: "Войти через Twitch" }).click();
       await page
         .getByRole("alert")
@@ -159,14 +160,15 @@ test(
         await da.getByLabel("Client secret", { exact: true }).inputValue(),
         "",
       );
-      await page.goto(
+      await goto(
+        page,
         `${a.origin}/oauth/donationalerts/callback?code=provider-code&state=${oauth.searchParams.get("state")}`,
       );
       await page
         .getByRole("button", { name: "Подключения", exact: true })
         .click();
       await until(() => a.da.status.state === "connected", 8000);
-      await page.reload();
+      await reload(page);
       await page
         .getByRole("button", { name: "Подключения", exact: true })
         .click();
@@ -216,7 +218,7 @@ test(
       assert.equal(a.configuration.value.daUtcOffsetMinutes, null);
       assert.equal(a.configuration.value.daAccessToken, "manual-access");
       await a.db.call("gap", "twitch", "fixture_gap", Date.now(), null);
-      await page.reload();
+      await reload(page);
       await page
         .getByRole("button", { name: "Подключения", exact: true })
         .click();
@@ -241,11 +243,11 @@ test(
         page = await context.newPage();
       page.setDefaultTimeout(5000);
       await startCoverage(page);
-      await page.goto(a.origin);
+      await goto(page, a.origin);
       await page
         .getByRole("heading", { name: "Откройте ссылку из терминала" })
         .waitFor();
-      await page.goto(a.bootstrap());
+      await goto(page, a.bootstrap());
       await page
         .getByRole("button", { name: "Подключить сервисы", exact: true })
         .waitFor();
@@ -255,7 +257,7 @@ test(
       await page.getByRole("button", { name: "Люди", exact: true }).click();
       await page.getByText("Пока никого нет", { exact: true }).waitFor();
       const s = await seed(a);
-      await page.reload();
+      await reload(page);
       await page
         .getByRole("button", { name: "Эфир идёт", exact: true })
         .waitFor();
@@ -277,7 +279,7 @@ test(
       await page.getByLabel("Период аналитики").selectOption("");
       await page.getByLabel("Фильтр событий").selectOption("all");
       await a.db.call("endSession", s, Date.now(), "estimated");
-      await page.reload();
+      await reload(page);
       await page.getByRole("button", { name: "Сессии", exact: true }).click();
       await page
         .getByText("Граница приблизительная", { exact: true })

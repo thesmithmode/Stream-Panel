@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { launchBrowser } from "../helpers/browser.mjs";
-import { startCoverage, saveCoverage } from "../helpers/browser-coverage.mjs";
+import {
+  startCoverage,
+  saveCoverage,
+  goto,
+  reload,
+} from "../helpers/browser-coverage.mjs";
 import { application, seed } from "../helpers/application.mjs";
 test(
   "real browser: recording, person attribution, alias search, minute grid, backup and responsive navigation",
@@ -21,7 +26,7 @@ test(
         if (m.type() === "error") errors.push(m.text());
       });
       await startCoverage(page);
-      await page.goto(a.bootstrap());
+      await goto(page, a.bootstrap());
       await page
         .getByRole("button", { name: "Подключить сервисы", exact: true })
         .waitFor();
@@ -42,7 +47,7 @@ test(
         .waitFor();
       checks.push("start manual recording");
       await seed(a);
-      await page.reload();
+      await reload(page);
       await page
         .getByText("Нет данных", { exact: true })
         .waitFor({ state: "hidden" });

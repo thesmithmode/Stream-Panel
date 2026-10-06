@@ -26,3 +26,15 @@ export async function saveCoverage(page) {
     JSON.stringify(result.toJSON()),
   );
 }
+// Recent Chromium can discard precise-coverage data with a destroyed document.
+// Persist before navigation, then instrument the next document from its first script.
+export async function goto(page, url) {
+  await saveCoverage(page);
+  await startCoverage(page);
+  return page.goto(url);
+}
+export async function reload(page) {
+  await saveCoverage(page);
+  await startCoverage(page);
+  return page.reload();
+}
