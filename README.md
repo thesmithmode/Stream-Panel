@@ -59,7 +59,7 @@ pnpm check
 pnpm benchmark
 ```
 
-`check` компилирует ядро, выполняет 27 тестов, проверяет Svelte и собирает production UI. Тесты используют временные данные и не обращаются к аккаунтам. [Benchmark](docs/benchmark-results.json) — синтетический storage smoke, не доказательство годовой нагрузки. CI настроен на Ubuntu и Windows; прохождение целевых Win11/Mint и живой записи отмечается отдельно.
+`check` компилирует ядро, выполняет 27 тестов, проверяет Svelte и собирает production UI. Тесты используют временные данные и не обращаются к аккаунтам. [Benchmark](docs/benchmark-results.json) — синтетический storage smoke, не доказательство годовой нагрузки. Установка и `pnpm check` прошли [CI на Ubuntu и Windows](https://github.com/thesmithmode/Stream-Panel/actions/runs/37535212725). Проверка живой записи на целевых Win11/Mint остаётся отдельным этапом.
 
 Структура: `packages/core` — домен/SQLite; `apps/daemon` — worker, HTTP, OAuth и адаптеры; `apps/web` — Svelte UI; `scripts` — измерения. Exact dependencies и lockfile фиксированы. В `allowBuilds` разрешён только `better-sqlite3`.
 
