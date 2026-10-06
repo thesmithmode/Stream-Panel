@@ -41,7 +41,13 @@
               )}</strong
             >{/if}
         </div>
-        <p>{event.payload.text || "—"}</p>
+        <p>
+          {#if event.payload.redacted}
+            <span class="muted">[скрыто модерацией]</span>
+          {:else}
+            {event.payload.text || "—"}
+          {/if}
+        </p>
         <time class="small muted"
           >{date(event.occurred_at_ms)}{#if event.occurred_at_ms === null}
             · получено {date(event.received_at_ms)}{/if}</time

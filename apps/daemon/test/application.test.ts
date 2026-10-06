@@ -37,6 +37,30 @@ test("documented Twitch chat IDs and UTC nanoseconds normalize without using env
   assert.equal(event.actor!.externalId, "42");
   assert.equal(event.sourceTime, "2026-10-06T20:00:00.123456789Z");
 });
+test("channel.subscription.message extracts text from message object", () => {
+  const event = normalizeTwitch(
+    {
+      metadata: {
+        message_type: "notification",
+        message_id: "sub-msg-id",
+        message_timestamp: "2026-10-06T20:00:00.000Z",
+      },
+      payload: {
+        subscription: { type: "channel.subscription.message" },
+        event: {
+          user_id: "99",
+          user_name: "Bob",
+          message: { text: "Love the stream!", emotes: null },
+          cumulative_months: 3,
+        },
+      },
+    },
+    "channel",
+  )!;
+  assert.equal(event.type, "subscription.message");
+  assert.equal(event.payload.text, "Love the stream!");
+});
+
 test("lossless DA money and recipient are normalized; missing timezone stays unknown", () => {
   const raw = parse(
     '{"id":9007199254740993,"amount":0.29,"currency":"RUB","username":"Alice","message":"hello","created_at":"2026-10-06 20:00:00"}',
@@ -190,10 +214,9 @@ test("chat moderation redacts persisted text rather than hiding it only in UI", 
     };
     await app.db.call("ingest", normalizeTwitch(deletion, "channel"));
     const events = await app.db.call<any[]>("events");
-    assert.equal(
-      events.find((e) => e.type === "chat.message").payload.text,
-      "[сообщение удалено]",
-    );
+    const chat = events.find((e) => e.type === "chat.message").payload;
+    assert.equal(chat.text, "hello", "moderation must not overwrite text");
+    assert.equal(chat.redacted, 1);
   } finally {
     await app.app.close();
     await rm(directory, { recursive: true, force: true });
@@ -238,6 +261,36 @@ test("Twitch rotating refresh is single-flight and public clients never send cli
         .refresh,
       "new-refresh",
     );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Twitch refresh keeps previous refresh_token when provider omits it", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stream-panel-refresh-omit-"));
+  const config = new Configuration(directory);
+  await config.load();
+  config.value.twitchClientId = "public-client";
+  config.value.twitch = {
+    access: "old-access",
+    refresh: "keep-me",
+    expiresAt: 0,
+    userId: "42",
+    scopes: [],
+  };
+  const request = (async () =>
+    new Response(
+      JSON.stringify({
+        access_token: "new-access",
+        expires_in: 3600,
+      }),
+    )) as typeof fetch;
+  const { TwitchConnection } = await import("../src/twitch.js");
+  const connection = new TwitchConnection(config, null as never, request);
+  try {
+    await connection.refresh();
+    assert.equal(config.value.twitch.refresh, "keep-me");
+    assert.equal(config.value.twitch.access, "new-access");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

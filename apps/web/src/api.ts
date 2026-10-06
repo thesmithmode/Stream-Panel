@@ -33,6 +33,7 @@ export interface Event {
   time_quality: string;
   payload: {
     text?: string;
+    redacted?: number | boolean;
     amountMinor?: string;
     currency?: string;
     actorName?: string;

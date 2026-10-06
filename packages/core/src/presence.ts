@@ -12,7 +12,9 @@ export interface PresenceMinute {
   state: "observed" | "not_observed" | "unknown";
 }
 
-// Complete polls are non-atomic observations over a time window, not viewer telemetry.
+// Complete polls cover [startedAtMs, completedAtMs] minute buckets (inclusive).
+// Callers set startedAtMs to the previous successful poll completion so the
+// observation spans the whole interval, not only the completion minute.
 // Partial/failed polls cannot produce a negative observation.
 export function presenceMinutes(
   polls: readonly PresencePoll[],
@@ -30,21 +32,20 @@ export function presenceMinutes(
   ) {
     throw new Error("INVALID_MINUTE_RANGE");
   }
-  const byMinute = new Map<number, PresencePoll[]>();
   for (const poll of polls) {
     assertTimestamp(poll.startedAtMs);
     assertTimestamp(poll.completedAtMs);
     if (poll.completedAtMs < poll.startedAtMs)
       throw new Error("INVALID_POLL_WINDOW");
-    const minute = Math.floor(poll.completedAtMs / 60_000) * 60_000;
-    const existing = byMinute.get(minute) ?? [];
-    existing.push(poll);
-    byMinute.set(minute, existing);
   }
   const result: PresenceMinute[] = [];
   for (let minute = fromMs; minute < toMs; minute += 60_000) {
-    const inMinute = byMinute.get(minute) ?? [];
-    const complete = inMinute.filter((poll) => poll.status === "complete");
+    const complete = polls.filter((poll) => {
+      if (poll.status !== "complete") return false;
+      const first = Math.floor(poll.startedAtMs / 60_000) * 60_000;
+      const last = Math.floor(poll.completedAtMs / 60_000) * 60_000;
+      return minute >= first && minute <= last;
+    });
     result.push({
       minuteStartMs: minute,
       state: complete.some((poll) => poll.userIds.includes(userId))
@@ -55,4 +56,10 @@ export function presenceMinutes(
     });
   }
   return result;
+}
+
+export function clampChattersPollSeconds(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return 60;
+  return Math.min(120, Math.max(60, Math.round(n)));
 }

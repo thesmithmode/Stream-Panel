@@ -60,14 +60,17 @@ for (const kind of [
       db = new StreamStore(path);
       db.ingest(message("old", 60000));
       const rows = db.events();
-      assert.equal(
-        (rows.find((x) => x.external_id === "old")!.payload as any).text,
-        "[сообщение удалено]",
-      );
+      const oldPayload = rows.find((x) => x.external_id === "old")!.payload as any;
+      assert.equal(oldPayload.text, "private text", "original text must be preserved");
+      assert.equal(oldPayload.redacted, 1);
       assert.equal(
         (rows.find((x) => x.external_id === "newer")!.payload as any).text,
         "private text",
         "later messages must not be removed by an older clear",
+      );
+      assert.notEqual(
+        (rows.find((x) => x.external_id === "newer")!.payload as any).redacted,
+        1,
       );
       assert.equal(
         (rows.find((x) => x.external_id === "other-account")!.payload as any)

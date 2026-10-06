@@ -257,6 +257,34 @@ test("partial pagination, HTTP failure and cursor cycle never mean an empty comp
   );
 });
 
+
+test("complete poll covers every minute from startedAt through completedAt", () => {
+  const polls = [
+    {
+      startedAtMs: 60_000,
+      completedAtMs: 181_000,
+      status: "complete" as const,
+      userIds: ["1"],
+    },
+  ];
+  assert.deepEqual(
+    presenceMinutes(polls, "1", 60_000, 300_000).map((x) => x.state),
+    ["observed", "observed", "observed", "unknown"],
+  );
+  assert.deepEqual(
+    presenceMinutes(polls, "absent", 60_000, 180_000).map((x) => x.state),
+    ["not_observed", "not_observed"],
+  );
+});
+
+test("clampChattersPollSeconds defaults and clamps to 60–120", async () => {
+  const { clampChattersPollSeconds } = await import("../src/presence.js");
+  assert.equal(clampChattersPollSeconds(undefined), 60);
+  assert.equal(clampChattersPollSeconds(30), 60);
+  assert.equal(clampChattersPollSeconds(90), 90);
+  assert.equal(clampChattersPollSeconds(180), 120);
+});
+
 test("minute grid preserves gaps, explicit empty poll and observation priority; interval is half-open", () => {
   const polls = [
     {

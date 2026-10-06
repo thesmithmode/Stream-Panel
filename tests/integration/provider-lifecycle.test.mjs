@@ -28,6 +28,9 @@ class Socket extends EventEmitter {
   terminate() {
     this.close();
   }
+  ping() {
+    this.emit("pong");
+  }
   push(data) {
     this.emit(
       "message",
@@ -58,6 +61,7 @@ function fixture(t) {
       daClientId: "app",
       daClientSecret: "secret",
       daUtcOffsetMinutes: null,
+      chattersPollSeconds: 60,
     },
     save: async () => {},
   };

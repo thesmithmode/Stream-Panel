@@ -167,24 +167,33 @@ export class StreamStore {
       ) {
         const messageId = String(event.payload.targetMessageId ?? "");
         const userId = String(event.payload.targetUserId ?? "");
+        const atMs = event.occurredAtMs ?? event.receivedAtMs;
+        const scope = this.moderationScope(event.accountId, atMs);
+        // Flag only — never overwrite original message text.
         if (event.type === "chat.clear")
           this.db
             .prepare(
-              "UPDATE events SET payload_json=json_set(payload_json, '$.text', '[сообщение удалено]', '$.redacted', 1) WHERE source='twitch' AND account_id=? AND type='chat.message' AND occurred_at_ms<=?",
+              `UPDATE events SET payload_json=json_set(payload_json, '$.redacted', 1)
+               WHERE source='twitch' AND account_id=? AND type='chat.message'
+               AND occurred_at_ms<=? AND occurred_at_ms>=?`,
             )
-            .run(event.accountId, event.occurredAtMs);
+            .run(event.accountId, atMs, scope);
         else if (event.type === "chat.message_delete" && messageId)
           this.db
             .prepare(
-              "UPDATE events SET payload_json=json_set(payload_json, '$.text', '[сообщение удалено]', '$.redacted', 1) WHERE source='twitch' AND account_id=? AND type='chat.message' AND external_id=?",
+              `UPDATE events SET payload_json=json_set(payload_json, '$.redacted', 1)
+               WHERE source='twitch' AND account_id=? AND type='chat.message' AND external_id=?`,
             )
             .run(event.accountId, messageId);
         else if (event.type === "chat.clear_user_messages" && userId)
           this.db
             .prepare(
-              "UPDATE events SET payload_json=json_set(payload_json, '$.text', '[сообщение удалено]', '$.redacted', 1) WHERE source='twitch' AND account_id=? AND type='chat.message' AND identity_id IN(SELECT id FROM identities WHERE source='twitch' AND account_id=? AND external_id=?) AND occurred_at_ms<=?",
+              `UPDATE events SET payload_json=json_set(payload_json, '$.redacted', 1)
+               WHERE source='twitch' AND account_id=? AND type='chat.message'
+               AND identity_id IN(SELECT id FROM identities WHERE source='twitch' AND account_id=? AND external_id=?)
+               AND occurred_at_ms<=? AND occurred_at_ms>=?`,
             )
-            .run(event.accountId, event.accountId, userId, event.occurredAtMs);
+            .run(event.accountId, event.accountId, userId, atMs, scope);
       }
       if (event.source === "twitch" && event.type === "chat.message") {
         const deletion = this.db
@@ -198,7 +207,7 @@ export class StreamStore {
         if (deletion)
           this.db
             .prepare(
-              "UPDATE events SET payload_json=json_set(payload_json,'$.text','[сообщение удалено]','$.redacted',1) WHERE id=?",
+              "UPDATE events SET payload_json=json_set(payload_json,'$.redacted',1) WHERE id=?",
             )
             .run(eventKey(event));
       }
@@ -664,11 +673,13 @@ export class StreamStore {
     fromMs: number,
     toMs: number,
   ): ReturnType<typeof presenceMinutes> {
+    // Overlap query: a poll window may start before fromMs when covering
+    // the interval from the previous successful sample.
     const polls = this.db
       .prepare(
-        `SELECT p.* FROM presence_polls p WHERE session_id=? AND completed_at_ms >= ? AND completed_at_ms < ? ORDER BY completed_at_ms`,
+        `SELECT p.* FROM presence_polls p WHERE session_id=? AND started_at_ms < ? AND completed_at_ms >= ? ORDER BY completed_at_ms`,
       )
-      .all(sessionId, fromMs, toMs) as {
+      .all(sessionId, toMs, fromMs) as {
       id: string;
       started_at_ms: number;
       completed_at_ms: number;
@@ -683,9 +694,9 @@ export class StreamStore {
       CROSS JOIN presence_members m INDEXED BY presence_members_identity
       CROSS JOIN presence_polls p
       WHERE i.person_id=? AND m.identity_id=i.id AND p.id=m.poll_id
-      AND p.session_id=? AND p.completed_at_ms>=? AND p.completed_at_ms<?`,
+      AND p.session_id=? AND p.started_at_ms<? AND p.completed_at_ms>=?`,
           )
-          .all(personId, sessionId, fromMs, toMs) as { poll_id: string }[]
+          .all(personId, sessionId, toMs, fromMs) as { poll_id: string }[]
       ).map((row) => row.poll_id),
     );
     const normalized = polls.map((poll) => ({
@@ -695,6 +706,20 @@ export class StreamStore {
       userIds: observed.has(poll.id) ? [personId] : [],
     }));
     return presenceMinutes(normalized, personId, fromMs, toMs);
+  }
+
+
+  /** Lower bound for clear / clear-user: open session start, else 6h window. */
+  private moderationScope(accountId: string, atMs: number): number {
+    const session = this.db
+      .prepare(
+        `SELECT started_at_ms FROM sessions
+         WHERE account_id=? AND started_at_ms<=? AND (ended_at_ms IS NULL OR ended_at_ms>?)
+         ORDER BY started_at_ms DESC LIMIT 1`,
+      )
+      .get(accountId, atMs, atMs) as { started_at_ms: number } | undefined;
+    if (session) return session.started_at_ms;
+    return Math.max(0, atMs - 6 * 3_600_000);
   }
 
   renamePerson(id: string, name: string): void {

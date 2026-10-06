@@ -1,3 +1,4 @@
+import { clampChattersPollSeconds } from "../../../packages/core/src/presence.js";
 import { mkdir, readFile, writeFile, rename, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -17,6 +18,7 @@ export interface Config {
   daAccessToken: string;
   daRefreshToken: string;
   daUtcOffsetMinutes: number | null;
+  chattersPollSeconds: number;
 }
 const defaults: Config = {
   version: 1,
@@ -26,6 +28,7 @@ const defaults: Config = {
   daAccessToken: "",
   daRefreshToken: "",
   daUtcOffsetMinutes: null,
+  chattersPollSeconds: 60,
 };
 export function defaultDataDir(): string {
   return (
@@ -50,6 +53,9 @@ export class Configuration {
       ) as Config;
       if (saved.version !== 1) throw new Error("UNSUPPORTED_CONFIG");
       this.value = { ...defaults, ...saved };
+      this.value.chattersPollSeconds = clampChattersPollSeconds(
+        this.value.chattersPollSeconds,
+      );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
@@ -72,6 +78,7 @@ export class Configuration {
       hasDaSecret: !!this.value.daClientSecret,
       hasDaToken: !!this.value.daAccessToken,
       daUtcOffsetMinutes: this.value.daUtcOffsetMinutes,
+      chattersPollSeconds: this.value.chattersPollSeconds,
     };
   }
 }

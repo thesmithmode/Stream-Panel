@@ -6,6 +6,7 @@ import {
   type ChattersPage,
 } from "../../../packages/core/src/chatters.js";
 import type { EventInput } from "../../../packages/core/src/domain.js";
+import { clampChattersPollSeconds } from "../../../packages/core/src/presence.js";
 
 export type SocketFactory = (
   url: string,
@@ -26,6 +27,13 @@ export const object = (value: unknown): Record<string, unknown> => {
 };
 export const string = (value: unknown): string =>
   typeof value === "string" ? value : "";
+
+export function messageText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && !Array.isArray(value))
+    return string((value as Record<string, unknown>).text);
+  return "";
+}
 const baseScopes = ["user:read:chat", "moderator:read:chatters"];
 const optionalScopes = [
   "moderator:read:followers",
@@ -92,7 +100,7 @@ export function normalizeTwitch(
     timeQuality: "provider",
     transport: "eventsub",
     payload: {
-      text: chat ? string(object(event.message).text) : string(event.message),
+      text: messageText(event.message),
       actorName: label,
       originChannelId: string(event.source_broadcaster_user_id) || accountId,
       bits: event.bits ?? null,
@@ -118,7 +126,6 @@ export class TwitchConnection {
   } | null = null;
   private stopped = true;
   private socket: WebSocket | null = null;
-  private watchdog: NodeJS.Timeout | null = null;
   private retry: NodeJS.Timeout | null = null;
   private tick: NodeJS.Timeout | null = null;
   private hourly: NodeJS.Timeout | null = null;
@@ -127,6 +134,7 @@ export class TwitchConnection {
   private reconnectAttempt = 0;
   private offlineCount = 0;
   private sessionId: string | null = null;
+  private lastSuccessfulPollAt: number | null = null;
   private authGeneration = 0;
   private gapStart: number | null = null;
   private rateLimitedUntil = 0;
@@ -253,10 +261,12 @@ export class TwitchConnection {
       if (generation !== this.authGeneration)
         throw new Error("TWITCH_AUTH_CANCELLED");
       if (!response.ok) throw new Error("TWITCH_REAUTH_REQUIRED");
+      const previous = this.token;
       this.config.value.twitch = {
-        ...this.token,
+        ...previous,
         access: string(body.access_token),
-        refresh: string(body.refresh_token),
+        // Mirror DA: providers may omit refresh_token; keep the previous one.
+        refresh: string(body.refresh_token) || previous.refresh,
         expiresAt: Date.now() + Number(body.expires_in) * 1000,
       };
       await this.config.save();
@@ -352,13 +362,15 @@ export class TwitchConnection {
       await this.validate();
       if (this.stopped || generation !== this.authGeneration) return;
       this.connect();
+      const pollMs = clampChattersPollSeconds(this.config.value.chattersPollSeconds) * 1000;
       this.tick = setInterval(() => {
         void this.reconcile().catch((error) => this.report(error));
-      }, 60_000);
+      }, pollMs);
       this.hourly = setInterval(() => {
         void this.validate().catch((error) => this.report(error));
       }, 3_600_000);
-      await this.reconcile();
+      // Reconcile/chatters failures must not tear down a healthy EventSub.
+      void this.reconcile().catch((error) => this.report(error));
     } catch (error) {
       if (this.stopped || generation !== this.authGeneration) return;
       this.report(error);
@@ -548,6 +560,7 @@ export class TwitchConnection {
       const manual = sessions.find(
         (s) => s.kind === "manual" && s.ended_at_ms === null,
       );
+      const previousSession = this.sessionId;
       if (manual) this.sessionId = String(manual.id);
       const streams = Array.isArray(body.data) ? body.data : [];
       if (streams.length) {
@@ -575,39 +588,56 @@ export class TwitchConnection {
           );
         this.sessionId = null;
       }
+      if (this.sessionId !== previousSession) this.lastSuccessfulPollAt = null;
       if (!current()) return;
       if (
         this.sessionId &&
         this.token.scopes.includes("moderator:read:chatters")
       ) {
-        const users: { user_id: string; user_name: string }[] = [];
-        const sessionId = this.sessionId;
-        const abort = AbortSignal.timeout(30000);
-        const poll = await collectChatters(async (cursor) => {
-          if (!current()) throw new Error("TWITCH_AUTH_CANCELLED");
-          const page = object(
-            await this.api(
-              `chat/chatters?broadcaster_id=${accountId}&moderator_id=${accountId}&first=1000${cursor ? `&after=${encodeURIComponent(cursor)}` : ""}`,
-              { signal: abort },
-            ),
-          ) as unknown as ChattersPage;
-          users.push(...page.data);
-          return page;
-        });
-        if (!current()) return;
-        await this.db.call("recordPoll", sessionId, accountId, poll);
-        if (!current()) return;
-        await this.db.call("updateChatterNames", accountId, users, Date.now());
-        if (!current()) return;
-        this.status.capabilities.presence = poll.status;
-        if (poll.status !== "complete")
-          await this.db.call(
-            "gap",
-            "twitch",
-            "chatters_poll_incomplete",
-            poll.startedAtMs,
-            poll.completedAtMs,
-          );
+        try {
+          const users: { user_id: string; user_name: string }[] = [];
+          const sessionId = this.sessionId;
+          const abort = AbortSignal.timeout(30000);
+          const poll = await collectChatters(async (cursor) => {
+            if (!current()) throw new Error("TWITCH_AUTH_CANCELLED");
+            const page = object(
+              await this.api(
+                `chat/chatters?broadcaster_id=${accountId}&moderator_id=${accountId}&first=1000${cursor ? `&after=${encodeURIComponent(cursor)}` : ""}`,
+                { signal: abort },
+              ),
+            ) as unknown as ChattersPage;
+            users.push(...page.data);
+            return page;
+          });
+          if (!current()) return;
+          // Cover the interval from the previous successful poll (not one minute bucket).
+          const windowed = {
+            ...poll,
+            startedAtMs:
+              this.lastSuccessfulPollAt !== null
+                ? Math.min(this.lastSuccessfulPollAt, poll.startedAtMs)
+                : poll.startedAtMs,
+          };
+          await this.db.call("recordPoll", sessionId, accountId, windowed);
+          if (!current()) return;
+          await this.db.call("updateChatterNames", accountId, users, Date.now());
+          if (!current()) return;
+          this.status.capabilities.presence = poll.status;
+          if (poll.status === "complete")
+            this.lastSuccessfulPollAt = poll.completedAtMs;
+          else
+            await this.db.call(
+              "gap",
+              "twitch",
+              "chatters_poll_incomplete",
+              poll.startedAtMs,
+              poll.completedAtMs,
+            );
+        } catch (error) {
+          this.status.capabilities.presence =
+            error instanceof Error ? error.message : "chatters_error";
+          // Isolate from EventSub — do not rethrow into start()/reconnect.
+        }
       }
     } finally {
       this.reconciling = false;
@@ -631,9 +661,10 @@ export class TwitchConnection {
   async stop(): Promise<void> {
     this.stopped = true;
     ++this.authGeneration;
-    for (const timer of [this.retry, this.tick, this.hourly, this.watchdog])
+    for (const timer of [this.retry, this.tick, this.hourly])
       if (timer) clearTimeout(timer);
-    this.retry = this.tick = this.hourly = this.watchdog = null;
+    this.retry = this.tick = this.hourly = null;
+    this.lastSuccessfulPollAt = null;
     for (const socket of this.sockets) socket.close();
     this.sockets.clear();
     this.socket = null;
