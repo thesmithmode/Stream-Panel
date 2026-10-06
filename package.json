@@ -1,0 +1,38 @@
+{
+  "name": "stream-panel",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24.19.0 <25"
+  },
+  "scripts": {
+    "build": "pnpm build:core && pnpm build:web",
+    "test": "pnpm build:core && node --test dist/packages/core/test/*.test.js dist/apps/daemon/test/*.test.js",
+    "check": "pnpm test && pnpm check:web && pnpm build:web",
+    "benchmark": "pnpm build:core && node dist/scripts/benchmark.js",
+    "build:core": "tsc -p tsconfig.json",
+    "build:web": "vite build --config apps/web/vite.config.ts",
+    "start": "node dist/apps/daemon/src/index.js",
+    "check:web": "svelte-check --workspace apps/web --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.1.2",
+    "@fastify/static": "10.1.5",
+    "better-sqlite3": "13.0.3",
+    "fastify": "5.12.5",
+    "lossless-json": "4.3.1",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "24.10.1",
+    "@types/ws": "8.18.2",
+    "svelte": "5.57.2",
+    "svelte-check": "4.7.6",
+    "typescript": "5.9.3",
+    "vite": "8.3.3"
+  }
+}

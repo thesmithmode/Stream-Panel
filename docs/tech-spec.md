@@ -1,280 +1,114 @@
-# Техническая спецификация: Stream Panel
+# Архитектура Stream Panel
 
-Стадия: продумывание. Код продукта не пишется в этом коммите — только документация.
+Дата 2026-10-06. Различаем работающую раннюю версию и целевую v1. Таблица ниже — текущий код; backlog и release gates вынесены отдельно. PRD задаёт цель, но не является свидетельством готовности всех функций.
 
-Связанные документы: [prd.md](./prd.md), [user-requirements.md](./user-requirements.md), [research-notes.md](./research-notes.md).
+## Выбранный стек и границы
 
----
+| Слой         | Реализация                                              | Почему / предел доказательства                                                                  |
+| ------------ | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Runtime      | Node24.19+, TypeScript5.9.3, pnpm11.25                  | Один runtime Win/Linux; текущая установка Linux проверена                                       |
+| Storage      | better-sqlite3 13.0.3, SQLite3.53.4 в текущей установке | Драйвер загрузился, actual WAL/backup/migrations прошли тесты; exact dependency + lockfile      |
+| DB isolation | worker_threads, один StreamStore writer                 | Синхронный SQLite не блокирует WebSocket/main HTTP напрямую; очередь ограничена 10000pending RPC |
+| HTTP         | Fastify5, cookie/static, loopback                       | Собственный локальный API и один origin для SPA, без внешнего analytics backend                 |
+| UI           | Svelte5 + Vite8                                         | Production build и браузерный цикл проверены; обычный браузер, без Electron                     |
+| Twitch       | fetch + ws, public Device Code, EventSub + Helix        | Протокол по официальным docs; live account gate открыт                                          |
+| DA           | fetch + ws, lossless-json, legacy Centrifugo2 adapter   | Не предполагает современный centrifuge-js wire format; live handshake gate открыт               |
+| Tests        | node:test, strict TypeScript, Svelte check              | 27 тестов; mock auth + реальные SQLite/HTTP/worker; browser QA отдельно                          |
+| Backup       | SQLite online API → tmp → integrity/FK/version → rename | Локальная кнопка работает; scheduler/cloud ещё отсутствуют                                      |
+| Distribution | Исходники + Node runtime + bundled static assets        | Запуск описан в README; installer/SEA/Tauri — отдельный будущий spike                           |
 
-## 1. Выбранный стек и обоснование
+Native package install scripts разрешены только для better-sqlite3 через pnpm11 `allowBuilds`. Изменение драйвера/runtime допускается после конкретного неудачного измерения, не в виде вечного выбора «или то, или это».
 
-| Слой | Выбор | Почему |
-|------|--------|--------|
-| Язык / рантайм | **TypeScript на Node.js 22 LTS** | Зрелые клиенты Twitch (EventSub WebSocket), удобный JSON, один язык для демона и UI-тулинга; проще нанять/продолжить, чем Rust на этапе аналитики. |
-| Процесс | Долгоживущий **daemon** + локальный HTTP | Должен работать весь стрим; перезапуск без потери подписок (reconnect). |
-| UI | **Vite + Svelte 5** (SPA на `localhost`) | Лёгкий дашборд; без Electron на MVP. Позже опционально Tauri-обёртка (tray), если понадобится «как приложение». |
-| БД | **SQLite** (драйвер `better-sqlite3` или libsql) | Локальность из требований; один файл; достаточно для одного канала. |
-| Миграции | `drizzle-orm` + drizzle-kit | Типобезопасная схема рядом с TS. |
-| Remote backup | **Litestream** → бесплатный object storage (**Cloudflare R2** free tier или Backblaze B2) | Непрерывная репликация SQLite без своего сервера БД; соответствует «бесплатный удалённый бэкап/sync». |
-| Секреты | `.env` / OS credential store, **не в git** | Публичный репозиторий. |
-| Упаковка | `pnpm` monorepo (`apps/daemon`, `apps/web`, `packages/shared`); бинарники позже через `pkg`/`node-sea` или просто `pnpm start` | Win + Linux без двух кодовых баз. |
-| Тесты | `vitest` + контрактные фикстуры событий | Детерминированные тесты матчинга Person. |
+## Компоненты
 
-**Почему не Python:** хуже единый деплой UI+демона и типизация контрактов событий.  
-**Почему не чистый Rust/Go на MVP:** дольше до Working Dashboard; при необходимости hot-path presence можно вынести позже.  
-**Почему не Electron сразу:** тяжелее и не нужен для localhost-дашборда.
-
----
-
-## 2. Высокоуровневая архитектура
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  apps/daemon (Node/TS)                                  │
-│  ┌──────────┐ ┌──────────┐ ┌────────────┐ ┌──────────┐ │
-│  │ Twitch   │ │ Donationalerts │ │ Streamer.bot │ │ …    │ │
-│  │ adapter  │ │ adapter        │ │ (future)     │ │      │ │
-│  └────┬─────┘ └──────┬─────────┘ └──────┬───────┘ └────┘ │
-│       └──────────────┼──────────────────┘                │
-│                      ▼                                   │
-│              Event Normalizer                            │
-│                      ▼                                   │
-│         Person Matcher (auto + manual rules)             │
-│                      ▼                                   │
-│              SQLite (local file)                         │
-│                      │                                   │
-│              Litestream ──► R2/B2 backup                 │
-│                      ▲                                   │
-│              Query API (HTTP localhost)                  │
-└──────────────────────┼──────────────────────────────────┘
-                       ▼
-                 apps/web (Svelte)
+```mermaid
+flowchart TD
+  T["Twitch: EventSub и Helix"] --> A["Adapters: auth и normalization"]
+  D["DA: WS и REST"] --> A
+  A --> W["DB worker: транзакции"]
+  H["Local HTTP и SPA"] --> W
+  W --> B["SQLite WAL"]
+  B --> K["Verified snapshot"]
 ```
 
-Работа ведётся в ветке **`dev`**. В `main` — только релизы.
+| Путь                                             | Ответственность                                                                              |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `packages/core/src/domain.ts`                    | EventInput, tuple dedupe key, exact money и candidate normalization                          |
+| `packages/core/src/store.ts`                     | SQL, ingest, identity/person attribution, sessions, polls, queries, merge/undo/split, backup |
+| `packages/core/src/schema.ts`                    | Транзакционные миграции 1/2 через user_version                                                |
+| `packages/core/src/chatters.ts`, `presence.ts`   | Полная пагинация и чистая функция minute state                                               |
+| `apps/daemon/src/db.ts`, `db-worker.ts`          | Ограниченный RPC, исключительное владение БД, whitelist операций                             |
+| `apps/daemon/src/twitch.ts`, `donationalerts.ts` | Transport/OAuth, retry, права, normalization, source health                                  |
+| `apps/daemon/src/config.ts`                      | Раздельные секреты, serialized temp-file writes, публичная redacted config                   |
+| `apps/daemon/src/server.ts`, `index.ts`          | Host/Origin/nonce/CSRF, routes/static, data-dir lock, процесс                                |
+| `apps/web/src`                                   | Статусы и действия через API; OAuth-секреты не запрашиваются обратно                         |
 
----
+Сеть никогда не пишет SQL напрямую. Ingest подтверждается после транзакции. DB worker исполняет синхронные методы последовательно; async backup использует API драйвера. RPC переполнение/exit отвергают запрос, UI/adapter видят ошибку. **Нет** durable ingest queue, приоритетов/chunked reports и автоматического восстановления переполнения. На reconnect Twitch replay недоступен, DA догоняет доступную REST-историю.
 
-## 3. Модули
+## Домен и сохранность
 
-### 3.1. Ingest adapters
+**Identity:** `(source, account_id, external_id)`. Twitch external_id=user ID, имена — aliases. Scope v1 один канал; многоканальность требует отдельной миграции глобальных identities. DA external_id=donation occurrence ID: API не даёт stable donor ID. Каждый несопоставленный донат создаёт отдельную provisional группу. Anonymous actor не превращается в общий Person «Anonymous».
 
-Единый внутренний контракт `NormalizedEvent`:
+**Person:** управляемая группа identities. NFKC+trim+lowercase даёт кандидатов; без удаления@, транслитерации/сведения confusables. Совпадение имени не вызывает merge. Явные owner rules, отказ кандидата и preview применения к истории ещё не реализованы.
 
-```ts
-type NormalizedEvent = {
-  id: string;              // idempotency key (source + external id)
-  source: 'twitch' | 'donationalerts' | 'streamerbot';
-  type: string;            // chat.message | donation | bits | sub | presence.sample | …
-  occurredAt: string;      // ISO-8601 UTC
-  sessionId?: string;
-  rawRef?: string;         // optional pointer to raw payload store
-  actor?: {
-    source: string;
-    externalId?: string;   // twitch user id
-    login?: string;
-    displayName?: string;
-  };
-  payload: Record<string, unknown>;
-};
-```
+**Merge:** меняет только identity.person_id, не event.identity_id. Все исторические запросы join текущую membership; аудит содержит before/expected revisions. Undo требует неизменного состава/ревизий; новое сообщение той же identity не блокирует undo. Новый merge/split блокирует устаревшую отмену 409. Split выбирает identities одной группы, создаёт новый Person, сохраняет аудит и события. Переименование группы не меняет stable IDs.
 
-**Twitch (MVP)** — факты: [research-notes.md](./research-notes.md)
+**Dedupe:** JSON tuple `(source, account_id, type, external_id)`; transport не входит. Twitch chat key=event.message_id, остальные=metadata.message_id. DA WS/REST=recipient+alert ID. Streamer.bot позже должен сохранить platform source/IDs; если исходного ID нет, использовать его вместо direct transport для типа, а не параллельно.
 
-- EventSub (**WebSocket** transport), subscription types:
-  - `channel.chat.message` v1 — scope **`user:read:chat`** (не legacy `chat:read`); condition `broadcaster_user_id` + `user_id` (MVP: оба = стример); idempotency: `message_id`
-  - `channel.subscribe` / `channel.subscription.gift` / `channel.subscription.message` v1 — `channel:read:subscriptions`
-  - `channel.cheer` v1 — `bits:read`
-  - `channel.follow` **v2** — `moderator:read:followers` (+ `moderator_user_id` в condition)
-  - `channel.raid` v1 — auth не требуется (`to_broadcaster_user_id` или `from_…`)
-  - `stream.online` / `stream.offline` v1
-- Helix **Get Chatters** poll во время `stream.online` (см. §5): scope **`moderator:read:chatters`**; `moderator_id` = broadcaster **или** мод (совпадает с user в токене); `first` ≤ 1000; documented delay обновления списка.
-- Рекомендуемый MVP user-token scopes (broadcaster):  
-  `user:read:chat`, `moderator:read:chatters`, `moderator:read:followers`, `channel:read:subscriptions`, `bits:read`.  
-  Legacy `chat:read` для EventSub **не** использовать.
+**Fact:** UTC-ms или null, raw source_time, received_at_ms отдельно, time_quality provider/configured/unknown, transport и payload. Provider nanoseconds сохраняются в исходной строке, UI точность ms не выдаётся за точность действия. Twitch event timestamp предпочтительнее envelope publication при наличии; timeBasis отмечен в payload. Unknown time никогда не присваивается сессии по receivedAt.
 
-**DonationAlerts (MVP)** — факты: [research-notes.md](./research-notes.md)
+**Money:** lossless JSON до Number, decimal→minor string, BigInt суммирование. Поддерживаются RUB,USD,EUR,BRL,TRY,PLN,UAH,KZT с 2decimal digits. Неизвестная валюта/precision отвергается и делает импорт ошибочным; отдельной durable quarantine пока нет. Валюты не складываются друг с другом, Bits не валюта DA. Amount не означает net payout.
 
-- **Realtime:** Centrifugo WebSocket `wss://centrifugo.donationalerts.com/connection/websocket`.
-  1. OAuth → `GET /api/v1/user/oauth` (scope `oauth-user-show`) → `socket_connection_token` + user `id`
-  2. Connect WS → Centrifugo client UUID
-  3. `POST /api/v1/centrifuge/subscribe` на канал `$alerts:donation_<user_id>` (scope `oauth-donation-subscribe`)
-  4. Subscribe на канале по WS
-- **Scopes:** `oauth-user-show`, `oauth-donation-subscribe`, `oauth-donation-index` (REST backfill `GET /api/v1/alerts/donations`).
-- **Idempotency:** целочисленный donation `id` → `NormalizedEvent.id = donationalerts:{id}`.
-- **HTTP rate limit:** 60 req/min на приложение.
-- Payload: amount, currency, username, message, created_at, …
+**Moderation:** полученные delete/clear/clear_user_messages редактируют уже сохранённый текст. Не обещается полная поддержка delete-before-message/reordered transport: это отдельная задача hardening. Merge audit не удаляет факты; moderation intentionally редактирует содержание сообщений. Проверить условия хранения данных Twitch до распространения.
 
-**Streamer.bot (post-MVP, заложить интерфейс)** — факты: [research-notes.md](./research-notes.md)
+## Схема и запросы
 
-- Adapter `source: 'streamerbot'` → тот же `NormalizedEvent`.
-- **Транспорт исходящих событий:** WebSocket Server (default `127.0.0.1:8080`) + официальный клиент **`@streamerbot/client`** (`StreamerbotClient`, `on('Twitch.ChatMessage')` / `subscribe: { Twitch: ['ChatMessage'] }`).
-- **UDP Server** в доке SB — для **DoAction** (входящие команды *в* SB), **не** шина аналитических событий → не использовать как ingest.
-- Цель: не дублировать Twitch/DA, если SB уже их агрегирует; адаптер реалистичен.
+Migration1: persons,identities,events,person_merges. Migration2: sessions,event_sessions,presence_polls,presence_members,identity_aliases,collection_gaps,membership_operations. STRICT таблицы, foreign_keys=ON, busy_timeout5s, WAL, synchronous=FULL. Новая версия схемы отвергается, не сбрасывается;0→1→2 и 1→2 транзакционны.
 
+Деньги пока лежат в payload JSON и агрегируются BigInt в worker. Summary обходит выбранные факты; materialized rollups ещё нет. Events limit200,persons500,sessions100. Time range `[from,to)` и session filters поддержаны, cursor pagination нет. Индексы event time/identity, session links, poll time/members и candidates. Годовые отчёты/покрытие/per-source полнота должны получить отдельный нагрузочный тест перед добавлением rollups.
 
-### 3.2. Sessions
+## Сессии и minute presence
 
-- Сессия стрима открывается по `stream.online` (или ручной «начать запись»), закрывается по `stream.offline`.
-- Все события и presence-сэмплы привязываются к `session_id`.
+Платформенная сессия `(Twitch account,stream ID)` устойчива при рестарте. Helix streams проверяется при старте и каждые 60s, онлайн/офлайн notifications вызывают reconciliation. Два последовательных пустых ответа закрывают запись с observed upper boundary; это не точное время конца эфира. Новый stream ID закрывает старую открытую сессию с estimated end. Ошибка Helix не равна offline.
 
-### 3.3. Person / Identity
+Manual session создаётся только при отсутствии открытой записи; прекращается вручную. Существующая manual запись имеет приоритет при reconciliation. Platform запись закрывает адаптер, ручной stop API её отвергает. Требуется live проверка перехода manual↔platform и logout/relogin account boundaries.
 
-Публичная модель «человек/склейка» у Stream Tools **не задокументирована** → ниже — наш дизайн, не reverse-engineer.
+Events известного времени связываются по полуоткрытому интервалу; известные DA timestamps относятся к единственному каналу v1 даже при отличающемся recipient ID. При обнаружении ранее начатого эфира уже записанные события перераспределяются. Unknown DA остаётся в общей истории и сумме, вне временной сессии.
 
-Таблицы (логически):
+Опрос Chatters: first1000, все страницы, дедуп user IDs; timeout30s,max100pages, cursor cycle→partial. Сохраняется started/completed/status и memberships. Основной minute grid использует только complete; даже положительная часть partial не становится полным доказательством основной сетки.
 
-- `persons` — канонический человек (`id`, `display_name`, `notes`, timestamps).
-- `person_identities` — `(person_id, source, external_id?, login_normalized, display_normalized)`, unique по source+external_id / source+login.
-- `person_merges` — аудит ручных склеек/разделений.
+- `observed`: хотя бы один полный sample в UTC-минуте содержит identity Person.
+- `not_observed`: полный sample есть, ни один не содержит.
+- `unknown`: полного sample нет.
 
-**Автоматч (MVP rules, по приоритету)**
+После merge — union identity membership, пересекающиеся минуты не суммируются. Интерполяции нет. Grid capped31days. При выборе минуты UI заново запрашивает events range из БД, а не фильтрует последние 200 общей ленты. Показывать coverage независимо от активности; ни chatters, ни сообщения не являются viewer telemetry.
 
-1. Точный `external_id` уже привязан → тот Person.
-2. Одинаковый `login_normalized` на Twitch + совпадение с DA username после нормализации (lowercase, trim, убрать `#`/`@`, уникод NFKC).
-3. Одинаковый `display_normalized`, если однозначен (ровно один кандидат) — пометить `confidence=low`, показать в UI «предложение».
+## Twitch lifecycle
 
-**Ручное редактирование**
+DCF: собственный public Client ID; базовые user:read:chat/moderator:read:chatters, optional followers/subscriptions/bits. Poll interval провайдера, не чаще 5s; authorization_pending и slow_down. Refresh single-flight, one-time rotated refresh сохраняется в serialized config. Validate startup/hourly проверяет client/user/scopes.401 один refresh/retry,429 блокировка до reset.5xx показывается как ошибка; общий адаптер делает reconnect, универсального per-request retry пока нет.
 
-- Merge: выбрать identity A и B → один Person (перенос ссылок, запись аудита).
-- Unmerge: вернуть identity на нового/старого Person.
-- Rename канонического `display_name` («Петя»).
+WS listener устанавливается до HTTP subscriptions. Welcome → chat,moderation,stream online/offline,raid и доступные optional subscriptions. Keepalive deadline включает grace5s. `session_reconnect` принимает только wss eventsub.wss.twitch.tv: новое welcome → handoff; подписки унаследованы, без повторной регистрации. Unexpected close → capped exponential backoff+jitter → новый welcome/subscribe, gap без replay. Lifecycle generations блокируют сообщения остановленного подключения; все handoff sockets закрываются при stop.
 
-### 3.4. Storage
+Отозванная подписка имеет собственный статус. Потеря соединения видна в source state. Время chatters cache неизвестно: poll60s не гарантирует свежесть 60s. Системный sleep, catch-up и revocation требуют живого soak-теста.
 
-- Файл по умолчанию: `~/.stream-panel/data.sqlite` (или путь из конфига).
-- Append-only `events`; агрегаты можно материализовать позже.
-- `presence_samples`: `(session_id, sampled_at, chatter_user_id, login, …)` или сжатое хранение diff’ов между сэмплами (оптимизация post-MVP).
-- Raw payloads — опциональная таблица/каталог для отладки (ротация).
+## DonationAlerts lifecycle
 
-### 3.5. Query API + UI
+BYO own Client ID/secret; Authorization Code scopes user-show/donation-subscribe/donation-index. State TTL10min, одноразовый; missing/mismatch отклоняется до token exchange. Localhost redirect/state echo — открытый gate. Альтернативный собственный token import есть в UI; без refresh/app реквизитов expiry требует повторного входа.
 
-Локальный HTTP `127.0.0.1` (порт из конфига):
+`user/oauth` → socket_connection_token+recipient → legacy WS connect `{params:{token},id:1}` → client UUID → HTTP centrifuge/subscribe → WS subscribe method1. ACK подтверждает realtime отдельно от REST. Handshake20s, maxWS payload1MiB, reconnect30s. **Нет подтверждённого client heartbeat/token-expiry сценария:** возможные protocol отличия не скрываются статусом REST.
 
-- `GET /sessions`, `GET /sessions/:id/summary`
-- `GET /persons`, `GET /persons/:id` (события, минуты, донаты)
-- `POST /persons/merge`, `POST /persons/unmerge`
-- `GET /sessions/:id/presence?from&to` — минутная сетка
+REST запускается параллельно с WS и далее каждые 5min: страницы 1..1000, общий pacing1100ms, timeout15s,401refresh,429Retry-After. До конца доступных pages history=`Импорт…`; ошибка/лимит означает неполноту. Ordering/snapshot pagination не документированы: весь scan повторяется с page1, на known ID не останавливаемся. Cursor checkpoint между процессами нет; restart безопасен благодаря DB dedupe, но может повторить долгую загрузку.
 
-UI-экраны MVP: список сессий, дашборд сессии (топы + таймлайн), карточка Person, очередь предложений матчинга, экран минутной сетки.
+DA created_at без зоны остаётся null. Можно ввести **проверенный fixed UTC offset minutes**±840; это не IANA/DST resolver, относится только к новым фактам. Историческая перепроекция с preview/таймзонами ещё не реализована. Неизвестные события не теряются из суммы.
 
----
+## Local security, процесс и backup
 
-## 4. Модель данных (черновик)
+Bind127.0.0.1, exact Host+Origin, no CORS, CSP и no-store, body32KiB. Nonce fragment10min/one-use → cookie HttpOnly/SameSiteStrict24h; POST JSON+CSRF. Значения событий Svelte escapes, не raw HTML. Секреты не возвращаются и не логируются. Сессии auth in-memory, после рестарта новая ссылка.
 
-```text
-sessions(id, started_at, ended_at, platform_stream_id, title, …)
-events(id, session_id, source, type, occurred_at, person_id?, identity_id?, payload_json)
-identities(id, source, external_id, login_normalized, display_name, …)
-persons(id, display_name, notes, created_at, updated_at)
-person_identities(person_id, identity_id, linked_how, confidence)
-presence_samples(session_id, sampled_at, identity_id)  -- или bitmap/diff later
-donations(…)  -- может быть проекцией events type=donation
-```
+Config version1 отдельно от data.sqlite, temp write+atomic rename; POSIX0600, directory0700. **Файл не зашифрован**, Windows ACL/credential store ещё gate. Он не входит в snapshot. Это не защита от другого процесса того же пользователя.
 
----
+Exclusive PID lock data-dir, active second writer rejected даже на другом порту; stale PID recovery. Ctrl+C/SIGTERM закрывают sockets, adapters, DB и lock. Bounded10s shutdown/sleep gaps/автостарт ещё backlog; не заявлять эти цели реализованными.
 
-## 5. Presence: требование vs реальность Twitch API
+Snapshot: online backup while WAL writer открыт, readonly destination integrity_check/foreign_key_check/version2, tmp→atomic rename. Локальная кнопка, без scheduler/rotation/remote. Restore в новый data-dir с остановленным writer описан в README, проверяется при запуске схемой; отдельный CLI/UI preview восстановления ещё нужен.
 
-### 5.1. Требование
-
-Знать доподлинно, кто смотрит, как долго, когда приходит/уходит, и ответ вида: «смотрел ли Вася в пн DD.MM в 12:03», плюс сообщения и частота.
-
-### 5.2. Что Twitch реально даёт
-
-| Механизм | Что даёт | Чего не даёт |
-|----------|----------|--------------|
-| **EventSub** | Чат, биты, сабы, фоллоу, рейды, online/offline | Списка зрителей; join/leave произвольного viewer |
-| **Helix Get Chatters** | Список пользователей, **подключённых к чат-сессии** канала; нужен `moderator:read:chatters` | Не «все viewers» стрима; есть задержка обновления; анонимы/без чата не видны; боты в списке есть |
-| **IRC JOIN/PART** | Исторически join/part; на практике для крупных каналов и современных клиентов **нельзя** строить полный presence | Не замена Get Chatters |
-| **Устаревший TMI chatters** | Недокументирован, ломается | Не использовать в продукте |
-| **Get Streams `viewer_count`** | Одно число | Без имён |
-
-**Итог:** платформа **не предоставляет** поминутный канонический лог «viewer X смотрел поток». Доступен proxy: **кто был в chatters в момент опроса** + точные timestamps чата/донатов.
-
-### 5.3. Как закрываем требование (честный контракт продукта)
-
-1. **Во время online** опрашивать Get Chatters с интервалом **60–120 с** (дефолт конфига **60s**; community часто 1–3 мин из‑за cache; official delay join/leave→list). Helix bucket ~800/min — не узкое место. Пагинация `first` до **1000**, cursor `after`. Не TMI.
-2. Каждый ответ → `presence_samples` с `sampled_at` (время локального получения, UTC).
-3. **Минутная сетка:** минута `HH:MM` считается «смотрел», если существует сэмпл в этой минуте (или соседней — политика интерполяции ниже), где identity присутствует.
-4. **Интерполяция (документированная):** если пользователь был в сэмпле T и T+2мин, но пропущен T+1 из-за сбоя сети — UI помечает минуту как `inferred` vs `observed`. По умолчанию MVP: только `observed` (строже, честнее).
-5. **Приход:** первый `observed` сэмпл в сессии (или после паузы отсутствия ≥ N минут). **Уход:** первый пробел после последнего сэмпла длительностью ≥ N (дефолт N=2 мин).
-6. **Минуты просмотра:** count(observed minutes) × 1 мин; не претендуем на субминутную точность.
-7. **Сообщения:** точные `occurred_at` из EventSub — без интерполяции.
-8. **Оговорка в UI:** «По данным Twitch Chatters (нужен мод-токен). Не учитывает зрителей вне чата и может включать ботов.»
-
-### 5.4. Что не обещаем
-
-- Учёт logged-out / embed viewers.
-- Субминутный join/leave как у внутренней телеметрии Twitch.
-- Presence без прав модератора на канале.
-
-### 5.5. Усиления позже
-
-- Фильтр ботов (список известных login).
-- Сжатие presence (хранит diff in/out вместо полного списка каждый раз).
-- Подмешивание Streamer.bot events, если там появятся дополнительные сигналы.
-- Poll чаще **60s** не делать — бессмысленно из-за documented delay / community cache; верх конфига 120s достаточен.
-
----
-
-## 6. DonationAlerts
-
-- Ingest: Centrifugo WS (основной) + REST `/alerts/donations` для backfill при старте/gap.
-- Нормализовать username → identity `source=donationalerts`.
-- Суммы хранить в минорных единицах + currency; в UI — агрегаты по Person (после merge с Twitch identity).
-- Идемпотентность по donation `id` из API.
-- Укладывать HTTP (OAuth refresh, subscribe, REST) в **60 req/min**.
-
----
-
-## 7. Litestream → R2/B2 (минимальный путь)
-
-Один канал бэкапа на MVP: **Cloudflare R2** (zero egress). Альтернатива: Backblaze B2. Детали и yaml — [research-notes.md](./research-notes.md).
-
-От пользователя нужно:
-
-1. Аккаунт Cloudflare + R2 bucket.
-2. Account ID + API token **Object Read & Write**.
-3. Установленный Litestream рядом с файлом SQLite.
-4. `litestream.yml` с `endpoint: https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, `region: auto`, ключи из env.
-5. `litestream replicate` во время работы демона; restore — `litestream restore` на новой машине.
-
-Секреты R2/B2 только в env / локальном конфиге, не в git.
-
-## 8. Безопасность и приватность
-
-- Публичный GitHub: никаких токенов, `.env.example` только с пустыми ключами.
-- Слушать API по умолчанию на `127.0.0.1`.
-- Политика данных: аналитика локальна; remote backup — опционален и под контролем пользователя (свой R2/B2).
-- Не логировать полные OAuth-токены.
-
----
-
-## 9. Кроссплатформа и «всегда во время стрима»
-
-- Один TS-код для Win/Linux.
-- Systemd user unit (Linux) / Task Scheduler или NSSM (Windows) — в docs запуска, не обязательно в MVP-бинарнике.
-- Авто-reconnect EventSub с backoff; watchdog на poll chatters.
-- Graceful shutdown: flush SQLite.
-
----
-
-## 10. Порядок реализации (когда разрешат код)
-
-1. Схема SQLite + Person merge API (без сети) + фикстуры.
-2. Twitch OAuth + EventSub chat/online + sessions.
-3. Get Chatters poll + минутная сетка.
-4. DonationAlerts donations + автоматч.
-5. Web UI дашборд.
-6. Litestream + инструкция R2.
-7. Заглушка интерфейса Streamer.bot adapter.
-
----
-
-## 11. Открытые технические решения (не блокеры docs)
-
-- ~~Точный транспорт DA~~ — **закрыто** (Centrifugo WS + REST backfill); см. §3.1 / research-notes.
-- LibSQL vs better-sqlite3 — выбрать при первом scaffold.
-- Нужен ли отдельный raw event log на диск — решить по объёму чата.
-- Модель Person-merge у Stream Tools из публички **неизвестна** — проектируем свою (§3.3).
+Будущий cloud backup: single writer, отдельный object prefix на установку, не двусторонний sync. Litestream0.5 Windows support есть, age encryption нет. R2 free tier ограничен storage/operations; sync interval60s — только предполагаемый budget, проверяется restore+usage экспериментом. Не коммитить непроверенный cloud config как рабочую функцию.

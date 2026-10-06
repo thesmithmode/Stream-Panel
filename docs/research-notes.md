@@ -1,197 +1,40 @@
-# Research notes (официальные доки)
+# Исследование и границы доказательств
 
-Дата проверки: **2026-10-06** (МСК); доп. сверка оркестратора + официальные ссылки тем же днём. Код продукта не писался — только факты для закрытия слепых пятен в спецификации.
+Проверено 2026-10-06 по первичным источникам. «В документации есть протокол», «локальный эксперимент прошёл» и «живое подключение работает» — три разных статуса. Последний нельзя закрыть mock-тестом.
 
-| Тема | Источник | Статус |
-|------|----------|--------|
-| DonationAlerts realtime | [apidoc](https://www.donationalerts.com/apidoc) | Факт |
-| Twitch Get Chatters | [Helix reference](https://dev.twitch.tv/docs/api/reference#get-chatters) | Факт |
-| Twitch EventSub types | [Subscription types](https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/) | Факт |
-| Twitch rate limits | [API guide](https://dev.twitch.tv/docs/api/guide#twitch-rate-limits) | Факт |
-| Streamer.bot outbound events | [WS events](https://docs.streamer.bot/api/websocket/guide/events), [WS config](https://docs.streamer.bot/api/websocket/guide/configuration), [UDP](https://docs.streamer.bot/api/udp/guide/configuration) | Факт |
-| Litestream → R2/B2 | [S3-compatible](https://litestream.io/guides/s3-compatible/), [S3 guide](https://litestream.io/guides/s3/) | Факт |
-| Stream Tools Person-merge | Публичные страницы b1trat3 | **Неизвестно** |
+## Выводы, влияющие на продукт и код
 
----
+| Тема               | Подтверждение                                                                                                                                                                                            | Принятое решение / оставшаяся проверка                                                                                                                                                                                            |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Референс           | [Stream Tools](https://b1trat3.ru/products/stream-tools) описывает инструменты эфира и интеграции                                                                                                        | Публичная страница не подтверждает Person, merge и локальную аналитическую БД. Старое утверждение о наличии такой БД удалено. Скоуп задают требования владельца                                                                   |
+| Участники Twitch   | [Get Chatters](https://dev.twitch.tv/docs/api/reference/#get-chatters): connected to chat; задержка обновления без фиксированного числа; first≤1000; broadcaster может быть moderator_id                 | Полная пагинация; 60s — наш default. Не называть watch time. Ошибка/часть страниц → unknown, а не отсутствие человека. Тезис «официально кэш ровно 60s» не подтверждён                                                             |
+| Device Code        | [Twitch getting tokens](https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/#device-code-grant-flow): public clients, polling, grant, refresh                                                 | Собственный public Client ID; секрет и внешняя OAuth-прокладка не нужны. Single-flight refresh с сохранением нового токена проверен mock-экспериментом                                                                            |
+| Validate           | [Twitch validating tokens](https://dev.twitch.tv/docs/authentication/validate-tokens/): проверять старт и далее каждый час                                                                               | Validate client/user IDs/scopes, затем разрешать сбор. Реальный вход пока gate                                                                                                                                                    |
+| EventSub WS        | [Handling WS events](https://dev.twitch.tv/docs/eventsub/handling-websocket-events/): keepalive, reconnect handoff, нет replay потерянных сообщений                                                      | Handoff наследует подписки, старый сокет закрывается после welcome нового. При неожиданном разрыве — новая сессия WS, повторные подписки, gap. Живой reconnect нужно проверить                                                    |
+| Типы и права       | [Subscription types](https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/) и [management](https://dev.twitch.tv/docs/eventsub/manage-subscriptions/)                                         | WS user token, `user:read:chat`; chatters `moderator:read:chatters`; followers v2 `moderator:read:followers`; subscriptions `channel:read:subscriptions`; cheer `bits:read`. Недоступная возможность не должна скрывать доступные |
+| Helix лимиты       | [API guide](https://dev.twitch.tv/docs/api/guide/#twitch-rate-limits)                                                                                                                                    | Не фиксировать bucket800 как вечную гарантию. Читать reset на 429; новые запросы до границы заблокированы и протестированы                                                                                                         |
+| DA donor ID        | [DA apidoc](https://www.donationalerts.com/apidoc): donation `id` — ID alert, `username` — подпись донора; стабильного ID отправителя нет                                                                | Каждое несопоставленное донатное событие имеет provisional identity по alert ID. Имя даёт предложение, не автоматическое доказательство личности                                                                                  |
+| DA realtime        | [DA apidoc](https://www.donationalerts.com/apidoc): Centrifugo2 connect token → client UUID → HTTP subscribe → WS method1                                                                                | Изолированный legacy wire adapter; совместимость современного centrifuge-js не предполагаем. Живой handshake/heartbeat/token expiry требуют аккаунтного эксперимента                                                              |
+| DA auth            | [DA apidoc](https://www.donationalerts.com/apidoc): Authorization Code требует client_secret; PKCE/Device Code не документированы                                                                        | Локальная ранняя версия: BYO приложение/токен. Не встраивать общий secret. Localhost redirect и возврат state не подтверждены живым входом; отсутствие state отвергается до обмена кода                                           |
+| DA время           | [DA apidoc](https://www.donationalerts.com/apidoc): примеры created_at без offset; зона не указана                                                                                                       | Не добавлять Z и не подставлять receivedAt. Default occurredAt=null. Только явно подтверждённый fixed offset на новые факты; DST и перепроекция истории — отдельный этап                                                          |
+| DA REST            | [DA apidoc](https://www.donationalerts.com/apidoc): pagination / links;60HTTP запросов в минуту на приложение                                                                                            | Пейсинг 1100ms; REST+WS дедуплицируются. Сортировка и консистентность страниц не обещаны: полный повторный обход, bounded1000pages, статус неполноты. Не останавливаться на первом известном ID                                    |
+| SQLite сохранность | [WAL](https://sqlite.org/wal.html), [Online backup](https://sqlite.org/backup.html), [better-sqlite3 API](https://github.com/WiseLibs/better-sqlite3/blob/master/docs/api.md)                            | WAL/FULL, один writer в worker; online snapshot. Реальные persist/restore/integrity тесты прошли. Native Windows install ещё проверить                                                                                            |
+| Runtime            | [Node releases](https://nodejs.org/en/about/previous-releases), [node:sqlite](https://nodejs.org/api/sqlite.html)                                                                                        | Node24 LTS; Node24.19 фактически установлен и проверен. Драйвер better-sqlite3 выбран и загружен; changing stability встроенного sqlite не делает его обязательным                                                                |
+| Package scripts    | [pnpm approve-builds](https://pnpm.io/cli/approve-builds), [settings](https://pnpm.io/settings)                                                                                                          | pnpm11 `allowBuilds`; старое onlyBuiltDependencies здесь не использовать. Разрешён один native addon                                                                                                                              |
+| Упаковка           | [vercel/pkg](https://github.com/vercel/pkg) архивирован                                                                                                                                                  | Не планировать на нём один EXE. Ранняя версия запускается с Node; инсталлятор требует отдельного Windows/Linux spike                                                                                                              |
+| Streamer.bot       | [официальный client](https://docs.streamer.bot/api/websocket/guide/client), [events](https://docs.streamer.bot/api/websocket/guide/events), [UDP](https://docs.streamer.bot/api/udp/guide/configuration) | Опциональный WS transport позже. UDP — вызов действий, не outbound analytics. Отсутствие исходного ID запрещает безопасный параллельный ingest с direct adapter                                                                   |
+| Litestream Windows | [installation](https://litestream.io/install/)                                                                                                                                                           | v0.5 поддерживает Windows; старое «только Linux» неактуально. В приложение ещё не внедрён                                                                                                                                         |
+| Шифрование backup  | [Litestream config](https://litestream.io/reference/config/)                                                                                                                                             | v0.5 age client-side encryption не поддерживается. Не публиковать неработающий age config; encrypted snapshot upload потребует отдельного доказательства restore                                                                  |
+| Бесплатный R2      | [R2 pricing](https://developers.cloudflare.com/r2/pricing/)                                                                                                                                              | Free allowances:10GB-month,1MClassA,10MClassB; zero egress. Запись каждую секунду весь месяц ≈2.6M операций — нельзя гарантировать free. Optional60s interval лишь проектное решение, расход ещё не измерен                       |
 
-## 1. DonationAlerts — realtime донаты
+## Протокольные ключи
 
-**Источник:** https://www.donationalerts.com/apidoc (проверено 2026-10-06).
+Twitch chat dedupe: `event.message_id`, остальные события — `metadata.message_id`, вместе с account/type/source. DA dedupe: recipient + donation ID + type; WS/REST не отдельные источники. `channel.chat.message_delete`, clear и clear_user_messages редактируют уже сохранённый текст в базе. Проверка события удаления до прихода самого сообщения и официальных условий хранения остаётся отдельным release gate.
 
-### Как получать донаты в realtime
+Raw строки timestamps и денежных чисел сохраняются без предварительного преобразования DA JSON в JS Number. Число 9007199254740993 и 0.29 прошли lossless fixture-тест. Это доказательство выбранной обработки, а не проверка реального payload сервера.
 
-Официальный путь — **Centrifugo WebSocket**, не long-poll как основной канал.  
-**Гипотеза «websocket vs REST» закрыта:** WS — основной realtime; REST `/alerts/donations` — только history/backfill.
+## Как закрывать аккаунтные неизвестности
 
-1. OAuth 2.0 Authorization Code → `access_token`.
-2. `GET https://www.donationalerts.com/api/v1/user/oauth` (scope `oauth-user-show`) → в ответе `data.socket_connection_token` и `data.id` (user id).
-3. Открыть `wss://centrifugo.donationalerts.com/connection/websocket`, отправить connect с `socket_connection_token` → получить Centrifugo **UUIDv4 client id**.
-4. `POST https://www.donationalerts.com/api/v1/centrifuge/subscribe` с `Authorization: Bearer <token>`, body `{"channels":["$alerts:donation_<user_id>"], "client":"<uuidv4>"}`.
-5. По тому же WebSocket подписаться на канал (`method: 1`) с выданным channel token.
-6. События донатов приходят в канал `$alerts:donation_<user_id>`; payload — тот же donation resource, что в REST-списке.
+Использовать отдельный тестовый эфир и контрольный донат. Записать UTC время действия отдельно, версии runtime, разрешения токенов, ответы без секретов, platform IDs и состояние базы. Проверить обе доставки одного DA alert, обрыв связи, перезапуск, ротацию токена, сон/пробуждение и длительный сбор. Публиковать обезличенные fixtures и результаты, не токены и не дампы реального чата.
 
-**Fallback / backfill:** `GET /api/v1/alerts/donations` (scope `oauth-donation-index`), пагинация `page`.
-
-### OAuth scopes (из таблицы Scopes)
-
-| Scope | Зачем нам |
-|-------|-----------|
-| `oauth-user-show` | Профиль + `socket_connection_token` |
-| `oauth-donation-subscribe` | Подписка на realtime `$alerts:donation_*` |
-| `oauth-donation-index` | REST-список донатов (бэкап/догон) |
-
-Также в доке есть `oauth-goal-subscribe`, `oauth-poll-subscribe` — не MVP.
-
-### Idempotency
-
-- У доната есть целочисленный **`id`** («unique donation alert identifier») в REST и в том же resource в Centrifugo.
-- Использовать `donationalerts:{id}` как `NormalizedEvent.id`.
-- Поля: `username`, `message`, `amount`, `currency`, `created_at`, `message_type`, `is_shown`, …
-
-### Rate limits
-
-- HTTP API: **60 запросов в минуту на приложение** («1 request per second») — раздел Limitations.
-- На WebSocket отдельного числового лимита в apidoc нет; HTTP subscribe/OAuth укладывать в 60/min.
-
----
-
-## 2. Twitch Get Chatters
-
-**Источник:** https://dev.twitch.tv/docs/api/reference#get-chatters
-
-| Параметр | Факт |
-|----------|------|
-| URL | `GET https://api.twitch.tv/helix/chat/chatters` |
-| Scope | **`moderator:read:chatters`** (user token; либо app token с prior user auth на этого модератора) |
-| `broadcaster_id` | Канал |
-| `moderator_id` | **Broadcaster или один из его модераторов**; должен совпадать с user id в токене |
-| Pagination | `first` min 1 / max **1000** / default 100; `after` cursor |
-| Latency | Официально: *«There is a delay between when users join and leave a chat and when the list is updated accordingly.»* Числовой latency в доке **не** указан. |
-| Что возвращает | Users **connected to the chat session** (`user_id`, `user_login`, `user_name`) + `total` — это **не** полный список viewers стрима |
-
-### Rate limit и poll 60–120s
-
-- Общий Helix: token-bucket, типичный пример заголовков `Ratelimit-Limit: 800` / минуту на client+user ([guide](https://dev.twitch.tv/docs/api/guide#twitch-rate-limits)). У Get Chatters отдельного «points» в reference нет → default 1 point.
-- Official: есть **delay** между join/leave и обновлением списка (без числовой latency в reference).
-- Community practice: poll примерно **1–3 мин** из‑за cache; **60s на нижней грани**, разумный дефолт продукта **60–120s** (конфиг).
-- При `first=1000` один канал ≈0.5–1 req/min — далеко внутри Helix bucket.
-- **Не использовать** устаревший/недокументированный TMI chatters endpoint.
-
-**Broadcaster as mod:** да — `moderator_id` = владелец user-токена; может быть ID самого broadcaster («broadcaster or one of the broadcaster’s moderators»).
-
----
-
-## 3. EventSub — типы и scopes для MVP
-
-**Источник:** https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/  
-Транспорт для локального демона: **WebSocket** (session), см. примеры в тех же страницах.
-
-| Type | Version | Scope / auth (по доке типа) | Condition notes |
-|------|---------|-----------------------------|-----------------|
-| `channel.chat.message` | 1 | User-token WS: **`user:read:chat`** (не legacy `chat:read` — он не для EventSub). App token: ещё `user:bot` + `channel:bot`/mod | `broadcaster_user_id` + `user_id` (MVP: оба = стример) |
-| `channel.subscribe` | 1 | `channel:read:subscriptions` | `broadcaster_user_id` |
-| `channel.subscription.gift` | 1 | `channel:read:subscriptions` | `broadcaster_user_id` |
-| `channel.subscription.message` | 1 | `channel:read:subscriptions` | resub chat message |
-| `channel.cheer` | 1 | `bits:read` | `broadcaster_user_id` |
-| `channel.follow` | **2** | `moderator:read:followers` | `broadcaster_user_id` + `moderator_user_id` |
-| `channel.raid` | 1 | **No authorization required** | `to_broadcaster_user_id` *или* `from_…` (не оба) |
-| `stream.online` | 1 | (в таблице типов; app/user token без особого scope в listing) | `broadcaster_user_id` |
-| `stream.offline` | 1 | аналогично | `broadcaster_user_id` |
-
-**Идемпотентность чата:** `event.message_id` у `channel.chat.message`.
-
-**Практический MVP-токен стримера:** один user token broadcaster с суммой scopes:  
-`user:read:chat`, `moderator:read:chatters`, `moderator:read:followers`, `channel:read:subscriptions`, `bits:read`  
-(+ при bot-модели отдельные bot scopes — post-MVP).
-
-Для `channel.chat.message` в condition обычно `broadcaster_user_id` = `user_id` = id стримера. Legacy IRC scope `chat:read` **не** заменяет `user:read:chat` для EventSub.
-
-Опционально позже: `channel.bits.use` (новый, `bits:read`) — шире чем cheer; MVP достаточно `channel.cheer`.
-
----
-
-## 4. Streamer.bot — как отдать события наружу
-
-**Источники:**  
-- https://docs.streamer.bot/api/websocket/guide/configuration  
-- https://docs.streamer.bot/api/websocket/guide/events  
-- https://docs.streamer.bot/api/websocket/requests  
-- https://docs.streamer.bot/api/udp/guide/configuration  
-
-| Механизм | Роль для нашего адаптера |
-|----------|---------------------------|
-| **WebSocket Server** | **Основной:** клиент коннектится к `Address:Port` (default `127.0.0.1:8080`), шлёт `Subscribe` с нужными `events`, получает JSON `{ timeStamp, event: { source, type }, data }` |
-| **Официальный клиент** | npm/pnpm **`@streamerbot/client`** (`StreamerbotClient`); docs: [Using the Client](https://docs.streamer.bot/api/websocket/guide/client), [events](https://streamerbot.github.io/client/guide/events). Пример: `client.on('Twitch.ChatMessage', …)` / `subscribe: { Twitch: ['ChatMessage'] }` |
-| **UDP Server** | В доке — **DoAction** / триггер действий *в* Streamer.bot, не шина исходящих событий аналитики |
-| HTTP webhook «из коробки как EventSub» | Не описан как общий outbound event bus в проверенных страницах |
-
-Конфиг WS: Servers/Clients → WebSocket Server; Auto Start default true; опционально Authentication / Enforce + Password (client передаёт `password`).
-
-**Вывод для адаптера:** адаптер **реалистичен** — `StreamerBotAdapter` на `@streamerbot/client` → события вида `Twitch.ChatMessage` и др. → map в `NormalizedEvent`. UDP не использовать как ingest.
-
----
-
-## 5. Litestream → Cloudflare R2 / Backblaze B2
-
-**Источники:** https://litestream.io/guides/s3-compatible/ , https://litestream.io/guides/s3/
-
-### Минимальный путь (рекомендуем R2 — zero egress)
-
-От пользователя нужно:
-
-1. Аккаунт Cloudflare.
-2. R2 bucket (имя).
-3. **Account ID** (dashboard → R2).
-4. R2 API token с **Object Read & Write**.
-5. Установить Litestream рядом с SQLite-файлом демона.
-6. `litestream.yml` (пример):
-
-```yaml
-dbs:
-  - path: /path/to/stream-panel.sqlite
-    replica:
-      type: s3
-      bucket: YOUR_BUCKET
-      path: stream-panel
-      endpoint: https://YOUR_ACCOUNT_ID.r2.cloudflarestorage.com
-      region: auto
-      access-key-id: ${R2_ACCESS_KEY}
-      secret-access-key: ${R2_SECRET_KEY}
-```
-
-7. Запуск: `litestream replicate -config litestream.yml`  
-8. Restore: `litestream restore -o …` по тому же endpoint/bucket.
-
-Litestream v0.5+ автодетектит `*.r2.cloudflarestorage.com` (`sign-payload`, `concurrency: 2`).
-
-### Альтернатива B2
-
-- Endpoint вида `s3.<region>.backblazeb2.com`, application key с доступом к bucket.
-- Auto-detect `*.backblazeb2.com` (`force-path-style`, `sign-payload`).
-
-Секреты — только локально / env, не в git.
-
----
-
-## 6. Stream Tools — модель «человек / склейка»
-
-Публичная страница продукта: https://b1trat3.ru/products/stream-tools  
-
-Упоминается локальная аналитическая БД и интеграции, **но нет** описания сущности «человек», автоматча донат↔чат или UI merge.
-
-**Вывод:** из публичных источников **неизвестно**. Проектируем свою модель Person / Identity (уже в tech-spec) независимо от внутренней реализации Stream Tools.
-
----
-
-## Гипотеза → факт (сводка для оркестратора)
-
-| Было в docs (гипотеза / дыра) | Стало |
-|-------------------------------|--------|
-| DA: «уточнить websocket vs REST на старте кода» | **Факт:** Centrifugo WS + scopes; REST `/alerts/donations` для backfill; id для идемпотентности; 60 req/min HTTP |
-| Get Chatters scopes / broadcaster | **Факт:** `moderator:read:chatters`; broadcaster может быть `moderator_id` |
-| Pagination / delay | **Факт:** first≤1000; delay задокументирован без числа |
-| 60s poll «ок?» | **Факт-вывод:** 60s на грани; продукт **60–120s** (не TMI); official delay + community cache |
-| EventSub types/scopes списком | **Факт:** таблица выше; chat.message → `user:read:chat` (не legacy `chat:read`); condition оба id = стример на MVP |
-| Streamer.bot «WS/UDP/HTTP» | **Факт:** ingest = WebSocket + `@streamerbot/client` (`Twitch.ChatMessage`…); UDP = DoAction inbound |
-| Litestream R2/B2 «набросать» | **Факт:** минимальный checklist + yaml |
-| Stream Tools person merge | **Факт «неизвестно»** — проектируем сами |
+Точный перечень и критерии: [validation.md](validation.md). Никакой открытый gate не превращён в «100% работает» только наличием документации или написанного кода.

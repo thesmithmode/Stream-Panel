@@ -1,0 +1,24 @@
+{
+  "measuredAt": "2026-10-06T21:24:19.120Z",
+  "node": "v24.19.0",
+  "platform": "linux",
+  "arch": "x64",
+  "sqlite": {
+    "version": "3.53.4"
+  },
+  "caveat": "Synthetic local scratch filesystem; not a stream-machine, Windows, network or 8-hour soak benchmark.",
+  "eventRows": 10000,
+  "ingestionElapsedMs": 2469.491619,
+  "eventInsertP50Ms": 0.16881499999999505,
+  "eventInsertP95Ms": 0.3949769999999262,
+  "eventInsertP99Ms": 0.7291510000000017,
+  "presenceRows": 480000,
+  "presencePolls": 480,
+  "presenceBatchP95Ms": 9.262730999999803,
+  "observedPollsForOneIdentity": 480,
+  "presenceQueryMs": 0.34664300000076764,
+  "databaseBytes": 54333440,
+  "rssBytes": 156545024,
+  "eventLoopP99Ms": 53.706751,
+  "integrity": "ok"
+}
