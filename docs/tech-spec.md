@@ -2,7 +2,7 @@
 
 Стадия: продумывание. Код продукта не пишется в этом коммите — только документация.
 
-Связанные документы: [prd.md](./prd.md), [user-requirements.md](./user-requirements.md).
+Связанные документы: [prd.md](./prd.md), [user-requirements.md](./user-requirements.md), [research-notes.md](./research-notes.md).
 
 ---
 
@@ -79,25 +79,37 @@ type NormalizedEvent = {
 };
 ```
 
-**Twitch (MVP)**
+**Twitch (MVP)** — факты: [research-notes.md](./research-notes.md)
 
-- EventSub (WebSocket transport):  
-  `channel.chat.message`, `channel.subscribe` / `channel.subscription.gift`,  
-  `channel.cheer`, `channel.follow`, `channel.raid`,  
-  `stream.online`, `stream.offline`.
-- Helix **Get Chatters** poll во время `stream.online` (см. §5).
-- OAuth user token стримера (broadcaster), scope включая `moderator:read:chatters`, chat read, и нужные EventSub scopes.
+- EventSub (**WebSocket** transport), subscription types:
+  - `channel.chat.message` v1 — scope `user:read:chat` (condition: `broadcaster_user_id` + `user_id`); idempotency: `message_id`
+  - `channel.subscribe` / `channel.subscription.gift` / `channel.subscription.message` v1 — `channel:read:subscriptions`
+  - `channel.cheer` v1 — `bits:read`
+  - `channel.follow` **v2** — `moderator:read:followers` (+ `moderator_user_id` в condition)
+  - `channel.raid` v1 — auth не требуется (`to_broadcaster_user_id` или `from_…`)
+  - `stream.online` / `stream.offline` v1
+- Helix **Get Chatters** poll во время `stream.online` (см. §5): scope **`moderator:read:chatters`**; `moderator_id` = broadcaster **или** мод (совпадает с user в токене); `first` ≤ 1000; documented delay обновления списка.
+- Рекомендуемый MVP user-token scopes (broadcaster):  
+  `user:read:chat`, `moderator:read:chatters`, `moderator:read:followers`, `channel:read:subscriptions`, `bits:read`.
 
-**DonationAlerts (MVP)**
+**DonationAlerts (MVP)** — факты: [research-notes.md](./research-notes.md)
 
-- OAuth / socket или polling API донатов (уточнить актуальный endpoint на старте кода).
-- Событие `donation` с amount, currency, username, message, timestamp, external id.
+- **Realtime:** Centrifugo WebSocket `wss://centrifugo.donationalerts.com/connection/websocket`.
+  1. OAuth → `GET /api/v1/user/oauth` (scope `oauth-user-show`) → `socket_connection_token` + user `id`
+  2. Connect WS → Centrifugo client UUID
+  3. `POST /api/v1/centrifuge/subscribe` на канал `$alerts:donation_<user_id>` (scope `oauth-donation-subscribe`)
+  4. Subscribe на канале по WS
+- **Scopes:** `oauth-user-show`, `oauth-donation-subscribe`, `oauth-donation-index` (REST backfill `GET /api/v1/alerts/donations`).
+- **Idempotency:** целочисленный donation `id` → `NormalizedEvent.id = donationalerts:{id}`.
+- **HTTP rate limit:** 60 req/min на приложение.
+- Payload: amount, currency, username, message, created_at, …
 
-**Streamer.bot (post-MVP, заложить интерфейс)**
+**Streamer.bot (post-MVP, заложить интерфейс)** — факты: [research-notes.md](./research-notes.md)
 
-- Adapter `source: 'streamerbot'` за тем же `NormalizedEvent`.
-- Транспорт: WebSocket/HTTP server actions — выбрать по доке SB, когда пользователь поставит ПО.
-- Цель: не дублировать подписки, если SB уже агрегирует Twitch/DA.
+- Adapter `source: 'streamerbot'` → тот же `NormalizedEvent`.
+- **Транспорт исходящих событий:** WebSocket Server (Servers/Clients → WebSocket Server, default `127.0.0.1:8080`): клиент шлёт `Subscribe`, получает `{ timeStamp, event: { source, type }, data }`.
+- **UDP Server** в доке SB — для **DoAction** (входящие команды *в* SB), **не** шина аналитических событий → не использовать как ingest.
+- Цель: не дублировать Twitch/DA, если SB уже их агрегирует.
 
 ### 3.2. Sessions
 
@@ -105,6 +117,8 @@ type NormalizedEvent = {
 - Все события и presence-сэмплы привязываются к `session_id`.
 
 ### 3.3. Person / Identity
+
+Публичная модель «человек/склейка» у Stream Tools **не задокументирована** → ниже — наш дизайн, не reverse-engineer.
 
 Таблицы (логически):
 
@@ -178,7 +192,7 @@ donations(…)  -- может быть проекцией events type=donation
 
 ### 5.3. Как закрываем требование (честный контракт продукта)
 
-1. **Во время online** опрашивать Get Chatters с интервалом **60 секунд** (не чаще: cache/rate; для одного канала этого достаточно). Пагинация `first=1000`.
+1. **Во время online** опрашивать Get Chatters с интервалом **60 секунд** (подтверждено: Helix default 1 point/req, bucket ~800/min; documented delay списка делает более частый poll бессмысленным). Пагинация `first` до **1000**, cursor `after`.
 2. Каждый ответ → `presence_samples` с `sampled_at` (время локального получения, UTC).
 3. **Минутная сетка:** минута `HH:MM` считается «смотрел», если существует сэмпл в этой минуте (или соседней — политика интерполяции ниже), где identity присутствует.
 4. **Интерполяция (документированная):** если пользователь был в сэмпле T и T+2мин, но пропущен T+1 из-за сбоя сети — UI помечает минуту как `inferred` vs `observed`. По умолчанию MVP: только `observed` (строже, честнее).
@@ -204,13 +218,29 @@ donations(…)  -- может быть проекцией events type=donation
 
 ## 6. DonationAlerts
 
+- Ingest: Centrifugo WS (основной) + REST `/alerts/donations` для backfill при старте/gap.
 - Нормализовать username → identity `source=donationalerts`.
 - Суммы хранить в минорных единицах + currency; в UI — агрегаты по Person (после merge с Twitch identity).
-- Идемпотентность по id уведомления DA.
+- Идемпотентность по donation `id` из API.
+- Укладывать HTTP (OAuth refresh, subscribe, REST) в **60 req/min**.
 
 ---
 
-## 7. Безопасность и приватность
+## 7. Litestream → R2/B2 (минимальный путь)
+
+Один канал бэкапа на MVP: **Cloudflare R2** (zero egress). Альтернатива: Backblaze B2. Детали и yaml — [research-notes.md](./research-notes.md).
+
+От пользователя нужно:
+
+1. Аккаунт Cloudflare + R2 bucket.
+2. Account ID + API token **Object Read & Write**.
+3. Установленный Litestream рядом с файлом SQLite.
+4. `litestream.yml` с `endpoint: https://<ACCOUNT_ID>.r2.cloudflarestorage.com`, `region: auto`, ключи из env.
+5. `litestream replicate` во время работы демона; restore — `litestream restore` на новой машине.
+
+Секреты R2/B2 только в env / локальном конфиге, не в git.
+
+## 8. Безопасность и приватность
 
 - Публичный GitHub: никаких токенов, `.env.example` только с пустыми ключами.
 - Слушать API по умолчанию на `127.0.0.1`.
@@ -219,7 +249,7 @@ donations(…)  -- может быть проекцией events type=donation
 
 ---
 
-## 8. Кроссплатформа и «всегда во время стрима»
+## 9. Кроссплатформа и «всегда во время стрима»
 
 - Один TS-код для Win/Linux.
 - Systemd user unit (Linux) / Task Scheduler или NSSM (Windows) — в docs запуска, не обязательно в MVP-бинарнике.
@@ -228,7 +258,7 @@ donations(…)  -- может быть проекцией events type=donation
 
 ---
 
-## 9. Порядок реализации (когда разрешат код)
+## 10. Порядок реализации (когда разрешат код)
 
 1. Схема SQLite + Person merge API (без сети) + фикстуры.
 2. Twitch OAuth + EventSub chat/online + sessions.
@@ -240,8 +270,9 @@ donations(…)  -- может быть проекцией events type=donation
 
 ---
 
-## 10. Открытые технические решения (не блокеры docs)
+## 11. Открытые технические решения (не блокеры docs)
 
-- Точный транспорт DA (websocket vs REST) — проверить по актуальной доке на старте кода.
+- ~~Точный транспорт DA~~ — **закрыто** (Centrifugo WS + REST backfill); см. §3.1 / research-notes.
 - LibSQL vs better-sqlite3 — выбрать при первом scaffold.
 - Нужен ли отдельный raw event log на диск — решить по объёму чата.
+- Модель Person-merge у Stream Tools из публички **неизвестна** — проектируем свою (§3.3).
