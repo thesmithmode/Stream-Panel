@@ -37,15 +37,21 @@ try {
     "Откройте ссылку в браузере. Токен одноразовый; повторный запуск выдаст новую ссылку.",
   );
   let closing = false;
+  const shutdown = () => {
+    if (closing) return;
+    closing = true;
+    void application.app
+      .close()
+      .then(() => unlink(lockPath))
+      .then(() => process.exit(0))
+      .catch(() => process.exit(1));
+  };
   for (const signal of ["SIGINT", "SIGTERM"] as const)
-    process.on(signal, () => {
-      if (closing) return;
-      closing = true;
-      void application.app
-        .close()
-        .then(() => unlink(lockPath))
-        .then(() => process.exit(0))
-        .catch(() => process.exit(1));
+    process.on(signal, shutdown);
+  // A desktop launcher can request the same graceful shutdown on Windows via IPC.
+  if (process.connected)
+    process.on("message", (message) => {
+      if (message === "shutdown") shutdown();
     });
 } catch (error) {
   await unlink(lockPath).catch(() => {});

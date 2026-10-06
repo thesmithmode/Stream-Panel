@@ -7,7 +7,12 @@ import {
   moneyToMinor,
   type EventInput,
 } from "../../../packages/core/src/domain.js";
-import { object, string, type ConnectionStatus } from "./twitch.js";
+import {
+  object,
+  string,
+  type ConnectionStatus,
+  type SocketFactory,
+} from "./twitch.js";
 
 export function parseDonationTime(
   raw: string,
@@ -105,6 +110,8 @@ export class DonationAlertsConnection {
     private config: Configuration,
     private db: StoreClient,
     private request: typeof fetch = fetch,
+    private socketFactory: SocketFactory = (url, options) =>
+      new WebSocket(url, options),
   ) {}
   authUrl(callback: string): string {
     if (!this.config.value.daClientId || !this.config.value.daClientSecret)
@@ -134,6 +141,7 @@ export class DonationAlertsConnection {
     )
       throw new Error("INVALID_OAUTH_STATE");
     this.oauthState = null;
+    const generation = this.generation;
     const response = await this.request(
       "https://www.donationalerts.com/oauth/token",
       {
@@ -149,15 +157,18 @@ export class DonationAlertsConnection {
       },
     );
     const body = object(await response.json());
+    if (generation !== this.generation) throw new Error("DA_AUTH_CANCELLED");
     if (!response.ok || !string(body.access_token))
       throw new Error(`DA_OAUTH_HTTP_${response.status}`);
     this.config.value.daAccessToken = string(body.access_token);
     this.config.value.daRefreshToken = string(body.refresh_token);
     await this.config.save();
+    if (generation !== this.generation) throw new Error("DA_AUTH_CANCELLED");
     await this.start();
   }
   private async refresh(): Promise<void> {
     if (this.refreshPromise) return this.refreshPromise;
+    const generation = this.generation;
     this.refreshPromise = (async () => {
       const c = this.config.value;
       if (!c.daRefreshToken || !c.daClientId || !c.daClientSecret)
@@ -178,6 +189,7 @@ export class DonationAlertsConnection {
         },
       );
       const body = object(await response.json());
+      if (generation !== this.generation) throw new Error("DA_AUTH_CANCELLED");
       if (!response.ok) throw new Error("DA_REAUTH_REQUIRED");
       c.daAccessToken = string(body.access_token);
       if (string(body.refresh_token))
@@ -250,12 +262,13 @@ export class DonationAlertsConnection {
         void this.scanHistory().catch((error) => this.report(error));
       }, 300000);
     } catch (error) {
+      if (this.stopped || generation !== this.generation) return;
       this.report(error);
       this.schedule();
     }
   }
   private connect(token: string, generation: number): void {
-    const socket = new WebSocket(
+    const socket = this.socketFactory(
       "wss://centrifugo.donationalerts.com/connection/websocket",
       { maxPayload: 1048576 },
     );
@@ -404,6 +417,7 @@ export class DonationAlertsConnection {
   }
   async stop(): Promise<void> {
     this.stopped = true;
+    this.oauthState = null;
     ++this.generation;
     if (this.retry) clearTimeout(this.retry);
     if (this.history) clearInterval(this.history);

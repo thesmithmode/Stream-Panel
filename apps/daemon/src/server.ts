@@ -6,34 +6,148 @@ import { mkdir, rename, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { StoreClient } from "./db.js";
 import { Configuration } from "./config.js";
-import { TwitchConnection, object, string } from "./twitch.js";
+import {
+  TwitchConnection,
+  object,
+  string,
+  type SocketFactory,
+} from "./twitch.js";
 import { DonationAlertsConnection } from "./donationalerts.js";
 
 export async function createApplication(
   dir: string,
   port: number,
   connect = true,
+  transports: {
+    twitch?: { request?: typeof fetch; socket?: SocketFactory };
+    donationalerts?: { request?: typeof fetch; socket?: SocketFactory };
+  } = {},
 ) {
   const configuration = new Configuration(dir);
   await configuration.load();
   const db = new StoreClient(join(dir, "data.sqlite"));
   await db.ready;
-  const twitch = new TwitchConnection(configuration, db),
-    da = new DonationAlertsConnection(configuration, db);
-  const app = Fastify({ logger: false, bodyLimit: 32768 });
+  const twitch = new TwitchConnection(
+      configuration,
+      db,
+      transports.twitch?.request,
+      transports.twitch?.socket,
+    ),
+    da = new DonationAlertsConnection(
+      configuration,
+      db,
+      transports.donationalerts?.request,
+      transports.donationalerts?.socket,
+    );
+  const app = Fastify({
+    logger: false,
+    bodyLimit: 32768,
+    ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
+  });
   await app.register(cookie);
   app.setErrorHandler((error, request, reply) => {
     const code = error instanceof Error ? error.message : "INTERNAL_ERROR";
-    const safe = /^[A-Z0-9_]+$/.test(code) ? code : "REQUEST_FAILED";
+    const detail = error as { code?: string; statusCode?: number };
+    const storage = /^(EIO|ENOSPC|EROFS|EACCES|EEXIST|ENOTDIR|ENOENT)$/.test(
+      detail.code ?? "",
+    );
+    const safe = storage
+      ? "STORAGE_UNAVAILABLE"
+      : /^[A-Z0-9_]+$/.test(code)
+        ? code
+        : "REQUEST_FAILED";
+    const clientStatus =
+      detail.statusCode && detail.statusCode >= 400 && detail.statusCode < 500
+        ? detail.statusCode
+        : undefined;
+    const clientFailure =
+      /^(INVALID_|MISSING_|TWITCH_|DA_|UNSUPPORTED_CURRENCY$|SAME_PERSON$|EMPTY_PERSON$|ALREADY_UNDONE$|PLATFORM_SESSION_MANAGED_AUTOMATICALLY$)/.test(
+        safe,
+      );
     reply
       .code(
-        /CONFLICT|ALREADY_OPEN/.test(safe)
-          ? 409
-          : /NOT_FOUND/.test(safe)
-            ? 404
-            : 400,
+        clientStatus ??
+          (/CONFLICT|ALREADY_OPEN/.test(safe)
+            ? 409
+            : /NOT_FOUND/.test(safe)
+              ? 404
+              : storage || /^(DB_|QUEUE_OVERFLOW|SQLITE_)/.test(safe)
+                ? 503
+                : clientFailure
+                  ? 400
+                  : 500),
       )
       .send({ error: safe });
+  });
+  const text = { type: "string", maxLength: 256, minLength: 1 };
+  const revision = { type: "integer", minimum: 0 };
+  const body = (
+    properties: Record<string, unknown> = {},
+    required: string[] = [],
+  ): Record<string, unknown> => ({
+    type: "object",
+    additionalProperties: false,
+    properties,
+    required,
+  });
+  const schemaBodies: Record<string, Record<string, unknown>> = {
+    "/api/v1/sessions/start": body(),
+    "/api/v1/sessions/:id/stop": body(),
+    "/api/v1/persons/:id/rename": body(
+      { name: { type: "string", minLength: 1, maxLength: 200 } },
+      ["name"],
+    ),
+    "/api/v1/persons/merge": body(
+      {
+        sourceId: text,
+        targetId: text,
+        sourceRevision: revision,
+        targetRevision: revision,
+      },
+      ["sourceId", "targetId", "sourceRevision", "targetRevision"],
+    ),
+    "/api/v1/persons/split": body(
+      {
+        identityIds: {
+          type: "array",
+          items: text,
+          minItems: 1,
+          maxItems: 1000,
+          uniqueItems: true,
+        },
+        name: { type: "string", minLength: 1, maxLength: 200 },
+        revision,
+      },
+      ["identityIds", "name", "revision"],
+    ),
+    "/api/v1/merges/:id/undo": body(),
+    "/api/v1/twitch/connect": body(
+      { clientId: text, extended: { type: "boolean" } },
+      ["clientId"],
+    ),
+    "/api/v1/twitch/disconnect": body(),
+    "/api/v1/donationalerts/connect": body(
+      {
+        clientId: { type: "string", maxLength: 256 },
+        clientSecret: { type: "string", maxLength: 4096 },
+        accessToken: { type: "string", maxLength: 4096 },
+        refreshToken: { type: "string", maxLength: 4096 },
+        utcOffsetMinutes: {
+          anyOf: [
+            { type: "integer", minimum: -840, maximum: 840 },
+            { type: "null" },
+          ],
+        },
+      },
+      ["utcOffsetMinutes"],
+    ),
+    "/api/v1/donationalerts/disconnect": body(),
+    "/api/v1/donationalerts/rescan": body(),
+    "/api/v1/backup": body(),
+  };
+  app.addHook("onRoute", (route) => {
+    if (route.method === "POST" && schemaBodies[route.url])
+      route.schema = { ...route.schema, body: schemaBodies[route.url] };
   });
   let nonce = randomBytes(32).toString("hex");
   let nonceExpiry = Date.now() + 600000;

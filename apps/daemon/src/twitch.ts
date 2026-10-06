@@ -7,6 +7,11 @@ import {
 } from "../../../packages/core/src/chatters.js";
 import type { EventInput } from "../../../packages/core/src/domain.js";
 
+export type SocketFactory = (
+  url: string,
+  options: WebSocket.ClientOptions,
+) => WebSocket;
+
 export interface ConnectionStatus {
   state: string;
   detail: string;
@@ -130,6 +135,8 @@ export class TwitchConnection {
     private config: Configuration,
     private db: StoreClient,
     private request: typeof fetch = fetch,
+    private socketFactory: SocketFactory = (url, options) =>
+      new WebSocket(url, options),
   ) {}
   private get token(): Tokens {
     if (!this.config.value.twitch) throw new Error("TWITCH_LOGIN_REQUIRED");
@@ -139,6 +146,7 @@ export class TwitchConnection {
     if (!/^[a-zA-Z0-9]{5,100}$/.test(clientId))
       throw new Error("INVALID_CLIENT_ID");
     await this.stop();
+    const generation = this.authGeneration;
     this.config.value.twitchClientId = clientId;
     await this.config.save();
     const scopes = [...baseScopes, ...(extended ? optionalScopes : [])];
@@ -151,6 +159,8 @@ export class TwitchConnection {
       signal: AbortSignal.timeout(15000),
     });
     const body = object(await response.json());
+    if (generation !== this.authGeneration)
+      throw new Error("TWITCH_AUTH_CANCELLED");
     if (!response.ok) throw new Error(`TWITCH_DEVICE_HTTP_${response.status}`);
     const deviceCode = string(body.device_code);
     if (!deviceCode) throw new Error("INVALID_DEVICE_RESPONSE");
@@ -161,7 +171,6 @@ export class TwitchConnection {
       userCode: string(body.user_code),
       expiresAt,
     };
-    const generation = ++this.authGeneration;
     this.status = {
       state: "authorizing",
       detail: "Подтвердите вход на Twitch",
@@ -330,6 +339,7 @@ export class TwitchConnection {
     }
     await this.stop();
     this.stopped = false;
+    const generation = this.authGeneration;
     this.status.state = "connecting";
     this.status.detail = "Подключение…";
     try {
@@ -344,6 +354,7 @@ export class TwitchConnection {
       }, 3_600_000);
       await this.reconcile();
     } catch (error) {
+      if (this.stopped || generation !== this.authGeneration) return;
       this.report(error);
       this.scheduleReconnect();
     }
@@ -355,7 +366,7 @@ export class TwitchConnection {
     if (this.stopped) return;
     const generation = this.authGeneration,
       old = this.socket;
-    const socket = new WebSocket(url, { maxPayload: 1048576 });
+    const socket = this.socketFactory(url, { maxPayload: 1048576 });
     this.sockets.add(socket);
     if (!handoff) this.socket = socket;
     let keepalive = 15_000;

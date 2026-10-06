@@ -45,10 +45,16 @@ export class StoreClient {
     return new Promise((resolve, reject) => {
       const id = ++this.sequence;
       this.pending.set(id, { resolve: (value) => resolve(value as T), reject });
-      this.worker.postMessage({ id, method, args });
+      try {
+        this.worker.postMessage({ id, method, args });
+      } catch (error) {
+        this.pending.delete(id);
+        reject(error);
+      }
     });
   }
   async stop(): Promise<void> {
+    if (this.dead) return;
     await this.call("close");
     await this.worker.terminate();
   }
