@@ -91,7 +91,9 @@
   onMount(() => {
     let alive = true;
     let timer: ReturnType<typeof setInterval> | undefined;
-    void (async () => {
+    async function initialize() {
+      loading = true;
+      error = "";
       try {
         const key = new URLSearchParams(location.hash.slice(1)).get("key");
         if (key) {
@@ -102,6 +104,7 @@
         await refresh();
         if (!alive) return;
         authorized = true;
+        if (timer) clearInterval(timer);
         timer = setInterval(() => {
           void refresh().catch((e) => (error = e.message));
         }, 5000);
@@ -110,9 +113,16 @@
       } finally {
         loading = false;
       }
-    })();
+    }
+    void initialize();
+    const onHashChange = () => {
+      if (new URLSearchParams(location.hash.slice(1)).has("key"))
+        void initialize();
+    };
+    window.addEventListener("hashchange", onHashChange);
     return () => {
       alive = false;
+      window.removeEventListener("hashchange", onHashChange);
       if (timer) clearInterval(timer);
     };
   });

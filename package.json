@@ -9,13 +9,17 @@
   },
   "scripts": {
     "build": "pnpm build:core && pnpm build:web",
-    "test": "pnpm build && node --test dist/packages/core/test/*.test.js dist/apps/daemon/test/*.test.js tests/integration/*.test.mjs",
-    "check": "pnpm test && pnpm check:web && pnpm build:web",
+    "test": "pnpm build && node --test dist/packages/core/test/*.test.js dist/apps/daemon/test/*.test.js",
+    "check": "pnpm check:web && pnpm test:coverage",
     "benchmark": "pnpm build:core && node dist/scripts/benchmark.js",
     "build:core": "tsc -p tsconfig.json",
     "build:web": "vite build --config apps/web/vite.config.ts",
     "start": "node dist/apps/daemon/src/index.js",
-    "check:web": "svelte-check --workspace apps/web --tsconfig ./tsconfig.json"
+    "check:web": "svelte-check --workspace apps/web --tsconfig ./tsconfig.json",
+    "test:unit": "pnpm build:core && node --test dist/packages/core/test/*.test.js",
+    "test:integration": "pnpm build && node --test dist/apps/daemon/test/*.test.js tests/integration/*.test.mjs",
+    "test:e2e": "pnpm build && node --test tests/e2e/*.test.mjs",
+    "test:coverage": "pnpm build && node scripts/test-with-coverage.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.2",
@@ -30,9 +34,13 @@
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "24.10.1",
     "@types/ws": "8.18.2",
+    "c8": "12.0.0",
+    "istanbul-lib-coverage": "3.2.2",
+    "playwright": "1.63.0",
     "svelte": "5.57.2",
     "svelte-check": "4.7.6",
     "typescript": "5.9.3",
+    "v8-to-istanbul": "9.3.0",
     "vite": "8.3.3"
   }
 }

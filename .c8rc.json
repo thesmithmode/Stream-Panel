@@ -1,0 +1,14 @@
+{
+  "all": true,
+  "src": ["dist/packages/core/src", "dist/apps/daemon/src"],
+  "include": [
+    "**/packages/core/src/**/*.{js,ts}",
+    "**/apps/daemon/src/**/*.{js,ts}"
+  ],
+  "exclude": ["**/*.d.ts", "**/node_modules/**"],
+  "exclude-after-remap": true,
+  "reporter": ["text", "json", "lcov"],
+  "reports-dir": "coverage/node",
+  "temp-directory": "coverage/raw",
+  "clean": true
+}

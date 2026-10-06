@@ -4,5 +4,5 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),
   plugins: [svelte()],
-  build: { outDir: "dist", emptyOutDir: true },
+  build: { outDir: "dist", emptyOutDir: true, sourcemap: true },
 });
