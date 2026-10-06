@@ -3,7 +3,8 @@ import cookie from "@fastify/cookie";
 import staticFiles from "@fastify/static";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, rename, unlink } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { StoreClient } from "./db.js";
 import { Configuration } from "./config.js";
 import {
@@ -406,7 +407,11 @@ export async function createApplication(
     return { filename };
   });
   await app.register(staticFiles, {
-    root: resolve("apps/web/dist"),
+    // Resolve from this module, not process.cwd() — daemon may start elsewhere.
+    root: join(
+      dirname(fileURLToPath(import.meta.url)),
+      "../../../../apps/web/dist",
+    ),
     prefix: "/",
   });
   app.setNotFoundHandler((request, reply) =>
