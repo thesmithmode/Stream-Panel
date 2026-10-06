@@ -29,6 +29,12 @@ interface MergeRow {
   undone_at_ms: number | null;
 }
 
+export const priorModerationQuery = `SELECT 1 FROM events WHERE source='twitch' AND account_id=?
+        AND type IN ('chat.message_delete','chat.clear','chat.clear_user_messages') AND (
+          (type='chat.message_delete' AND json_extract(payload_json,'$.targetMessageId')=?) OR
+          (occurred_at_ms>=? AND (type='chat.clear' OR
+          (type='chat.clear_user_messages' AND json_extract(payload_json,'$.targetUserId')=?)))) LIMIT 1`;
+
 export class StreamStore {
   private readonly db: Database.Database;
 
@@ -164,9 +170,9 @@ export class StreamStore {
         if (event.type === "chat.clear")
           this.db
             .prepare(
-              "UPDATE events SET payload_json=json_set(payload_json, '$.text', '[сообщение удалено]', '$.redacted', 1) WHERE source='twitch' AND account_id=? AND type='chat.message'",
+              "UPDATE events SET payload_json=json_set(payload_json, '$.text', '[сообщение удалено]', '$.redacted', 1) WHERE source='twitch' AND account_id=? AND type='chat.message' AND occurred_at_ms<=?",
             )
-            .run(event.accountId);
+            .run(event.accountId, event.occurredAtMs);
         else if (event.type === "chat.message_delete" && messageId)
           this.db
             .prepare(
@@ -176,9 +182,25 @@ export class StreamStore {
         else if (event.type === "chat.clear_user_messages" && userId)
           this.db
             .prepare(
-              "UPDATE events SET payload_json=json_set(payload_json, '$.text', '[сообщение удалено]', '$.redacted', 1) WHERE source='twitch' AND account_id=? AND type='chat.message' AND identity_id IN(SELECT id FROM identities WHERE source='twitch' AND account_id=? AND external_id=?)",
+              "UPDATE events SET payload_json=json_set(payload_json, '$.text', '[сообщение удалено]', '$.redacted', 1) WHERE source='twitch' AND account_id=? AND type='chat.message' AND identity_id IN(SELECT id FROM identities WHERE source='twitch' AND account_id=? AND external_id=?) AND occurred_at_ms<=?",
             )
-            .run(event.accountId, event.accountId, userId);
+            .run(event.accountId, event.accountId, userId, event.occurredAtMs);
+      }
+      if (event.source === "twitch" && event.type === "chat.message") {
+        const deletion = this.db
+          .prepare(priorModerationQuery)
+          .get(
+            event.accountId,
+            event.externalId,
+            event.occurredAtMs,
+            event.actor?.externalId ?? "",
+          );
+        if (deletion)
+          this.db
+            .prepare(
+              "UPDATE events SET payload_json=json_set(payload_json,'$.text','[сообщение удалено]','$.redacted',1) WHERE id=?",
+            )
+            .run(eventKey(event));
       }
       if (identity && event.actor)
         this.rememberAlias(
