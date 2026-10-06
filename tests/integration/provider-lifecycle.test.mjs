@@ -728,3 +728,163 @@ test("disconnect during startup validation/refresh preserves disconnected status
   assert.equal(f.config.value.daRefreshToken, "");
   assert.equal(f.sockets.length, 0);
 });
+test("a refresh response from the previous login cannot overwrite a new device login", async (t) => {
+  const f = fixture(t);
+  let oldResponse;
+  const fallback = twitchRequest(f);
+  const c = new TwitchConnection(
+    f.config,
+    f.db,
+    async (url, init) => {
+      if (url.endsWith("/token")) {
+        const grant = new URLSearchParams(init.body).get("grant_type");
+        if (grant === "refresh_token")
+          return new Promise((resolve) => (oldResponse = resolve));
+        return response({
+          access_token: "new-login-access",
+          refresh_token: "new-login-refresh",
+          expires_in: 7200,
+          scope: ["user:read:chat"],
+        });
+      }
+      return fallback(url, init);
+    },
+    f.socket,
+  );
+  try {
+    const stale = assert.rejects(c.refresh(), /TWITCH_AUTH_CANCELLED/);
+    await flush();
+    await c.disconnect();
+    await c.beginAuth("client123", false);
+    await f.tick(5000);
+    assert.equal(f.config.value.twitch.access, "new-login-access");
+    oldResponse(
+      response({
+        access_token: "old-login-access",
+        refresh_token: "old-login-refresh",
+        expires_in: 7200,
+      }),
+    );
+    await stale;
+    assert.equal(f.config.value.twitch.access, "new-login-access");
+    assert.equal(f.config.value.twitch.refresh, "new-login-refresh");
+  } finally {
+    await c.stop();
+  }
+});
+test("a stream poll from the previous account is never applied to the new login", async (t) => {
+  const f = fixture(t);
+  let oldStream;
+  let streams = 0;
+  const fallback = twitchRequest(f);
+  const c = new TwitchConnection(
+    f.config,
+    f.db,
+    async (url, init) => {
+      if (url.endsWith("/validate"))
+        return response({
+          client_id: "client123",
+          user_id: f.config.value.twitch.userId,
+          scopes: ["user:read:chat"],
+        });
+      if (new URL(url).pathname.endsWith("/streams")) {
+        if (++streams === 1)
+          return new Promise((resolve) => (oldStream = resolve));
+        return response({
+          data: [{ id: "new-stream", started_at: new Date().toISOString() }],
+        });
+      }
+      return fallback(url, init);
+    },
+    f.socket,
+  );
+  try {
+    const starting = c.start();
+    await flush();
+    const token = { ...f.config.value.twitch };
+    await c.disconnect();
+    f.config.value.twitch = {
+      ...token,
+      userId: "new-owner",
+      access: "new-access",
+    };
+    await c.start();
+    oldStream(
+      response({
+        data: [{ id: "old-stream", started_at: new Date().toISOString() }],
+      }),
+    );
+    await starting;
+    assert.equal(
+      f.calls.filter((x) => x.method === "startSession").length,
+      0,
+      "a cancelled response must not attach the old stream to the new owner",
+    );
+    f.sockets.at(-1).push(welcome);
+    await flush();
+    await f.tick(60000);
+    const sessions = f.calls.filter((x) => x.method === "startSession");
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].args[0], "new-owner");
+    assert.equal(sessions[0].args[1], "new-stream");
+  } finally {
+    await c.stop();
+  }
+});
+
+test("a validation response from the previous account cannot mutate or reconnect a new login", async (t) => {
+  const f = fixture(t);
+  let oldValidate;
+  let validations = 0;
+  const fallback = twitchRequest(f);
+  const c = new TwitchConnection(
+    f.config,
+    f.db,
+    async (url, init) => {
+      if (url.endsWith("/validate")) {
+        if (++validations === 1)
+          return new Promise((resolve) => (oldValidate = resolve));
+        return response({
+          client_id: "client123",
+          user_id: "new-owner",
+          login: "New owner",
+          scopes: ["user:read:chat"],
+        });
+      }
+      return fallback(url, init);
+    },
+    f.socket,
+  );
+  try {
+    const starting = c.start();
+    await flush();
+    const token = { ...f.config.value.twitch };
+    await c.disconnect();
+    f.config.value.twitch = {
+      ...token,
+      userId: "new-owner",
+      access: "new-access",
+    };
+    await c.start();
+    assert.equal(f.sockets.length, 1);
+    oldValidate(
+      response({
+        client_id: "client123",
+        user_id: "old-owner",
+        login: "Old owner",
+        scopes: ["user:read:chat"],
+      }),
+    );
+    await starting;
+    assert.equal(f.config.value.twitch.userId, "new-owner");
+    assert.equal(f.config.value.twitch.access, "new-access");
+    assert.equal(c.status.account, "New owner");
+    assert.equal(
+      f.sockets.length,
+      1,
+      "cancelled validation must not create a second connection",
+    );
+  } finally {
+    await c.stop();
+  }
+});

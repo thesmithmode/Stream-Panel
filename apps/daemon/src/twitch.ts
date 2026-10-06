@@ -238,6 +238,7 @@ export class TwitchConnection {
   }
   async refresh(): Promise<void> {
     if (this.refreshPromise) return this.refreshPromise;
+    const generation = this.authGeneration;
     this.refreshPromise = (async () => {
       const response = await this.request("https://id.twitch.tv/oauth2/token", {
         method: "POST",
@@ -249,6 +250,8 @@ export class TwitchConnection {
         signal: AbortSignal.timeout(15000),
       });
       const body = object(await response.json());
+      if (generation !== this.authGeneration)
+        throw new Error("TWITCH_AUTH_CANCELLED");
       if (!response.ok) throw new Error("TWITCH_REAUTH_REQUIRED");
       this.config.value.twitch = {
         ...this.token,
@@ -300,6 +303,7 @@ export class TwitchConnection {
     return response.json();
   }
   private async validate(): Promise<void> {
+    const generation = this.authGeneration;
     if (this.token.expiresAt < Date.now() + 60_000) await this.refresh();
     let response = await this.request("https://id.twitch.tv/oauth2/validate", {
       headers: { Authorization: `OAuth ${this.token.access}` },
@@ -313,6 +317,8 @@ export class TwitchConnection {
       });
     }
     const body = object(await response.json());
+    if (generation !== this.authGeneration)
+      throw new Error("TWITCH_AUTH_CANCELLED");
     if (
       !response.ok ||
       body.client_id !== this.config.value.twitchClientId ||
@@ -344,7 +350,7 @@ export class TwitchConnection {
     this.status.detail = "Подключение…";
     try {
       await this.validate();
-      if (this.stopped) return;
+      if (this.stopped || generation !== this.authGeneration) return;
       this.connect();
       this.tick = setInterval(() => {
         void this.reconcile().catch((error) => this.report(error));
@@ -527,15 +533,18 @@ export class TwitchConnection {
   }
   private async reconcile(): Promise<void> {
     if (this.reconciling || this.stopped) return;
+    const generation = this.authGeneration;
+    const accountId = this.token.userId;
+    const current = () => !this.stopped && generation === this.authGeneration;
     this.reconciling = true;
     try {
       const body = object(
-        await this.api(
-          `streams?user_id=${encodeURIComponent(this.token.userId)}`,
-        ),
+        await this.api(`streams?user_id=${encodeURIComponent(accountId)}`),
       );
+      if (!current()) return;
       const sessions =
         await this.db.call<Record<string, unknown>[]>("sessions");
+      if (!current()) return;
       const manual = sessions.find(
         (s) => s.kind === "manual" && s.ended_at_ms === null,
       );
@@ -547,7 +556,7 @@ export class TwitchConnection {
         if (!manual)
           this.sessionId = await this.db.call<string>(
             "startSession",
-            this.token.userId,
+            accountId,
             string(stream.id),
             Date.parse(string(stream.started_at)),
             "platform",
@@ -555,7 +564,7 @@ export class TwitchConnection {
           );
       } else if (!manual && ++this.offlineCount >= 2) {
         const open = sessions.find(
-          (s) => s.account_id === this.token.userId && s.ended_at_ms === null,
+          (s) => s.account_id === accountId && s.ended_at_ms === null,
         );
         if (open)
           await this.db.call(
@@ -566,34 +575,30 @@ export class TwitchConnection {
           );
         this.sessionId = null;
       }
+      if (!current()) return;
       if (
         this.sessionId &&
         this.token.scopes.includes("moderator:read:chatters")
       ) {
         const users: { user_id: string; user_name: string }[] = [];
+        const sessionId = this.sessionId;
         const abort = AbortSignal.timeout(30000);
         const poll = await collectChatters(async (cursor) => {
+          if (!current()) throw new Error("TWITCH_AUTH_CANCELLED");
           const page = object(
             await this.api(
-              `chat/chatters?broadcaster_id=${this.token.userId}&moderator_id=${this.token.userId}&first=1000${cursor ? `&after=${encodeURIComponent(cursor)}` : ""}`,
+              `chat/chatters?broadcaster_id=${accountId}&moderator_id=${accountId}&first=1000${cursor ? `&after=${encodeURIComponent(cursor)}` : ""}`,
               { signal: abort },
             ),
           ) as unknown as ChattersPage;
           users.push(...page.data);
           return page;
         });
-        await this.db.call(
-          "recordPoll",
-          this.sessionId,
-          this.token.userId,
-          poll,
-        );
-        await this.db.call(
-          "updateChatterNames",
-          this.token.userId,
-          users,
-          Date.now(),
-        );
+        if (!current()) return;
+        await this.db.call("recordPoll", sessionId, accountId, poll);
+        if (!current()) return;
+        await this.db.call("updateChatterNames", accountId, users, Date.now());
+        if (!current()) return;
         this.status.capabilities.presence = poll.status;
         if (poll.status !== "complete")
           await this.db.call(
