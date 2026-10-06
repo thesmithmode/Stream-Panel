@@ -1,7 +1,7 @@
 import lib from "istanbul-lib-coverage";
 import converter from "v8-to-istanbul";
 import { writeFile, mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 export async function startCoverage(page) {
   if (process.env.STREAM_PANEL_COVERAGE)
@@ -18,7 +18,12 @@ export async function saveCoverage(page) {
     });
     await c.load();
     c.applyCoverage(entry.functions);
-    result.merge(c.toIstanbul());
+    // Dependencies are outside the established runtime scope; avoid writing them
+    // to every checkpoint (particularly expensive on Windows CI filesystems).
+    const root = resolve("apps/web/src") + sep;
+    for (const [path, data] of Object.entries(c.toIstanbul()))
+      if (resolve(path).startsWith(root))
+        result.addFileCoverage({ ...data, path: resolve(path) });
   }
   await mkdir("coverage/browser", { recursive: true });
   await writeFile(
