@@ -52,14 +52,17 @@ pnpm start
 3. [Реальный контракт API](docs/api-contract.md).
 4. [Проверенные источники и исправленные гипотезы](docs/research-notes.md).
 5. [Выполненные проверки и ограничения](docs/validation.md).
-6. [Следующие задачи и критерии готовности](docs/implementation-plan.md).
+6. [TDD, команды тестов и политика покрытия](docs/testing-strategy.md).
+7. [Следующие задачи и критерии готовности](docs/implementation-plan.md).
 
 ```sh
 pnpm check
 pnpm benchmark
 ```
 
-`check` компилирует ядро, выполняет 27 тестов, проверяет Svelte и собирает production UI. Тесты используют временные данные и не обращаются к аккаунтам. [Benchmark](docs/benchmark-results.json) — синтетический storage smoke, не доказательство годовой нагрузки. Установка и `pnpm check` прошли [CI на Ubuntu и Windows](https://github.com/thesmithmode/Stream-Panel/actions/runs/37535212725). Проверка живой записи на целевых Win11/Mint остаётся отдельным этапом.
+Перед первой проверкой установите Chromium: `pnpm exec playwright install chromium` (на Linux runner — `--with-deps chromium`). `pnpm check` проверяет TypeScript/Svelte, собирает UI, запускает unit/integration/E2E и контролирует покрытие: минимум 90% строк, ветвлений и функций суммарно, 90% строк каждого runtime-файла. Тесты используют временные данные и искусственные реквизиты, не требуют живого аккаунта. Подробности, команды и границы доказательств — в [стратегии тестирования](docs/testing-strategy.md). CI настроен для push во все ветки и всех PR на Ubuntu/Windows; фактические результаты отмечены в [validation](docs/validation.md).
+
+[Benchmark](docs/benchmark-results.json) — синтетический storage smoke, не доказательство годовой нагрузки. Живая запись на целевых Win11/Mint остаётся отдельным этапом.
 
 Структура: `packages/core` — домен/SQLite; `apps/daemon` — worker, HTTP, OAuth и адаптеры; `apps/web` — Svelte UI; `scripts` — измерения. Exact dependencies и lockfile фиксированы. В `allowBuilds` разрешён только `better-sqlite3`.
 

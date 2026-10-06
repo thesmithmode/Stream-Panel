@@ -113,8 +113,14 @@ Bind127.0.0.1, exact Host+Origin, no CORS, CSP и no-store, body32KiB. Nonce fra
 
 Config version1 отдельно от data.sqlite, temp write+atomic rename; POSIX0600, directory0700. **Файл не зашифрован**, Windows ACL/credential store ещё gate. Он не входит в snapshot. Это не защита от другого процесса того же пользователя.
 
-Exclusive PID lock data-dir, active second writer rejected даже на другом порту; stale PID recovery. Ctrl+C/SIGTERM закрывают sockets, adapters, DB и lock. Bounded10s shutdown/sleep gaps/автостарт ещё backlog; не заявлять эти цели реализованными.
+Exclusive PID lock data-dir, active second writer rejected даже на другом порту; stale PID recovery. Ctrl+C/SIGTERM закрывают sockets, adapters, DB и lock; launcher с IPC-каналом может отправить строку `shutdown` для того же завершения на Windows. Bounded10s shutdown/sleep gaps/автостарт ещё backlog; не заявлять эти цели реализованными.
 
 Snapshot: online backup while WAL writer открыт, readonly destination integrity_check/foreign_key_check/version2, tmp→atomic rename. Локальная кнопка, без scheduler/rotation/remote. Restore в новый data-dir с остановленным writer описан в README, проверяется при запуске схемой; отдельный CLI/UI preview восстановления ещё нужен.
 
 Будущий cloud backup: single writer, отдельный object prefix на установку, не двусторонний sync. Litestream0.5 Windows support есть, age encryption нет. R2 free tier ограничен storage/operations; sync interval60s — только предполагаемый budget, проверяется restore+usage экспериментом. Не коммитить непроверенный cloud config как рабочую функцию.
+
+## Автоматические проверки
+
+[TDD и политика покрытия](testing-strategy.md) обязательны для дальнейшей реализации. Все POST имеют строгие схемы без coercion/removeAdditional; worker освобождает очередь при невозможности structured clone. Проверена отмена позднего device/code exchange Twitch/DA после disconnect. При смене Twitch login старые ответы refresh/validate/streams не изменяют новый токен или account и не создают повторное подключение; poll использует account/session, захваченные до запроса. Остальные lifecycle races остаются в release gates. Повторный bootstrap в открытой вкладке обрабатывает hashchange.
+
+Модерация: delete привязан к provider message ID; clear и clear-user удаляют текст только до времени события модерации включительно. Сохранённые факты модерации применяются к запоздалому сообщению, в том числе после рестарта. Проверка прежней модерации использует индекс `(source, account_id, type, external_id)` с ограничением типов; история обычных сообщений не сканируется. Это не политика автоматического удаления истории целиком.
