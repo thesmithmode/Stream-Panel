@@ -1,6 +1,6 @@
 # Research notes (официальные доки)
 
-Дата проверки: **2026-10-06** (МСК). Код продукта не писался — только факты для закрытия слепых пятен в спецификации.
+Дата проверки: **2026-10-06** (МСК); доп. сверка оркестратора + официальные ссылки тем же днём. Код продукта не писался — только факты для закрытия слепых пятен в спецификации.
 
 | Тема | Источник | Статус |
 |------|----------|--------|
@@ -20,7 +20,8 @@
 
 ### Как получать донаты в realtime
 
-Официальный путь — **Centrifugo WebSocket**, не long-poll как основной канал.
+Официальный путь — **Centrifugo WebSocket**, не long-poll как основной канал.  
+**Гипотеза «websocket vs REST» закрыта:** WS — основной realtime; REST `/alerts/donations` — только history/backfill.
 
 1. OAuth 2.0 Authorization Code → `access_token`.
 2. `GET https://www.donationalerts.com/api/v1/user/oauth` (scope `oauth-user-show`) → в ответе `data.socket_connection_token` и `data.id` (user id).
@@ -68,13 +69,15 @@
 | Latency | Официально: *«There is a delay between when users join and leave a chat and when the list is updated accordingly.»* Числовой latency в доке **не** указан. |
 | Что возвращает | Users **connected to the chat session** (`user_id`, `user_login`, `user_name`) + `total` — это **не** полный список viewers стрима |
 
-### Rate limit и poll 60s
+### Rate limit и poll 60–120s
 
 - Общий Helix: token-bucket, типичный пример заголовков `Ratelimit-Limit: 800` / минуту на client+user ([guide](https://dev.twitch.tv/docs/api/guide#twitch-rate-limits)). У Get Chatters отдельного «points» в reference нет → default 1 point.
-- **Poll раз в 60 с для одного канала** при `first=1000` — комфортно внутри лимита (≈1 req/min + пагинация только если chatters > 1000).
-- Вывод спецификации: **60s — ок и рекомендован** как нижняя разумная граница с учётом documented delay списка; чаще не даёт «точной секунды» из-за задержки обновления списка.
+- Official: есть **delay** между join/leave и обновлением списка (без числовой latency в reference).
+- Community practice: poll примерно **1–3 мин** из‑за cache; **60s на нижней грани**, разумный дефолт продукта **60–120s** (конфиг).
+- При `first=1000` один канал ≈0.5–1 req/min — далеко внутри Helix bucket.
+- **Не использовать** устаревший/недокументированный TMI chatters endpoint.
 
-**Broadcaster as mod:** да — `moderator_id` может быть ID самого broadcaster (формулировка docs: «broadcaster or one of the broadcaster’s moderators»).
+**Broadcaster as mod:** да — `moderator_id` = владелец user-токена; может быть ID самого broadcaster («broadcaster or one of the broadcaster’s moderators»).
 
 ---
 
@@ -85,7 +88,7 @@
 
 | Type | Version | Scope / auth (по доке типа) | Condition notes |
 |------|---------|-----------------------------|-----------------|
-| `channel.chat.message` | 1 | `user:read:chat` у **chatting user** (`user_id` в condition). App token: ещё `user:bot` + `channel:bot`/mod | `broadcaster_user_id` + `user_id` |
+| `channel.chat.message` | 1 | User-token WS: **`user:read:chat`** (не legacy `chat:read` — он не для EventSub). App token: ещё `user:bot` + `channel:bot`/mod | `broadcaster_user_id` + `user_id` (MVP: оба = стример) |
 | `channel.subscribe` | 1 | `channel:read:subscriptions` | `broadcaster_user_id` |
 | `channel.subscription.gift` | 1 | `channel:read:subscriptions` | `broadcaster_user_id` |
 | `channel.subscription.message` | 1 | `channel:read:subscriptions` | resub chat message |
@@ -100,6 +103,8 @@
 **Практический MVP-токен стримера:** один user token broadcaster с суммой scopes:  
 `user:read:chat`, `moderator:read:chatters`, `moderator:read:followers`, `channel:read:subscriptions`, `bits:read`  
 (+ при bot-модели отдельные bot scopes — post-MVP).
+
+Для `channel.chat.message` в condition обычно `broadcaster_user_id` = `user_id` = id стримера. Legacy IRC scope `chat:read` **не** заменяет `user:read:chat` для EventSub.
 
 Опционально позже: `channel.bits.use` (новый, `bits:read`) — шире чем cheer; MVP достаточно `channel.cheer`.
 
@@ -116,12 +121,13 @@
 | Механизм | Роль для нашего адаптера |
 |----------|---------------------------|
 | **WebSocket Server** | **Основной:** клиент коннектится к `Address:Port` (default `127.0.0.1:8080`), шлёт `Subscribe` с нужными `events`, получает JSON `{ timeStamp, event: { source, type }, data }` |
+| **Официальный клиент** | npm/pnpm **`@streamerbot/client`** (`StreamerbotClient`); docs: [Using the Client](https://docs.streamer.bot/api/websocket/guide/client), [events](https://streamerbot.github.io/client/guide/events). Пример: `client.on('Twitch.ChatMessage', …)` / `subscribe: { Twitch: ['ChatMessage'] }` |
 | **UDP Server** | В доке — **DoAction** / триггер действий *в* Streamer.bot, не шина исходящих событий аналитики |
 | HTTP webhook «из коробки как EventSub» | Не описан как общий outbound event bus в проверенных страницах |
 
-Конфиг WS: Servers/Clients → WebSocket Server; Auto Start default true; опционально Authentication / Enforce + Password.
+Конфиг WS: Servers/Clients → WebSocket Server; Auto Start default true; опционально Authentication / Enforce + Password (client передаёт `password`).
 
-**Вывод для адаптера:** `StreamerBotAdapter` = WebSocket client → `Subscribe` (Twitch ChatMessage, Follow, … + DonationAlerts если SB их прокидывает) → map в `NormalizedEvent`. UDP не использовать как ingest.
+**Вывод для адаптера:** адаптер **реалистичен** — `StreamerBotAdapter` на `@streamerbot/client` → события вида `Twitch.ChatMessage` и др. → map в `NormalizedEvent`. UDP не использовать как ingest.
 
 ---
 
@@ -184,8 +190,8 @@ Litestream v0.5+ автодетектит `*.r2.cloudflarestorage.com` (`sign-pa
 | DA: «уточнить websocket vs REST на старте кода» | **Факт:** Centrifugo WS + scopes; REST `/alerts/donations` для backfill; id для идемпотентности; 60 req/min HTTP |
 | Get Chatters scopes / broadcaster | **Факт:** `moderator:read:chatters`; broadcaster может быть `moderator_id` |
 | Pagination / delay | **Факт:** first≤1000; delay задокументирован без числа |
-| 60s poll «ок?» | **Факт-вывод:** ок относительно Helix bucket и delay списка |
-| EventSub types/scopes списком | **Факт:** таблица выше (chat.message + subs/cheer/follow v2/raid/online/offline) |
-| Streamer.bot «WS/UDP/HTTP» | **Факт:** ingest = WebSocket Subscribe; UDP = DoAction inbound |
+| 60s poll «ок?» | **Факт-вывод:** 60s на грани; продукт **60–120s** (не TMI); official delay + community cache |
+| EventSub types/scopes списком | **Факт:** таблица выше; chat.message → `user:read:chat` (не legacy `chat:read`); condition оба id = стример на MVP |
+| Streamer.bot «WS/UDP/HTTP» | **Факт:** ingest = WebSocket + `@streamerbot/client` (`Twitch.ChatMessage`…); UDP = DoAction inbound |
 | Litestream R2/B2 «набросать» | **Факт:** минимальный checklist + yaml |
 | Stream Tools person merge | **Факт «неизвестно»** — проектируем сами |

@@ -82,7 +82,7 @@ type NormalizedEvent = {
 **Twitch (MVP)** — факты: [research-notes.md](./research-notes.md)
 
 - EventSub (**WebSocket** transport), subscription types:
-  - `channel.chat.message` v1 — scope `user:read:chat` (condition: `broadcaster_user_id` + `user_id`); idempotency: `message_id`
+  - `channel.chat.message` v1 — scope **`user:read:chat`** (не legacy `chat:read`); condition `broadcaster_user_id` + `user_id` (MVP: оба = стример); idempotency: `message_id`
   - `channel.subscribe` / `channel.subscription.gift` / `channel.subscription.message` v1 — `channel:read:subscriptions`
   - `channel.cheer` v1 — `bits:read`
   - `channel.follow` **v2** — `moderator:read:followers` (+ `moderator_user_id` в condition)
@@ -90,7 +90,8 @@ type NormalizedEvent = {
   - `stream.online` / `stream.offline` v1
 - Helix **Get Chatters** poll во время `stream.online` (см. §5): scope **`moderator:read:chatters`**; `moderator_id` = broadcaster **или** мод (совпадает с user в токене); `first` ≤ 1000; documented delay обновления списка.
 - Рекомендуемый MVP user-token scopes (broadcaster):  
-  `user:read:chat`, `moderator:read:chatters`, `moderator:read:followers`, `channel:read:subscriptions`, `bits:read`.
+  `user:read:chat`, `moderator:read:chatters`, `moderator:read:followers`, `channel:read:subscriptions`, `bits:read`.  
+  Legacy `chat:read` для EventSub **не** использовать.
 
 **DonationAlerts (MVP)** — факты: [research-notes.md](./research-notes.md)
 
@@ -107,9 +108,10 @@ type NormalizedEvent = {
 **Streamer.bot (post-MVP, заложить интерфейс)** — факты: [research-notes.md](./research-notes.md)
 
 - Adapter `source: 'streamerbot'` → тот же `NormalizedEvent`.
-- **Транспорт исходящих событий:** WebSocket Server (Servers/Clients → WebSocket Server, default `127.0.0.1:8080`): клиент шлёт `Subscribe`, получает `{ timeStamp, event: { source, type }, data }`.
+- **Транспорт исходящих событий:** WebSocket Server (default `127.0.0.1:8080`) + официальный клиент **`@streamerbot/client`** (`StreamerbotClient`, `on('Twitch.ChatMessage')` / `subscribe: { Twitch: ['ChatMessage'] }`).
 - **UDP Server** в доке SB — для **DoAction** (входящие команды *в* SB), **не** шина аналитических событий → не использовать как ingest.
-- Цель: не дублировать Twitch/DA, если SB уже их агрегирует.
+- Цель: не дублировать Twitch/DA, если SB уже их агрегирует; адаптер реалистичен.
+
 
 ### 3.2. Sessions
 
@@ -192,7 +194,7 @@ donations(…)  -- может быть проекцией events type=donation
 
 ### 5.3. Как закрываем требование (честный контракт продукта)
 
-1. **Во время online** опрашивать Get Chatters с интервалом **60 секунд** (подтверждено: Helix default 1 point/req, bucket ~800/min; documented delay списка делает более частый poll бессмысленным). Пагинация `first` до **1000**, cursor `after`.
+1. **Во время online** опрашивать Get Chatters с интервалом **60–120 с** (дефолт конфига **60s**; community часто 1–3 мин из‑за cache; official delay join/leave→list). Helix bucket ~800/min — не узкое место. Пагинация `first` до **1000**, cursor `after`. Не TMI.
 2. Каждый ответ → `presence_samples` с `sampled_at` (время локального получения, UTC).
 3. **Минутная сетка:** минута `HH:MM` считается «смотрел», если существует сэмпл в этой минуте (или соседней — политика интерполяции ниже), где identity присутствует.
 4. **Интерполяция (документированная):** если пользователь был в сэмпле T и T+2мин, но пропущен T+1 из-за сбоя сети — UI помечает минуту как `inferred` vs `observed`. По умолчанию MVP: только `observed` (строже, честнее).
@@ -212,7 +214,7 @@ donations(…)  -- может быть проекцией events type=donation
 - Фильтр ботов (список известных login).
 - Сжатие presence (хранит diff in/out вместо полного списка каждый раз).
 - Подмешивание Streamer.bot events, если там появятся дополнительные сигналы.
-- Опциональный более частый poll **не** делать — бессмысленно из-за cache и ToS.
+- Poll чаще **60s** не делать — бессмысленно из-за documented delay / community cache; верх конфига 120s достаточен.
 
 ---
 
