@@ -441,27 +441,36 @@ export class StreamStore {
           poll.completedAtMs,
           poll.status,
         );
+      const lookup = this.db.prepare(
+        "SELECT id FROM identities WHERE source='twitch' AND account_id=? AND external_id=?",
+      );
+      const insertPerson = this.db.prepare(
+        "INSERT INTO persons VALUES (?, ?, 1)",
+      );
+      const insertIdentity = this.db.prepare(
+        "INSERT INTO identities VALUES (?, 'twitch', ?, ?, ?, ?, ?)",
+      );
+      const insertMember = this.db.prepare(
+        "INSERT INTO presence_members VALUES (?, ?)",
+      );
       for (const userId of new Set(poll.userIds)) {
-        let identity = this.db
-          .prepare(
-            "SELECT id FROM identities WHERE source='twitch' AND account_id=? AND external_id=?",
-          )
-          .get(accountId, userId) as { id: string } | undefined;
+        let identity = lookup.get(accountId, userId) as
+          | { id: string }
+          | undefined;
         if (!identity) {
           const personId = randomUUID();
           identity = { id: randomUUID() };
-          this.db
-            .prepare("INSERT INTO persons VALUES (?, ?, 1)")
-            .run(personId, userId);
-          this.db
-            .prepare(
-              "INSERT INTO identities VALUES (?, 'twitch', ?, ?, ?, ?, ?)",
-            )
-            .run(identity.id, accountId, userId, userId, userId, personId);
+          insertPerson.run(personId, userId);
+          insertIdentity.run(
+            identity.id,
+            accountId,
+            userId,
+            userId,
+            userId,
+            personId,
+          );
         }
-        this.db
-          .prepare("INSERT INTO presence_members VALUES (?, ?)")
-          .run(id, identity.id);
+        insertMember.run(id, identity.id);
       }
     })();
   }
@@ -643,17 +652,25 @@ export class StreamStore {
       completed_at_ms: number;
       status: PresencePoll["status"];
     }[];
+    // One indexed membership query for the whole interval; avoid a query per minute.
+    const observed = new Set(
+      (
+        this.db
+          .prepare(
+            `SELECT m.poll_id FROM identities i
+      CROSS JOIN presence_members m INDEXED BY presence_members_identity
+      CROSS JOIN presence_polls p
+      WHERE i.person_id=? AND m.identity_id=i.id AND p.id=m.poll_id
+      AND p.session_id=? AND p.completed_at_ms>=? AND p.completed_at_ms<?`,
+          )
+          .all(personId, sessionId, fromMs, toMs) as { poll_id: string }[]
+      ).map((row) => row.poll_id),
+    );
     const normalized = polls.map((poll) => ({
       startedAtMs: poll.started_at_ms,
       completedAtMs: poll.completed_at_ms,
       status: poll.status,
-      userIds: (
-        this.db
-          .prepare(
-            "SELECT i.person_id FROM presence_members m JOIN identities i ON i.id=m.identity_id WHERE m.poll_id=? AND i.person_id=?",
-          )
-          .all(poll.id, personId) as { person_id: string }[]
-      ).map((row) => row.person_id),
+      userIds: observed.has(poll.id) ? [personId] : [],
     }));
     return presenceMinutes(normalized, personId, fromMs, toMs);
   }

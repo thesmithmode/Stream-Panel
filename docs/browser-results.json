@@ -1,15 +1,17 @@
 {
-  "date": "2026-10-06T21:29:11.628Z",
+  "date": "2026-10-06T21:37:19.675Z",
   "browser": "Chromium 133, Playwright",
   "checks": [
     "bootstrap exchanges nonce and removes fragment",
     "empty-state CTA opens real connection forms",
     "start manual recording",
     "reload preserves cookie; identical Twitch/DA names remain separate",
+    "server-side people search",
     "merge persists and updates people list",
     "undo restores memberships",
     "split selected identity",
     "rename group",
+    "historical alias search after group rename",
     "presence grid and persisted minute event query",
     "stop manual recording",
     "SQLite backup through UI",

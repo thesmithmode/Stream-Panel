@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import assert from "node:assert/strict";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,12 +17,13 @@ const quantile = (values: number[], q: number) =>
     Math.min(values.length - 1, Math.floor(values.length * q))
   ]!;
 let probe: Database.Database | undefined;
+let firstPersonId = "";
 delay.enable();
 try {
   const started = performance.now();
   for (let i = 0; i < 10_000; i++) {
     const before = performance.now();
-    store.ingest({
+    const inserted = store.ingest({
       source: "twitch",
       accountId: "synthetic-channel",
       externalId: `m${i}`,
@@ -34,6 +36,7 @@ try {
       transport: "eventsub",
       payload: { text: "synthetic message" },
     });
+    if (i === 0) firstPersonId = inserted.personId!;
     timings.push(performance.now() - before);
     if (i % 100 === 99) await setImmediate();
   }
@@ -41,36 +44,43 @@ try {
   probe = new Database(path);
   probe.pragma("foreign_keys = ON");
   probe.pragma("synchronous = FULL");
-  // Proposed full-snapshot storage layout. This is a sizing experiment, not migration 1.
-  probe.exec(`CREATE TABLE benchmark_polls(id INTEGER PRIMARY KEY, sampled_at_ms INTEGER NOT NULL) STRICT;
-    CREATE TABLE benchmark_members(poll_id INTEGER NOT NULL REFERENCES benchmark_polls(id), identity_id TEXT NOT NULL REFERENCES identities(id), PRIMARY KEY(poll_id, identity_id)) WITHOUT ROWID;
-    CREATE INDEX benchmark_presence_identity ON benchmark_members(identity_id, poll_id);`);
-  const identities = probe.prepare("SELECT id FROM identities").all() as {
-    id: string;
-  }[];
-  const pollInsert = probe.prepare("INSERT INTO benchmark_polls VALUES (?, ?)");
-  const memberInsert = probe.prepare(
-    "INSERT INTO benchmark_members VALUES (?, ?)",
+  const sampleStart = Math.floor(1_790_000_000_000 / 60_000) * 60_000;
+  const sessionId = store.startSession(
+    "synthetic-channel",
+    "synthetic-stream",
+    sampleStart,
+    "platform",
+    sampleStart,
   );
+  const userIds = Array.from({ length: 1000 }, (_, i) => `u${i}`);
   const batches: number[] = [];
-  const insertPoll = probe.transaction((poll: number) => {
-    pollInsert.run(poll, 1_790_000_000_000 + poll * 60_000);
-    for (const identity of identities) memberInsert.run(poll, identity.id);
-  });
   for (let minute = 0; minute < 480; minute++) {
     const before = performance.now();
-    insertPoll(minute);
+    store.recordPoll(sessionId, "synthetic-channel", {
+      startedAtMs: sampleStart + minute * 60000,
+      completedAtMs: sampleStart + minute * 60000 + 1000,
+      status: "complete",
+      userIds,
+    });
     batches.push(performance.now() - before);
     await setImmediate();
   }
   const queryStarted = performance.now();
-  const observed = probe
-    .prepare(
-      "SELECT count(*) AS n FROM benchmark_members WHERE identity_id = ?",
-    )
-    .get(identities[0]!.id) as { n: number };
+  const grid = store.grid(
+    sessionId,
+    firstPersonId,
+    sampleStart,
+    sampleStart + 480 * 60000,
+  );
+  const observed = grid.filter((cell) => cell.state === "observed").length;
+  assert.equal(
+    observed,
+    480,
+    "Every complete sample must remain visible in the real grid",
+  );
   const presenceQueryMs = performance.now() - queryStarted;
   const integrity = probe.pragma("integrity_check", { simple: true });
+  assert.equal(integrity, "ok");
   probe.pragma("wal_checkpoint(TRUNCATE)");
   delay.disable();
   console.log(
@@ -88,10 +98,11 @@ try {
         eventInsertP50Ms: quantile(timings, 0.5),
         eventInsertP95Ms: quantile(timings, 0.95),
         eventInsertP99Ms: quantile(timings, 0.99),
-        presenceRows: identities.length * 480,
+        presenceRows: userIds.length * 480,
         presencePolls: 480,
         presenceBatchP95Ms: quantile(batches, 0.95),
-        observedPollsForOneIdentity: observed.n,
+        observedMinutesForOnePerson: observed,
+        presenceQuery: "StreamStore.grid, 480 minutes, one person",
         presenceQueryMs,
         databaseBytes: (await stat(path)).size,
         rssBytes: process.memoryUsage().rss,

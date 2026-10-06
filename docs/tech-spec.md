@@ -4,18 +4,18 @@
 
 ## Выбранный стек и границы
 
-| Слой         | Реализация                                              | Почему / предел доказательства                                                                  |
-| ------------ | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Runtime      | Node24.19+, TypeScript5.9.3, pnpm11.25                  | Один runtime Win/Linux; текущая установка Linux проверена                                       |
-| Storage      | better-sqlite3 13.0.3, SQLite3.53.4 в текущей установке | Драйвер загрузился, actual WAL/backup/migrations прошли тесты; exact dependency + lockfile      |
+| Слой         | Реализация                                              | Почему / предел доказательства                                                                   |
+| ------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Runtime      | Node24.19+, TypeScript5.9.3, pnpm11.25                  | Один runtime Win/Linux; текущая установка Linux проверена                                        |
+| Storage      | better-sqlite3 13.0.3, SQLite3.53.4 в текущей установке | Драйвер загрузился, actual WAL/backup/migrations прошли тесты; exact dependency + lockfile       |
 | DB isolation | worker_threads, один StreamStore writer                 | Синхронный SQLite не блокирует WebSocket/main HTTP напрямую; очередь ограничена 10000pending RPC |
-| HTTP         | Fastify5, cookie/static, loopback                       | Собственный локальный API и один origin для SPA, без внешнего analytics backend                 |
-| UI           | Svelte5 + Vite8                                         | Production build и браузерный цикл проверены; обычный браузер, без Electron                     |
-| Twitch       | fetch + ws, public Device Code, EventSub + Helix        | Протокол по официальным docs; live account gate открыт                                          |
-| DA           | fetch + ws, lossless-json, legacy Centrifugo2 adapter   | Не предполагает современный centrifuge-js wire format; live handshake gate открыт               |
+| HTTP         | Fastify5, cookie/static, loopback                       | Собственный локальный API и один origin для SPA, без внешнего analytics backend                  |
+| UI           | Svelte5 + Vite8                                         | Production build и браузерный цикл проверены; обычный браузер, без Electron                      |
+| Twitch       | fetch + ws, public Device Code, EventSub + Helix        | Протокол по официальным docs; live account gate открыт                                           |
+| DA           | fetch + ws, lossless-json, legacy Centrifugo2 adapter   | Не предполагает современный centrifuge-js wire format; live handshake gate открыт                |
 | Tests        | node:test, strict TypeScript, Svelte check              | 27 тестов; mock auth + реальные SQLite/HTTP/worker; browser QA отдельно                          |
-| Backup       | SQLite online API → tmp → integrity/FK/version → rename | Локальная кнопка работает; scheduler/cloud ещё отсутствуют                                      |
-| Distribution | Исходники + Node runtime + bundled static assets        | Запуск описан в README; installer/SEA/Tauri — отдельный будущий spike                           |
+| Backup       | SQLite online API → tmp → integrity/FK/version → rename | Локальная кнопка работает; scheduler/cloud ещё отсутствуют                                       |
+| Distribution | Исходники + Node runtime + bundled static assets        | Запуск описан в README; installer/SEA/Tauri — отдельный будущий spike                            |
 
 Native package install scripts разрешены только для better-sqlite3 через pnpm11 `allowBuilds`. Изменение драйвера/runtime допускается после конкретного неудачного измерения, не в виде вечного выбора «или то, или это».
 
@@ -35,7 +35,7 @@ flowchart TD
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
 | `packages/core/src/domain.ts`                    | EventInput, tuple dedupe key, exact money и candidate normalization                          |
 | `packages/core/src/store.ts`                     | SQL, ingest, identity/person attribution, sessions, polls, queries, merge/undo/split, backup |
-| `packages/core/src/schema.ts`                    | Транзакционные миграции 1/2 через user_version                                                |
+| `packages/core/src/schema.ts`                    | Транзакционные миграции 1/2 через user_version                                               |
 | `packages/core/src/chatters.ts`, `presence.ts`   | Полная пагинация и чистая функция minute state                                               |
 | `apps/daemon/src/db.ts`, `db-worker.ts`          | Ограниченный RPC, исключительное владение БД, whitelist операций                             |
 | `apps/daemon/src/twitch.ts`, `donationalerts.ts` | Transport/OAuth, retry, права, normalization, source health                                  |
@@ -66,6 +66,12 @@ flowchart TD
 Migration1: persons,identities,events,person_merges. Migration2: sessions,event_sessions,presence_polls,presence_members,identity_aliases,collection_gaps,membership_operations. STRICT таблицы, foreign_keys=ON, busy_timeout5s, WAL, synchronous=FULL. Новая версия схемы отвергается, не сбрасывается;0→1→2 и 1→2 транзакционны.
 
 Деньги пока лежат в payload JSON и агрегируются BigInt в worker. Summary обходит выбранные факты; materialized rollups ещё нет. Events limit200,persons500,sessions100. Time range `[from,to)` и session filters поддержаны, cursor pagination нет. Индексы event time/identity, session links, poll time/members и candidates. Годовые отчёты/покрытие/per-source полнота должны получить отдельный нагрузочный тест перед добавлением rollups.
+
+### Измеренная стоимость snapshot presence
+
+На настоящей схеме: 480 polls ×1000 identity и10000 событий занимают около93.7MB; сетка480 минут после оптимизации —1.90ms. Prepared statements переиспользуются внутри poll, для сетки выполняются два запроса вместо запроса на каждую минуту. Результат — локальный smoke, не годовой benchmark.
+
+Грубая линейная экстраполяция при ежедневных8h с1000 участниками даёт около34GB/год до retention/компрессии, без дополнительных копий. Это вывод из синтетического размера, не измерение годовой базы. Нельзя обещать такой истории бесплатный R2 backup в10GB. Перед облаком требуется проверенный retention/compression plan и restore; interval membership или общие неизменившиеся snapshots — кандидаты для отдельного эксперимента, сейчас не реализованы.
 
 ## Сессии и minute presence
 

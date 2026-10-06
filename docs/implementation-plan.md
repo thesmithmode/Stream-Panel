@@ -1,34 +1,32 @@
-# Дальнейшая реализация
+# Следующие задачи
 
-2026-10-06: ранняя программа уже запускается. Ветка codex-init от dev, без merge в main. PRD остаётся целевой v1; следующие задачи не скрыты как «готово».
+2026-10-06: ранняя программа запускается в `codex-init`, созданной от `dev`. В `main` изменения не объединены. PRD остаётся целью v1; таблица показывает оставшуюся работу.
 
-## Сделано
+## Реализовано
 
-Локальный daemon +worker+SQLite migrations, adapters Twitch/DA, DCF/Authorization Code, HTTP local auth/CSRF, сессии, exact money/dedupe, aliases, candidate suggestions, merge/undo/split, Svelte screens, minute grid и verified local backup.27 автотестов, strict build, production UI и реальные browser actions проходят на Linux. CI matrix Ubuntu/Windows настроена.
+Локальные daemon, worker и SQLite migrations; адаптеры Twitch/DA; OAuth; защищённый HTTP; сессии; точные деньги и dedupe; aliases и предложения по имени; merge/undo/split; Svelte UI; минутная сетка; проверенный локальный backup.27 тестов, production build и браузерный цикл проходят на Linux. CI проверяет Ubuntu и Windows.
 
-## Очередь с зависимостями
+## Очередь
 
-| Приоритет | Задача                       | Условие готовности                                                                                                                                                                                                               |
-| --------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P0        | Живой Twitch test            | Public DCF/refresh/validate, chat+moderation, rights, полный Chatters, stream detection, reconnect handoff, unexpected break. Fixtures обезличены, IDs в базе сверены                                                            |
-| P0        | Живой DA test                | Localhost redirect+state, token rotation, legacy connect/ACK/heartbeat, REST+WS одного alert, timezone calibration, missed-event backfill. Если callback запрещён — отдельное решение по auth distribution, не встроенный secret |
-| P0        | Windows/Mint install и 8hsoak | Native addon/build/start, права папки, второй writer, shutdown/sleep/network,1000chatters и ratebudget. CI не заменяет целевой ПК                                                                                                 |
-| P0        | Hardening                    | Все POST schemas, internal503/500 mapping, durable gaps при worker overflow/disk errors, generation races auth/reconnect, shutdown timeout, moderation reordered/delete-before-message                                           |
-| P1        | История и отчёты             | Cursor pagination, interval/currency/identity filters, shared query contract, bot exclusions, tops и person/session totals. Годовой dataset с p95 ипамятью; materialized rollups только по измерению                               |
-| P1        | Сопоставления                | Отказ пары; owner rules(scope,exact normalized name,target,validity), preview и apply-history; коллизия не склеивает; revisions/audit/undo tests                                                                                  |
-| P1        | Время DA                     | Проверенный source timezone, DST ambiguity и preview historical reprojection; неизвестный rawtime остаётся доступным                                                                                                              |
-| P1        | Backup automation и restore   | Scheduler5min/rotation3copies как цель; verified restore вновую папку, interrupteddiskfailure; read-only validation CLI                                                                                                          |
-| P1        | Секреты                      | OS credential store илиизмеренный безопасный fallback; WindowsACL, экспортбез секретов, reauthmigration                                                                                                                           |
-| P2        | Optionalcloud                | Encrypted snapshots→upload илипроверенная Litestreamstrategy; actualR2quotausage/restore/keyrecovery; singlewriter                                                                                                               |
-| P2        | Поставка                     | Автостарт под пользователем, installer Win/Linux, reproducible signed builds при необходимости                                                                                                                                    |
-| P3        | Streamer.bot                 | Официальный WSclient, реальные IDfixtures; запрет unsafe direct+bridge duplicate path                                                                                                                                            |
+| Приоритет | Задача                         | Условие завершения                                                                                                                                                                                     |
+| --------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| P0        | Живой Twitch                   | DCF/refresh/validate, чат/модерация, права, полная пагинация Chatters, stream detection и оба сценария reconnect; сверка platform IDs с БД                                                             |
+| P0        | Живой DA                       | Localhost callback и state, ротация токенов, legacy handshake/heartbeat, REST+WS одного alert, проверка source time. Если callback запрещён — отдельное решение по auth, без встроенного общего secret |
+| P0        | Целевые ОС и длительная запись | Win11/Mint: чистая установка, native addon, права, второй writer, shutdown/sleep/network;8h и rate budgets PRD                                                                                         |
+| P0        | Обработка отказов              | JSON schemas всех POST, отдельные503/500, сохранение gaps при overflow/disk fault, auth lifecycle races, timeout shutdown, reordered moderation                                                        |
+| P1        | История и отчёты               | Cursor pagination; единые interval/currency/identity filters; bot exclusions и tops; годовой dataset с измеренными p95/RSS. Rollups добавлять по результатам измерения                                 |
+| P1        | Сопоставления                  | Сохранённый отказ пары; owner rules с scope/сроком; preview и apply-to-history; безопасные коллизии, ревизии и аудит                                                                                   |
+| P1        | Время DA                       | Проверенная зона источника, DST ambiguity, preview исторической перепроекции; rawtime сохраняется                                                                                                      |
+| P1        | Backup/restore                 | Scheduler с целью5min и rotation последних3 snapshot; restore в новую папку; disk failure и interruption tests                                                                                         |
+| P1        | Секреты                        | Хранилище ОС или проверенный fallback; Windows ACL; миграция и reauth без экспорта секретов                                                                                                            |
+| P2        | Облако                         | Проверенная схема encrypted snapshot upload или Litestream; измеренные квоты R2; восстановление ключа и базы; один writer                                                                              |
+| P2        | Поставка                       | Автостарт под пользователем, installer Win/Linux, воспроизводимые сборки                                                                                                                               |
+| P3        | Streamer.bot                   | Официальный WS client и реальные fixtures; исходные provider IDs, безопасное исключение дублей direct+bridge                                                                                           |
 
-## Как начать разработчику
+## Разработчику
 
-Установить README версии, `pnpm install --frozen-lockfile`, `pnpm check`, `pnpm build`, `pnpm start`. В браузере открыть напечатанную ссылку. Бизнес-логику писать в core, provider parsing — в adapter; SQL не пробрасывать в UI. Изменение schema — следующая транзакционная migration, существующие БДнеудалять. Реальные токены/чаты/backup не коммитить.
+Установить версии из README, выполнить `pnpm install --frozen-lockfile`, `pnpm check`, `pnpm build`, `pnpm start`. Открыть напечатанную ссылку. Бизнес-логика — в core, provider parsing — в adapter; UI не получает SQL/секреты. Новая схема — отдельная транзакционная миграция; существующие БД не удалять. Реальные токены, чат и backup не коммитить.
 
-Каждый PR описывает конкретное новое поведение и проверку. Подключения, облако и Windows отмечаются доказанными только после соответствующего эксперимента. Срок до полной v1 сейчас не оценивается по догадке.
+Каждый PR описывает конкретное поведение и проверку. Документация протокола, mock-тест и живое подключение имеют разные уровни доказательства. Срок полной v1 не оценивается по догадке.
 
-## Решения владельца
-
-Новых продуктовых ответов для продолжения локальной реализации не требуется: исходные требования есть в docs/user-requirements.md. Аккаунтные gates требуют входа владельца/контрольного эфира и доната, а не передачи секретов в переписке. Точный donor identity API непредоставляет — это ограничение платформы, не вопрос, который владелец может исправить ответом.
+Новых продуктовых ответов для продолжения локальной реализации не требуется: требования есть в `docs/user-requirements.md`. Аккаунтные проверки требуют локального входа владельца и контрольного эфира/доната, а не передачи секретов в переписке. Отсутствие stable donor ID в DA — ограничение API.
