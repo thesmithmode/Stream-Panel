@@ -278,10 +278,30 @@ export class DonationAlertsConnection {
       socket.terminate();
     }, 20000);
     let subscribed = false;
+    let lastSeen = Date.now();
+    const touch = () => {
+      lastSeen = Date.now();
+    };
+    // After subscribe, ping and reconnect if the socket goes silent.
+    const liveness = setInterval(() => {
+      if (this.stopped || generation !== this.generation) return;
+      if (Date.now() - lastSeen > 45_000) {
+        this.status.capabilities.realtime = "silent";
+        socket.terminate();
+        return;
+      }
+      try {
+        socket.ping();
+      } catch {
+        /* close handler schedules reconnect */
+      }
+    }, 15_000);
     socket.on("open", () =>
       socket.send(JSON.stringify({ params: { token }, id: 1 })),
     );
+    socket.on("pong", touch);
     socket.on("message", (frame) => {
+      touch();
       void (async () => {
         if (this.stopped || generation !== this.generation) return;
         for (const line of frame.toString().split("\n").filter(Boolean)) {
@@ -346,6 +366,7 @@ export class DonationAlertsConnection {
     });
     socket.on("close", () => {
       clearTimeout(deadline);
+      clearInterval(liveness);
       if (!this.stopped && generation === this.generation) {
         this.status.capabilities.realtime = "disconnected";
         this.schedule();
@@ -362,6 +383,8 @@ export class DonationAlertsConnection {
     this.status.capabilities.history = "Импорт…";
     try {
       let complete = false;
+      let knownStreak = 0;
+      const stopAfterKnownPages = 3;
       for (
         let page = 1;
         page <= 1000 && !this.stopped && generation === this.generation;
@@ -373,22 +396,39 @@ export class DonationAlertsConnection {
         if (this.stopped || generation !== this.generation) return;
         if (!Array.isArray(response.data))
           throw new Error("INVALID_DA_HISTORY");
-        for (const raw of response.data)
-          await this.db.call(
-            "ingest",
-            normalizeDonation(
-              raw,
-              this.recipient,
-              "rest",
-              this.config.value.daUtcOffsetMinutes,
-            ),
-          );
+        let pageAllKnown = response.data.length > 0;
+        for (const raw of response.data) {
+          try {
+            const result = await this.db.call<{ inserted: boolean }>(
+              "ingest",
+              normalizeDonation(
+                raw,
+                this.recipient,
+                "rest",
+                this.config.value.daUtcOffsetMinutes,
+              ),
+            );
+            if (result.inserted) pageAllKnown = false;
+          } catch (error) {
+            pageAllKnown = false;
+            console.error(
+              "DA history row skipped",
+              error instanceof Error ? error.message : error,
+            );
+          }
+        }
+        if (pageAllKnown) knownStreak++;
+        else knownStreak = 0;
         const links = response.links ? object(response.links) : {};
         if (links.next === null) {
           complete = true;
           break;
         }
         if (!string(links.next)) throw new Error("DA_PAGINATION_UNKNOWN");
+        if (knownStreak >= stopAfterKnownPages) {
+          complete = true;
+          break;
+        }
       }
       this.status.capabilities.history = complete
         ? "Импорт доступных страниц завершён"
