@@ -1342,3 +1342,6 @@ td {
     max-width: none;
   }
 }
+
+.login-form { display: grid; gap: 16px; width: min(100%, 360px); margin: 20px auto; text-align: left; }
+.login-form label { display: grid; gap: 8px; }

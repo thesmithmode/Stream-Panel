@@ -4,7 +4,7 @@ export { getDataMode, setDataMode, type DataMode };
 let csrf = "";
 export const setCsrf = (value: string) => (csrf = value);
 export async function api<T = any>(path: string, body?: unknown): Promise<T> {
-  if (getDataMode() === "demo") {
+  if (getDataMode() === "demo" && !path.startsWith("auth/")) {
     return (await demoApi(path, body)) as T;
   }
   const response = await fetch(`/api/v1/${path}`, {

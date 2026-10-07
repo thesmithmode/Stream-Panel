@@ -1,4 +1,4 @@
-import Fastify from "fastify";
+import Fastify, { type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
 import staticFiles from "@fastify/static";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -13,6 +13,7 @@ import {
   string,
   type SocketFactory,
 } from "./twitch.js";
+import { YouTubeConnection } from "./youtube.js";
 import { DonationAlertsConnection } from "./donationalerts.js";
 
 export async function createApplication(
@@ -20,13 +21,21 @@ export async function createApplication(
   port: number,
   connect = true,
   transports: {
+    youtube?: { request?: typeof fetch };
     twitch?: { request?: typeof fetch; socket?: SocketFactory };
     donationalerts?: { request?: typeof fetch; socket?: SocketFactory };
+  } = {},
+  options: {
+    databasePath?: string;
+    profile?: string;
+    origin?: string;
+    session?: (request: FastifyRequest) => { csrf: string; expires: number } | null;
+    staticFiles?: boolean;
   } = {},
 ) {
   const configuration = new Configuration(dir);
   await configuration.load();
-  const db = new StoreClient(join(dir, "data.sqlite"));
+  const db = new StoreClient(options.databasePath ?? join(dir, "data.sqlite"), options.profile);
   await db.ready;
   const twitch = new TwitchConnection(
       configuration,
@@ -122,6 +131,8 @@ export async function createApplication(
       ["identityIds", "name", "revision"],
     ),
     "/api/v1/merges/:id/undo": body(),
+    "/api/v1/youtube/connect": body({clientId:text,clientSecret:{type:"string",maxLength:256}},["clientId"]),
+    "/api/v1/youtube/disconnect": body(),
     "/api/v1/twitch/connect": body(
       { clientId: text, extended: { type: "boolean" } },
       ["clientId"],
@@ -153,8 +164,9 @@ export async function createApplication(
   let nonce = randomBytes(32).toString("hex");
   let nonceExpiry = Date.now() + 600000;
   const sessions = new Map<string, { csrf: string; expires: number }>();
-  const origin = `http://127.0.0.1:${port}`;
-  const callback = `http://127.0.0.1:${port}/oauth/donationalerts/callback`;
+  const origin = options.origin ?? `http://127.0.0.1:${port}`;
+  const callback = `${origin}/oauth/donationalerts/callback`;
+  const youtube = new YouTubeConnection(configuration, db, `${origin}/oauth/youtube/callback`, options.profile ?? "local", transports.youtube?.request);
   const same = (a: string, b: string) => {
     const left = Buffer.from(a),
       right = Buffer.from(b);
@@ -167,7 +179,7 @@ export async function createApplication(
   };
   app.addHook("onRequest", async (request, reply) => {
     if (
-      ![`127.0.0.1:${port}`, `localhost:${port}`].includes(
+      !(options.origin ? [new URL(origin).host] : [`127.0.0.1:${port}`, `localhost:${port}`]).includes(
         request.headers.host ?? "",
       )
     )
@@ -189,7 +201,7 @@ export async function createApplication(
     )
       return reply.code(403).send({ error: "INVALID_ORIGIN" });
     if (path === "/api/v1/bootstrap") return;
-    const session = sessions.get(request.cookies.sp_session ?? "");
+    const session = options.session ? options.session(request) : sessions.get(request.cookies.sp_session ?? "");
     if (!session || session.expires < Date.now())
       return reply.code(401).send({ error: "LOCAL_LOGIN_REQUIRED" });
     if (
@@ -199,7 +211,7 @@ export async function createApplication(
     )
       return reply.code(403).send({ error: "CSRF_REQUIRED" });
   });
-  app.post(
+  if (!options.session) app.post(
     "/api/v1/bootstrap",
     {
       schema: {
@@ -233,11 +245,14 @@ export async function createApplication(
     },
   );
   app.get("/api/v1/status", async (request) => ({
+    youtube: youtube.status,
     twitch: twitch.status,
     donationalerts: da.status,
     device: twitch.device,
-    config: { ...configuration.publicView(), daRedirectUri: callback },
-    csrf: sessions.get(request.cookies.sp_session ?? "")?.csrf,
+    config: { ...configuration.publicView(), daRedirectUri: callback, youtubeRedirectUri: `${origin}/oauth/youtube/callback` },
+    csrf: (options.session ? options.session(request) : sessions.get(request.cookies.sp_session ?? ""))?.csrf,
+    serverMode: Boolean(options.session),
+    profile: options.profile ?? null,
     gaps: await db.call("gaps"),
   }));
   app.get("/api/v1/sessions", async () => db.call("sessions"));
@@ -383,6 +398,16 @@ export async function createApplication(
       Number(q.to),
     );
   });
+  app.post("/api/v1/youtube/connect", async request => {
+    const b = object(request.body);
+    return youtube.beginAuth(string(b.clientId), string(b.clientSecret));
+  });
+  app.post("/api/v1/youtube/disconnect", async () => { await youtube.disconnect(); return {ok:true}; });
+  app.get("/api/v1/youtube/data", async () => db.call("youtubeData", configuration.value.youtube?.userId ?? ""));
+  app.get("/oauth/youtube/callback", async (request, reply) => {
+    try { const q = object(request.query); await youtube.finishAuth(string(q.code), string(q.state)); return reply.redirect(origin + "/"); }
+    catch { return reply.code(400).type("text/plain").send("YouTube: вход не завершён. Проверьте права и redirect URI; вернитесь в панель."); }
+  });
   app.post("/api/v1/twitch/connect", async (request) => {
     const b = object(request.body);
     return twitch.beginAuth(string(b.clientId), b.extended === true);
@@ -446,7 +471,7 @@ export async function createApplication(
     await rename(target + ".tmp", target);
     return { filename };
   });
-  await app.register(staticFiles, {
+  if (options.staticFiles !== false) await app.register(staticFiles, {
     // Resolve from this module, not process.cwd() — daemon may start elsewhere.
     root: join(
       dirname(fileURLToPath(import.meta.url)),
@@ -457,15 +482,15 @@ export async function createApplication(
   app.setNotFoundHandler((request, reply) =>
     request.url.startsWith("/api/")
       ? reply.code(404).send({ error: "NOT_FOUND" })
-      : reply.sendFile("index.html"),
+      : options.staticFiles === false ? reply.code(404).send({ error: "NOT_FOUND" }) : reply.sendFile("index.html"),
   );
   app.addHook("onClose", async () => {
-    await Promise.all([twitch.stop(), da.stop()]);
+    await Promise.all([twitch.stop(), da.stop(), youtube.stop()]);
     await db.stop();
   });
   if (connect) {
     void twitch.start();
-    void da.start();
+    void da.start(); void youtube.start();
   }
-  return { app, db, configuration, twitch, da, bootstrap };
+  return { app, db, configuration, twitch, da, youtube, bootstrap };
 }

@@ -11,6 +11,9 @@ export interface Tokens {
 }
 export interface Config {
   version: 1;
+  youtubeClientId?: string;
+  youtubeClientSecret?: string;
+  youtube?: Tokens;
   twitchClientId: string;
   twitch?: Tokens;
   daClientId: string;
@@ -36,12 +39,7 @@ const defaults: Config = {
 export function defaultDataDir(): string {
   return (
     process.env.STREAM_PANEL_DATA_DIR ??
-    (process.platform === "win32"
-      ? join(process.env.LOCALAPPDATA ?? homedir(), "StreamPanel")
-      : join(
-          process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"),
-          "stream-panel",
-        ))
+    join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "stream-panel")
   );
 }
 export class Configuration {
@@ -75,7 +73,7 @@ export class Configuration {
     const path = join(this.dir, "secrets.json");
     const operation = this.saving.then(async () => {
       await writeFile(path + ".tmp", data, { mode: 0o600 });
-      if (process.platform !== "win32") await chmod(path + ".tmp", 0o600);
+      await chmod(path + ".tmp", 0o600);
       await rename(path + ".tmp", path);
     });
     this.saving = operation.catch(() => {});
@@ -83,6 +81,8 @@ export class Configuration {
   }
   publicView() {
     return {
+      youtubeClientId: this.value.youtubeClientId ?? "",
+      hasYoutubeSecret: !!this.value.youtubeClientSecret,
       twitchClientId: this.value.twitchClientId,
       daClientId: this.value.daClientId,
       hasDaSecret: !!this.value.daClientSecret,

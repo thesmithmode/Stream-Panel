@@ -53,7 +53,7 @@ test(
         .waitFor();
       await reload(page);
       await page
-        .getByRole("heading", { name: "Откройте ссылку из терминала" })
+        .getByRole("heading", { name: "Вход в Stream Panel" })
         .waitFor();
       await page.getByText("DB_WORKER_STOPPED", { exact: true }).waitFor();
       await a.app.close();
@@ -61,7 +61,7 @@ test(
       restarted = await createApplication(a.dir, port, false);
       await restarted.app.listen({ host: "127.0.0.1", port });
       await reload(page);
-      await page.getByText("LOCAL_LOGIN_REQUIRED", { exact: true }).waitFor();
+      await page.getByText("Войдите в свой профиль", { exact: true }).waitFor();
       await goto(page, restarted.bootstrap());
       await page
         .getByRole("button", { name: "Завершить запись", exact: true })

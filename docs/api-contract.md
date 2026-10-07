@@ -1,12 +1,14 @@
 # HTTP API ранней версии
 
-Это контракт реализованных routes в `apps/daemon/src/server.ts`, а не список будущих endpoints. База URL: `http://127.0.0.1:47831/api/v1`. Ответы JSON, времена UTC epoch milliseconds; отсутствующее время — null, деньги в minor units — **строки**. UI отображает время в зоне браузера.
+Это контракт реализованных routes в `apps/daemon/src/server.ts`, а не список будущих endpoints. База URL: `<HTTPS origin>/api/v1`. Ответы JSON, времена UTC epoch milliseconds; отсутствующее время — null, деньги в minor units — **строки**. UI отображает время в зоне браузера.
 
 ## Вход и защита
 
-Первый адрес приложения содержит `#key=…` (одноразовый nonce, TTL10min). UI отправляет `POST /bootstrap {"key":"…"}`, получает `{csrf}` и HttpOnly SameSite=Strict cookie `sp_session` на `/api` на 24h, удаляет fragment. Все остальные API требуют cookie; каждый POST — `Content-Type: application/json` и `X-CSRF-Token`. `GET /status` возвращает текущий CSRF для восстановления вкладки. Cookie и CSRF сбрасываются при перезапуске демона.
+Серверный вход: POST /auth/login {username,password} → {csrf,user}; публичной регистрации и /bootstrap нет. Secure HttpOnly SameSite=Lax cookie sp_session на / действует 24 часа, хранится в SQLite в виде хэша. GET /auth/me возвращает свой профиль; POST /auth/logout требует CSRF и отзывает текущую сессию. Перезапуск не отзывает сессии автоматически. Все записи требуют точный Origin и X-CSRF-Token, точный Host проверяется для всех запросов. API профиля выбирается сервером из сессии, клиент не передаёт profile ID для доступа к чужой базе.
 
-Точный Host localhost/127.0.0.1 с портом; Origin допускает только эти адреса этого порта; CORS отсутствует. Не открывать LAN. Bootstrap не является постоянным bearer token. OAuth callback DA расположен вне `/api`: проверяет отдельный short-lived state, после успеха возвращает на 127.0.0.1.
+Публичный URL — HTTPS за reverse proxy; backend слушает только 127.0.0.1. GET /healthz проверяет workers без токенов/учётных данных, возвращает ok и release. Во время maintenance API возвращает 503 SERVER_UPDATING. OAuth callbacks DA/YouTube требуют ту же парольную сессию и short-lived одноразовый state. Утилита createApplication сохраняет старый локальный bootstrap только для низкоуровневых fixture-тестов; production entrypoint использует createHostedApplication.
+
+YouTube: POST /youtube/connect {clientId,clientSecret?} → {url}, GET /oauth/youtube/callback, POST /youtube/disconnect {}, GET /youtube/data → {snapshots,messages}. Секреты и токены никогда не выдаются; snapshots/report, channel, broadcasts и ограниченные последние 200 сообщений принадлежат подключённому каналу текущего профиля. Денежные значения YouTube amountMicros хранятся в исходном строковом формате, не суммируются с minor units DA. POST /backup — общий шифрованный снимок обоих профилей, возвращает только имя закрытого серверного файла. Не чаще 1 запроса/10 минут, без настроенного backup key — 503 BACKUP_NOT_CONFIGURED; скачивания базы через API нет.
 
 ## Чтение
 

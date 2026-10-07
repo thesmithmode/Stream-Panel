@@ -89,3 +89,18 @@ ALTER TABLE identities ADD COLUMN match_key TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS identities_match ON identities(match_key);
 PRAGMA user_version = 3;
 `;
+
+// YouTube data stays separate from Twitch/DA identity matching and currencies.
+export const schemaV4 = `
+CREATE TABLE youtube_snapshots (
+  account_id TEXT NOT NULL, key TEXT NOT NULL, payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
+  updated_at_ms INTEGER NOT NULL, PRIMARY KEY(account_id, key)
+) WITHOUT ROWID;
+CREATE TABLE youtube_messages (
+  id TEXT PRIMARY KEY, account_id TEXT NOT NULL, chat_id TEXT NOT NULL,
+  author_id TEXT NOT NULL, published_at_ms INTEGER NOT NULL,
+  payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+) STRICT;
+CREATE INDEX youtube_messages_time ON youtube_messages(account_id, published_at_ms);
+PRAGMA user_version = 4;
+`;

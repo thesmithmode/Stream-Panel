@@ -221,10 +221,11 @@ test("collapseDuplicateDaDonors merges legacy per-tip DA identities into one Don
     ).run(idB);
     raw.close();
 
+    const inspect = new Database(dbPath);
     const store = new StreamStore(dbPath);
     try {
       store.collapseDuplicateDaDonors();
-      const donors = new Database(dbPath)
+      const donors = inspect
         .prepare(
           `SELECT id, person_id, external_id FROM identities
            WHERE source='donationalerts' AND match_key='legacydonor'`,
@@ -232,18 +233,19 @@ test("collapseDuplicateDaDonors merges legacy per-tip DA identities into one Don
         .all() as { id: string; person_id: string; external_id: string }[];
       assert.equal(donors.length, 1);
       assert.equal(donors[0]!.external_id, daDonorExternalId("LegacyDonor"));
-      const events = new Database(dbPath)
+      const events = inspect
         .prepare("SELECT identity_id FROM events ORDER BY id")
         .all() as { identity_id: string }[];
       assert.equal(events[0]!.identity_id, donors[0]!.id);
       assert.equal(events[1]!.identity_id, donors[0]!.id);
-      const aliases = new Database(dbPath)
+      const aliases = inspect
         .prepare("SELECT identity_id, name FROM identity_aliases")
         .all() as { identity_id: string; name: string }[];
       assert.equal(aliases.length, 1);
       assert.equal(aliases[0]!.identity_id, donors[0]!.id);
     } finally {
       store.close();
+      inspect.close();
     }
   } finally {
     await rm(dir, { recursive: true, force: true });

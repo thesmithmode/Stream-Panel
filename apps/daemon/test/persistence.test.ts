@@ -36,28 +36,19 @@ test("default data directory obeys explicit override and platform defaults", () 
   const vars = [
     "STREAM_PANEL_DATA_DIR",
     "XDG_DATA_HOME",
-    "LOCALAPPDATA",
   ] as const;
   const saved = Object.fromEntries(vars.map((v) => [v, process.env[v]]));
-  const platform = process.platform;
   try {
     process.env.STREAM_PANEL_DATA_DIR = "/explicit";
     assert.equal(defaultDataDir(), "/explicit");
     delete process.env.STREAM_PANEL_DATA_DIR;
     process.env.XDG_DATA_HOME = "/xdg";
-    process.env.LOCALAPPDATA = "/local";
-    Object.defineProperty(process, "platform", { value: "linux" });
     assert.equal(defaultDataDir(), join("/xdg", "stream-panel"));
     delete process.env.XDG_DATA_HOME;
     assert.ok(
       defaultDataDir().endsWith(join(".local", "share", "stream-panel")),
     );
-    Object.defineProperty(process, "platform", { value: "win32" });
-    assert.equal(defaultDataDir(), join("/local", "StreamPanel"));
-    delete process.env.LOCALAPPDATA;
-    assert.ok(defaultDataDir().endsWith("StreamPanel"));
   } finally {
-    Object.defineProperty(process, "platform", { value: platform });
     for (const v of vars) {
       if (saved[v] === undefined) delete process.env[v];
       else process.env[v] = saved[v];

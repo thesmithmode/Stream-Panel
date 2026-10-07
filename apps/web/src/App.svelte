@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import Icon from "./Icon.svelte";
   import Overview from "./Overview.svelte";
+  import YouTube from "./YouTube.svelte";
   import Connections from "./Connections.svelte";
   import People from "./People.svelte";
   import {
@@ -36,26 +37,55 @@
     personId = $state(""),
     busy = $state(false),
     dataMode = $state<DataMode>(getDataMode());
+  let username = $state(""), password = $state(""), user = $state<any>(null);
+  let epoch = 0;
+  const authMessage = (code: string) => ({ INVALID_LOGIN: "Неверный логин или пароль", LOGIN_RATE_LIMIT: "Слишком много попыток. Попробуйте позже.", LOGIN_REQUIRED: "Войдите в свой профиль", LOCAL_LOGIN_REQUIRED: "Войдите в свой профиль" }[code] ?? code);
+  async function login() {
+    busy = true; error = "";
+    try {
+      const response = await fetch("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
+      const result = await response.json();
+      password = "";
+      if (!response.ok) throw new Error(result.error);
+      epoch++; setCsrf(result.csrf); user = result.user;
+      await refresh(); authorized = true;
+    } catch (e) { error = authMessage((e as Error).message); }
+    finally { busy = false; }
+  }
+  async function logout() {
+    try {
+      await api("auth/logout", {});
+      epoch++; authorized = false; user = null; status = null;
+      sessions = []; people = []; events = []; personId = sessionFilter = "";
+      summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
+      setCsrf(""); setDataMode("real"); dataMode = "real";
+      error = "";
+    } catch (e) { error = authMessage((e as Error).message); }
+  }
   const titles: Record<string, string> = {
     overview: "Обзор эфира",
     sessions: "Сессии",
     people: "Люди",
+    youtube: "YouTube",
     connections: "Интеграции",
   };
   const descriptions: Record<string, string> = {
     overview: "История чата, донаты и наблюдения.",
     sessions: "История записей и полнота собранных данных.",
     people: "Активность людей и управляемые связи аккаунтов.",
-    connections: "Twitch и DonationAlerts — вход и статус сбора.",
+    youtube: "Статистика канала и чат эфиров своего профиля.",
+    connections: "Twitch, DonationAlerts и YouTube — вход и статус сбора.",
   };
   const nav = [
     ["overview", "Обзор"],
     ["sessions", "Сессии"],
     ["people", "Люди"],
+    ["youtube", "YouTube"],
     ["connections", "Интеграции"],
   ] as const;
   const activeSession = $derived(sessions.find((s) => s.ended_at_ms === null));
   async function refresh() {
+    const current = epoch;
     const query = sessionFilter ? `?session=${sessionFilter}` : "";
     const values = await Promise.all([
       api("status"),
@@ -64,8 +94,9 @@
       api<Event[]>(`events${query}`),
       api<Summary>(`summary${query}`),
     ]);
+    if (current !== epoch) return;
     status = values[0];
-    setCsrf(status.csrf);
+    if (dataMode === "real") { setCsrf(status.csrf); user = status.user ?? user; }
     sessions = values[1];
     people = values[2];
     events = values[3];
@@ -101,8 +132,14 @@
   }
   onMount(() => {
     let alive = true;
-    let timer: ReturnType<typeof setInterval> | undefined;
+    const timer = setInterval(() => {
+      if (authorized) void refresh().catch((e) => {
+        if (["LOGIN_REQUIRED", "LOCAL_LOGIN_REQUIRED"].includes(e.message)) { epoch++; authorized = false; people = []; events = []; sessions = []; }
+        error = authMessage(e.message);
+      });
+    }, 5000);
     async function initialize() {
+      setDataMode("real"); dataMode = "real";
       loading = true;
       error = "";
       try {
@@ -115,12 +152,8 @@
         await refresh();
         if (!alive) return;
         authorized = true;
-        if (timer) clearInterval(timer);
-        timer = setInterval(() => {
-          void refresh().catch((e) => (error = e.message));
-        }, 5000);
       } catch (e) {
-        error = (e as Error).message;
+        error = authMessage((e as Error).message);
       } finally {
         loading = false;
       }
@@ -134,7 +167,7 @@
     return () => {
       alive = false;
       window.removeEventListener("hashchange", onHashChange);
-      if (timer) clearInterval(timer);
+      clearInterval(timer);
     };
   });
 </script>
@@ -151,11 +184,11 @@
     <div class="sidebar-bottom">
       <span class="dot" class:off={!authorized}></span>
       <div class="sidebar-status">
-        <span>{dataMode === "demo" ? "Демо-данные" : "Локальная база"}</span>
+        <span>{user?.displayName ?? (dataMode === "demo" ? "Демо-данные" : "Stream Panel")}</span>
         <span class="small muted sidebar-hint"
           >{dataMode === "demo"
-            ? "Фикстуры в памяти — SQLite и secrets не трогаем."
-            : "Вкладку можно закрыть — сбор продолжается. Выход: Ctrl+C или STREAM_PANEL_STOP=1"}</span
+            ? "Демонстрационные данные"
+            : "Сбор продолжается, когда вкладка закрыта"}</span
         >
       </div>
       <Icon name="arrow" size={17} />
@@ -168,6 +201,7 @@
         <p>{descriptions[tab]}</p>
       </div>
       <div class="inline" style="justify-content:flex-end">
+        {#if authorized && user}<button class="outline" onclick={logout}>Выйти</button>{/if}
         {#if authorized}<div class="mode-toggle" role="group" aria-label="Режим данных">
             <button
               type="button"
@@ -201,15 +235,17 @@
       </div>
     </div>
     {#if loading}<div class="panel empty">
-        <p>Открываем локальную базу…</p>
+        <p>Загружаем профиль…</p>
       </div>{:else if !authorized}<section class="panel empty">
         <Icon name="connections" size={48} />
-        <h2>Откройте ссылку из терминала</h2>
-        <p>
-          Запустите Stream Panel и откройте напечатанную ссылку для безопасного
-          входа.
-        </p>
-        <p class="small muted">{error}</p>
+        <h2>Вход в Stream Panel</h2>
+        <p>Каждый профиль видит только свою аналитику.</p>
+        <form class="login-form" onsubmit={(event) => { event.preventDefault(); void login(); }}>
+          <label>Логин<input autocomplete="username" bind:value={username} required maxlength="32" /></label>
+          <label>Пароль<input type="password" autocomplete="current-password" bind:value={password} required maxlength="256" /></label>
+          <button class="primary" disabled={busy}>{busy ? "Входим…" : "Войти"}</button>
+        </form>
+        {#if error}<p role="alert" class="small notice error">{error}</p>{/if}
       </section>{:else}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}
       {#if dataMode === "demo"}<p class="demo-banner" role="status">
@@ -245,6 +281,8 @@
           connect={() => navigate("connections")}
           onPerson={openPerson}
         />
+      {:else if tab === "youtube"}
+        <YouTube />
       {:else if tab === "connections"}<Connections
           {status}
           onChange={refresh}

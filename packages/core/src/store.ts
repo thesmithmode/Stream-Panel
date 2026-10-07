@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
+import { openProfileDatabase } from "./profile-db.js";
 import {
   candidateKey,
   matchKey,
@@ -9,7 +10,7 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { schemaV1, schemaV2, schemaV3 } from "./schema.js";
+import { schemaV1, schemaV2, schemaV3, schemaV4 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
 import { presenceMinutes, pollCoveredMinutes, type PresencePoll } from "./presence.js";
 
@@ -42,19 +43,19 @@ export const priorModerationQuery = `SELECT 1 FROM events WHERE source='twitch' 
 export class StreamStore {
   private readonly db: Database.Database;
 
-  constructor(path: string) {
-    this.db = new Database(path);
+  constructor(path: string, private readonly profile?: string) {
+    this.db = openProfileDatabase(path, profile);
     try {
       this.db.pragma("foreign_keys = ON");
       this.db.pragma("busy_timeout = 5000");
       const version = this.db.pragma("user_version", { simple: true });
-      if (version !== 0 && version !== 1 && version !== 2 && version !== 3)
+      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4)
         throw new Error("UNSUPPORTED_SCHEMA_VERSION");
       this.db.pragma("journal_mode = WAL");
       this.db.pragma("synchronous = FULL");
-      if (version === 0) this.db.transaction(() => this.db.exec(schemaV1))();
+      if (version === 0) this.db.transaction(() => this.db.exec(schemaV1)).immediate();
       if ((this.db.pragma("user_version", { simple: true }) as number) < 2)
-        this.db.transaction(() => this.db.exec(schemaV2))();
+        this.db.transaction(() => this.db.exec(schemaV2)).immediate();
       if ((this.db.pragma("user_version", { simple: true }) as number) < 3) {
         this.db.transaction(() => {
           this.db.exec(schemaV3);
@@ -66,11 +67,14 @@ export class StreamStore {
           );
           for (const row of rows)
             update.run(matchKey(row.display_name), row.id);
-        })();
+        }).immediate();
       }
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 4)
+        this.db.transaction(() => this.db.exec(schemaV4)).immediate();
+      this.db.exec("CREATE TABLE IF NOT EXISTS sp_youtube_quota (day TEXT NOT NULL, profile TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(day,profile)) WITHOUT ROWID");
       // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
-      this.db.transaction(() => this.collapseDuplicateDaDonors())();
+      this.db.transaction(() => this.collapseDuplicateDaDonors()).immediate();
     } catch (error) {
       this.db.close();
       throw error;
@@ -79,6 +83,39 @@ export class StreamStore {
 
   close(): void {
     this.db.close();
+  }
+
+  youtubeQuota(day: string, profile: string, cost = 1): boolean {
+    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(day) || !profile || !Number.isInteger(cost) || cost < 1 || cost > 4000) throw new Error("INVALID_QUOTA");
+    return this.db.transaction(() => {
+      const row = this.db.prepare("SELECT used FROM sp_youtube_quota WHERE day=? AND profile=?").get(day, profile) as {used: number} | undefined;
+      if ((row?.used ?? 0) + cost > 4000) return false;
+      this.db.prepare("INSERT INTO sp_youtube_quota VALUES (?,?,?) ON CONFLICT(day,profile) DO UPDATE SET used=used+excluded.used").run(day, profile, cost);
+      this.db.prepare("DELETE FROM sp_youtube_quota WHERE day!=?").run(day);
+      return true;
+    }).immediate();
+  }
+  youtubeSnapshot(account: string, key: string, payload: unknown, now = Date.now()): void {
+    if (!account || !key) throw new Error("INVALID_YOUTUBE_KEY");
+    this.db.prepare("INSERT INTO youtube_snapshots VALUES (?,?,?,?) ON CONFLICT(account_id,key) DO UPDATE SET payload_json=excluded.payload_json,updated_at_ms=excluded.updated_at_ms").run(account, key, JSON.stringify(payload), now);
+  }
+  youtubeMessages(account: string, chat: string, messages: any[]): void {
+    if (!account || !chat || messages.length > 2000) throw new Error("INVALID_YOUTUBE_MESSAGES");
+    this.db.transaction(() => {
+      const insert = this.db.prepare("INSERT OR IGNORE INTO youtube_messages VALUES (?,?,?,?,?,?)");
+      for (const m of messages) {
+        const time = Date.parse(m.snippet?.publishedAt ?? "");
+        if (!m.id || !Number.isFinite(time)) continue;
+        if (m.snippet.type === "messageDeletedEvent") this.db.prepare("DELETE FROM youtube_messages WHERE account_id=? AND id=?").run(account, m.snippet.messageDeletedDetails?.deletedMessageId ?? "");
+        if (m.snippet.type === "userBannedEvent") this.db.prepare("DELETE FROM youtube_messages WHERE account_id=? AND author_id=?").run(account, m.snippet.userBannedDetails?.bannedUserDetails?.channelId ?? "");
+        insert.run(m.id, account, chat, m.authorDetails?.channelId ?? "", time, JSON.stringify(m));
+      }
+    }).immediate();
+  }
+  youtubeData(account: string) {
+    const snapshots = this.db.prepare("SELECT key,payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=?").all(account) as {key:string;payload_json:string;updated_at_ms:number}[];
+    const messages = this.db.prepare("SELECT payload_json FROM youtube_messages WHERE account_id=? ORDER BY published_at_ms DESC,id DESC LIMIT 200").all(account) as {payload_json:string}[];
+    return { snapshots: Object.fromEntries(snapshots.map(r => [r.key, {data: JSON.parse(r.payload_json), updatedAt: r.updated_at_ms}])), messages: messages.map(r => JSON.parse(r.payload_json)) };
   }
 
   ingest(event: EventInput): {
@@ -320,7 +357,7 @@ export class StreamStore {
         identityId: identity?.id ?? null,
         personId: identity?.person_id ?? null,
       };
-    })();
+    }).immediate();
   }
 
   personRevision(id: string): number {
@@ -385,7 +422,7 @@ export class StreamStore {
           nowMs,
         );
       return id;
-    })();
+    }).immediate();
   }
 
   undoMerge(mergeId: string, nowMs: number): void {
@@ -424,7 +461,7 @@ export class StreamStore {
       this.db
         .prepare("UPDATE person_merges SET undone_at_ms = ? WHERE id = ?")
         .run(nowMs, mergeId);
-    })();
+    }).immediate();
   }
 
 
@@ -727,7 +764,7 @@ export class StreamStore {
           atMs,
         );
       return personId;
-    })();
+    }).immediate();
   }
 
   candidatePersons(name: string): string[] {
@@ -821,7 +858,7 @@ export class StreamStore {
       for (const event of events)
         this.assignEvent(event.id, event.account_id, event.occurred_at_ms);
       return id;
-    })();
+    }).immediate();
   }
 
   endSession(id: string, atMs: number, quality = "observed"): void {
@@ -837,7 +874,7 @@ export class StreamStore {
           `DELETE FROM event_sessions WHERE session_id = ? AND event_id IN (SELECT id FROM events WHERE occurred_at_ms >= ?)`,
         )
         .run(id, atMs);
-    })();
+    }).immediate();
   }
 
   sessions(): Record<string, unknown>[] {
@@ -898,7 +935,7 @@ export class StreamStore {
         }
         insertMember.run(id, identity.id);
       }
-    })();
+    }).immediate();
   }
 
   updateChatterNames(
@@ -928,7 +965,7 @@ export class StreamStore {
           .run(user.user_name, identity.person_id, identity.display_name);
         this.rememberAlias(identity.id, user.user_name, atMs);
       }
-    })();
+    }).immediate();
   }
 
   persons(
@@ -1041,7 +1078,7 @@ export class StreamStore {
     const counts = this.db
       .prepare(
         `SELECT
-        (SELECT count(*) FROM events e WHERE ${inSession}) AS events,
+        (SELECT count(*) FROM events e WHERE ${inSession}) AS event_count,
         (SELECT count(*) FROM events e
           LEFT JOIN identities i ON i.id = e.identity_id
           WHERE ${inSession}
@@ -1058,7 +1095,7 @@ export class StreamStore {
         (SELECT count(*) FROM events e WHERE ${inSession} AND e.type = 'donation') AS donations`,
       )
       .get(sid, sid, sid, sid, botJson, sid, sid) as {
-      events: number;
+      event_count: number;
       messages: number;
       donations: number;
     };
@@ -1209,7 +1246,7 @@ export class StreamStore {
       totals,
       chatters,
       lastPollAtMs: latest?.completed_at_ms ?? null,
-      events: counts.events,
+      events: counts.event_count,
       excludedBots: botKeys.length,
       uniquePersons: unique.unique_persons_events,
       uniqueIdentities: unique.unique_identities_events,
@@ -1337,7 +1374,7 @@ export class StreamStore {
           nowMs,
         );
       return target;
-    })();
+    }).immediate();
   }
 
   merges(): Record<string, unknown>[] {
@@ -2117,7 +2154,7 @@ export class StreamStore {
       if (
         snapshot.pragma("integrity_check", { simple: true }) !== "ok" ||
         (snapshot.pragma("foreign_key_check") as unknown[]).length ||
-        snapshot.pragma("user_version", { simple: true }) !== 3
+        (this.profile ? (snapshot.prepare("SELECT version FROM sp_profile_schema WHERE profile=?").get(this.profile) as {version:number} | undefined)?.version : snapshot.pragma("user_version", { simple: true })) !== 4
       )
         throw new Error("BACKUP_VALIDATION_FAILED");
     } finally {
