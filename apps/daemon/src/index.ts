@@ -2,6 +2,8 @@ import { createApplication } from "./server.js";
 import { defaultDataDir } from "./config.js";
 import { open, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
+
 const dir = defaultDataDir();
 const port = Number(process.env.STREAM_PANEL_PORT ?? 47831);
 if (!Number.isInteger(port) || port < 1024 || port > 65535)
@@ -29,13 +31,52 @@ try {
 }
 await lock.writeFile(String(process.pid));
 await lock.close();
+
+function shouldOpenBrowser(): boolean {
+  if (process.env.STREAM_PANEL_NO_BROWSER === "1") return false;
+  if (process.env.STREAM_PANEL_HEADLESS === "1") return false;
+  const ci = process.env.CI;
+  if (ci === "1" || ci === "true") return false;
+  if (
+    process.platform === "linux" &&
+    !process.env.DISPLAY &&
+    !process.env.WAYLAND_DISPLAY
+  )
+    return false;
+  return true;
+}
+
+function openBrowser(url: string): void {
+  try {
+    const platform = process.platform;
+    let child;
+    if (platform === "win32") {
+      child = spawn("cmd", ["/c", "start", "", url], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } else if (platform === "darwin") {
+      child = spawn("open", [url], { detached: true, stdio: "ignore" });
+    } else {
+      child = spawn("xdg-open", [url], { detached: true, stdio: "ignore" });
+    }
+    child.on("error", () => {});
+    child.unref();
+  } catch {
+    /* browser open is best-effort */
+  }
+}
+
 try {
   const application = await createApplication(dir, port);
   await application.app.listen({ host: "127.0.0.1", port });
-  console.log(`Stream Panel: ${application.bootstrap()}`);
+  const url = application.bootstrap();
+  console.log(`Stream Panel: ${url}`);
   console.log(
-    "Откройте ссылку в браузере. Токен одноразовый; повторный запуск выдаст новую ссылку.",
+    "Интерфейс открывается в браузере. Токен одноразовый; повторный запуск выдаст новую ссылку.",
   );
+  if (shouldOpenBrowser()) openBrowser(url);
   let closing = false;
   const shutdown = () => {
     if (closing) return;

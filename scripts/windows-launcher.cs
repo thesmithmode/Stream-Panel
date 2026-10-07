@@ -1,13 +1,18 @@
-// Minimal Windows launcher: starts bundled Node with the daemon entry.
-// Must compile with .NET Framework csc (C# 5 / net40 APIs) on windows-latest:
-//   csc /nologo /optimize /t:exe /out:StreamPanel.exe windows-launcher.cs
+// GUI Windows launcher: starts bundled Node with the daemon entry (no console window).
+// Daemon auto-opens the system browser to the one-time panel URL.
+// Compile with .NET Framework csc on windows-latest:
+//   csc /nologo /optimize /t:winexe /out:StreamPanel.exe windows-launcher.cs
 using System;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 
 internal static class Program
 {
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+
     private static int Main()
     {
         try
@@ -16,7 +21,7 @@ internal static class Program
             string root = Path.GetDirectoryName(location);
             if (string.IsNullOrEmpty(root))
             {
-                Console.Error.WriteLine("Stream Panel: cannot resolve install directory");
+                Fail("cannot resolve install directory");
                 return 1;
             }
 
@@ -32,14 +37,12 @@ internal static class Program
             );
             if (!File.Exists(node))
             {
-                Console.Error.WriteLine("Stream Panel: missing runtime\\node.exe");
+                Fail("missing runtime\\node.exe");
                 return 1;
             }
             if (!File.Exists(entry))
             {
-                Console.Error.WriteLine(
-                    "Stream Panel: missing app entry (dist/apps/daemon/src/index.js)"
-                );
+                Fail("missing app entry (dist/apps/daemon/src/index.js)");
                 return 1;
             }
 
@@ -48,34 +51,35 @@ internal static class Program
             psi.Arguments = Quote(entry);
             psi.WorkingDirectory = Path.Combine(root, "app");
             psi.UseShellExecute = false;
+            psi.CreateNoWindow = true;
+            psi.WindowStyle = ProcessWindowStyle.Hidden;
 
             Process process = Process.Start(psi);
             if (process == null)
             {
-                Console.Error.WriteLine("Stream Panel: failed to start Node runtime");
+                Fail("failed to start Node runtime");
                 return 1;
             }
-
-            Console.CancelKeyPress += delegate(object sender, ConsoleCancelEventArgs e)
-            {
-                e.Cancel = true;
-                try
-                {
-                    process.Kill();
-                }
-                catch
-                {
-                    /* ignore */
-                }
-            };
 
             process.WaitForExit();
             return process.ExitCode;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine("Stream Panel: " + ex.Message);
+            Fail(ex.Message);
             return 1;
+        }
+    }
+
+    private static void Fail(string message)
+    {
+        try
+        {
+            MessageBoxW(IntPtr.Zero, "Stream Panel: " + message, "Stream Panel", 0x00000010);
+        }
+        catch
+        {
+            /* ignore */
         }
     }
 

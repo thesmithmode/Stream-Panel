@@ -20,6 +20,7 @@ function start(dir, p) {
       ...process.env,
       STREAM_PANEL_DATA_DIR: dir,
       STREAM_PANEL_PORT: String(p),
+      STREAM_PANEL_NO_BROWSER: "1",
     },
     stdio: ["ignore", "pipe", "pipe", "ipc"],
   });

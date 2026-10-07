@@ -8,7 +8,9 @@
 
 ## Установка и запуск (Windows и Linux)
 
-Нужны **Node.js 24.19.0+** (ветка 24), **pnpm 11.25.0** и Git. На Linux/macOS Node можно поставить в `~/.local/node24` и добавить в `PATH`. Если pnpm ещё нет: `npm install -g pnpm@11.25.0`.
+**Готовые сборки:** скачайте GitHub Release — Linux `.deb` или Windows `StreamPanel-Setup-*.exe`. После установки откройте **Stream Panel** из меню приложений / Start Menu: интерфейс (обзор, сессии, люди, подключения) откроется в системном браузере сам.
+
+**Из исходников** нужны **Node.js 24.19.0+** (ветка 24), **pnpm 11.25.0** и Git. На Linux/macOS Node можно поставить в `~/.local/node24` и добавить в `PATH`. Если pnpm ещё нет: `npm install -g pnpm@11.25.0`.
 
 **Linux / macOS (bash):**
 
@@ -30,7 +32,7 @@ pnpm build
 pnpm start
 ```
 
-Откройте ссылку из терминала. Она одноразовая (≈10 мин); после входа ключ удаляется из адреса. Вкладку можно закрыть — процесс продолжит работать. Остановка: Ctrl+C (Linux/macOS и Windows terminal). После перезапуска откройте новую напечатанную ссылку. Программа не заполняет базу выдуманными событиями.
+При запуске панель сама открывается в браузере (одноразовая ссылка ≈10 мин; после входа ключ удаляется из адреса). Вкладку можно закрыть — процесс продолжит работать. Остановка: Ctrl+C в терминале (или завершите процесс Stream Panel). После перезапуска откроется новая ссылка. Программа не заполняет базу выдуманными событиями. Без браузера: `STREAM_PANEL_NO_BROWSER=1`.
 
 Native addon `better-sqlite3` собирается при `pnpm install`. На Windows нужны Build Tools for Visual Studio (C++); на Linux — обычный toolchain (`build-essential` / эквивалент). CI проверяет Ubuntu и Windows.
 
@@ -69,7 +71,12 @@ Native addon `better-sqlite3` собирается при `pnpm install`. На W
 
 ### Пакеты (Stage 3)
 
-Сборка: `pnpm package`. **GitHub Release** — только `.deb` + один Windows zip (`--github-assets`; см. [docs/ops/packaging.md](docs/ops/packaging.md)). CI: **Package release artifacts** (`workflow_dispatch` или tag `v*`).
+Сборка: `pnpm package`. **GitHub Release** — только `.deb` + Windows Setup `.exe` (`--github-assets`; см. [docs/ops/packaging.md](docs/ops/packaging.md)). CI: **Package release artifacts** (`workflow_dispatch` или tag `v*`).
+
+**После установки из релиза:**
+
+- **Linux (`.deb`):** `sudo dpkg -i stream-panel_*_amd64.deb` → пункт меню **Stream Panel** или команда `stream-panel`. Браузер с панелью откроется сам.
+- **Windows:** `StreamPanel-Setup-*.exe` → Start Menu **Stream Panel**. Браузер с панелью откроется сам.
 
 ## Данные и восстановление
 

@@ -11,6 +11,7 @@ const root = fileURLToPath(new URL("../..", import.meta.url));
 test("package-release script produces linux portable archive layout (--skip-runtime)", () => {
   assert.ok(existsSync(join(root, "scripts/package-release.mjs")));
   assert.ok(existsSync(join(root, "scripts/windows-launcher.cs")));
+  assert.ok(existsSync(join(root, "scripts/installer/stream-panel.iss")));
   assert.ok(existsSync(join(root, "dist/apps/daemon/src/index.js")), "run pnpm build first");
 
   const out = join(root, "artifacts", "release");

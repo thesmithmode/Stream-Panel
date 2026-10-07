@@ -3,9 +3,9 @@
  * Build portable + platform packages for Stream Panel.
  *
  * GitHub Release assets (HARD POLICY — upload ONLY these two):
- *   1. stream-panel_<ver>_amd64.deb          (Linux installer)
- *   2. stream-panel-<ver>-win-x64.zip        (single Windows package; contains StreamPanel.exe)
- * Do NOT upload tar.gz, source.zip, SHA256SUMS, manifest.json, or other texts to the Release.
+ *   1. stream-panel_<ver>_amd64.deb          (Linux Debian installer + .desktop menu)
+ *   2. StreamPanel-Setup-<ver>.exe           (Windows Inno Setup installer)
+ * Do NOT upload zip, tar.gz, source.zip, SHA256SUMS, manifest.json, or other texts to the Release.
  * Use --github-assets so the script emits only those publishable binaries.
  *
  * Local / CI debug outputs under artifacts/release/ (not for GitHub Release):
@@ -44,7 +44,7 @@ const args = new Set(process.argv.slice(2));
 const skipBuild = args.has("--skip-build");
 const skipRuntime = args.has("--skip-runtime");
 const wantSource = args.has("--source");
-/** Emit only GitHub Release binaries: .deb (linux) or win zip. No tar.gz / source. */
+/** Emit only GitHub Release binaries: .deb (linux) or Setup .exe (win). No zip/tar/source. */
 const githubAssets = args.has("--github-assets");
 
 function readVersion() {
@@ -237,6 +237,24 @@ exec /opt/stream-panel/stream-panel "$@"
     { mode: 0o755 },
   );
   chmodSync(join(binDir, "stream-panel"), 0o755);
+  const appsDir = join(debRoot, "usr", "share", "applications");
+  mkdirSync(appsDir, { recursive: true });
+  writeFileSync(
+    join(appsDir, "stream-panel.desktop"),
+    `[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Stream Panel
+Name[ru]=Stream Panel
+Comment=Local Twitch + DonationAlerts analytics panel
+Comment[ru]=Локальная аналитика Twitch + DonationAlerts
+Exec=stream-panel
+Terminal=false
+Categories=Network;AudioVideo;
+Keywords=twitch;stream;donations;analytics;
+StartupNotify=false
+`,
+  );
   const debian = join(debRoot, "DEBIAN");
   mkdirSync(debian, { recursive: true });
   const sizeKb = Math.max(
@@ -260,7 +278,7 @@ Depends: libc6
 Homepage: https://github.com/thesmithmode/Stream-Panel
 Description: Local Twitch + DonationAlerts analytics panel
  Stream Panel stores chat, donations, sessions and presence locally.
- Bundles Node.js ${nodeVersion}. Opens a localhost UI after start.
+ Bundles Node.js ${nodeVersion}. Launches the local UI in your browser.
 `,
   );
   writeFileSync(
@@ -352,6 +370,69 @@ function resolveCscCandidates() {
   return out;
 }
 
+function resolveIsccCandidates() {
+  const programFilesX86 =
+    process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+  const programFiles = process.env.ProgramFiles || "C:\\Program Files";
+  const candidates = [];
+  if (process.env.ISCC) candidates.push(process.env.ISCC);
+  candidates.push("ISCC");
+  candidates.push(join(programFilesX86, "Inno Setup 6", "ISCC.exe"));
+  candidates.push(join(programFiles, "Inno Setup 6", "ISCC.exe"));
+  candidates.push(join(programFilesX86, "Inno Setup 5", "ISCC.exe"));
+  const seen = new Set();
+  const out = [];
+  for (const c of candidates) {
+    if (!c || seen.has(c)) continue;
+    seen.add(c);
+    out.push(c);
+  }
+  return out;
+}
+
+function buildInnoInstaller({ version, stagingRoot, exeOutPath }) {
+  const iss = join(root, "scripts", "installer", "stream-panel.iss");
+  if (!existsSync(iss)) throw new Error(`missing ${iss}`);
+  const outputDir = dirname(exeOutPath);
+  const outputBase = basenameSafe(exeOutPath).replace(/\\.exe$/i, "");
+  mkdirSync(outputDir, { recursive: true });
+  const candidates = resolveIsccCandidates();
+  const errors = [];
+  for (const iscc of candidates) {
+    if (iscc !== "ISCC" && iscc !== process.env.ISCC && !existsSync(iscc)) {
+      continue;
+    }
+    const result = spawnSync(
+      iscc,
+      [
+        `/DAppVersion=${version}`,
+        `/DSourceDir=${stagingRoot}`,
+        `/DOutputDir=${outputDir}`,
+        `/DOutputBase=${outputBase}`,
+        iss,
+      ],
+      { encoding: "utf8" },
+    );
+    if (result.status === 0 && existsSync(exeOutPath)) {
+      console.log("Built Windows installer via", iscc, "->", exeOutPath);
+      return exeOutPath;
+    }
+    const detail = [
+      result.error ? result.error.message : null,
+      result.stderr && String(result.stderr).trim(),
+      result.stdout && String(result.stdout).trim(),
+      `exit=${result.status}`,
+    ]
+      .filter(Boolean)
+      .join(" | ");
+    errors.push(`${iscc}: ${detail || "failed"}`);
+  }
+  throw new Error(
+    "Failed to build StreamPanel-Setup.exe (Inno Setup ISCC required on Windows packaging).\n" +
+      errors.map((e) => `  - ${e}`).join("\n"),
+  );
+}
+
 function tryBuildWindowsExe(stagingRoot) {
   const cs = join(root, "scripts", "windows-launcher.cs");
   if (!existsSync(cs)) {
@@ -366,7 +447,7 @@ function tryBuildWindowsExe(stagingRoot) {
     }
     const result = spawnSync(
       csc,
-      ["/nologo", "/optimize", "/t:exe", `/out:${exePath}`, cs],
+      ["/nologo", "/optimize", "/t:winexe", `/out:${exePath}`, cs],
       { encoding: "utf8" },
     );
     if (result.status === 0 && existsSync(exePath)) {
@@ -436,8 +517,8 @@ async function main() {
       join(stagingRoot, "README.txt"),
       `Stream Panel ${version}
 =================
-1. Run the launcher (stream-panel / StreamPanel.exe / StreamPanel.cmd).
-2. Open the one-time URL printed in the terminal.
+1. Run Stream Panel (menu / Start Menu / stream-panel / StreamPanel.exe).
+2. The local UI opens in your browser automatically (one-time URL).
 3. Data stays local (see app docs). Presence minutes ≠ Twitch watch time.
 
 Bundled Node: ${skipRuntime ? "(none)" : nodeVersion}
@@ -472,10 +553,21 @@ Bundled Node: ${skipRuntime ? "(none)" : nodeVersion}
           "StreamPanel.exe missing after csc — refusing cmd-only Windows package",
         );
       }
-      const zipName = `stream-panel-${version}-win-${arch}.zip`;
-      const zipPath = join(outDir, zipName);
-      archiveZip(stagingRoot, zipPath);
-      artifacts.push(zipPath);
+      if (githubAssets) {
+        const setupName = `StreamPanel-Setup-${version}.exe`;
+        const setupPath = join(outDir, setupName);
+        buildInnoInstaller({
+          version,
+          stagingRoot,
+          exeOutPath: setupPath,
+        });
+        artifacts.push(setupPath);
+      } else {
+        const zipName = `stream-panel-${version}-win-${arch}.zip`;
+        const zipPath = join(outDir, zipName);
+        archiveZip(stagingRoot, zipPath);
+        artifacts.push(zipPath);
+      }
     } else {
       writeLauncherUnix(stagingRoot);
       const tarName = `stream-panel-${version}-${platform}-${arch}.tar.gz`;
@@ -527,7 +619,7 @@ Bundled Node: ${skipRuntime ? "(none)" : nodeVersion}
     for (const f of artifacts) console.log(" -", f);
     if (githubAssets) {
       console.log(
-        "GitHub Release policy: upload ONLY the binary artifact(s) above (.deb + win zip). Do not upload SHA256SUMS, manifest.json, tar.gz, or source.zip.",
+        "GitHub Release policy: upload ONLY the binary artifact(s) above (.deb + StreamPanel-Setup-*.exe). Do not upload zip, tar.gz, source, SHA256SUMS, or manifest.json.",
       );
     }
   } finally {
