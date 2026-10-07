@@ -19,6 +19,8 @@ export interface Config {
   daRefreshToken: string;
   daUtcOffsetMinutes: number | null;
   chattersPollSeconds: number;
+  /** Extra bot logins excluded from analytics aggregates (well-known list always applied). */
+  excludedBotLogins: string[];
 }
 const defaults: Config = {
   version: 1,
@@ -29,6 +31,7 @@ const defaults: Config = {
   daRefreshToken: "",
   daUtcOffsetMinutes: null,
   chattersPollSeconds: 60,
+  excludedBotLogins: [],
 };
 export function defaultDataDir(): string {
   return (
@@ -56,6 +59,13 @@ export class Configuration {
       this.value.chattersPollSeconds = clampChattersPollSeconds(
         this.value.chattersPollSeconds,
       );
+      this.value.excludedBotLogins = Array.isArray(this.value.excludedBotLogins)
+        ? this.value.excludedBotLogins
+            .filter((v): v is string => typeof v === "string")
+            .map((v) => v.trim())
+            .filter(Boolean)
+            .slice(0, 200)
+        : [];
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
@@ -79,6 +89,7 @@ export class Configuration {
       hasDaToken: !!this.value.daAccessToken,
       daUtcOffsetMinutes: this.value.daUtcOffsetMinutes,
       chattersPollSeconds: this.value.chattersPollSeconds,
+      excludedBotLogins: this.value.excludedBotLogins,
     };
   }
 }

@@ -2,11 +2,14 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import {
   candidateKey,
+  matchKey,
   eventKey,
   assertTimestamp,
   type EventInput,
+  type Source,
 } from "./domain.js";
-import { schemaV1, schemaV2 } from "./schema.js";
+import { schemaV1, schemaV2, schemaV3 } from "./schema.js";
+import { botExclusionSet } from "./bots.js";
 import { presenceMinutes, type PresencePoll } from "./presence.js";
 
 interface IdentityRow {
@@ -44,12 +47,26 @@ export class StreamStore {
       this.db.pragma("foreign_keys = ON");
       this.db.pragma("busy_timeout = 5000");
       const version = this.db.pragma("user_version", { simple: true });
-      if (version !== 0 && version !== 1 && version !== 2)
+      if (version !== 0 && version !== 1 && version !== 2 && version !== 3)
         throw new Error("UNSUPPORTED_SCHEMA_VERSION");
       this.db.pragma("journal_mode = WAL");
       this.db.pragma("synchronous = FULL");
       if (version === 0) this.db.transaction(() => this.db.exec(schemaV1))();
-      if (version !== 2) this.db.transaction(() => this.db.exec(schemaV2))();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 2)
+        this.db.transaction(() => this.db.exec(schemaV2))();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 3) {
+        this.db.transaction(() => {
+          this.db.exec(schemaV3);
+          const rows = this.db
+            .prepare("SELECT id, display_name FROM identities")
+            .all() as { id: string; display_name: string }[];
+          const update = this.db.prepare(
+            "UPDATE identities SET match_key = ? WHERE id = ?",
+          );
+          for (const row of rows)
+            update.run(matchKey(row.display_name), row.id);
+        })();
+      }
     } catch (error) {
       this.db.close();
       throw error;
@@ -99,6 +116,7 @@ export class StreamStore {
       }
       let identity: IdentityRow | null = null;
       let newIdentity = false;
+      let autoLinked = false;
       if (event.actor) {
         identity =
           (this.db
@@ -110,13 +128,23 @@ export class StreamStore {
             | undefined) ?? null;
         if (!identity) {
           newIdentity = true;
-          identity = { id: randomUUID(), person_id: randomUUID() };
-          this.db
-            .prepare("INSERT INTO persons(id, display_name) VALUES (?, ?)")
-            .run(identity.person_id, event.actor.displayName);
+          const linked = this.resolveAutoLinkPerson(
+            event.source,
+            event.accountId,
+            event.actor.externalId,
+            event.actor.displayName,
+          );
+          const personId = linked ?? randomUUID();
+          autoLinked = linked !== null;
+          identity = { id: randomUUID(), person_id: personId };
+          if (!linked) {
+            this.db
+              .prepare("INSERT INTO persons(id, display_name) VALUES (?, ?)")
+              .run(personId, event.actor.displayName);
+          }
           this.db
             .prepare(
-              `INSERT INTO identities(id, source, account_id, external_id, display_name, candidate_key, person_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              `INSERT INTO identities(id, source, account_id, external_id, display_name, candidate_key, person_id, match_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             )
             .run(
               identity.id,
@@ -125,16 +153,44 @@ export class StreamStore {
               event.actor.externalId,
               event.actor.displayName,
               candidateKey(event.actor.displayName),
-              identity.person_id,
+              personId,
+              matchKey(event.actor.displayName),
             );
+          if (linked) {
+            this.db
+              .prepare(
+                "INSERT INTO membership_operations VALUES (?, ?, ?, ?, ?)",
+              )
+              .run(
+                randomUUID(),
+                "auto_link",
+                JSON.stringify([]),
+                JSON.stringify([
+                  {
+                    id: identity.id,
+                    personId,
+                    how:
+                      event.source === "twitch" &&
+                      event.actor.externalId === event.accountId
+                        ? "owner"
+                        : "login_match",
+                  },
+                ]),
+                event.receivedAtMs,
+              );
+            this.db
+              .prepare("UPDATE persons SET revision = revision + 1 WHERE id = ?")
+              .run(personId);
+          }
         } else {
           this.db
             .prepare(
-              "UPDATE identities SET display_name = ?, candidate_key = ? WHERE id = ?",
+              "UPDATE identities SET display_name = ?, candidate_key = ?, match_key = ? WHERE id = ?",
             )
             .run(
               event.actor.displayName,
               candidateKey(event.actor.displayName),
+              matchKey(event.actor.displayName),
               identity.id,
             );
         }
@@ -220,7 +276,8 @@ export class StreamStore {
       if (event.occurredAtMs !== null)
         this.assignEvent(eventKey(event), event.accountId, event.occurredAtMs);
       // Membership changes invalidate outstanding undo revisions, including arrival of a new identity.
-      if (identity && newIdentity)
+      // Auto-link already bumped revision when attaching to an existing person.
+      if (identity && newIdentity && !autoLinked)
         this.db
           .prepare("UPDATE persons SET revision = revision + 1 WHERE id = ?")
           .run(identity.person_id);
@@ -333,6 +390,93 @@ export class StreamStore {
       this.db
         .prepare("UPDATE person_merges SET undone_at_ms = ? WHERE id = ?")
         .run(nowMs, mergeId);
+    })();
+  }
+
+
+  /**
+   * High-confidence auto-link target person id, or null.
+   * Exact platform id is handled by caller lookup. Strong name: unique
+   * cross-source match_key (exactly one person). Owner person is created via
+   * ensureOwnerIdentity so DA donations matching the owner login link here.
+   */
+  private resolveAutoLinkPerson(
+    source: Source,
+    _accountId: string,
+    _externalId: string,
+    displayName: string,
+  ): string | null {
+    const key = matchKey(displayName);
+    if (!key) return null;
+    const other = source === "twitch" ? "donationalerts" : "twitch";
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT person_id FROM identities
+         WHERE source = ? AND match_key = ?`,
+      )
+      .all(other, key) as { person_id: string }[];
+    if (rows.length === 1) return rows[0]!.person_id;
+    return null;
+  }
+
+  /** Ensure the broadcaster Twitch identity/person exists (owner auto-bind). */
+  ensureOwnerIdentity(
+    accountId: string,
+    userId: string,
+    displayName: string,
+    atMs: number,
+  ): string {
+    assertTimestamp(atMs);
+    return this.db.transaction(() => {
+      const existing = this.db
+        .prepare(
+          "SELECT id, person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id=?",
+        )
+        .get(accountId, userId) as IdentityRow | undefined;
+      if (existing) {
+        this.db
+          .prepare(
+            "UPDATE identities SET display_name=?, candidate_key=?, match_key=? WHERE id=?",
+          )
+          .run(
+            displayName,
+            candidateKey(displayName),
+            matchKey(displayName),
+            existing.id,
+          );
+        this.rememberAlias(existing.id, displayName, atMs);
+        return existing.person_id;
+      }
+      const personId = randomUUID();
+      const identityId = randomUUID();
+      this.db
+        .prepare("INSERT INTO persons(id, display_name) VALUES (?, ?)")
+        .run(personId, displayName);
+      this.db
+        .prepare(
+          `INSERT INTO identities(id, source, account_id, external_id, display_name, candidate_key, person_id, match_key)
+           VALUES (?, 'twitch', ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          identityId,
+          accountId,
+          userId,
+          displayName,
+          candidateKey(displayName),
+          personId,
+          matchKey(displayName),
+        );
+      this.rememberAlias(identityId, displayName, atMs);
+      this.db
+        .prepare("INSERT INTO membership_operations VALUES (?, ?, ?, ?, ?)")
+        .run(
+          randomUUID(),
+          "owner_bind",
+          JSON.stringify([]),
+          JSON.stringify([{ id: identityId, personId, how: "owner" }]),
+          atMs,
+        );
+      return personId;
     })();
   }
 
@@ -479,7 +623,7 @@ export class StreamStore {
         "INSERT INTO persons VALUES (?, ?, 1)",
       );
       const insertIdentity = this.db.prepare(
-        "INSERT INTO identities VALUES (?, 'twitch', ?, ?, ?, ?, ?)",
+        "INSERT INTO identities(id, source, account_id, external_id, display_name, candidate_key, person_id, match_key) VALUES (?, 'twitch', ?, ?, ?, ?, ?, ?)",
       );
       const insertMember = this.db.prepare(
         "INSERT INTO presence_members VALUES (?, ?)",
@@ -497,8 +641,9 @@ export class StreamStore {
             accountId,
             userId,
             userId,
-            userId,
+            candidateKey(userId),
             personId,
+            matchKey(userId),
           );
         }
         insertMember.run(id, identity.id);
@@ -523,9 +668,9 @@ export class StreamStore {
         if (!identity) continue;
         this.db
           .prepare(
-            "UPDATE identities SET display_name=?, candidate_key=? WHERE id=?",
+            "UPDATE identities SET display_name=?, candidate_key=?, match_key=? WHERE id=?",
           )
-          .run(user.user_name, candidateKey(user.user_name), identity.id);
+          .run(user.user_name, candidateKey(user.user_name), matchKey(user.user_name), identity.id);
         this.db
           .prepare(
             "UPDATE persons SET display_name=? WHERE id=? AND display_name=?",
@@ -536,16 +681,44 @@ export class StreamStore {
     })();
   }
 
-  persons(search = ""): Record<string, unknown>[] {
+  persons(
+    search = "",
+    excludedBotLogins: readonly string[] = [],
+  ): Record<string, unknown>[] {
+    const excluded = botExclusionSet(excludedBotLogins);
+    const botJson = JSON.stringify([...excluded]);
+    const term = search;
+    const key = candidateKey(search);
+    // Aggregate counts via JOIN instead of correlated per-row event scans.
     return this.db
       .prepare(
-        `SELECT p.*, (SELECT count(*) FROM events e JOIN identities i ON e.identity_id=i.id WHERE i.person_id=p.id) event_count,
-      (SELECT group_concat(DISTINCT i.source) FROM identities i WHERE i.person_id=p.id) sources
-      FROM persons p WHERE EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id)
-      AND (instr(lower(p.display_name), lower(?)) > 0 OR EXISTS(SELECT 1 FROM identities i LEFT JOIN identity_aliases a ON a.identity_id=i.id WHERE i.person_id=p.id AND instr(a.candidate_key, ?) > 0))
-      ORDER BY event_count DESC, p.display_name LIMIT 500`,
+        `SELECT p.id, p.display_name, p.revision,
+          coalesce(ec.event_count, 0) AS event_count,
+          (SELECT group_concat(DISTINCT i2.source) FROM identities i2 WHERE i2.person_id=p.id) AS sources,
+          CASE WHEN EXISTS(
+            SELECT 1 FROM identities ib
+            WHERE ib.person_id=p.id AND ib.match_key IN (SELECT value FROM json_each(?))
+          ) THEN 1 ELSE 0 END AS is_bot
+        FROM persons p
+        LEFT JOIN (
+          SELECT i.person_id, count(e.id) AS event_count
+          FROM identities i
+          LEFT JOIN events e ON e.identity_id = i.id
+          GROUP BY i.person_id
+        ) ec ON ec.person_id = p.id
+        WHERE EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id)
+          AND (
+            ? = '' OR instr(lower(p.display_name), lower(?)) > 0
+            OR EXISTS(
+              SELECT 1 FROM identities i
+              LEFT JOIN identity_aliases a ON a.identity_id=i.id
+              WHERE i.person_id=p.id AND instr(a.candidate_key, ?) > 0
+            )
+          )
+        ORDER BY event_count DESC, p.display_name
+        LIMIT 500`,
       )
-      .all(search, candidateKey(search)) as Record<string, unknown>[];
+      .all(botJson, term, term, key) as Record<string, unknown>[];
   }
 
   person(id: string): Record<string, unknown> {
@@ -604,66 +777,85 @@ export class StreamStore {
       });
   }
 
-  summary(sessionId?: string): Record<string, unknown> {
-    const where =
+  summary(
+    sessionId?: string,
+    excludedBotLogins: readonly string[] = [],
+  ): Record<string, unknown> {
+    const excluded = botExclusionSet(excludedBotLogins);
+    const botKeys = [...excluded];
+    const botJson = JSON.stringify(botKeys);
+    const sid = sessionId ?? null;
+    const inSession =
       "(? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?))";
-    const rows = this.db
+    // SQL aggregates — avoid loading/parsing every event row in JS.
+    const counts = this.db
       .prepare(
-        `SELECT e.type, e.payload_json, e.account_id FROM events e WHERE ${where}`,
+        `SELECT
+        (SELECT count(*) FROM events e WHERE ${inSession}) AS events,
+        (SELECT count(*) FROM events e
+          LEFT JOIN identities i ON i.id = e.identity_id
+          WHERE ${inSession}
+          AND e.type = 'chat.message'
+          AND (
+            json_extract(e.payload_json, '$.originChannelId') IS NULL
+            OR json_extract(e.payload_json, '$.originChannelId') = e.account_id
+          )
+          AND (
+            i.id IS NULL
+            OR i.match_key NOT IN (SELECT value FROM json_each(?))
+          )
+        ) AS messages,
+        (SELECT count(*) FROM events e WHERE ${inSession} AND e.type = 'donation') AS donations`,
       )
-      .all(sessionId ?? null, sessionId ?? null) as {
-      type: string;
-      payload_json: string;
-      account_id: string;
-    }[];
-    let messages = 0;
-    let donations = 0;
+      .get(sid, sid, sid, sid, botJson, sid, sid) as {
+      events: number;
+      messages: number;
+      donations: number;
+    };
+    const donationRows = this.db
+      .prepare(
+        `SELECT json_extract(e.payload_json, '$.currency') AS currency,
+                json_extract(e.payload_json, '$.amountMinor') AS amount_minor
+         FROM events e
+         WHERE ${inSession} AND e.type = 'donation'
+           AND json_extract(e.payload_json, '$.currency') IS NOT NULL
+           AND json_extract(e.payload_json, '$.amountMinor') IS NOT NULL`,
+      )
+      .all(sid, sid) as { currency: string; amount_minor: string }[];
     const totals: Record<string, string> = {};
-    for (const row of rows) {
-      if (row.type === "chat.message") {
-        const payload = JSON.parse(row.payload_json) as {
-          originChannelId?: string;
-        };
-        if (
-          !payload.originChannelId ||
-          payload.originChannelId === row.account_id
-        )
-          messages++;
-      }
-      if (row.type === "donation") {
-        donations++;
-        const payload = JSON.parse(row.payload_json) as {
-          amountMinor?: string;
-          currency?: string;
-        };
-        if (payload.amountMinor && payload.currency)
-          totals[payload.currency] = (
-            BigInt(totals[payload.currency] ?? "0") +
-            BigInt(payload.amountMinor)
-          ).toString();
-      }
+    for (const row of donationRows) {
+      totals[row.currency] = (
+        BigInt(totals[row.currency] ?? "0") + BigInt(row.amount_minor)
+      ).toString();
     }
     const latest = this.db
       .prepare(
-        `SELECT p.* FROM presence_polls p WHERE p.status='complete' AND (? IS NULL OR p.session_id=?) ORDER BY p.completed_at_ms DESC LIMIT 1`,
+        `SELECT p.id, p.completed_at_ms FROM presence_polls p
+         WHERE p.status='complete' AND (? IS NULL OR p.session_id=?)
+         ORDER BY p.completed_at_ms DESC LIMIT 1`,
       )
-      .get(sessionId ?? null, sessionId ?? null) as
-      | { id: string; completed_at_ms: number }
-      | undefined;
-    const chatters = latest
-      ? (
-          this.db
-            .prepare("SELECT count(*) n FROM presence_members WHERE poll_id=?")
-            .get(latest.id) as { n: number }
-        ).n
-      : null;
+      .get(sid, sid) as { id: string; completed_at_ms: number } | undefined;
+    let chatters: number | null = null;
+    if (latest) {
+      chatters = (
+        this.db
+          .prepare(
+            `SELECT count(*) n FROM presence_members m
+             JOIN identities i ON i.id = m.identity_id
+             WHERE m.poll_id = ?
+               AND i.match_key NOT IN (SELECT value FROM json_each(?))`,
+          )
+          .get(latest.id, botJson) as { n: number }
+      ).n;
+    }
     return {
-      messages,
-      donations,
+      messages: counts.messages,
+      donations: counts.donations,
       totals,
       chatters,
       lastPollAtMs: latest?.completed_at_ms ?? null,
-      events: rows.length,
+      events: counts.events,
+      excludedBots: botKeys.length,
     };
   }
 
@@ -824,7 +1016,7 @@ export class StreamStore {
       if (
         snapshot.pragma("integrity_check", { simple: true }) !== "ok" ||
         (snapshot.pragma("foreign_key_check") as unknown[]).length ||
-        snapshot.pragma("user_version", { simple: true }) !== 2
+        snapshot.pragma("user_version", { simple: true }) !== 3
       )
         throw new Error("BACKUP_VALIDATION_FAILED");
     } finally {

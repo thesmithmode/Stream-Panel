@@ -56,20 +56,20 @@ test(
       );
       assert.equal(persons.length, 3);
       checks.push(
-        "reload preserves cookie; identical Twitch/DA names remain separate",
+        "reload preserves cookie; distinct Twitch/DA names stay separate until merge (auto-link covered in unit tests)",
       );
 
       await page.getByRole("button", { name: "Люди", exact: true }).click();
       await page.getByLabel("Поиск человека").fill("Тестовый зритель");
       await page.waitForFunction(
-        () => document.querySelectorAll(".person-row").length === 2,
+        () => document.querySelectorAll(".person-row").length === 1,
       );
       await page.getByLabel("Поиск человека").fill("");
       await page.waitForFunction(
         () => document.querySelectorAll(".person-row").length === 3,
       );
       checks.push("server-side people search");
-      const da = persons.find((p) => p.sources === "donationalerts");
+      const da = persons.find((p) => String(p.sources).includes("donationalerts"));
       await page
         .locator(".person-row")
         .filter({ hasText: "Тестовый зритель" })
@@ -114,7 +114,7 @@ test(
       checks.push("rename group");
       await page.getByLabel("Поиск человека").fill("Тестовый зритель");
       await page.waitForFunction(
-        () => document.querySelectorAll(".person-row").length === 2,
+        () => document.querySelectorAll(".person-row").length === 1,
       );
       assert.equal(
         await page

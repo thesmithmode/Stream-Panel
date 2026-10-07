@@ -4,7 +4,17 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { moneyToMinor, candidateKey, type EventInput } from "../src/domain.js";
+import { moneyToMinor, candidateKey, matchKey, type EventInput } from "../src/domain.js";
+import {
+  botExclusionSet,
+  WELL_KNOWN_TWITCH_BOTS,
+  isExcludedBot,
+  normalizeBotLogin,
+} from "../src/bots.js";
+import {
+  StreamerBotStubAdapter,
+  mapStreamerBotTwitchChatMessage,
+} from "../src/streamerbot.js";
 import { presenceMinutes } from "../src/presence.js";
 import { collectChatters } from "../src/chatters.js";
 import { StreamStore } from "../src/store.js";
@@ -54,27 +64,54 @@ test("name normalization is only candidate discovery; does not fold confusables"
   assert.notEqual(candidateKey("@Vasya"), candidateKey("Vasya"));
 });
 
-test("same nick does not merge accounts; DA occurrences remain separate", () => {
+test("unique cross-source login match auto-links; ambiguous names stay separate; DA actor key still enforced", () => {
   const store = new StreamStore(":memory:");
   try {
     const first = store.ingest(base);
     const second = store.ingest(donation);
+    // High-confidence unique Twitch↔DA match_key → same person.
+    assert.equal(first.personId, second.personId);
     const third = store.ingest({
       ...donation,
       externalId: "donation-2",
       actor: { externalId: "donation-2", displayName: "Vasya" },
     });
-    assert.notEqual(first.personId, second.personId);
-    assert.notEqual(second.personId, third.personId);
-    assert.equal(store.candidatePersons("Vasya").length, 3);
+    // Second DA donation with same name also links to the unique Twitch person.
+    assert.equal(second.personId, third.personId);
+    assert.equal(store.candidatePersons("Vasya").length, 1);
+    // Ambiguous: two Twitch identities with same match key → DA does not auto-link.
+    store.ingest({
+      ...base,
+      externalId: "message-amb-1",
+      actor: { externalId: "user-amb-1", displayName: "Twin" },
+    });
+    store.ingest({
+      ...base,
+      externalId: "message-amb-2",
+      actor: { externalId: "user-amb-2", displayName: "Twin" },
+    });
+    const daTwin = store.ingest({
+      ...donation,
+      externalId: "donation-twin",
+      actor: { externalId: "donation-twin", displayName: "Twin" },
+    });
+    assert.equal(store.candidatePersons("Twin").length, 3);
+    const twinDetail = store.person(String(daTwin.personId)) as {
+      identities: { source: string }[];
+    };
+    assert.ok(!twinDetail.identities.some((i) => i.source === "twitch"));
     assert.throws(
       () =>
         store.ingest({
           ...donation,
+          externalId: "donation-bad-actor",
           actor: { externalId: "Vasya", displayName: "Vasya" },
         }),
       /DA_ACTOR/,
     );
+    assert.equal(matchKey("@Vasya"), "vasya");
+    assert.equal(matchKey("#Vasya"), "vasya");
+    assert.notEqual(candidateKey("@Vasya"), candidateKey("Vasya"));
   } finally {
     store.close();
   }
@@ -129,7 +166,10 @@ test("merge updates historical query; undo restores identities without rewriting
   const store = new StreamStore(":memory:");
   try {
     const a = store.ingest(base).personId!;
-    const b = store.ingest(donation).personId!;
+    const b = store.ingest({
+      ...donation,
+      actor: { externalId: "donation-1", displayName: "OtherNick" },
+    }).personId!;
     const merge = store.merge(
       b,
       a,
@@ -154,7 +194,10 @@ test("stale merge and undo after another membership change fail atomically", () 
   const store = new StreamStore(":memory:");
   try {
     const a = store.ingest(base).personId!;
-    const b = store.ingest(donation).personId!;
+    const b = store.ingest({
+      ...donation,
+      actor: { externalId: "donation-1", displayName: "OtherNick" },
+    }).personId!;
     const c = store.ingest({
       ...base,
       externalId: "message-3",
@@ -419,7 +462,10 @@ test("selective split preserves events and invalidates stale undo", () => {
   const store = new StreamStore(":memory:");
   try {
     const a = store.ingest(base),
-      b = store.ingest(donation);
+      b = store.ingest({
+        ...donation,
+        actor: { externalId: "donation-1", displayName: "OtherNick" },
+      });
     const merge = store.merge(
       b.personId!,
       a.personId!,
@@ -499,4 +545,181 @@ test("minute history queries older events beyond the latest 200 and keeps half-o
   } finally {
     store.close();
   }
+});
+
+
+test("owner ensureOwnerIdentity binds channel owner; DA matching owner login auto-links", () => {
+  const store = new StreamStore(":memory:");
+  try {
+    const ownerPerson = store.ensureOwnerIdentity(
+      "channel-1",
+      "channel-1",
+      "Streamer",
+      50_000,
+    );
+    const again = store.ensureOwnerIdentity(
+      "channel-1",
+      "channel-1",
+      "Streamer",
+      51_000,
+    );
+    assert.equal(ownerPerson, again);
+    const tip = store.ingest({
+      ...donation,
+      actor: { externalId: "donation-owner", displayName: "@Streamer" },
+      externalId: "donation-owner",
+    });
+    assert.equal(tip.personId, ownerPerson);
+  } finally {
+    store.close();
+  }
+});
+
+test("manual merge undo and split still work after auto-link", () => {
+  const store = new StreamStore(":memory:");
+  try {
+    const twitch = store.ingest(base).personId!;
+    const linked = store.ingest(donation).personId!;
+    assert.equal(twitch, linked);
+    const other = store.ingest({
+      ...base,
+      externalId: "message-other",
+      actor: { externalId: "user-9", displayName: "Other" },
+    }).personId!;
+    const mergeId = store.merge(
+      other,
+      twitch,
+      store.personRevision(other),
+      store.personRevision(twitch),
+      80_000,
+    );
+    assert.equal(store.eventCount(twitch), 3);
+    store.undoMerge(mergeId, 90_000);
+    assert.equal(store.eventCount(other), 1);
+    const detail = store.person(twitch) as {
+      identities: { id: string; source: string }[];
+    };
+    const twitchIdentity = detail.identities.find((i) => i.source === "twitch");
+    const daIdentity = detail.identities.find(
+      (i) => i.source === "donationalerts",
+    );
+    assert.ok(twitchIdentity && daIdentity);
+    const splitId = store.splitIdentities(
+      [String(daIdentity.id)],
+      "DA only",
+      store.personRevision(twitch),
+      100_000,
+    );
+    assert.notEqual(splitId, twitch);
+    assert.equal(store.eventCount(splitId), 1);
+  } finally {
+    store.close();
+  }
+});
+
+test("summary uses SQL aggregates and excludes well-known bots from message counts", () => {
+  const store = new StreamStore(":memory:");
+  try {
+    store.ingest(base);
+    store.ingest({
+      ...base,
+      externalId: "bot-msg",
+      actor: { externalId: "bot-1", displayName: "Nightbot" },
+    });
+    store.ingest(donation);
+    const raw = store.summary();
+    assert.equal(raw.messages, 1);
+    assert.equal(raw.donations, 1);
+    assert.equal(raw.events, 3);
+    assert.ok(Number(raw.excludedBots) >= WELL_KNOWN_TWITCH_BOTS.length);
+    const people = store.persons();
+    const bot = people.find((p) => p.display_name === "Nightbot");
+    assert.equal(bot?.is_bot, 1);
+    assert.ok(botExclusionSet(["CustomBot"]).has("custombot"));
+    assert.equal(normalizeBotLogin("  @NightBot "), "nightbot");
+    assert.equal(isExcludedBot("Nightbot", botExclusionSet()), true);
+    assert.equal(isExcludedBot("", botExclusionSet()), false);
+    assert.equal(isExcludedBot("human", botExclusionSet()), false);
+    assert.ok(botExclusionSet(["", "  "]).has("nightbot"));
+  } finally {
+    store.close();
+  }
+});
+
+test("Streamer.bot stub maps Twitch.ChatMessage and dedupes against direct ingest", async () => {
+  const store = new StreamStore(":memory:");
+  try {
+    const adapter = new StreamerBotStubAdapter("channel-1");
+    const events: import("../src/domain.js").EventInput[] = [];
+    adapter.subscribe((event) => {
+      events.push(event);
+      store.ingest(event);
+    });
+    await adapter.start();
+    await adapter.inject({
+      messageId: "message-1",
+      message: "from sb",
+      user: { id: "user-1", displayName: "Vasya" },
+      timeStamp: "1970-01-01T00:01:00.000Z",
+    });
+    assert.equal(events.length, 1);
+    assert.equal(events[0]!.transport, "streamerbot");
+    assert.equal(store.ingest(base).inserted, false);
+    assert.equal(
+      mapStreamerBotTwitchChatMessage({}, "channel-1", 1),
+      null,
+    );
+    await adapter.stop();
+  } finally {
+    store.close();
+  }
+});
+
+
+test("Streamer.bot stub with client wires Twitch.ChatMessage and ignores bad payloads", async () => {
+  const seen: import("../src/domain.js").EventInput[] = [];
+  let connected = false;
+  let disconnected = false;
+  const client = {
+    on(
+      _event: "Twitch.ChatMessage",
+      handler: (data: import("../src/streamerbot.js").StreamerBotTwitchChatMessage) => void,
+    ) {
+      Promise.resolve().then(() => {
+        handler({});
+        handler({
+          messageId: "live-1",
+          message: { text: "hi" },
+          user: { id: "9", displayName: "X" },
+          timeStamp: Date.now(),
+        });
+      });
+    },
+    async connect() {
+      connected = true;
+    },
+    async disconnect() {
+      disconnected = true;
+    },
+  };
+  const adapter = new StreamerBotStubAdapter("channel-1", client);
+  adapter.subscribe((event) => {
+    seen.push(event);
+  });
+  await adapter.start();
+  await adapter.start(); // idempotent
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(connected, true);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0]!.payload.text, "hi");
+  await adapter.stop();
+  assert.equal(disconnected, true);
+  assert.equal(
+    mapStreamerBotTwitchChatMessage(
+      { messageId: "t", userId: "1", message: "plain", timeStamp: "not-a-date" },
+      "channel-1",
+      1,
+    )?.timeQuality,
+    "unknown",
+  );
 });

@@ -65,3 +65,13 @@ export function moneyToMinor(decimal: string, currency: string): string {
     BigInt((match[2] ?? "").padEnd(2, "0"))
   ).toString();
 }
+
+// Login-style key for high-confidence Twitch↔DA auto-link (tech-spec §3.3 rule 2).
+// Strips leading @/# after NFKC; does not fold confusables or strip other punctuation.
+export function matchKey(name: string): string {
+  return name
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/^[@#]+/, "");
+}

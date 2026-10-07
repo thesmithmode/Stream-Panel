@@ -268,7 +268,11 @@ export async function createApplication(
     return { ok: true };
   });
   app.get("/api/v1/summary", async (request) =>
-    db.call("summary", string(object(request.query).session) || undefined),
+    db.call(
+      "summary",
+      string(object(request.query).session) || undefined,
+      configuration.value.excludedBotLogins,
+    ),
   );
   app.get("/api/v1/events", async (request) => {
     const q = object(request.query);
@@ -281,7 +285,11 @@ export async function createApplication(
     );
   });
   app.get("/api/v1/persons", async (request) =>
-    db.call("persons", string(object(request.query).search)),
+    db.call(
+      "persons",
+      string(object(request.query).search),
+      configuration.value.excludedBotLogins,
+    ),
   );
   app.get("/api/v1/persons/:id", async (request) =>
     db.call("person", string(object(request.params).id)),

@@ -82,3 +82,10 @@ CREATE TABLE membership_operations (
 ) STRICT;
 PRAGMA user_version = 2;
 `;
+
+// match_key: login-style key for high-confidence auto-link (strip @/#).
+export const schemaV3 = `
+ALTER TABLE identities ADD COLUMN match_key TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS identities_match ON identities(match_key);
+PRAGMA user_version = 3;
+`;

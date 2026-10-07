@@ -23,6 +23,7 @@ const allowed = new Set([
   "backup",
   "close",
   "candidatePersons",
+  "ensureOwnerIdentity",
 ]);
 parentPort!.on(
   "message",
