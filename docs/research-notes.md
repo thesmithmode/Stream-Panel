@@ -183,6 +183,8 @@ Litestream v0.5+ автодетектит `*.r2.cloudflarestorage.com` (`sign-pa
 
 **Вывод:** Person / Identity проектируем сами (tech-spec §3.3), независимо от внутренней реализации Stream Tools. Не обещаем совместимость схем/файлов.
 
+**Product decision (2026-10-07):** YouTube / видео «Аналитический раздел Stream Tools» **не** источник требований к Person и **не** в scope Stream Panel v1 — только Twitch + DonationAlerts.
+
 ---
 
 ## Гипотеза → факт (сводка для оркестратора)
@@ -211,6 +213,8 @@ Litestream v0.5+ автодетектит `*.r2.cloudflarestorage.com` (`sign-pa
 | Network / timeout | нет HTTP ответа | **Keep** tokens; transient |
 
 Дополнительно (docs): public-client refresh tokens **истекают через 30 дней**; concurrent refresh — лимит ~50 access tokens на один refresh (single-flight в коде).
+
+**Product decision (2026-10-07, clarified):** при HTTP 400/401 UI показывает **явный** reauth («Войди снова»); **без** предварительного предупреждения о ~30-дневном expiry (бесполезно заранее).
 
 ## 8. EventSub WebSocket — reconnect / keepalive
 
@@ -250,6 +254,7 @@ Litestream v0.5+ автодетектит `*.r2.cloudflarestorage.com` (`sign-pa
 ### Person auto-link / Litestream / Streamer.bot (codex-init-grok)
 
 - Auto-link uses `matchKey` (strip `@`/`#`) for unique cross-source matches only; `candidateKey` stays suggestion-only without stripping.
+- **Product (2026-10-07):** unique Twitch↔DA nick auto-link **KEEP** (FR07 wording fixed — not suggestions-only). Manual merge required for different nicks; past + future activity into one Person; undo/split unchanged.
 - Litestream example checked against research checklist; script no-ops without credentials.
 - Streamer.bot: interface + stub; live client deferred.
 
@@ -257,5 +262,6 @@ Litestream v0.5+ автодетектит `*.r2.cloudflarestorage.com` (`sign-pa
 
 - Definitive auth failure (clear + reauth): HTTP **400/401** and/or body `error` `invalid_grant` (unauthorized / invalid_token / «Invalid refresh token»).
 - Transient (keep tokens): **429**, **5xx**, network/timeout → `TWITCH_REFRESH_HTTP_*` / underlying error for reconnect/backoff.
+- Public-client refresh tokens expire ~**30 days** (fact from Twitch docs) — **no** advance UI warning. On 400/401: `state=error` + explicit «Войди снова» in Connections/Overview.
 - Full audit trail: [docs-audit.md](./docs-audit.md).
 

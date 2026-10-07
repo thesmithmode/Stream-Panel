@@ -60,6 +60,9 @@
       <p class="muted">
         Вход владельца канала. Приложение читает чат и события.
       </p>
+      {#if status.twitch.state === "error"}<p role="alert" class="notice error">
+          Войди снова в Twitch — авторизация сброшена (HTTP 400/401).
+        </p>{/if}
       <label
         >Client ID своего public OAuth-приложения<input
           bind:value={twitchClient}

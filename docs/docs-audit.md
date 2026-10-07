@@ -2,7 +2,7 @@
 
 Дата: **2026-10-07** (МСК). Прочитаны: `docs/prd.md`, `tech-spec.md`, `user-requirements.md`, `research-notes.md`, `readiness-checklist.md`, `live-validation-checklist.md`, `implementation-plan.md`, `ops/litestream.md`, `README.md`; публичная страница [Stream Tools](https://b1trat3.ru/products/stream-tools).
 
-**Вердикт:** **разработчик поймёт** целевую архитектуру, честный контракт presence и текущий offline/live статус *если* читает README → readiness → research → tech-spec Implementation decisions. **Без** этой цепочки легко запутаться: в шапках tech-spec / user-requirements ещё «код не пишется», стек в §1 устарел (Node 22 / drizzle / vitest), а PRD FR07 расходится с auto-link.
+**Вердикт:** **разработчик поймёт** целевую архитектуру, честный контракт presence и текущий offline/live статус *если* читает README → readiness → research → tech-spec Implementation decisions. **Без** этой цепочки легко запутаться: в шапках tech-spec / user-requirements ещё «код не пишется», стек в §1 устарел (Node 22 / drizzle / vitest). FR07 wording aligned with unique Twitch↔DA auto-link (product decision 2026-10-07).
 
 Формат строк: **Fact** (источник) / **Hypothesis** / **Blind spot** / **Contradiction**.
 
@@ -62,7 +62,7 @@
 | --- | --- |
 | **Fact** | Публичная страница Stream Tools: виджеты OBS, мультичат, донаты/события площадок; FAQ: «Аналитическая база и история остаются на вашем компьютере». Есть видео «Аналитический раздел». [b1trat3 Stream Tools](https://b1trat3.ru/products/stream-tools). |
 | **Blind spot** | Публично **нет** описания сущности Person / auto-merge / UI склейки донат↔чат. Модель Stream Panel — своя (tech-spec §3.3). |
-| **Contradiction** | PRD FR07 «не склеивает физлиц автоматически» vs Implementation decisions: unique `matchKey` Twitch↔DA **auto-link**. Кандидаты при неоднозначности остаются suggestions — частично согласовано, но FR07 формулировка устарела относительно кода. |
+| **Fact (resolved 2026-10-07)** | FR07: unique Twitch↔DA `matchKey` **auto-link KEEP**; ambiguous → suggestions; different nicks → required manual merge (past+future). PRD/UR/tech-spec/readiness wording updated. YouTube analytics video **out of scope**. |
 
 ## Minute-grid honesty bounds
 
@@ -88,6 +88,7 @@
 2. EventSub WS reconnect/keepalive/at-least-once — уточнение в research-notes.
 3. Stream Tools: публично подтверждена **локальная аналитическая БД**; Person-merge по-прежнему неизвестен.
 4. Stale stack/status отмечены в audit; Implementation decisions tech-spec обновлены (не выдумывая новых product requirements).
+5. FR07 wording + four product decisions (auto-link KEEP, manual merge past+future, YouTube out, explicit reauth UI / no 30d advance warn) — prd/UR/tech-spec/readiness/research/audit + Connections/Overview.
 
 ## Remaining hypotheses
 
@@ -97,10 +98,11 @@
 - R2 free-tier sufficiency (P2).
 - Streamer.bot duplicate suppression strategy (P3).
 
-## User questions for orchestrator (blocked only)
+## Closed product decisions (orphanator / user 2026-10-07)
 
-1. **FR07 vs auto-link:** оставить high-confidence unique Twitch↔DA auto-link как есть и поправить формулировку FR07, или откатить auto-link к suggestions-only?
-2. **Public Twitch client 30-day refresh expiry:** нужно ли явное предупреждение в UI/Connections до истечения, или достаточно текущего reauth-on-400/401?
-3. (Опционально) Смотреть ли YouTube «Аналитический раздел Stream Tools» как источник требований к Person, или продолжать только по owner UR + своей модели?
+1. **FR07 vs auto-link:** **KEEP** unique Twitch↔DA nick auto-link; fix FR07 wording (not suggestions-only). Ambiguous names stay suggestions. Code already correct — no behavior change.
+2. **Twitch reauth UI (clarified):** **Do not** advance-warn about ~30-day public refresh expiry. **Required:** on definitive auth failure (HTTP 400/401) show **explicit** reauth («Войди снова») — Connections `notice error` + Overview source alert/button; daemon `state=error` / detail «Требуется повторный вход в Twitch». No silent connected look.
+3. **YouTube «Аналитический раздел Stream Tools»:** **out of scope** — not a Person requirements source; product is Twitch + DonationAlerts only.
+4. **Manual merge:** **required** for different nicks («донатер X = зритель Y»); merges all past **and** future donations/activity into one Person; undo/split unchanged.
 
-Новых продуктовых ответов для offline кода **не** требуется, кроме пункта 1 если меняется поведение матчинга.
+See also tech-spec Implementation decisions §19, user-requirements Implementation decisions, research-notes.

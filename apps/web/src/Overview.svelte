@@ -85,14 +85,21 @@
             {mark}
           </div>
           <div class="source-content">
-            <strong>{label}</strong><span class="small muted"
-              >{status?.[key]?.detail || "Не подключён"}</span
-            >
+            <strong>{label}</strong>
+            {#if status?.[key]?.state === "error"}<span
+                role="alert"
+                class="notice error"
+                >Войди снова — {status?.[key]?.detail || "авторизация сброшена"}</span
+              >{:else}<span class="small muted"
+                >{status?.[key]?.detail || "Не подключён"}</span
+              >{/if}
           </div>
           <button class="outline small" onclick={connect}
-            >{status?.[key]?.state === "connected"
-              ? "Настроить"
-              : "Подключить"}</button
+            >{status?.[key]?.state === "error"
+              ? "Войти снова"
+              : status?.[key]?.state === "connected"
+                ? "Настроить"
+                : "Подключить"}</button
           >
         </div>{/each}
     </section>

@@ -17,7 +17,7 @@
 | U1 | Локальная аналитика людей (не разрозненные ники) | ✅ | `packages/core/src/store.ts` persons/identities/merge; UI `apps/web/src/People.svelte` |
 | U2 | Twitch + DonationAlerts обязательны | ⏳ | Адаптеры `apps/daemon/src/twitch.ts`, `donationalerts.ts`; живой OAuth — G1/G3 |
 | U3 | Streamer.bot заложить на будущее | ✅ stub / ❌ live | Stub `packages/core/src/streamerbot.ts`; полный `@streamerbot/client` — P3 |
-| U4 | Автоматч + ручное merge/unmerge | ✅ / ❌ reject | Auto-link + merge/undo/split offline; **durable reject/owner rules — P1** |
+| U4 | Автоматч (same nick) + ручное merge/unmerge | ✅ / ❌ reject | Unique Twitch↔DA auto-link + merge/undo/split offline; **durable reject/owner rules — P1** |
 | U5 | Данные локально (SQLite) | ✅ | `packages/core/src/schema.ts`, `store.ts`; путь `apps/daemon/src/config.ts` `defaultDataDir` |
 | U6 | Бесплатный remote backup/sync | ✅ docs | Litestream docs `docs/ops/litestream.md`, `litestream.yml.example`; не обязателен для старта |
 | U7 | Windows + Linux | ⏳ | Один TS-код; CI Ubuntu+Windows; native Win11/Mint install — G5 |
@@ -36,7 +36,7 @@
 | FR04 | Сбор чата и событий | ✅ / ⏳ | Normalized ingest + gaps offline; live EventSub — G1/G2 |
 | FR05 | Presence (полные страницы, не silent empty) | ✅ | `packages/core/src/chatters.ts`, poll status complete/partial/failed |
 | FR06 | Person / Identity (rename, DA не unique account) | ✅ | Identity by platform id; DA alert occurrence key — core tests |
-| FR07 | Автопредложения (не автосклейка физлиц) | ✅ | `candidatePersons`; ambiguous → suggestions; unique match_key auto-link only |
+| FR07 | Автоматч unique Twitch↔DA + предложения при неоднозначности | ✅ | unique `matchKey` auto-link; `candidatePersons` for ambiguous; manual merge FR08 |
 | FR08 | Ручные merge/undo/split + ревизии | ✅ | `store.merge` / `undoMerge` / `splitIdentities`; E2E People |
 | FR09 | Донатная история / unknown TZ | ✅ / ⏳ | Unknown time quality; incremental backfill offline; live offset — G4 |
 | FR10 | Согласованные фильтры экранов | ✅ partial | Session/person filters; cursor pagination / currency filter — P1 |

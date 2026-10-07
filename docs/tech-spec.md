@@ -131,13 +131,13 @@ type NormalizedEvent = {
 **Автоматч (MVP rules, по приоритету)**
 
 1. Точный `external_id` уже привязан → тот Person.
-2. Одинаковый `login_normalized` на Twitch + совпадение с DA username после нормализации (lowercase, trim, убрать `#`/`@`, уникод NFKC).
-3. Одинаковый `display_normalized`, если однозначен (ровно один кандидат) — пометить `confidence=low`, показать в UI «предложение».
+2. Одинаковый `matchKey` (NFKC, trim, lower, strip leading `@`/`#`) на Twitch и DA, и ровно один Person на другой стороне → **auto-link** новой identity к этому Person (не suggestion). Owner: `ensureOwnerIdentity` на Twitch validate.
+3. Неоднозначные / ambiguous имена (`candidateKey`) → только UI-предложения; без автосклейки.
 
 **Ручное редактирование**
 
-- Merge: выбрать identity A и B → один Person (перенос ссылок, запись аудита).
-- Unmerge: вернуть identity на нового/старого Person.
+- Merge «донатер X = зритель Y»: выбрать identity A и B → один Person; прошлое **и** будущее (донаты/активность) атрибутируется на этого Person; запись аудита + revision.
+- Undo / split: вернуть состав / выделить identities (как реализовано); fact log не удаляется.
 - Rename канонического `display_name` («Петя»).
 
 ### 3.4. Storage
@@ -297,7 +297,7 @@ donations(…)  -- может быть проекцией events type=donation
 
 10. **Person auto-link (2026-10-07):** exact `source+account+external_id` unchanged. High-confidence auto-link attaches a **new** identity to an existing person when `matchKey` (NFKC, trim, lower, strip leading `@`/`#`) uniquely matches exactly one person on the other platform (Twitch↔DA). Owner: `ensureOwnerIdentity` on Twitch validate. Manual merge/undo/split kept. Deferred: historical backfill merge of already-split persons.
 11. **Bot filter:** well-known Twitch bot logins + `excludedBotLogins` in secrets; marked `is_bot` on `/persons`; excluded from summary message/chatter counts. Events not deleted.
-12. **Twitch refresh failure:** clear tokens + `TWITCH_REAUTH_REQUIRED` **only** on definitive auth failure (HTTP 400/401 and/or OAuth `invalid_grant` / revoked equivalents). On 429/5xx/network/timeout: **keep** tokens and throw transient error for existing reconnect/backoff. Dead `watchdog` timer field (present on `codex-init`) remains absent on this branch.
+12. **Twitch refresh failure:** clear tokens + `TWITCH_REAUTH_REQUIRED` **only** on definitive auth failure (HTTP 400/401 and/or OAuth `invalid_grant` / revoked equivalents). On 429/5xx/network/timeout: **keep** tokens and throw transient error for existing reconnect/backoff. Dead `watchdog` timer field (present on `codex-init`) remains absent on this branch. Product: UI shows **explicit** reauth («Войди снова») when `state=error` / reauth required; **no** advance ~30-day expiry warning (see §19).
 13. **summary/persons:** SQL aggregates / JOIN counts — no per-request JS parse of every event row for summary totals.
 14. **Litestream:** docs + `litestream.yml.example` + graceful `scripts/litestream-replicate.sh` (skip if unset). No secrets in repo.
 15. **Streamer.bot:** stub adapter + `mapStreamerBotTwitchChatMessage` + test; full `@streamerbot/client` WS deferred to P3 (needs live SB + duplicate suppression).
@@ -305,3 +305,5 @@ donations(…)  -- может быть проекцией events type=donation
 
 17. **Docs authenticity (2026-10-07 audit):** runtime stack is **Node 24.19+**, SQL schema in `packages/core` (not drizzle), tests via `node:test` + coverage gate (not vitest). Working branch for this line: **`codex-init-grok`**. Headers in §1–2 / user-requirements that still say «код не пишется» / Node 22 are historical; see [docs-audit.md](./docs-audit.md) and README.
 18. **Stream Tools public FAQ:** local analytics DB confirmed on product page; Person-merge model still unpublished → keep independent Person design (§3.3).
+
+19. **Product decisions (user / orphanator 2026-10-07):** (1) YouTube / Stream Tools analytics video **out of scope** — product is Twitch + DonationAlerts only. (2) FR07 **KEEP** unique Twitch↔DA nick auto-link; wording fixed (not suggestions-only). (3) Manual merge **required** for different nicks; merges all past **and** future donations/activity into one Person; undo/split unchanged. (4) Twitch auth drop: UI must show **explicit** reauth («Войди снова») on definitive failure HTTP **400/401** (`state=error`, `TWITCH_REAUTH_REQUIRED`) — no silent OK look. **Do not** advance-warn about ~30-day public refresh expiry (useless beforehand). Connections + Overview surface the alert; daemon detail «Требуется повторный вход в Twitch».

@@ -18,9 +18,10 @@
 
 ## Сущность «человек»
 
-- Донат с именем «Вася» и зритель чата «Вася» должны считаться **одним человеком**, если система смогла сопоставить.
-- Нужен **автоматический матчинг** (по нормализованному нику / известным связям) и **ручное редактирование**: например склеить донат «Петя» и зрителя «Петя123» в человека «Петя».
-- Разъединение ошибочных склеек — тоже через ручное управление.
+- Одинаковый nick на Twitch и DonationAlerts → **сразу один Person** (auto-link по unique `matchKey`).
+- Разные ники («донатер X = зритель Y») → **обязательный ручной merge**: прошлые и будущие донаты/активность в одном Person.
+- Разъединение ошибочных склеек — undo / split (как уже задокументировано).
+- Неоднозначные имена (несколько кандидатов) → только предложения, без автосклейки.
 
 ## Хранение данных
 
@@ -57,6 +58,7 @@
 ## Вне скоупа (пока)
 
 - Клон OBS-виджетов Stream Tools (мультичат-оверлей, таймеры, колесо, аукцион, эмулятор ввода и т.п.).
+- YouTube (в т.ч. видео «Аналитический раздел Stream Tools») как источник требований или интеграция — продукт v1 = **Twitch + DonationAlerts** only.
 - Обязательный multi-tenant SaaS.
 - Гарантия учёта анонимных / незалогиненных зрителей без присутствия в chatters.
 
@@ -71,7 +73,10 @@
 - Удалённые модерацией сообщения: хранить оригинал, помечать redacted, в интерфейсе скрывать по умолчанию; действие ограничено текущей сессией (или узким окном).
 - Рабочая ветка для клонирования ранней версии: `codex-init-grok` (не `codex-init`). Интеграция — в `dev`, релизы — в `main`.
 
-- Person auto-link: high-confidence unique login match Twitch↔DA + owner bind on Twitch login; manual merge/undo/split remain. Ambiguous names stay suggestions only.
+- Person auto-link (**KEEP**): identical Twitch↔DA nick (unique `matchKey`) → immediate auto-link into one Person + owner bind on Twitch login. Ambiguous names stay suggestions only. Not suggestions-only for unique nick.
+- Manual merge **required** for different nicks («донатер X = зритель Y»): merges all past **and** future donations/activity into one Person; undo/split unchanged.
+- Twitch definitive auth failure HTTP **400/401** → clear tokens + `TWITCH_REAUTH_REQUIRED`; UI must show **explicit** reauth («Войди снова»), not a silent/connected look. Do **not** advance-warn about ~30-day public refresh expiry (useless beforehand).
+- YouTube / Stream Tools analytics video: **out of scope** (Twitch + DA only).
 - Bot filter in analytics (configurable + well-known); Litestream path documented; Streamer.bot stub only until P3.
 - Durable rejection of merge candidates and scoped owner rules with TTL stay **P1** (not implemented in this readiness tick): needs schema + API + UI + coverage; offline suggestions + manual merge are enough to start live validation. See tech-spec Implementation decisions §16.
 
