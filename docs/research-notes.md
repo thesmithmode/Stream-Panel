@@ -1,6 +1,6 @@
 # Research notes (официальные доки)
 
-Дата проверки: **2026-10-06** (МСК); доп. сверка оркестратора + официальные ссылки тем же днём. Код продукта не писался — только факты для закрытия слепых пятен в спецификации.
+Дата проверки: **2026-10-06** (МСК); доп. сверка **2026-10-07** (OAuth refresh / EventSub WS / Stream Tools FAQ). Код продукта не писался — только факты для закрытия слепых пятен в спецификации.
 
 | Тема | Источник | Статус |
 |------|----------|--------|
@@ -10,7 +10,7 @@
 | Twitch rate limits | [API guide](https://dev.twitch.tv/docs/api/guide#twitch-rate-limits) | Факт |
 | Streamer.bot outbound events | [WS events](https://docs.streamer.bot/api/websocket/guide/events), [WS config](https://docs.streamer.bot/api/websocket/guide/configuration), [UDP](https://docs.streamer.bot/api/udp/guide/configuration) | Факт |
 | Litestream → R2/B2 | [S3-compatible](https://litestream.io/guides/s3-compatible/), [S3 guide](https://litestream.io/guides/s3/) | Факт |
-| Stream Tools Person-merge | Публичные страницы b1trat3 | **Неизвестно** |
+| Stream Tools Person-merge | [Stream Tools](https://b1trat3.ru/products/stream-tools) | Локальная БД — факт; Person/merge — **неизвестно** |
 
 ---
 
@@ -175,11 +175,13 @@ Litestream v0.5+ автодетектит `*.r2.cloudflarestorage.com` (`sign-pa
 
 ## 6. Stream Tools — модель «человек / склейка»
 
-Публичная страница продукта: https://b1trat3.ru/products/stream-tools  
+Публичная страница продукта: https://b1trat3.ru/products/stream-tools (проверено 2026-10-07).
 
-Упоминается локальная аналитическая БД и интеграции, **но нет** описания сущности «человек», автоматча донат↔чат или UI merge.
+**Факт с публички:** FAQ подтверждает, что «аналитическая база и история остаются на вашем компьютере» (локальная БД есть). Есть видео «Аналитический раздел Stream Tools». Интеграции: Twitch/YouTube/VK/Kick/GoodGame + DonationAlerts/DonatePay; продукт ориентирован на OBS-виджеты и интерактив эфира (Windows-only).
 
-**Вывод:** из публичных источников **неизвестно**. Проектируем свою модель Person / Identity (уже в tech-spec) независимо от внутренней реализации Stream Tools.
+**Слепое пятно:** публично **нет** описания сущности «человек», автоматча донат↔чат или UI merge.
+
+**Вывод:** Person / Identity проектируем сами (tech-spec §3.3), независимо от внутренней реализации Stream Tools. Не обещаем совместимость схем/файлов.
 
 ---
 
@@ -194,7 +196,32 @@ Litestream v0.5+ автодетектит `*.r2.cloudflarestorage.com` (`sign-pa
 | EventSub types/scopes списком | **Факт:** таблица выше; chat.message → `user:read:chat` (не legacy `chat:read`); condition оба id = стример на MVP |
 | Streamer.bot «WS/UDP/HTTP» | **Факт:** ingest = WebSocket + `@streamerbot/client` (`Twitch.ChatMessage`…); UDP = DoAction inbound |
 | Litestream R2/B2 «набросать» | **Факт:** минимальный checklist + yaml |
-| Stream Tools person merge | **Факт «неизвестно»** — проектируем сами |
+| Stream Tools person merge | **Факт:** локальная аналитическая БД на публичке есть; Person/merge UI **неизвестно** — проектируем сами |
+
+---
+
+## 7. Twitch OAuth refresh — definitive vs transient failure
+
+**Источник:** https://dev.twitch.tv/docs/authentication/refresh-tokens/ (проверено 2026-10-07).
+
+| Случай | HTTP / body | Поведение продукта |
+|--------|-------------|-------------------|
+| Invalid / revoked refresh | **400** (пример docs: `message: Invalid refresh token`) или **401**; OAuth `error` `invalid_grant` / unauthorized equivalents | Clear tokens → `TWITCH_REAUTH_REQUIRED` (без reconnect loop) |
+| Rate limit / upstream | **429**, **5xx** | **Keep** tokens; transient error → существующий reconnect/backoff |
+| Network / timeout | нет HTTP ответа | **Keep** tokens; transient |
+
+Дополнительно (docs): public-client refresh tokens **истекают через 30 дней**; concurrent refresh — лимит ~50 access tokens на один refresh (single-flight в коде).
+
+## 8. EventSub WebSocket — reconnect / keepalive
+
+**Источники:** https://dev.twitch.tv/docs/eventsub/handling-websocket-events , https://dev.twitch.tv/docs/eventsub/websocket-reference/
+
+| Факт | Деталь |
+|------|--------|
+| Endpoint | `wss://eventsub.wss.twitch.tv/ws` (+ опц. `keepalive_timeout_seconds` 10–600) |
+| Keepalive | Если нет notification/keepalive дольше `keepalive_timeout_seconds` → считать соединение мёртвым, reconnect + resubscribe |
+| `session_reconnect` | Сразу открыть `reconnect_url`; **не** закрывать старый сокет до Welcome на новом (~30s окно) |
+| Delivery | At-least-once; повтор с тем же `message_id` → dedupe по provider id |
 
 ---
 
@@ -225,4 +252,10 @@ Litestream v0.5+ автодетектит `*.r2.cloudflarestorage.com` (`sign-pa
 - Auto-link uses `matchKey` (strip `@`/`#`) for unique cross-source matches only; `candidateKey` stays suggestion-only without stripping.
 - Litestream example checked against research checklist; script no-ops without credentials.
 - Streamer.bot: interface + stub; live client deferred.
+
+### Twitch refresh failure classification (2026-10-07)
+
+- Definitive auth failure (clear + reauth): HTTP **400/401** and/or body `error` `invalid_grant` (unauthorized / invalid_token / «Invalid refresh token»).
+- Transient (keep tokens): **429**, **5xx**, network/timeout → `TWITCH_REFRESH_HTTP_*` / underlying error for reconnect/backoff.
+- Full audit trail: [docs-audit.md](./docs-audit.md).
 
