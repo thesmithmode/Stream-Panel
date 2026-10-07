@@ -219,7 +219,7 @@ test(
           c.status.capabilities.history === "Импорт доступных страниц завершён",
         10000,
       );
-      assert.equal(c.status.capabilities.realtime, "connected");
+      assert.equal(c.status.capabilities.realtime, "подключено");
       const summary = await f.db.call("summary");
       assert.equal(summary.donations, 2);
       assert.equal(summary.totals.RUB, "58");

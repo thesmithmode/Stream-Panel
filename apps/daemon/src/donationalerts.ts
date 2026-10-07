@@ -5,6 +5,7 @@ import type { Configuration } from "./config.js";
 import type { StoreClient } from "./db.js";
 import {
   moneyToMinor,
+  daDonorExternalId,
   type EventInput,
 } from "../../../packages/core/src/domain.js";
 import {
@@ -55,7 +56,9 @@ export function normalizeDonation(
     accountId,
     externalId: id,
     type: "donation",
-    actor: name.trim() ? { externalId: id, displayName: name } : null,
+    actor: name.trim()
+      ? { externalId: daDonorExternalId(name), displayName: name }
+      : null,
     occurredAtMs,
     receivedAtMs: Date.now(),
     sourceTime,
@@ -274,7 +277,7 @@ export class DonationAlertsConnection {
     );
     this.socket = socket;
     const deadline = setTimeout(() => {
-      this.status.capabilities.realtime = "Handshake timeout";
+      this.status.capabilities.realtime = "Таймаут рукопожатия";
       socket.terminate();
     }, 20000);
     let subscribed = false;
@@ -286,7 +289,7 @@ export class DonationAlertsConnection {
     const liveness = setInterval(() => {
       if (this.stopped || generation !== this.generation) return;
       if (Date.now() - lastSeen > 45_000) {
-        this.status.capabilities.realtime = "silent";
+        this.status.capabilities.realtime = "тихо";
         socket.terminate();
         return;
       }
@@ -344,7 +347,7 @@ export class DonationAlertsConnection {
               String(message.id) === "2")
           ) {
             clearTimeout(deadline);
-            this.status.capabilities.realtime = "connected";
+            this.status.capabilities.realtime = "подключено";
             this.status.state = "connected";
             this.status.detail = "Сбор донатов включён";
           }
@@ -368,12 +371,12 @@ export class DonationAlertsConnection {
       clearTimeout(deadline);
       clearInterval(liveness);
       if (!this.stopped && generation === this.generation) {
-        this.status.capabilities.realtime = "disconnected";
+        this.status.capabilities.realtime = "отключено";
         this.schedule();
       }
     });
     socket.on("error", () => {
-      this.status.capabilities.realtime = "WebSocket error";
+      this.status.capabilities.realtime = "Ошибка WebSocket";
     });
   }
   async scanHistory(): Promise<void> {

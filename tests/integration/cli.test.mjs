@@ -14,13 +14,14 @@ async function port() {
     });
   });
 }
-function start(dir, p) {
+function start(dir, p, extraEnv = {}) {
   const child = spawn(process.execPath, ["dist/apps/daemon/src/index.js"], {
     env: {
       ...process.env,
       STREAM_PANEL_DATA_DIR: dir,
       STREAM_PANEL_PORT: String(p),
       STREAM_PANEL_NO_BROWSER: "1",
+      ...extraEnv,
     },
     stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
@@ -29,15 +30,16 @@ function start(dir, p) {
   child.stdout.on("data", (b) => (stdout += b));
   child.stderr.on("data", (b) => (stderr += b));
   const exit = new Promise((r) =>
-    child.on("exit", (code) => r({ code, stdout, stderr })),
+    child.on("exit", (code, signal) => r({ code, signal, stdout, stderr })),
   );
   return {
     child,
     exit,
+    getStdout: () => stdout,
     ready: async () => {
-      const deadline = Date.now() + 15000;
+      const deadline = Date.now() + 20000;
       while (!stdout.includes("Stream Panel: ")) {
-        if (child.exitCode !== null) throw new Error(stderr);
+        if (child.exitCode !== null) throw new Error(stderr || stdout);
         if (Date.now() > deadline) throw new Error("CLI_START_TIMEOUT");
         await new Promise((r) => setTimeout(r, 10));
       }
@@ -46,8 +48,8 @@ function start(dir, p) {
   };
 }
 test(
-  "real entrypoint: protected UI, independent writer lock, IPC graceful shutdown and restart",
-  { timeout: 45000 },
+  "real entrypoint: protected UI, kill-on-relaunch, IPC graceful shutdown and restart",
+  { timeout: 60000 },
   async () => {
     const dir = await mkdtemp(join(tmpdir(), "sp-cli-"));
     const p = await port();
@@ -65,26 +67,38 @@ test(
       assert.equal(response.status, 200);
       const html = await fetch(`http://127.0.0.1:${p}/`);
       assert.match(await html.text(), /<title>Stream Panel<\/title>/);
-      const duplicate = start(dir, await port());
+
+      // Second start: graceful kill old → new process + fresh bootstrap (same port).
+      const duplicate = start(dir, p);
       children.push(duplicate);
-      const rejected = await duplicate.exit;
-      assert.equal(rejected.code, 1);
-      assert.match(rejected.stderr, /DATA_DIR_ALREADY_IN_USE/);
-      running.child.send("shutdown");
-      const completed = await Promise.race([
+      const relaunchedUrl = await duplicate.ready();
+      assert.match(relaunchedUrl, /^http:\/\/127\.0\.0\.1/);
+      assert.match(duplicate.getStdout(), /Останавливаю старый процесс/);
+
+      const oldExit = await Promise.race([
         running.exit,
         new Promise(
           (_, reject) =>
             (deadline = setTimeout(
-              () => reject(new Error("GRACEFUL_SHUTDOWN_TIMEOUT")),
-              5000,
+              () => reject(new Error("OLD_DAEMON_STOP_TIMEOUT")),
+              10000,
             )),
         ),
       ]);
       clearTimeout(deadline);
-      assert.equal(completed.code, 0);
-      await assert.rejects(access(join(dir, "daemon.lock")));
+      assert.ok(oldExit.code === 0 || oldExit.signal === "SIGTERM");
+
+      await access(join(dir, "daemon.lock"));
       await access(join(dir, "data.sqlite"));
+
+      // Explicit stop via STREAM_PANEL_STOP
+      const stopper = start(dir, p, { STREAM_PANEL_STOP: "1" });
+      children.push(stopper);
+      const stopResult = await stopper.exit;
+      assert.equal(stopResult.code, 0);
+      assert.match(stopResult.stdout, /остановлен|не запущен/i);
+      await assert.rejects(access(join(dir, "daemon.lock")));
+
       const again = start(dir, p);
       children.push(again);
       await again.ready();

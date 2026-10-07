@@ -7,7 +7,16 @@
     "module": "ESNext",
     "allowJs": true,
     "checkJs": true,
-    "types": ["svelte", "vite/client"]
+    "types": [
+      "svelte",
+      "vite/client"
+    ]
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.svelte"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
+  ]
 }

@@ -67,7 +67,7 @@ export async function seed(a) {
     accountId: "test-recipient",
     externalId: "123",
     type: "donation",
-    actor: { externalId: "123", displayName: "Донатер отдельно" },
+    actor: { externalId: "name:донатер отдельно", displayName: "Донатер отдельно" },
     occurredAtMs: null,
     receivedAtMs: now,
     sourceTime: "2026-10-06 20:00:00",

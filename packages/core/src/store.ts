@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   candidateKey,
   matchKey,
+  daDonorExternalId,
   eventKey,
   assertTimestamp,
   type EventInput,
@@ -67,6 +68,9 @@ export class StreamStore {
             update.run(matchKey(row.display_name), row.id);
         })();
       }
+      // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
+      // Person = link umbrella. Collapse historical per-tip DA identity dupes.
+      this.db.transaction(() => this.collapseDuplicateDaDonors())();
     } catch (error) {
       this.db.close();
       throw error;
@@ -88,12 +92,10 @@ export class StreamStore {
       throw new Error("MISSING_EVENT_KEY");
     if ((event.timeQuality === "unknown") !== (event.occurredAtMs === null))
       throw new Error("INVALID_TIME_QUALITY");
-    if (
-      event.source === "donationalerts" &&
-      event.actor &&
-      event.actor.externalId !== event.externalId
-    ) {
-      throw new Error("DA_ACTOR_MUST_BE_DONATION_OCCURRENCE");
+    if (event.source === "donationalerts" && event.actor) {
+      // Donor identity is name-scoped; event.externalId remains the donation occurrence id.
+      if (event.actor.externalId !== daDonorExternalId(event.actor.displayName))
+        throw new Error("DA_ACTOR_MUST_BE_DONOR_NAME");
     }
     if (event.actor && !event.actor.externalId)
       throw new Error("MISSING_ACTOR_KEY");
@@ -126,6 +128,37 @@ export class StreamStore {
             .get(event.source, event.accountId, event.actor.externalId) as
             | IdentityRow
             | undefined) ?? null;
+        // Legacy DA rows keyed donation id per tip — reuse Donor by match_key.
+        if (!identity && event.source === "donationalerts") {
+          const key = matchKey(event.actor.displayName);
+          if (key) {
+            identity =
+              (this.db
+                .prepare(
+                  `SELECT id, person_id FROM identities
+                   WHERE source = 'donationalerts' AND account_id = ? AND match_key = ?
+                   ORDER BY CASE WHEN external_id LIKE 'name:%' THEN 0 ELSE 1 END, id
+                   LIMIT 1`,
+                )
+                .get(event.accountId, key) as IdentityRow | undefined) ?? null;
+            if (identity) {
+              // Promote legacy occurrence-keyed Donor to stable name key when free.
+              const stable = daDonorExternalId(event.actor.displayName);
+              const taken = this.db
+                .prepare(
+                  "SELECT id FROM identities WHERE source = ? AND account_id = ? AND external_id = ?",
+                )
+                .get("donationalerts", event.accountId, stable) as
+                | { id: string }
+                | undefined;
+              if (!taken) {
+                this.db
+                  .prepare("UPDATE identities SET external_id = ? WHERE id = ?")
+                  .run(stable, identity.id);
+              }
+            }
+          }
+        }
         if (!identity) {
           newIdentity = true;
           const linked = this.resolveAutoLinkPerson(
@@ -134,7 +167,7 @@ export class StreamStore {
             event.actor.externalId,
             event.actor.displayName,
           );
-          const personId = linked ?? randomUUID();
+          const personId = linked?.personId ?? randomUUID();
           autoLinked = linked !== null;
           identity = { id: randomUUID(), person_id: personId };
           if (!linked) {
@@ -157,6 +190,11 @@ export class StreamStore {
               matchKey(event.actor.displayName),
             );
           if (linked) {
+            const how =
+              event.source === "twitch" &&
+              event.actor.externalId === event.accountId
+                ? "owner"
+                : linked.how;
             this.db
               .prepare(
                 "INSERT INTO membership_operations VALUES (?, ?, ?, ?, ?)",
@@ -169,11 +207,7 @@ export class StreamStore {
                   {
                     id: identity.id,
                     personId,
-                    how:
-                      event.source === "twitch" &&
-                      event.actor.externalId === event.accountId
-                        ? "owner"
-                        : "login_match",
+                    how,
                   },
                 ]),
                 event.receivedAtMs,
@@ -395,17 +429,221 @@ export class StreamStore {
 
 
   /**
+   * Repair historical DA Person/Donor duplication: same recipient account +
+   * same display match_key must be ONE Donor identity under ONE Person when
+   * unambiguous (persons whose membership is only that DA name group).
+   * Viewer (Twitch) identities are never collapsed by name.
+   * Never moves events across a non-mergeable (e.g. Twitch-linked) person
+   * boundary — only collapses within a mergeable set or within one person.
+   */
+  collapseDuplicateDaDonors(): void {
+    const groups = this.db
+      .prepare(
+        `SELECT account_id, match_key
+         FROM identities
+         WHERE source = 'donationalerts' AND match_key != ''
+         GROUP BY account_id, match_key
+         HAVING COUNT(*) > 1`,
+      )
+      .all() as { account_id: string; match_key: string }[];
+    for (const group of groups) {
+      const rows = this.db
+        .prepare(
+          `SELECT id, person_id AS personId, external_id AS externalId
+           FROM identities
+           WHERE source = 'donationalerts' AND account_id = ? AND match_key = ?`,
+        )
+        .all(group.account_id, group.match_key) as {
+        id: string;
+        personId: string;
+        externalId: string;
+      }[];
+      if (rows.length <= 1) continue;
+      const ids = rows.map((r) => r.id);
+      const idMeta = new Map(
+        rows.map((r) => [r.id, { personId: r.personId, externalId: r.externalId }]),
+      );
+      const personIds = [...new Set(rows.map((r) => r.personId))];
+
+      const mergeable: string[] = [];
+      const protectedPersons: string[] = [];
+      for (const personId of personIds) {
+        const members = this.db
+          .prepare(
+            "SELECT id, match_key, source FROM identities WHERE person_id = ?",
+          )
+          .all(personId) as { id: string; match_key: string; source: string }[];
+        const pure = members.every(
+          (m) =>
+            m.source === "donationalerts" &&
+            m.match_key === group.match_key &&
+            ids.includes(m.id),
+        );
+        if (pure) mergeable.push(personId);
+        else protectedPersons.push(personId);
+      }
+
+      const eventCount = (identityId: string): number => {
+        const row = this.db
+          .prepare("SELECT count(*) AS n FROM events WHERE identity_id = ?")
+          .get(identityId) as { n: number };
+        return row.n;
+      };
+      const personEventCount = (personId: string): number => {
+        const row = this.db
+          .prepare(
+            `SELECT count(*) AS n FROM events e
+             JOIN identities i ON i.id = e.identity_id
+             WHERE i.person_id = ?`,
+          )
+          .get(personId) as { n: number };
+        return row.n;
+      };
+
+      if (mergeable.length > 0) {
+        mergeable.sort((a, b) => {
+          const aHasName = rows.some(
+            (r) => r.personId === a && r.externalId.startsWith("name:"),
+          );
+          const bHasName = rows.some(
+            (r) => r.personId === b && r.externalId.startsWith("name:"),
+          );
+          if (aHasName !== bHasName) return aHasName ? -1 : 1;
+          const d = personEventCount(b) - personEventCount(a);
+          if (d !== 0) return d;
+          return a < b ? -1 : a > b ? 1 : 0;
+        });
+        const mergeableTarget = mergeable[0]!;
+        for (const source of mergeable.slice(1)) {
+          this.db
+            .prepare("UPDATE identities SET person_id = ? WHERE person_id = ?")
+            .run(mergeableTarget, source);
+          this.db
+            .prepare(
+              "UPDATE persons SET revision = revision + 1 WHERE id IN (?, ?)",
+            )
+            .run(source, mergeableTarget);
+          for (const meta of idMeta.values()) {
+            if (meta.personId === source) meta.personId = mergeableTarget;
+          }
+        }
+      }
+
+      const buckets = new Map<string, string[]>();
+      for (const id of ids) {
+        const personId = idMeta.get(id)!.personId;
+        const list = buckets.get(personId) ?? [];
+        list.push(id);
+        buckets.set(personId, list);
+      }
+
+      const stable = `name:${group.match_key}`;
+      for (const [, bucket] of buckets) {
+        if (bucket.length <= 1) continue;
+        const scored = [...bucket].sort((a, b) => {
+          const aName = idMeta.get(a)!.externalId.startsWith("name:");
+          const bName = idMeta.get(b)!.externalId.startsWith("name:");
+          if (aName !== bName) return aName ? -1 : 1;
+          const aProt = protectedPersons.includes(idMeta.get(a)!.personId);
+          const bProt = protectedPersons.includes(idMeta.get(b)!.personId);
+          if (aProt !== bProt) return aProt ? -1 : 1;
+          const d = eventCount(b) - eventCount(a);
+          if (d !== 0) return d;
+          return a < b ? -1 : a > b ? 1 : 0;
+        });
+        let canonical = scored[0]!;
+        const taken = this.db
+          .prepare(
+            "SELECT id FROM identities WHERE source = 'donationalerts' AND account_id = ? AND external_id = ?",
+          )
+          .get(group.account_id, stable) as { id: string } | undefined;
+        if (taken && bucket.includes(taken.id)) canonical = taken.id;
+        else if (!idMeta.get(canonical)!.externalId.startsWith("name:")) {
+          if (!taken) {
+            this.db
+              .prepare("UPDATE identities SET external_id = ? WHERE id = ?")
+              .run(stable, canonical);
+            idMeta.get(canonical)!.externalId = stable;
+          }
+        }
+        for (const id of bucket) {
+          if (id === canonical) continue;
+          this.db
+            .prepare("UPDATE events SET identity_id = ? WHERE identity_id = ?")
+            .run(canonical, id);
+          const polls = this.db
+            .prepare(
+              "SELECT poll_id AS pollId FROM presence_members WHERE identity_id = ?",
+            )
+            .all(id) as { pollId: string }[];
+          const insertMember = this.db.prepare(
+            "INSERT OR IGNORE INTO presence_members(poll_id, identity_id) VALUES (?, ?)",
+          );
+          for (const row of polls) insertMember.run(row.pollId, canonical);
+          this.db
+            .prepare("DELETE FROM presence_members WHERE identity_id = ?")
+            .run(id);
+          const aliases = this.db
+            .prepare(
+              "SELECT name, candidate_key, first_seen_ms, last_seen_ms FROM identity_aliases WHERE identity_id = ?",
+            )
+            .all(id) as {
+            name: string;
+            candidate_key: string;
+            first_seen_ms: number;
+            last_seen_ms: number;
+          }[];
+          const upsertAlias = this.db.prepare(
+            `INSERT INTO identity_aliases(identity_id, name, candidate_key, first_seen_ms, last_seen_ms)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(identity_id, name) DO UPDATE SET
+               last_seen_ms = CASE
+                 WHEN excluded.last_seen_ms > identity_aliases.last_seen_ms
+                 THEN excluded.last_seen_ms ELSE identity_aliases.last_seen_ms END,
+               first_seen_ms = CASE
+                 WHEN excluded.first_seen_ms < identity_aliases.first_seen_ms
+                 THEN excluded.first_seen_ms ELSE identity_aliases.first_seen_ms END`,
+          );
+          for (const a of aliases)
+            upsertAlias.run(
+              canonical,
+              a.name,
+              a.candidate_key,
+              a.first_seen_ms,
+              a.last_seen_ms,
+            );
+          this.db
+            .prepare("DELETE FROM identity_aliases WHERE identity_id = ?")
+            .run(id);
+          this.db.prepare("DELETE FROM identities WHERE id = ?").run(id);
+        }
+        this.db
+          .prepare("INSERT INTO membership_operations VALUES (?, ?, ?, ?, ?)")
+          .run(
+            randomUUID(),
+            "da_donor_collapse",
+            JSON.stringify({ ids: bucket, match_key: group.match_key }),
+            JSON.stringify({ canonical, external_id: stable }),
+            Date.now(),
+          );
+      }
+    }
+  }
+
+  /**
    * High-confidence auto-link target person id, or null.
-   * Exact platform id is handled by caller lookup. Strong name: unique
-   * cross-source match_key (exactly one person). Owner person is created via
-   * ensureOwnerIdentity so DA donations matching the owner login link here.
+   * Exact platform id / Donor name key is handled by caller lookup.
+   * Strong name: unique cross-source match_key (exactly one person) — FR07 KEEP.
+   * Same-source DA fallback: if a Donor identity was not reused, attach a new
+   * Donor row to an existing Person that already owns that DA match_key
+   * (historical repair path). Prefer one Donor identity per name going forward.
    */
   private resolveAutoLinkPerson(
     source: Source,
-    _accountId: string,
+    accountId: string,
     _externalId: string,
     displayName: string,
-  ): string | null {
+  ): { personId: string; how: string } | null {
     const key = matchKey(displayName);
     if (!key) return null;
     const other = source === "twitch" ? "donationalerts" : "twitch";
@@ -415,7 +653,19 @@ export class StreamStore {
          WHERE source = ? AND match_key = ?`,
       )
       .all(other, key) as { person_id: string }[];
-    if (rows.length === 1) return rows[0]!.person_id;
+    if (rows.length === 1) return { personId: rows[0]!.person_id, how: "login_match" };
+    // DA actor external_id is the donation occurrence id, so reuse by name.
+    if (source === "donationalerts") {
+      const same = this.db
+        .prepare(
+          `SELECT DISTINCT person_id FROM identities
+           WHERE source = 'donationalerts' AND account_id = ? AND match_key = ?
+           ORDER BY person_id`,
+        )
+        .all(accountId, key) as { person_id: string }[];
+      if (same.length >= 1)
+        return { personId: same[0]!.person_id, how: "da_name_attach" };
+    }
     return null;
   }
 

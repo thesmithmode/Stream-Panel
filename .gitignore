@@ -13,3 +13,7 @@ secrets/
 *.log
 artifacts/
 release-assets/
+
+# Out-of-tree live credentials (never commit)
+stream-panel-live-creds/
+**/stream-panel-live-creds/
