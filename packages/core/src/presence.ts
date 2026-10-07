@@ -63,3 +63,25 @@ export function clampChattersPollSeconds(value: unknown): number {
   if (!Number.isFinite(n)) return 60;
   return Math.min(120, Math.max(60, Math.round(n)));
 }
+
+/** Inclusive minute buckets covered by a complete poll window (same as presenceMinutes). */
+export function pollCoveredMinutes(
+  startedAtMs: number,
+  completedAtMs: number,
+  fromMs?: number,
+  toMs?: number,
+): number[] {
+  assertTimestamp(startedAtMs);
+  assertTimestamp(completedAtMs);
+  if (completedAtMs < startedAtMs) throw new Error("INVALID_POLL_WINDOW");
+  const first = Math.floor(startedAtMs / 60_000) * 60_000;
+  const last = Math.floor(completedAtMs / 60_000) * 60_000;
+  const out: number[] = [];
+  for (let minute = first; minute <= last; minute += 60_000) {
+    if (fromMs !== undefined && minute < fromMs) continue;
+    if (toMs !== undefined && minute >= toMs) continue;
+    out.push(minute);
+  }
+  return out;
+}
+

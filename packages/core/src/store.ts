@@ -10,7 +10,7 @@ import {
 } from "./domain.js";
 import { schemaV1, schemaV2, schemaV3 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
-import { presenceMinutes, type PresencePoll } from "./presence.js";
+import { presenceMinutes, pollCoveredMinutes, type PresencePoll } from "./presence.js";
 
 interface IdentityRow {
   id: string;
@@ -848,6 +848,111 @@ export class StreamStore {
           .get(latest.id, botJson) as { n: number }
       ).n;
     }
+    const unique = this.db
+      .prepare(
+        `SELECT
+          (SELECT count(DISTINCT i.person_id) FROM events e
+            JOIN identities i ON i.id = e.identity_id
+            WHERE ${inSession}
+              AND i.match_key NOT IN (SELECT value FROM json_each(?))
+          ) AS unique_persons_events,
+          (SELECT count(DISTINCT i.id) FROM events e
+            JOIN identities i ON i.id = e.identity_id
+            WHERE ${inSession}
+              AND i.match_key NOT IN (SELECT value FROM json_each(?))
+          ) AS unique_identities_events`,
+      )
+      .get(sid, sid, botJson, sid, sid, botJson) as {
+      unique_persons_events: number;
+      unique_identities_events: number;
+    };
+    let uniquePersonsObserved: number | null = null;
+    let uniqueIdentitiesObserved: number | null = null;
+    let coverage: {
+      knownMinutes: number;
+      totalMinutes: number;
+      ratio: number | null;
+    } | null = null;
+    let messagesPerMinuteOfSession: number | null = null;
+    let sessionDurationMs: number | null = null;
+    let chattersOverTime: { atMs: number; chatters: number }[] = [];
+    let gapCount = 0;
+    if (sessionId) {
+      const session = this.db
+        .prepare("SELECT started_at_ms, ended_at_ms FROM sessions WHERE id=?")
+        .get(sessionId) as
+        | { started_at_ms: number; ended_at_ms: number | null }
+        | undefined;
+      if (session) {
+        const fromMs = Math.floor(session.started_at_ms / 60_000) * 60_000;
+        const endMs = session.ended_at_ms ?? Date.now();
+        const toMs = Math.ceil(endMs / 60_000) * 60_000;
+        sessionDurationMs = Math.max(0, endMs - session.started_at_ms);
+        const durationMin = sessionDurationMs / 60_000;
+        messagesPerMinuteOfSession =
+          durationMin > 0
+            ? Math.round((counts.messages / durationMin) * 1000) / 1000
+            : null;
+        const cov = this.sessionCoverage(sessionId, fromMs, toMs);
+        coverage = cov;
+        uniquePersonsObserved = (
+          this.db
+            .prepare(
+              `SELECT count(DISTINCT i.person_id) AS n
+               FROM presence_members m
+               JOIN presence_polls p ON p.id = m.poll_id
+               JOIN identities i ON i.id = m.identity_id
+               WHERE p.session_id = ? AND p.status = 'complete'
+                 AND i.match_key NOT IN (SELECT value FROM json_each(?))`,
+            )
+            .get(sessionId, botJson) as { n: number }
+        ).n;
+        uniqueIdentitiesObserved = (
+          this.db
+            .prepare(
+              `SELECT count(DISTINCT i.id) AS n
+               FROM presence_members m
+               JOIN presence_polls p ON p.id = m.poll_id
+               JOIN identities i ON i.id = m.identity_id
+               WHERE p.session_id = ? AND p.status = 'complete'
+                 AND i.match_key NOT IN (SELECT value FROM json_each(?))`,
+            )
+            .get(sessionId, botJson) as { n: number }
+        ).n;
+        const pollRows = this.db
+          .prepare(
+            `SELECT p.id, p.completed_at_ms FROM presence_polls p
+             WHERE p.session_id = ? AND p.status = 'complete'
+             ORDER BY p.completed_at_ms ASC LIMIT 200`,
+          )
+          .all(sessionId) as { id: string; completed_at_ms: number }[];
+        const chatterStmt = this.db.prepare(
+          `SELECT count(*) AS n FROM presence_members m
+           JOIN identities i ON i.id = m.identity_id
+           WHERE m.poll_id = ?
+             AND i.match_key NOT IN (SELECT value FROM json_each(?))`,
+        );
+        chattersOverTime = pollRows.map((row) => ({
+          atMs: row.completed_at_ms,
+          chatters: (chatterStmt.get(row.id, botJson) as { n: number }).n,
+        }));
+        gapCount = (
+          this.db
+            .prepare(
+              `SELECT count(*) AS n FROM collection_gaps g
+               WHERE g.started_at_ms < ?
+                 AND (g.ended_at_ms IS NULL OR g.ended_at_ms > ?)`,
+            )
+            .get(toMs, session.started_at_ms) as { n: number }
+        ).n;
+      }
+    } else {
+      gapCount = (
+        this.db.prepare("SELECT count(*) AS n FROM collection_gaps").get() as {
+          n: number;
+        }
+      ).n;
+    }
     return {
       messages: counts.messages,
       donations: counts.donations,
@@ -856,6 +961,15 @@ export class StreamStore {
       lastPollAtMs: latest?.completed_at_ms ?? null,
       events: counts.events,
       excludedBots: botKeys.length,
+      uniquePersons: unique.unique_persons_events,
+      uniqueIdentities: unique.unique_identities_events,
+      uniquePersonsObserved,
+      uniqueIdentitiesObserved,
+      messagesPerMinuteOfSession,
+      sessionDurationMs,
+      coverage,
+      chattersOverTime,
+      gapCount,
     };
   }
 
@@ -982,6 +1096,743 @@ export class StreamStore {
         "SELECT id, source_person_id, target_person_id, created_at_ms, undone_at_ms FROM person_merges ORDER BY created_at_ms DESC LIMIT 100",
       )
       .all() as Record<string, unknown>[];
+  }
+
+
+  private sessionRow(sessionId: string): {
+    started_at_ms: number;
+    ended_at_ms: number | null;
+  } {
+    const row = this.db
+      .prepare("SELECT started_at_ms, ended_at_ms FROM sessions WHERE id=?")
+      .get(sessionId) as
+      | { started_at_ms: number; ended_at_ms: number | null }
+      | undefined;
+    if (!row) throw new Error("SESSION_NOT_FOUND");
+    return row;
+  }
+
+  private sessionMinuteWindow(
+    sessionId: string,
+    nowMs = Date.now(),
+  ): { fromMs: number; toMs: number; startedAtMs: number; endedAtMs: number | null } {
+    const session = this.sessionRow(sessionId);
+    const fromMs = Math.floor(session.started_at_ms / 60_000) * 60_000;
+    const endMs = session.ended_at_ms ?? nowMs;
+    let toMs = Math.ceil(endMs / 60_000) * 60_000;
+    if (toMs < fromMs) toMs = fromMs;
+    if (toMs - fromMs > 31 * 86_400_000) toMs = fromMs + 31 * 86_400_000;
+    return {
+      fromMs,
+      toMs,
+      startedAtMs: session.started_at_ms,
+      endedAtMs: session.ended_at_ms,
+    };
+  }
+
+  private sessionCoverage(
+    sessionId: string,
+    fromMs: number,
+    toMs: number,
+  ): { knownMinutes: number; totalMinutes: number; ratio: number | null } {
+    const totalMinutes = Math.max(0, (toMs - fromMs) / 60_000);
+    const polls = this.db
+      .prepare(
+        `SELECT started_at_ms, completed_at_ms FROM presence_polls
+         WHERE session_id=? AND status='complete'
+           AND started_at_ms < ? AND completed_at_ms >= ?`,
+      )
+      .all(sessionId, toMs, fromMs) as {
+      started_at_ms: number;
+      completed_at_ms: number;
+    }[];
+    const known = new Set<number>();
+    for (const poll of polls)
+      for (const minute of pollCoveredMinutes(
+        poll.started_at_ms,
+        poll.completed_at_ms,
+        fromMs,
+        toMs,
+      ))
+        known.add(minute);
+    return {
+      knownMinutes: known.size,
+      totalMinutes,
+      ratio: totalMinutes > 0 ? Math.round((known.size / totalMinutes) * 1000) / 1000 : null,
+    };
+  }
+
+  private observedMinutesForPerson(
+    sessionId: string,
+    personId: string,
+    fromMs: number,
+    toMs: number,
+  ): { observedMinutes: number; firstObservedMs: number | null; lastObservedMs: number | null } {
+    const polls = this.db
+      .prepare(
+        `SELECT p.started_at_ms, p.completed_at_ms FROM presence_polls p
+         WHERE p.session_id=? AND p.status='complete'
+           AND p.started_at_ms < ? AND p.completed_at_ms >= ?
+           AND EXISTS (
+             SELECT 1 FROM presence_members m
+             JOIN identities i ON i.id = m.identity_id
+             WHERE m.poll_id = p.id AND i.person_id = ?
+           )`,
+      )
+      .all(sessionId, toMs, fromMs, personId) as {
+      started_at_ms: number;
+      completed_at_ms: number;
+    }[];
+    const observed = new Set<number>();
+    for (const poll of polls)
+      for (const minute of pollCoveredMinutes(
+        poll.started_at_ms,
+        poll.completed_at_ms,
+        fromMs,
+        toMs,
+      ))
+        observed.add(minute);
+    let firstObservedMs: number | null = null;
+    let lastObservedMs: number | null = null;
+    for (const minute of observed) {
+      if (firstObservedMs === null || minute < firstObservedMs)
+        firstObservedMs = minute;
+      if (lastObservedMs === null || minute > lastObservedMs)
+        lastObservedMs = minute;
+    }
+    return { observedMinutes: observed.size, firstObservedMs, lastObservedMs };
+  }
+
+  private botJson(excludedBotLogins: readonly string[] = []): string {
+    return JSON.stringify([...botExclusionSet(excludedBotLogins)]);
+  }
+
+  private notBotClause(alias = "i"): string {
+    return `${alias}.match_key NOT IN (SELECT value FROM json_each(?))`;
+  }
+
+  personStats(
+    personId: string,
+    sessionId?: string,
+    excludedBotLogins: readonly string[] = [],
+  ): Record<string, unknown> {
+    const person = this.db
+      .prepare("SELECT id, display_name FROM persons WHERE id=?")
+      .get(personId) as { id: string; display_name: string } | undefined;
+    if (!person) throw new Error("PERSON_NOT_FOUND");
+    const botJson = this.botJson(excludedBotLogins);
+    const sid = sessionId ?? null;
+    const inSession =
+      "(? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?))";
+    const messageCount = (
+      this.db
+        .prepare(
+          `SELECT count(*) AS n FROM events e
+           JOIN identities i ON i.id = e.identity_id
+           WHERE i.person_id = ? AND ${inSession}
+             AND e.type = 'chat.message'
+             AND (
+               json_extract(e.payload_json, '$.originChannelId') IS NULL
+               OR json_extract(e.payload_json, '$.originChannelId') = e.account_id
+             )
+             AND ${this.notBotClause("i")}`,
+        )
+        .get(personId, sid, sid, botJson) as { n: number }
+    ).n;
+    const donationRows = this.db
+      .prepare(
+        `SELECT json_extract(e.payload_json, '$.currency') AS currency,
+                json_extract(e.payload_json, '$.amountMinor') AS amount_minor
+         FROM events e
+         JOIN identities i ON i.id = e.identity_id
+         WHERE i.person_id = ? AND ${inSession} AND e.type = 'donation'
+           AND json_extract(e.payload_json, '$.currency') IS NOT NULL
+           AND json_extract(e.payload_json, '$.amountMinor') IS NOT NULL`,
+      )
+      .all(personId, sid, sid) as { currency: string; amount_minor: string }[];
+    const donationTotals: Record<string, string> = {};
+    for (const row of donationRows) {
+      donationTotals[row.currency] = (
+        BigInt(donationTotals[row.currency] ?? "0") + BigInt(row.amount_minor)
+      ).toString();
+    }
+    const donationCount = donationRows.length;
+    const eventBounds = this.db
+      .prepare(
+        `SELECT
+           min(coalesce(e.occurred_at_ms, e.received_at_ms)) AS first_event_ms,
+           max(coalesce(e.occurred_at_ms, e.received_at_ms)) AS last_event_ms
+         FROM events e
+         JOIN identities i ON i.id = e.identity_id
+         WHERE i.person_id = ? AND ${inSession}`,
+      )
+      .get(personId, sid, sid) as {
+      first_event_ms: number | null;
+      last_event_ms: number | null;
+    };
+    let observedMinutesThisSession: number | null = null;
+    let firstObservedMs: number | null = null;
+    let lastObservedMs: number | null = null;
+    if (sessionId) {
+      const window = this.sessionMinuteWindow(sessionId);
+      const obs = this.observedMinutesForPerson(
+        sessionId,
+        personId,
+        window.fromMs,
+        window.toMs,
+      );
+      observedMinutesThisSession = obs.observedMinutes;
+      firstObservedMs = obs.firstObservedMs;
+      lastObservedMs = obs.lastObservedMs;
+    } else {
+      const bounds = this.db
+        .prepare(
+          `SELECT min(p.completed_at_ms) AS first_ms, max(p.completed_at_ms) AS last_ms
+           FROM presence_polls p
+           JOIN presence_members m ON m.poll_id = p.id
+           JOIN identities i ON i.id = m.identity_id
+           WHERE i.person_id = ? AND p.status = 'complete'`,
+        )
+        .get(personId) as { first_ms: number | null; last_ms: number | null };
+      firstObservedMs = bounds.first_ms;
+      lastObservedMs = bounds.last_ms;
+    }
+    const sessions = this.db
+      .prepare(
+        `SELECT id, started_at_ms, ended_at_ms FROM sessions
+         ORDER BY started_at_ms DESC LIMIT 50`,
+      )
+      .all() as {
+      id: string;
+      started_at_ms: number;
+      ended_at_ms: number | null;
+    }[];
+    let observedSum = 0;
+    let observedSessions = 0;
+    let offsetSum = 0;
+    let offsetSessions = 0;
+    for (const session of sessions) {
+      const fromMs = Math.floor(session.started_at_ms / 60_000) * 60_000;
+      const endMs = session.ended_at_ms ?? Date.now();
+      let toMs = Math.ceil(endMs / 60_000) * 60_000;
+      if (toMs - fromMs > 31 * 86_400_000) continue;
+      if (toMs <= fromMs) continue;
+      const obs = this.observedMinutesForPerson(
+        session.id,
+        personId,
+        fromMs,
+        toMs,
+      );
+      if (obs.observedMinutes > 0) {
+        observedSum += obs.observedMinutes;
+        observedSessions += 1;
+        if (obs.firstObservedMs !== null) {
+          offsetSum += Math.max(0, obs.firstObservedMs - session.started_at_ms);
+          offsetSessions += 1;
+        }
+      }
+    }
+    return {
+      personId: person.id,
+      displayName: person.display_name,
+      sessionId: sessionId ?? null,
+      messageCount,
+      donationCount,
+      donationTotals,
+      firstEventMs: eventBounds.first_event_ms,
+      lastEventMs: eventBounds.last_event_ms,
+      firstObservedMs,
+      lastObservedMs,
+      observedMinutesThisSession,
+      avgObservedMinutes:
+        observedSessions > 0
+          ? Math.round((observedSum / observedSessions) * 1000) / 1000
+          : null,
+      avgFirstObservedOffsetMs:
+        offsetSessions > 0
+          ? Math.round(offsetSum / offsetSessions)
+          : null,
+      sessionsWithObservation: observedSessions,
+    };
+  }
+
+  personsTop(
+    sortBy: "messages" | "donations" | "observed_minutes" = "messages",
+    sessionId?: string,
+    excludedBotLogins: readonly string[] = [],
+    limit = 50,
+  ): Record<string, unknown>[] {
+    if (!["messages", "donations", "observed_minutes"].includes(sortBy))
+      throw new Error("INVALID_SORT");
+    const capped = Math.min(Math.max(1, Math.floor(limit) || 50), 100);
+    const botJson = this.botJson(excludedBotLogins);
+    const sid = sessionId ?? null;
+    const inSession =
+      "(? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?))";
+    if (sortBy === "observed_minutes") {
+      if (!sessionId) {
+        // All-time: sum observed minutes across recent sessions is expensive;
+        // rank by distinct complete polls instead as a proxy, then attach minutes for top candidates.
+        const rows = this.db
+          .prepare(
+            `SELECT p.id, p.display_name, p.revision,
+               (SELECT group_concat(DISTINCT i2.source) FROM identities i2 WHERE i2.person_id=p.id) AS sources,
+               count(DISTINCT poll.id) AS poll_count
+             FROM persons p
+             JOIN identities i ON i.person_id = p.id
+             JOIN presence_members m ON m.identity_id = i.id
+             JOIN presence_polls poll ON poll.id = m.poll_id AND poll.status='complete'
+             WHERE ${this.notBotClause("i")}
+             GROUP BY p.id
+             ORDER BY poll_count DESC, p.display_name
+             LIMIT ?`,
+          )
+          .all(botJson, capped) as Record<string, unknown>[];
+        return rows.map((row) => {
+          const sessions = this.db
+            .prepare(
+              `SELECT DISTINCT poll.session_id AS id FROM presence_polls poll
+               JOIN presence_members m ON m.poll_id = poll.id
+               JOIN identities i ON i.id = m.identity_id
+               WHERE i.person_id = ? AND poll.status='complete'
+               LIMIT 20`,
+            )
+            .all(row.id) as { id: string }[];
+          let minutes = 0;
+          for (const s of sessions) {
+            try {
+              const w = this.sessionMinuteWindow(s.id);
+              minutes += this.observedMinutesForPerson(
+                s.id,
+                String(row.id),
+                w.fromMs,
+                w.toMs,
+              ).observedMinutes;
+            } catch {
+              /* skip missing */
+            }
+          }
+          return {
+            id: row.id,
+            display_name: row.display_name,
+            revision: row.revision,
+            sources: row.sources,
+            messageCount: 0,
+            donationCount: 0,
+            donationTotals: {},
+            observedMinutes: minutes,
+          };
+        }).sort((a, b) => (b.observedMinutes as number) - (a.observedMinutes as number));
+      }
+      const window = this.sessionMinuteWindow(sessionId);
+      const candidates = this.db
+        .prepare(
+          `SELECT DISTINCT p.id, p.display_name, p.revision,
+             (SELECT group_concat(DISTINCT i2.source) FROM identities i2 WHERE i2.person_id=p.id) AS sources
+           FROM persons p
+           JOIN identities i ON i.person_id = p.id
+           JOIN presence_members m ON m.identity_id = i.id
+           JOIN presence_polls poll ON poll.id = m.poll_id
+           WHERE poll.session_id = ? AND poll.status = 'complete'
+             AND ${this.notBotClause("i")}`,
+        )
+        .all(sessionId, botJson) as Record<string, unknown>[];
+      return candidates
+        .map((row) => {
+          const obs = this.observedMinutesForPerson(
+            sessionId,
+            String(row.id),
+            window.fromMs,
+            window.toMs,
+          );
+          return {
+            id: row.id,
+            display_name: row.display_name,
+            revision: row.revision,
+            sources: row.sources,
+            messageCount: 0,
+            donationCount: 0,
+            donationTotals: {},
+            observedMinutes: obs.observedMinutes,
+          };
+        })
+        .filter((row) => row.observedMinutes > 0)
+        .sort((a, b) => b.observedMinutes - a.observedMinutes)
+        .slice(0, capped);
+    }
+
+    const typeFilter =
+      sortBy === "messages"
+        ? `e.type = 'chat.message'
+             AND (
+               json_extract(e.payload_json, '$.originChannelId') IS NULL
+               OR json_extract(e.payload_json, '$.originChannelId') = e.account_id
+             )`
+        : `e.type = 'donation'`;
+    const rows = this.db
+      .prepare(
+        `SELECT p.id, p.display_name, p.revision,
+           (SELECT group_concat(DISTINCT i2.source) FROM identities i2 WHERE i2.person_id=p.id) AS sources,
+           count(e.id) AS metric_count
+         FROM persons p
+         JOIN identities i ON i.person_id = p.id
+         JOIN events e ON e.identity_id = i.id
+         WHERE ${inSession} AND ${typeFilter}
+           AND ${this.notBotClause("i")}
+         GROUP BY p.id
+         ORDER BY metric_count DESC, p.display_name
+         LIMIT ?`,
+      )
+      .all(sid, sid, botJson, capped) as Record<string, unknown>[];
+
+    return rows.map((row) => {
+      const donationRows = this.db
+        .prepare(
+          `SELECT json_extract(e.payload_json, '$.currency') AS currency,
+                  json_extract(e.payload_json, '$.amountMinor') AS amount_minor
+           FROM events e
+           JOIN identities i ON i.id = e.identity_id
+           WHERE i.person_id = ? AND ${inSession} AND e.type = 'donation'
+             AND json_extract(e.payload_json, '$.currency') IS NOT NULL
+             AND json_extract(e.payload_json, '$.amountMinor') IS NOT NULL`,
+        )
+        .all(row.id, sid, sid) as { currency: string; amount_minor: string }[];
+      const donationTotals: Record<string, string> = {};
+      for (const d of donationRows) {
+        donationTotals[d.currency] = (
+          BigInt(donationTotals[d.currency] ?? "0") + BigInt(d.amount_minor)
+        ).toString();
+      }
+      const messageCount =
+        sortBy === "messages"
+          ? Number(row.metric_count)
+          : (
+              this.db
+                .prepare(
+                  `SELECT count(*) AS n FROM events e
+                   JOIN identities i ON i.id = e.identity_id
+                   WHERE i.person_id = ? AND ${inSession}
+                     AND e.type = 'chat.message'
+                     AND (
+                       json_extract(e.payload_json, '$.originChannelId') IS NULL
+                       OR json_extract(e.payload_json, '$.originChannelId') = e.account_id
+                     )
+                     AND ${this.notBotClause("i")}`,
+                )
+                .get(row.id, sid, sid, botJson) as { n: number }
+            ).n;
+      let observedMinutes = 0;
+      if (sessionId) {
+        try {
+          const w = this.sessionMinuteWindow(sessionId);
+          observedMinutes = this.observedMinutesForPerson(
+            sessionId,
+            String(row.id),
+            w.fromMs,
+            w.toMs,
+          ).observedMinutes;
+        } catch {
+          observedMinutes = 0;
+        }
+      }
+      return {
+        id: row.id,
+        display_name: row.display_name,
+        revision: row.revision,
+        sources: row.sources,
+        messageCount,
+        donationCount: donationRows.length,
+        donationTotals,
+        observedMinutes,
+      };
+    });
+  }
+
+  insights(
+    sessionId?: string,
+    excludedBotLogins: readonly string[] = [],
+  ): Record<string, unknown>[] {
+    const botJson = this.botJson(excludedBotLogins);
+    const cards: Record<string, unknown>[] = [];
+    const sessions = this.db
+      .prepare(
+        "SELECT id, started_at_ms, ended_at_ms FROM sessions ORDER BY started_at_ms DESC LIMIT 50",
+      )
+      .all() as {
+      id: string;
+      started_at_ms: number;
+      ended_at_ms: number | null;
+    }[];
+    const focus =
+      sessionId !== undefined
+        ? sessions.find((s) => s.id === sessionId)
+        : sessions[0];
+    if (!focus) return cards;
+
+    const window = this.sessionMinuteWindow(focus.id);
+    const sid = focus.id;
+    const inSession =
+      "e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?)";
+
+    // Regulars: observed in >= 3 sessions with avg >= 5 observed minutes
+    const personIds = this.db
+      .prepare(
+        `SELECT DISTINCT i.person_id AS id, p.display_name
+         FROM identities i
+         JOIN persons p ON p.id = i.person_id
+         WHERE ${this.notBotClause("i")}`,
+      )
+      .all(botJson) as { id: string; display_name: string }[];
+    for (const person of personIds) {
+      let hitSessions = 0;
+      let minuteSum = 0;
+      for (const session of sessions) {
+        const fromMs = Math.floor(session.started_at_ms / 60_000) * 60_000;
+        const endMs = session.ended_at_ms ?? Date.now();
+        let toMs = Math.ceil(endMs / 60_000) * 60_000;
+        if (toMs - fromMs > 31 * 86_400_000 || toMs <= fromMs) continue;
+        const obs = this.observedMinutesForPerson(
+          session.id,
+          person.id,
+          fromMs,
+          toMs,
+        );
+        if (obs.observedMinutes >= 5) {
+          hitSessions += 1;
+          minuteSum += obs.observedMinutes;
+        }
+      }
+      if (hitSessions >= 3) {
+        cards.push({
+          kind: "regular",
+          title: "Постоянный участник",
+          detail: `${person.display_name}: ≥5 наблюдаемых минут в ${hitSessions} сессиях`,
+          personId: person.id,
+          sessionId: sid,
+          metrics: {
+            sessions: hitSessions,
+            avgObservedMinutes: Math.round((minuteSum / hitSessions) * 10) / 10,
+          },
+        });
+      }
+    }
+
+    // Per-person message + observed for focus session
+    const msgRows = this.db
+      .prepare(
+        `SELECT i.person_id AS id, max(p.display_name) AS display_name, count(*) AS messages
+         FROM events e
+         JOIN identities i ON i.id = e.identity_id
+         JOIN persons p ON p.id = i.person_id
+         WHERE ${inSession} AND e.type = 'chat.message'
+           AND (
+             json_extract(e.payload_json, '$.originChannelId') IS NULL
+             OR json_extract(e.payload_json, '$.originChannelId') = e.account_id
+           )
+           AND ${this.notBotClause("i")}
+         GROUP BY i.person_id`,
+      )
+      .all(sid, botJson) as { id: string; display_name: string; messages: number }[];
+    const msgMap = new Map(msgRows.map((r) => [r.id, r]));
+    const presentIds = this.db
+      .prepare(
+        `SELECT DISTINCT i.person_id AS id, p.display_name
+         FROM presence_members m
+         JOIN presence_polls poll ON poll.id = m.poll_id
+         JOIN identities i ON i.id = m.identity_id
+         JOIN persons p ON p.id = i.person_id
+         WHERE poll.session_id = ? AND poll.status = 'complete'
+           AND ${this.notBotClause("i")}`,
+      )
+      .all(sid, botJson) as { id: string; display_name: string }[];
+
+    for (const row of msgRows) {
+      if (row.messages < 5) continue;
+      const obs = this.observedMinutesForPerson(
+        sid,
+        row.id,
+        window.fromMs,
+        window.toMs,
+      );
+      if (obs.observedMinutes === 0) {
+        cards.push({
+          kind: "chatty_absent",
+          title: "Пишет, но не наблюдался",
+          detail: `${row.display_name}: ${row.messages} сообщ., 0 наблюдаемых минут`,
+          personId: row.id,
+          sessionId: sid,
+          metrics: { messages: row.messages, observedMinutes: 0 },
+        });
+      }
+    }
+
+    for (const row of presentIds) {
+      const obs = this.observedMinutesForPerson(
+        sid,
+        row.id,
+        window.fromMs,
+        window.toMs,
+      );
+      const messages = msgMap.get(row.id)?.messages ?? 0;
+      if (obs.observedMinutes >= 10 && messages === 0) {
+        cards.push({
+          kind: "silent_presence",
+          title: "Тихое присутствие",
+          detail: `${row.display_name}: ${obs.observedMinutes} наблюдаемых минут без сообщений`,
+          personId: row.id,
+          sessionId: sid,
+          metrics: { messages: 0, observedMinutes: obs.observedMinutes },
+        });
+      }
+    }
+
+    // Donor without Twitch link
+    const donors = this.db
+      .prepare(
+        `SELECT p.id, p.display_name,
+           EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND i.source='twitch') AS has_twitch,
+           EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND i.source='donationalerts') AS has_da
+         FROM persons p
+         WHERE EXISTS(
+           SELECT 1 FROM events e
+           JOIN identities i ON i.id = e.identity_id
+           WHERE i.person_id = p.id AND e.type = 'donation' AND ${inSession}
+         )`,
+      )
+      .all(sid) as {
+      id: string;
+      display_name: string;
+      has_twitch: number;
+      has_da: number;
+    }[];
+    for (const d of donors) {
+      if (d.has_da && !d.has_twitch) {
+        cards.push({
+          kind: "donor_no_twitch",
+          title: "Донат без Twitch",
+          detail: `${d.display_name}: есть DonationAlerts, нет связанного Twitch`,
+          personId: d.id,
+          sessionId: sid,
+          metrics: {},
+        });
+      }
+    }
+
+    // First-timers this session
+    const sessionPeople = this.db
+      .prepare(
+        `SELECT DISTINCT i.person_id AS id, p.display_name FROM identities i
+         JOIN persons p ON p.id = i.person_id
+         WHERE ${this.notBotClause("i")} AND (
+           EXISTS(
+             SELECT 1 FROM events e WHERE e.identity_id = i.id AND ${inSession}
+           ) OR EXISTS(
+             SELECT 1 FROM presence_members m
+             JOIN presence_polls poll ON poll.id = m.poll_id
+             WHERE m.identity_id = i.id AND poll.session_id = ? AND poll.status='complete'
+           )
+         )`,
+      )
+      .all(botJson, sid, sid) as { id: string; display_name: string }[];
+    for (const person of sessionPeople) {
+      const prior = this.db
+        .prepare(
+          `SELECT 1 AS ok WHERE EXISTS(
+             SELECT 1 FROM events e
+             JOIN identities i ON i.id = e.identity_id
+             WHERE i.person_id = ? AND e.id NOT IN (
+               SELECT event_id FROM event_sessions WHERE session_id = ?
+             )
+           ) OR EXISTS(
+             SELECT 1 FROM presence_members m
+             JOIN presence_polls poll ON poll.id = m.poll_id
+             JOIN identities i ON i.id = m.identity_id
+             WHERE i.person_id = ? AND poll.session_id != ? AND poll.status='complete'
+           )`,
+        )
+        .get(person.id, sid, person.id, sid) as { ok: number } | undefined;
+      if (!prior) {
+        cards.push({
+          kind: "first_timer",
+          title: "Впервые в этой сессии",
+          detail: `${person.display_name}: нет более ранних событий или наблюдений`,
+          personId: person.id,
+          sessionId: sid,
+          metrics: {},
+        });
+      }
+    }
+
+    // Coverage holes / gaps
+    const cov = this.sessionCoverage(sid, window.fromMs, window.toMs);
+    if (cov.ratio !== null && cov.ratio < 0.7 && cov.totalMinutes >= 10) {
+      cards.push({
+        kind: "coverage_hole",
+        title: "Дыры в опросах присутствия",
+        detail: `Покрытие сессии: ${Math.round(cov.ratio * 100)}% (${cov.knownMinutes}/${cov.totalMinutes} мин)`,
+        personId: null,
+        sessionId: sid,
+        metrics: cov,
+      });
+    }
+    const gaps = this.db
+      .prepare(
+        `SELECT id, source, reason, started_at_ms, ended_at_ms FROM collection_gaps
+         WHERE started_at_ms < ? AND (ended_at_ms IS NULL OR ended_at_ms > ?)
+         ORDER BY started_at_ms DESC LIMIT 5`,
+      )
+      .all(window.toMs, focus.started_at_ms) as Record<string, unknown>[];
+    if (gaps.length) {
+      cards.push({
+        kind: "collection_gaps",
+        title: "Пропуски сбора",
+        detail: `${gaps.length} записей collection_gaps пересекают сессию`,
+        personId: null,
+        sessionId: sid,
+        metrics: { count: gaps.length, gaps },
+      });
+    }
+
+    // Returning after long gap (>= 14 days since prior activity)
+    const fourteen = 14 * 86_400_000;
+    for (const person of sessionPeople) {
+      const priorLast = this.db
+        .prepare(
+          `SELECT max(ts) AS last_ms FROM (
+             SELECT coalesce(e.occurred_at_ms, e.received_at_ms) AS ts
+             FROM events e JOIN identities i ON i.id = e.identity_id
+             WHERE i.person_id = ? AND e.id NOT IN (
+               SELECT event_id FROM event_sessions WHERE session_id = ?
+             )
+             UNION ALL
+             SELECT poll.completed_at_ms AS ts
+             FROM presence_polls poll
+             JOIN presence_members m ON m.poll_id = poll.id
+             JOIN identities i ON i.id = m.identity_id
+             WHERE i.person_id = ? AND poll.session_id != ? AND poll.status='complete'
+           )`,
+        )
+        .get(person.id, sid, person.id, sid) as { last_ms: number | null };
+      if (
+        priorLast.last_ms !== null &&
+        focus.started_at_ms - priorLast.last_ms >= fourteen
+      ) {
+        const days = Math.round(
+          (focus.started_at_ms - priorLast.last_ms) / 86_400_000,
+        );
+        cards.push({
+          kind: "returning_after_gap",
+          title: "Вернулся после паузы",
+          detail: `${person.display_name}: ~${days} дн. с прошлой активности`,
+          personId: person.id,
+          sessionId: sid,
+          metrics: { gapMs: focus.started_at_ms - priorLast.last_ms, days },
+        });
+      }
+    }
+
+    // Cap cards to keep UI light
+    return cards.slice(0, 40);
   }
 
   gap(

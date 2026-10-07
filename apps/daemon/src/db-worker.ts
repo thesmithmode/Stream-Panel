@@ -23,6 +23,9 @@ const allowed = new Set([
   "backup",
   "close",
   "candidatePersons",
+  "insights",
+  "personsTop",
+  "personStats",
   "ensureOwnerIdentity",
 ]);
 parentPort!.on(

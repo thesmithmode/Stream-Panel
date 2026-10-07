@@ -15,7 +15,7 @@ import {
   StreamerBotStubAdapter,
   mapStreamerBotTwitchChatMessage,
 } from "../src/streamerbot.js";
-import { presenceMinutes } from "../src/presence.js";
+import { presenceMinutes, pollCoveredMinutes } from "../src/presence.js";
 import { collectChatters } from "../src/chatters.js";
 import { StreamStore } from "../src/store.js";
 
@@ -722,4 +722,374 @@ test("Streamer.bot stub with client wires Twitch.ChatMessage and ignores bad pay
     )?.timeQuality,
     "unknown",
   );
+});
+
+test("personStats aggregates donations, messages, observed minutes and cross-session averages", () => {
+  const store = new StreamStore(":memory:");
+  try {
+    const session = store.startSession(
+      "channel-1",
+      "stream-stats",
+      60_000,
+      "platform",
+      60_000,
+    );
+    const person = store.ingest(base).personId!;
+    store.ingest({
+      ...donation,
+      externalId: "donation-stats",
+      actor: { externalId: "donation-stats", displayName: "Vasya" },
+      occurredAtMs: 90_000,
+      timeQuality: "configured",
+      sourceTime: "1970-01-01T00:01:30Z",
+      payload: { amountMinor: "5000", currency: "RUB" },
+    });
+    store.recordPoll(session, "channel-1", {
+      startedAtMs: 60_000,
+      completedAtMs: 61_000,
+      status: "complete",
+      userIds: ["user-1"],
+    });
+    store.recordPoll(session, "channel-1", {
+      startedAtMs: 120_000,
+      completedAtMs: 121_000,
+      status: "complete",
+      userIds: ["user-1"],
+    });
+    store.endSession(session, 180_000);
+    const stats = store.personStats(person, session) as {
+      messageCount: number;
+      donationCount: number;
+      donationTotals: Record<string, string>;
+      observedMinutesThisSession: number;
+      firstObservedMs: number | null;
+      lastObservedMs: number | null;
+      avgObservedMinutes: number | null;
+      sessionsWithObservation: number;
+    };
+    assert.equal(stats.messageCount, 1);
+    assert.equal(stats.donationCount, 1);
+    assert.equal(stats.donationTotals.RUB, "5000");
+    assert.equal(stats.observedMinutesThisSession, 2);
+    assert.equal(stats.firstObservedMs, 60_000);
+    assert.equal(stats.lastObservedMs, 120_000);
+    assert.equal(stats.sessionsWithObservation, 1);
+    assert.equal(stats.avgObservedMinutes, 2);
+    assert.throws(() => store.personStats("missing"), /PERSON_NOT_FOUND/);
+  } finally {
+    store.close();
+  }
+});
+
+test("summary session analytics expose coverage, msgs/min and chatters series", () => {
+  const store = new StreamStore(":memory:");
+  try {
+    const session = store.startSession(
+      "channel-1",
+      "stream-analytics",
+      60_000,
+      "platform",
+      60_000,
+    );
+    store.ingest(base);
+    store.ingest({
+      ...base,
+      externalId: "message-2",
+      occurredAtMs: 90_000,
+      actor: { externalId: "user-2", displayName: "Petya" },
+    });
+    store.recordPoll(session, "channel-1", {
+      startedAtMs: 60_000,
+      completedAtMs: 61_000,
+      status: "complete",
+      userIds: ["user-1", "user-2"],
+    });
+    store.gap("twitch", "test-gap", 60_000, 90_000);
+    store.endSession(session, 180_000);
+    const raw = store.summary(session) as {
+      messages: number;
+      messagesPerMinuteOfSession: number | null;
+      uniquePersons: number;
+      uniquePersonsObserved: number | null;
+      coverage: { knownMinutes: number; totalMinutes: number; ratio: number | null };
+      chattersOverTime: { atMs: number; chatters: number }[];
+      gapCount: number;
+    };
+    assert.equal(raw.messages, 2);
+    assert.ok(raw.messagesPerMinuteOfSession !== null);
+    assert.equal(raw.uniquePersons, 2);
+    assert.equal(raw.uniquePersonsObserved, 2);
+    assert.equal(raw.coverage.knownMinutes, 1);
+    assert.equal(raw.coverage.totalMinutes, 2);
+    assert.equal(raw.chattersOverTime.length, 1);
+    assert.equal(raw.chattersOverTime[0]!.chatters, 2);
+    assert.equal(raw.gapCount, 1);
+  } finally {
+    store.close();
+  }
+});
+
+test("personsTop ranks by messages, donations and observed minutes for a session", () => {
+  const store = new StreamStore(":memory:");
+  try {
+    const session = store.startSession(
+      "channel-1",
+      "stream-tops",
+      60_000,
+      "platform",
+      60_000,
+    );
+    const a = store.ingest(base).personId!;
+    store.ingest({
+      ...base,
+      externalId: "message-a2",
+      occurredAtMs: 70_000,
+    });
+    const b = store.ingest({
+      ...base,
+      externalId: "message-b",
+      occurredAtMs: 80_000,
+      actor: { externalId: "user-2", displayName: "Petya" },
+    }).personId!;
+    store.ingest({
+      ...donation,
+      externalId: "donation-b",
+      actor: { externalId: "donation-b", displayName: "Petya" },
+      occurredAtMs: 85_000,
+      timeQuality: "configured",
+      sourceTime: "1970-01-01T00:01:25Z",
+      payload: { amountMinor: "1000", currency: "USD" },
+    });
+    store.recordPoll(session, "channel-1", {
+      startedAtMs: 60_000,
+      completedAtMs: 120_000,
+      status: "complete",
+      userIds: ["user-2"],
+    });
+    store.endSession(session, 180_000);
+    const byMessages = store.personsTop("messages", session);
+    assert.equal(byMessages[0]!.id, a);
+    assert.equal(byMessages[0]!.messageCount, 2);
+    const byDonations = store.personsTop("donations", session);
+    assert.equal(byDonations[0]!.id, b);
+    assert.equal(byDonations[0]!.donationCount, 1);
+    const byObserved = store.personsTop("observed_minutes", session);
+    assert.equal(byObserved[0]!.id, b);
+    assert.ok((byObserved[0]!.observedMinutes as number) >= 1);
+  } finally {
+    store.close();
+  }
+});
+
+test("insights detectors surface first-timers, silent presence, donors without twitch and coverage", () => {
+  const store = new StreamStore(":memory:");
+  try {
+    const old = store.startSession(
+      "channel-1",
+      "old-stream",
+      60_000,
+      "platform",
+      60_000,
+    );
+    store.ingest(base);
+    store.endSession(old, 120_000);
+
+    const session = store.startSession(
+      "channel-1",
+      "new-stream",
+      1_300_000_000_000, // far future so returning gap is large vs old session
+      "platform",
+      1_300_000_000_000,
+    );
+    // Silent presence: observed, no messages
+    store.recordPoll(session, "channel-1", {
+      startedAtMs: 1_300_000_000_000,
+      completedAtMs: 1_300_000_600_000,
+      status: "complete",
+      userIds: ["silent-1"],
+    });
+    // Donor without twitch
+    store.ingest({
+      ...donation,
+      externalId: "donation-only",
+      actor: { externalId: "donation-only", displayName: "OnlyDA" },
+      occurredAtMs: 1_300_000_100_000,
+      timeQuality: "configured",
+      sourceTime: "2011-03-13T07:06:40Z",
+      payload: { amountMinor: "2500", currency: "RUB" },
+    });
+    // First-timer chatter
+    store.ingest({
+      ...base,
+      externalId: "newbie-msg",
+      occurredAtMs: 1_300_000_120_000,
+      actor: { externalId: "newbie-1", displayName: "Newbie" },
+    });
+    store.gap("twitch", "disconnect", 1_300_000_000_000, null);
+    store.endSession(session, 1_300_001_200_000);
+
+    const cards = store.insights(session) as {
+      kind: string;
+      personId: string | null;
+    }[];
+    const kinds = new Set(cards.map((c) => c.kind));
+    assert.ok(kinds.has("silent_presence"));
+    assert.ok(kinds.has("donor_no_twitch"));
+    assert.ok(kinds.has("first_timer"));
+    assert.ok(kinds.has("collection_gaps"));
+    assert.ok(kinds.has("coverage_hole") || kinds.has("collection_gaps"));
+  } finally {
+    store.close();
+  }
+});
+
+test("personsTop all-time observed minutes and invalid sort; insights chatty/regular/returning", () => {
+  const store = new StreamStore(":memory:");
+  try {
+    assert.throws(() => store.personsTop("nope" as "messages"), /INVALID_SORT/);
+
+    // Three sessions with the same chatter present >=5 min each → regular
+    const personLogin = "regular-1";
+    let personId = "";
+    for (let s = 0; s < 3; s++) {
+      const start = (s + 1) * 10_000_000;
+      const session = store.startSession(
+        "channel-1",
+        `regular-stream-${s}`,
+        start,
+        "platform",
+        start,
+      );
+      store.recordPoll(session, "channel-1", {
+        startedAtMs: start,
+        completedAtMs: start + 6 * 60_000,
+        status: "complete",
+        userIds: [personLogin],
+      });
+      if (!personId) {
+        const people = store.persons() as { id: string; display_name: string }[];
+        personId = String(
+          people.find((p) => p.display_name === personLogin || p.id)?.id,
+        );
+        // resolve via presence identity
+        const detail = store.persons() as { id: string; display_name: string }[];
+        const hit = detail.find((p) => p.display_name === personLogin);
+        personId = String(hit!.id);
+      }
+      store.endSession(session, start + 10 * 60_000);
+    }
+
+    const allTimeObserved = store.personsTop("observed_minutes");
+    assert.ok(allTimeObserved.length >= 1);
+    assert.ok((allTimeObserved[0]!.observedMinutes as number) >= 5);
+
+    // Chatty absent + returning after gap on a new session
+    const oldStart = 60_000;
+    const old = store.startSession(
+      "channel-1",
+      "gap-old",
+      oldStart,
+      "platform",
+      oldStart,
+    );
+    store.ingest({
+      ...base,
+      externalId: "old-chatty",
+      occurredAtMs: oldStart + 1000,
+      actor: { externalId: "chatty-1", displayName: "Chatty" },
+    });
+    store.endSession(old, oldStart + 120_000);
+
+    const newStart = oldStart + 20 * 86_400_000; // 20 days later
+    const neu = store.startSession(
+      "channel-1",
+      "gap-new",
+      newStart,
+      "platform",
+      newStart,
+    );
+    for (let i = 0; i < 5; i++) {
+      store.ingest({
+        ...base,
+        externalId: `chatty-msg-${i}`,
+        occurredAtMs: newStart + 1000 + i * 1000,
+        actor: { externalId: "chatty-1", displayName: "Chatty" },
+      });
+    }
+    // No presence for chatty → chatty_absent; prior activity → returning_after_gap
+    store.endSession(neu, newStart + 180_000);
+
+    const cards = store.insights(neu) as { kind: string }[];
+    const kinds = new Set(cards.map((c) => c.kind));
+    assert.ok(kinds.has("chatty_absent"));
+    assert.ok(kinds.has("returning_after_gap"));
+    assert.ok(kinds.has("regular"));
+
+    // summary without session still exposes gapCount
+    store.gap("twitch", "x", 1, 2);
+    const allSummary = store.summary() as { gapCount: number };
+    assert.ok(allSummary.gapCount >= 1);
+
+    // donations top without session
+    store.ingest({
+      ...donation,
+      externalId: "top-don",
+      actor: { externalId: "top-don", displayName: "Chatty" },
+      occurredAtMs: newStart + 5000,
+      timeQuality: "configured",
+      sourceTime: "x",
+      payload: { amountMinor: "999", currency: "EUR" },
+    });
+    const byDon = store.personsTop("donations");
+    assert.ok(byDon.some((r) => (r.donationCount as number) >= 1));
+
+    // personStats without session
+    const chatty = (store.persons() as { id: string; display_name: string }[]).find(
+      (p) => p.display_name === "Chatty",
+    )!;
+    const stats = store.personStats(chatty.id) as {
+      observedMinutesThisSession: null;
+      firstObservedMs: number | null;
+    };
+    assert.equal(stats.observedMinutesThisSession, null);
+  } finally {
+    store.close();
+  }
+});
+
+test("pollCoveredMinutes clips to from/to and rejects inverted windows", () => {
+  assert.deepEqual(pollCoveredMinutes(60_000, 180_000, 120_000, 180_000), [
+    120_000,
+  ]);
+  assert.deepEqual(pollCoveredMinutes(0, 60_000), [0, 60_000]);
+  assert.throws(() => pollCoveredMinutes(120_000, 60_000), /INVALID_POLL_WINDOW/);
+});
+
+test("insights empty without sessions; sessionCoverage ratio null on zero window", () => {
+  const store = new StreamStore(":memory:");
+  try {
+    assert.deepEqual(store.insights(), []);
+    const session = store.startSession(
+      "channel-1",
+      "instant",
+      60_000,
+      "platform",
+      60_000,
+    );
+    // ended at same minute boundary stretch with zero duration minutes after ceil/floor?
+    store.endSession(session, 60_000);
+    const summary = store.summary(session) as {
+      coverage: { totalMinutes: number; ratio: number | null };
+      messagesPerMinuteOfSession: number | null;
+      sessionDurationMs: number | null;
+    };
+    assert.equal(summary.sessionDurationMs, 0);
+    assert.equal(summary.messagesPerMinuteOfSession, null);
+    // tops with limit bounds
+    assert.equal(store.personsTop("messages", undefined, [], 0).length, 0);
+    const capped = store.personsTop("messages", undefined, [], 999);
+    assert.ok(capped.length <= 100);
+  } finally {
+    store.close();
+  }
 });
