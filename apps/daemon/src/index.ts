@@ -6,13 +6,16 @@ import {
   isProcessAlive,
   LOCK_NAME,
   parseLock,
-  requestReopen,
-  startReopenWatcher,
   stopLockedDaemon,
   wantsStop,
 } from "./lifecycle.js";
 import { open, readFile, unlink, mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  describeRemoteDb,
+  resolveDatabaseUrls,
+  startRemoteSync,
+} from "./remote-db.js";
 
 const dir = defaultDataDir();
 const port = Number(process.env.STREAM_PANEL_PORT ?? 47831);
@@ -21,17 +24,6 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535)
 
 await mkdir(dir, { recursive: true, mode: 0o700 });
 const lockPath = join(dir, LOCK_NAME);
-
-function printRunningHelp(pid: number): void {
-  console.log(
-    `Панель уже работает в фоне (PID ${pid}). Закрытие вкладки браузера её не останавливает.`,
-  );
-  console.log(
-    "Остановка: Ctrl+C в том терминале, где запущен Stream Panel, либо:",
-  );
-  console.log("  STREAM_PANEL_STOP=1 pnpm start");
-  console.log("  # или: node dist/apps/daemon/src/index.js --stop");
-}
 
 if (wantsStop()) {
   const result = await stopLockedDaemon(dir);
@@ -66,36 +58,39 @@ try {
         : true;
   if (active && info) {
     console.log(
-      `Stream Panel уже запущен (PID ${info.pid}). Запрашиваю новую ссылку входа…`,
+      `Stream Panel уже запущен (PID ${info.pid}). Останавливаю старый процесс и поднимаю новый…`,
     );
-    const url = await requestReopen(dir);
-    if (url) {
-      console.log(`Stream Panel: ${url}`);
-      printRunningHelp(info.pid);
-      if (shouldOpenBrowser()) openBrowser(url);
-      process.exit(0);
+    const stopped = await stopLockedDaemon(dir);
+    if (stopped === "timeout") {
+      console.error(
+        "Не дождались остановки предыдущего процесса. Остановите его вручную и повторите запуск.",
+      );
+      throw new Error("DATA_DIR_ALREADY_IN_USE");
     }
-    printRunningHelp(info.pid);
-    console.error(
-      "Не удалось получить новую ссылку от работающего процесса. Остановите его и запустите снова.",
-    );
+  } else if (active || !info) {
     throw new Error("DATA_DIR_ALREADY_IN_USE");
+  } else {
+    await unlink(lockPath).catch(() => {});
   }
-  if (active || !info) throw new Error("DATA_DIR_ALREADY_IN_USE");
-  await unlink(lockPath);
   lock = await open(lockPath, "wx", 0o600);
 }
 await lock.writeFile(formatLock(process.pid, port));
 await lock.close();
 
 try {
+  const remoteUrls = await resolveDatabaseUrls(process.env);
+  const remote = describeRemoteDb(process.env, remoteUrls);
+  if (remote.configured)
+    console.log(
+      `Удалённая БД: ${remote.kind}${remote.hostHint ? " @ " + remote.hostHint : ""} (prefer pooler; sync lean).`,
+    );
   const application = await createApplication(dir, port);
   await application.app.listen({ host: "127.0.0.1", port });
-  const stopReopen = startReopenWatcher(dir, () => application.bootstrap());
+  const stopRemoteSync = startRemoteSync({ dataDir: dir });
   const url = application.bootstrap();
   console.log(`Stream Panel: ${url}`);
   console.log(
-    "Интерфейс открывается в браузере. Токен одноразовый; повторный запуск при живом процессе откроет новую ссылку.",
+    "Интерфейс открывается в браузере. Токен одноразовый; повторный запуск остановит старый процесс и откроет новую ссылку.",
   );
   console.log(
     "Закрытие вкладки не останавливает сбор. Остановка: Ctrl+C здесь или STREAM_PANEL_STOP=1 pnpm start",
@@ -105,7 +100,7 @@ try {
   const shutdown = () => {
     if (closing) return;
     closing = true;
-    stopReopen();
+    stopRemoteSync();
     void application.app
       .close()
       .then(() => unlink(lockPath))

@@ -83,7 +83,7 @@ test(
       await startCoverage(page);
       await goto(page, a.bootstrap());
       await page
-        .getByRole("button", { name: "Подключить сервисы", exact: true })
+        .getByRole("button", { name: "Открыть интеграции", exact: true })
         .click();
       const twitch = page.locator("section.settings").filter({
         has: page.getByRole("heading", { name: "Twitch", exact: true }),
@@ -165,12 +165,12 @@ test(
         `${a.origin}/oauth/donationalerts/callback?code=provider-code&state=${oauth.searchParams.get("state")}`,
       );
       await page
-        .getByRole("button", { name: "Подключения", exact: true })
+        .getByRole("button", { name: "Интеграции", exact: true })
         .click();
       await until(() => a.da.status.state === "connected", 8000);
       await reload(page);
       await page
-        .getByRole("button", { name: "Подключения", exact: true })
+        .getByRole("button", { name: "Интеграции", exact: true })
         .click();
       await page.getByText("Сбор донатов включён", { exact: true }).waitFor();
       const publicStatus = await page.evaluate(() =>
@@ -220,7 +220,7 @@ test(
       await a.db.call("gap", "twitch", "fixture_gap", Date.now(), null);
       await reload(page);
       await page
-        .getByRole("button", { name: "Подключения", exact: true })
+        .getByRole("button", { name: "Интеграции", exact: true })
         .click();
       await page.getByText("twitch: fixture_gap", { exact: true }).waitFor();
       await saveCoverage(page);
@@ -249,7 +249,7 @@ test(
         .waitFor();
       await goto(page, a.bootstrap());
       await page
-        .getByRole("button", { name: "Подключить сервисы", exact: true })
+        .getByRole("button", { name: "Открыть интеграции", exact: true })
         .waitFor();
       await page.getByRole("button", { name: "Сессии", exact: true }).click();
       await page.getByText("Записей пока нет", { exact: true }).waitFor();

@@ -32,14 +32,14 @@ pnpm build
 pnpm start
 ```
 
-При запуске панель сама открывается в браузере (одноразовая ссылка ≈10 мин; после входа ключ удаляется из адреса). **Вкладку можно закрыть — демон продолжит сбор в фоне** (закрытие браузера ≠ выход). Повторный `pnpm start` / ярлык, пока процесс жив, **не падает с DATA_DIR_ALREADY_IN_USE**: запрашивает у работающего демона новую ссылку входа и снова открывает браузер. Остановка: **Ctrl+C** в том терминале, где запущен Stream Panel, или явно:
+При запуске панель сама открывается в браузере (одноразовая ссылка ≈10 мин; после входа ключ удаляется из адреса). **Вкладку можно закрыть — демон продолжит сбор в фоне** (закрытие браузера ≠ выход). Повторный `pnpm start` / ярлык, пока процесс жив, **корректно перезапускает демон**: graceful stop старого процесса → новый процесс + новая ссылка входа (не reuse lock). Остановка без перезапуска: **Ctrl+C** в том терминале, где запущен Stream Panel, или явно:
 
 ```sh
 STREAM_PANEL_STOP=1 pnpm start
 # эквивалент: node dist/apps/daemon/src/index.js --stop
 ```
 
-После полной остановки следующий обычный запуск поднимет новый процесс и новую ссылку. Программа не заполняет базу выдуманными событиями. Без браузера: `STREAM_PANEL_NO_BROWSER=1`.
+После полной остановки следующий обычный запуск поднимет новый процесс и новую ссылку. В UI есть режим **Демо** (in-memory fixtures, без записи в SQLite/secrets). Без браузера: `STREAM_PANEL_NO_BROWSER=1`.
 
 Native addon `better-sqlite3` собирается при `pnpm install`. На Windows нужны Build Tools for Visual Studio (C++); на Linux — обычный toolchain (`build-essential` / эквивалент). CI проверяет Ubuntu и Windows.
 
@@ -59,6 +59,21 @@ Native addon `better-sqlite3` собирается при `pnpm install`. На W
 Внутри: `data.sqlite`, **`secrets.json`** (токены, client id/secret, offset, poll interval, `excludedBotLogins`), `backups/`. Переопределение: `STREAM_PANEL_DATA_DIR`. Порт: `STREAM_PANEL_PORT` (default **47831**); при смене порта обновите DA redirect URI.
 
 Секреты вводятся в локальной панели. Их нет в HTTP API, git и snapshot базы. Файл `secrets.json` **незашифрован**; на POSIX пишется с mode `0600`, каталог данных `0700`. Интеграция с OS credential store — P1. Не коммитьте и не шарьте этот файл.
+
+### Опционально: remote DB / Supabase (lean sync)
+
+Локальный SQLite — источник истины; OAuth/secrets остаются только локально. Опциональный sync в Postgres/Supabase (persons / identities=Viewer|Donor / events / presence):
+
+| Env | Meaning |
+| --- | --- |
+| `STREAM_PANEL_DATABASE_POOLER_URL` | Preferred Session pooler URL (IPv4) |
+| `STREAM_PANEL_DATABASE_URL` | Direct DB URL (fallback; may be IPv6-only) |
+| `STREAM_PANEL_CREDS_DIR` | Out-of-tree dir with `supabase-pooler-url.txt` etc. (mode 600; never commit) |
+| `SUPABASE_URL` | Project HTTP URL (marks supabase; no password) |
+| `SUPABASE_DB_PASSWORD` / `STREAM_PANEL_DB_PASSWORD` | Password only if building URL from parts — prefer full URL env |
+| `STREAM_PANEL_DB_PASSWORD_FILE` | Path to password file (chmod 600) |
+
+Never commit connection strings or passwords. See [docs/ops/remote-db.md](docs/ops/remote-db.md).
 
 ### Опционально: Litestream → R2/B2
 

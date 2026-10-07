@@ -28,13 +28,16 @@ test(
       await startCoverage(page);
       await goto(page, a.bootstrap());
       await page
-        .getByRole("button", { name: "Подключить сервисы", exact: true })
+        .getByRole("button", { name: "Открыть интеграции", exact: true })
         .waitFor();
       assert.equal(new URL(page.url()).hash, "");
+      await page.getByRole("button", { name: "Демо", exact: true }).click();
+      await page.getByText("Алиса").first().waitFor({ state: "visible", timeout: 5000 });
+      await page.getByRole("button", { name: "Реальные", exact: true }).click();
       checks.push("bootstrap exchanges nonce and removes fragment");
 
       await page
-        .getByRole("button", { name: "Подключить сервисы", exact: true })
+        .getByRole("button", { name: "Открыть интеграции", exact: true })
         .click();
       await page.getByLabel("Client secret", { exact: true }).waitFor();
       checks.push("empty-state CTA opens real connection forms");
@@ -144,7 +147,7 @@ test(
         .waitFor();
       checks.push("stop manual recording");
       await page
-        .getByRole("button", { name: "Подключения", exact: true })
+        .getByRole("button", { name: "Интеграции", exact: true })
         .click();
       await page
         .getByRole("button", { name: "Создать резервную копию", exact: true })
@@ -185,7 +188,7 @@ test(
           "people overflow at " + width,
         );
         await page
-          .getByRole("button", { name: "Подключения", exact: true })
+          .getByRole("button", { name: "Интеграции", exact: true })
           .click();
         assert.equal(
           await page.evaluate(

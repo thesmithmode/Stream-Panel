@@ -7,11 +7,10 @@ import {
   formatLock,
   parseLock,
   isProcessAlive,
-  requestReopen,
-  startReopenWatcher,
+  readLock,
+  stopLockedDaemon,
   wantsStop,
   LOCK_NAME,
-  REOPEN_RESPONSE,
 } from "../src/lifecycle.js";
 
 test("parseLock accepts pid-only and pid+port; rejects garbage", () => {
@@ -40,38 +39,20 @@ test("wantsStop reads env and argv", () => {
     wantsStop(["node", "index.js"], { STREAM_PANEL_STOP: "1" }),
     true,
   );
+  assert.equal(
+    wantsStop(["node", "index.js"], { STREAM_PANEL_STOP: "true" }),
+    true,
+  );
 });
 
-test("reopen watcher answers requestReopen with matching nonce URL", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sp-reopen-"));
+test("readLock returns null when missing; parses when present", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sp-readlock-"));
   try {
-    let n = 0;
-    const stop = startReopenWatcher(
-      dir,
-      () => {
-        n += 1;
-        return `http://127.0.0.1:47831/#key=deadbeef${n}`;
-      },
-      50,
-    );
-    const url = await requestReopen(dir, 3000, (ms) =>
-      new Promise((r) => setTimeout(r, ms)),
-    );
-    stop();
-    assert.ok(url);
-    assert.match(url!, /^http:\/\/127\.0\.0\.1:47831\/#key=deadbeef/);
-    // stale response file should be cleaned by successful request
-    await assert.rejects(readFile(join(dir, REOPEN_RESPONSE)));
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("requestReopen times out when no daemon answers", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sp-reopen-miss-"));
-  try {
-    const url = await requestReopen(dir, 300, async () => {});
-    assert.equal(url, null);
+    assert.equal(await readLock(dir), null);
+    await writeFile(join(dir, LOCK_NAME), formatLock(7, 47831), {
+      mode: 0o600,
+    });
+    assert.deepEqual(await readLock(dir), { pid: 7, port: 47831 });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -85,6 +66,79 @@ test("lock file written shape matches formatLock", async () => {
     });
     const raw = await readFile(join(dir, LOCK_NAME), "utf8");
     assert.deepEqual(parseLock(raw), { pid: 7, port: 47831 });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("stopLockedDaemon: not_running when no lock or dead pid", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sp-stop-miss-"));
+  try {
+    assert.equal(await stopLockedDaemon(dir, 200, async () => {}), "not_running");
+    await writeFile(join(dir, LOCK_NAME), formatLock(2_147_483_646, 47831), {
+      mode: 0o600,
+    });
+    assert.equal(await stopLockedDaemon(dir, 200, async () => {}), "not_running");
+    await assert.rejects(readFile(join(dir, LOCK_NAME)));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("stopLockedDaemon: stopped when kill succeeds and pid dies", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sp-stop-ok-"));
+  try {
+    const fakePid = 424242;
+    await writeFile(join(dir, LOCK_NAME), formatLock(fakePid, 47831), {
+      mode: 0o600,
+    });
+    // Override alive check by using a real child that exits on SIGTERM.
+    const { spawn } = await import("node:child_process");
+    const child = spawn(process.execPath, ["-e", "setInterval(()=>{}, 1000)"], {
+      stdio: "ignore",
+    });
+    await writeFile(join(dir, LOCK_NAME), formatLock(child.pid!, 47831), {
+      mode: 0o600,
+    });
+    const result = await stopLockedDaemon(dir, 5000);
+    assert.equal(result, "stopped");
+    await assert.rejects(readFile(join(dir, LOCK_NAME)));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("stopLockedDaemon: timeout when process stays alive", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sp-stop-to-"));
+  try {
+    await writeFile(join(dir, LOCK_NAME), formatLock(process.pid, 47831), {
+      mode: 0o600,
+    });
+    const killFn = () => {
+      /* do not actually kill the test runner */
+    };
+    const result = await stopLockedDaemon(dir, 150, async () => {}, killFn);
+    assert.equal(result, "timeout");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("stopLockedDaemon: ESRCH from killFn treated as not_running", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sp-stop-esrch-"));
+  try {
+    await writeFile(join(dir, LOCK_NAME), formatLock(process.pid, 47831), {
+      mode: 0o600,
+    });
+    const killFn = () => {
+      const err = new Error("No such process") as NodeJS.ErrnoException;
+      err.code = "ESRCH";
+      throw err;
+    };
+    assert.equal(
+      await stopLockedDaemon(dir, 200, async () => {}, killFn),
+      "not_running",
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
