@@ -1,8 +1,8 @@
 import { createApplication } from "./server.js";
 import { defaultDataDir } from "./config.js";
+import { openBrowser, shouldOpenBrowser } from "./browser-launch.js";
 import { open, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
 
 const dir = defaultDataDir();
 const port = Number(process.env.STREAM_PANEL_PORT ?? 47831);
@@ -31,42 +31,6 @@ try {
 }
 await lock.writeFile(String(process.pid));
 await lock.close();
-
-function shouldOpenBrowser(): boolean {
-  if (process.env.STREAM_PANEL_NO_BROWSER === "1") return false;
-  if (process.env.STREAM_PANEL_HEADLESS === "1") return false;
-  const ci = process.env.CI;
-  if (ci === "1" || ci === "true") return false;
-  if (
-    process.platform === "linux" &&
-    !process.env.DISPLAY &&
-    !process.env.WAYLAND_DISPLAY
-  )
-    return false;
-  return true;
-}
-
-function openBrowser(url: string): void {
-  try {
-    const platform = process.platform;
-    let child;
-    if (platform === "win32") {
-      child = spawn("cmd", ["/c", "start", "", url], {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-      });
-    } else if (platform === "darwin") {
-      child = spawn("open", [url], { detached: true, stdio: "ignore" });
-    } else {
-      child = spawn("xdg-open", [url], { detached: true, stdio: "ignore" });
-    }
-    child.on("error", () => {});
-    child.unref();
-  } catch {
-    /* browser open is best-effort */
-  }
-}
 
 try {
   const application = await createApplication(dir, port);
