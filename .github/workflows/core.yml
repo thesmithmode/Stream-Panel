@@ -1,7 +1,14 @@
 name: Quality gate
 on:
   push:
+    branches:
+      - dev
+      - "feat/**"
+      - "fix/**"
+      - "chore/**"
   pull_request:
+    branches:
+      - dev
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
