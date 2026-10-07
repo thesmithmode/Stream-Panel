@@ -19,7 +19,10 @@ for (const dir of [
 ])
   for (const file of await readdir(dir))
     if (/\.test\.(m?js)$/.test(file)) files.push(join(dir, file));
-const exit = await run(
+const webUnit = [];
+for (const file of await readdir("apps/web/src"))
+  if (/\.test\.ts$/.test(file)) webUnit.push(join("apps/web/src", file));
+const exitMain = await run(
   process.execPath,
   ["--test", "--test-concurrency=2", ...files],
   {
@@ -28,6 +31,23 @@ const exit = await run(
     STREAM_PANEL_COVERAGE: "1",
   },
 );
+const exitWeb = webUnit.length
+  ? await run(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        "--test",
+        "--test-concurrency=2",
+        ...webUnit,
+      ],
+      {
+        ...process.env,
+        NODE_V8_COVERAGE: resolve("coverage/raw"),
+        STREAM_PANEL_COVERAGE: "1",
+      },
+    )
+  : 0;
+const exit = exitMain || exitWeb;
 const report = await run(process.execPath, [
   "node_modules/c8/bin/c8.js",
   "report",

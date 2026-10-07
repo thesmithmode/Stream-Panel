@@ -433,33 +433,40 @@ export class StreamStore {
    * same display match_key must be ONE Donor identity under ONE Person when
    * unambiguous (persons whose membership is only that DA name group).
    * Viewer (Twitch) identities are never collapsed by name.
+   * Never moves events across a non-mergeable (e.g. Twitch-linked) person
+   * boundary — only collapses within a mergeable set or within one person.
    */
   collapseDuplicateDaDonors(): void {
     const groups = this.db
       .prepare(
-        `SELECT account_id, match_key, COUNT(*) AS n,
-                GROUP_CONCAT(id, char(31)) AS ids,
-                GROUP_CONCAT(person_id, char(31)) AS person_ids,
-                GROUP_CONCAT(external_id, char(31)) AS external_ids
+        `SELECT account_id, match_key
          FROM identities
          WHERE source = 'donationalerts' AND match_key != ''
          GROUP BY account_id, match_key
-         HAVING n > 1`,
+         HAVING COUNT(*) > 1`,
       )
-      .all() as {
-      account_id: string;
-      match_key: string;
-      n: number;
-      ids: string;
-      person_ids: string;
-      external_ids: string;
-    }[];
-    const sep = String.fromCharCode(31);
+      .all() as { account_id: string; match_key: string }[];
     for (const group of groups) {
-      const ids = group.ids.split(sep);
-      const personIds = [...new Set(group.person_ids.split(sep))];
-      const externalIds = group.external_ids.split(sep);
+      const rows = this.db
+        .prepare(
+          `SELECT id, person_id AS personId, external_id AS externalId
+           FROM identities
+           WHERE source = 'donationalerts' AND account_id = ? AND match_key = ?`,
+        )
+        .all(group.account_id, group.match_key) as {
+        id: string;
+        personId: string;
+        externalId: string;
+      }[];
+      if (rows.length <= 1) continue;
+      const ids = rows.map((r) => r.id);
+      const idMeta = new Map(
+        rows.map((r) => [r.id, { personId: r.personId, externalId: r.externalId }]),
+      );
+      const personIds = [...new Set(rows.map((r) => r.personId))];
+
       const mergeable: string[] = [];
+      const protectedPersons: string[] = [];
       for (const personId of personIds) {
         const members = this.db
           .prepare(
@@ -473,75 +480,153 @@ export class StreamStore {
             ids.includes(m.id),
         );
         if (pure) mergeable.push(personId);
+        else protectedPersons.push(personId);
       }
-      if (mergeable.length > 1) {
-        mergeable.sort();
-        const target = mergeable[0]!;
+
+      const eventCount = (identityId: string): number => {
+        const row = this.db
+          .prepare("SELECT count(*) AS n FROM events WHERE identity_id = ?")
+          .get(identityId) as { n: number };
+        return row.n;
+      };
+      const personEventCount = (personId: string): number => {
+        const row = this.db
+          .prepare(
+            `SELECT count(*) AS n FROM events e
+             JOIN identities i ON i.id = e.identity_id
+             WHERE i.person_id = ?`,
+          )
+          .get(personId) as { n: number };
+        return row.n;
+      };
+
+      if (mergeable.length > 0) {
+        mergeable.sort((a, b) => {
+          const aHasName = rows.some(
+            (r) => r.personId === a && r.externalId.startsWith("name:"),
+          );
+          const bHasName = rows.some(
+            (r) => r.personId === b && r.externalId.startsWith("name:"),
+          );
+          if (aHasName !== bHasName) return aHasName ? -1 : 1;
+          const d = personEventCount(b) - personEventCount(a);
+          if (d !== 0) return d;
+          return a < b ? -1 : a > b ? 1 : 0;
+        });
+        const mergeableTarget = mergeable[0]!;
         for (const source of mergeable.slice(1)) {
           this.db
             .prepare("UPDATE identities SET person_id = ? WHERE person_id = ?")
-            .run(target, source);
+            .run(mergeableTarget, source);
           this.db
             .prepare(
               "UPDATE persons SET revision = revision + 1 WHERE id IN (?, ?)",
             )
-            .run(source, target);
+            .run(source, mergeableTarget);
+          for (const meta of idMeta.values()) {
+            if (meta.personId === source) meta.personId = mergeableTarget;
+          }
         }
       }
-      let canonical = ids[0]!;
-      for (let i = 0; i < ids.length; i++) {
-        if (externalIds[i]!.startsWith("name:")) {
-          canonical = ids[i]!;
-          break;
-        }
-      }
-      const sorted = [...ids].sort();
-      if (!externalIds[ids.indexOf(canonical)]?.startsWith("name:")) {
-        canonical = sorted[0]!;
-      }
-      const stable = `name:${group.match_key}`;
-      const taken = this.db
-        .prepare(
-          "SELECT id FROM identities WHERE source = 'donationalerts' AND account_id = ? AND external_id = ?",
-        )
-        .get(group.account_id, stable) as { id: string } | undefined;
-      if (taken) canonical = taken.id;
-      else {
-        this.db
-          .prepare("UPDATE identities SET external_id = ? WHERE id = ?")
-          .run(stable, canonical);
-      }
+
+      const buckets = new Map<string, string[]>();
       for (const id of ids) {
-        if (id === canonical) continue;
-        this.db
-          .prepare("UPDATE events SET identity_id = ? WHERE identity_id = ?")
-          .run(canonical, id);
-        const polls = this.db
-          .prepare(
-            "SELECT poll_id AS pollId FROM presence_members WHERE identity_id = ?",
-          )
-          .all(id) as { pollId: string }[];
-        const insertMember = this.db.prepare(
-          "INSERT OR IGNORE INTO presence_members(poll_id, identity_id) VALUES (?, ?)",
-        );
-        for (const row of polls) insertMember.run(row.pollId, canonical);
-        this.db
-          .prepare("DELETE FROM presence_members WHERE identity_id = ?")
-          .run(id);
-        this.db
-          .prepare("DELETE FROM identity_aliases WHERE identity_id = ?")
-          .run(id);
-        this.db.prepare("DELETE FROM identities WHERE id = ?").run(id);
+        const personId = idMeta.get(id)!.personId;
+        const list = buckets.get(personId) ?? [];
+        list.push(id);
+        buckets.set(personId, list);
       }
-      this.db
-        .prepare("INSERT INTO membership_operations VALUES (?, ?, ?, ?, ?)")
-        .run(
-          randomUUID(),
-          "da_donor_collapse",
-          JSON.stringify({ ids, match_key: group.match_key }),
-          JSON.stringify({ canonical, external_id: stable }),
-          Date.now(),
-        );
+
+      const stable = `name:${group.match_key}`;
+      for (const [, bucket] of buckets) {
+        if (bucket.length <= 1) continue;
+        const scored = [...bucket].sort((a, b) => {
+          const aName = idMeta.get(a)!.externalId.startsWith("name:");
+          const bName = idMeta.get(b)!.externalId.startsWith("name:");
+          if (aName !== bName) return aName ? -1 : 1;
+          const aProt = protectedPersons.includes(idMeta.get(a)!.personId);
+          const bProt = protectedPersons.includes(idMeta.get(b)!.personId);
+          if (aProt !== bProt) return aProt ? -1 : 1;
+          const d = eventCount(b) - eventCount(a);
+          if (d !== 0) return d;
+          return a < b ? -1 : a > b ? 1 : 0;
+        });
+        let canonical = scored[0]!;
+        const taken = this.db
+          .prepare(
+            "SELECT id FROM identities WHERE source = 'donationalerts' AND account_id = ? AND external_id = ?",
+          )
+          .get(group.account_id, stable) as { id: string } | undefined;
+        if (taken && bucket.includes(taken.id)) canonical = taken.id;
+        else if (!idMeta.get(canonical)!.externalId.startsWith("name:")) {
+          if (!taken) {
+            this.db
+              .prepare("UPDATE identities SET external_id = ? WHERE id = ?")
+              .run(stable, canonical);
+            idMeta.get(canonical)!.externalId = stable;
+          }
+        }
+        for (const id of bucket) {
+          if (id === canonical) continue;
+          this.db
+            .prepare("UPDATE events SET identity_id = ? WHERE identity_id = ?")
+            .run(canonical, id);
+          const polls = this.db
+            .prepare(
+              "SELECT poll_id AS pollId FROM presence_members WHERE identity_id = ?",
+            )
+            .all(id) as { pollId: string }[];
+          const insertMember = this.db.prepare(
+            "INSERT OR IGNORE INTO presence_members(poll_id, identity_id) VALUES (?, ?)",
+          );
+          for (const row of polls) insertMember.run(row.pollId, canonical);
+          this.db
+            .prepare("DELETE FROM presence_members WHERE identity_id = ?")
+            .run(id);
+          const aliases = this.db
+            .prepare(
+              "SELECT name, candidate_key, first_seen_ms, last_seen_ms FROM identity_aliases WHERE identity_id = ?",
+            )
+            .all(id) as {
+            name: string;
+            candidate_key: string;
+            first_seen_ms: number;
+            last_seen_ms: number;
+          }[];
+          const upsertAlias = this.db.prepare(
+            `INSERT INTO identity_aliases(identity_id, name, candidate_key, first_seen_ms, last_seen_ms)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(identity_id, name) DO UPDATE SET
+               last_seen_ms = CASE
+                 WHEN excluded.last_seen_ms > identity_aliases.last_seen_ms
+                 THEN excluded.last_seen_ms ELSE identity_aliases.last_seen_ms END,
+               first_seen_ms = CASE
+                 WHEN excluded.first_seen_ms < identity_aliases.first_seen_ms
+                 THEN excluded.first_seen_ms ELSE identity_aliases.first_seen_ms END`,
+          );
+          for (const a of aliases)
+            upsertAlias.run(
+              canonical,
+              a.name,
+              a.candidate_key,
+              a.first_seen_ms,
+              a.last_seen_ms,
+            );
+          this.db
+            .prepare("DELETE FROM identity_aliases WHERE identity_id = ?")
+            .run(id);
+          this.db.prepare("DELETE FROM identities WHERE id = ?").run(id);
+        }
+        this.db
+          .prepare("INSERT INTO membership_operations VALUES (?, ?, ?, ?, ?)")
+          .run(
+            randomUUID(),
+            "da_donor_collapse",
+            JSON.stringify({ ids: bucket, match_key: group.match_key }),
+            JSON.stringify({ canonical, external_id: stable }),
+            Date.now(),
+          );
+      }
     }
   }
 

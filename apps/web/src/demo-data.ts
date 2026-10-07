@@ -130,7 +130,7 @@ function buildEvents() {
     received_at_ms: now - 30 * minute,
     time_quality: "exact",
     payload: {
-      text: "https://example.com/demo-alert.wav",
+      text: "",
       amountMinor: "10000",
       currency: "RUB",
       actorName: "Вика",

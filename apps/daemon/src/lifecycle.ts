@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -42,7 +43,52 @@ export async function readLock(dataDir: string): Promise<LockInfo | null> {
   }
 }
 
-/** Signal the locked daemon to exit; wait until lock is gone or PID dies. */
+export type ProcessInspector = {
+  cmdline: (pid: number) => string | null;
+};
+
+/** Default: read /proc/<pid>/cmdline on Linux; null if unavailable. */
+export function defaultCmdline(pid: number): string | null {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when cmdline looks like this daemon (stream-panel / apps/daemon entry).
+ * If cmdline cannot be read, returns null (unknown) — caller decides.
+ */
+export function looksLikeStreamPanelDaemon(
+  pid: number,
+  port: number | null,
+  inspect: ProcessInspector = { cmdline: defaultCmdline },
+): boolean | null {
+  const cmd = inspect.cmdline(pid);
+  if (cmd == null) return null;
+  const lower = cmd.toLowerCase();
+  if (
+    lower.includes("stream-panel") ||
+    lower.includes("streampanel") ||
+    lower.includes("apps/daemon") ||
+    lower.includes("dist/apps/daemon")
+  )
+    return true;
+  // Port alone is weak; only accept when cmdline mentions node and our lock port.
+  if (
+    port != null &&
+    lower.includes("node") &&
+    (lower.includes(String(port)) || lower.includes("stream_panel_port"))
+  )
+    return true;
+  return false;
+}
+
+/**
+ * Signal the locked daemon to exit; wait until lock is gone or PID dies.
+ * Verifies process image before SIGTERM; stale lock + PID reuse → clear lock.
+ */
 export async function stopLockedDaemon(
   dataDir: string,
   timeoutMs = 10000,
@@ -50,10 +96,17 @@ export async function stopLockedDaemon(
     new Promise((resolve) => setTimeout(resolve, ms)),
   killFn: (pid: number, signal: NodeJS.Signals) => void = (pid, signal) =>
     process.kill(pid, signal),
+  inspect: ProcessInspector = { cmdline: defaultCmdline },
 ): Promise<"stopped" | "not_running" | "timeout"> {
   const info = await readLock(dataDir);
   if (!info) return "not_running";
   if (!isProcessAlive(info.pid)) {
+    await unlink(join(dataDir, LOCK_NAME)).catch(() => {});
+    return "not_running";
+  }
+  const ours = looksLikeStreamPanelDaemon(info.pid, info.port, inspect);
+  if (ours === false) {
+    // Stale lock: PID reused by unrelated process — do not kill.
     await unlink(join(dataDir, LOCK_NAME)).catch(() => {});
     return "not_running";
   }

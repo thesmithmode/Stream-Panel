@@ -56,7 +56,12 @@
       clientSecret: daSecret,
       accessToken: daToken,
       refreshToken: daRefresh,
-      utcOffsetMinutes: offset === "" ? null : Number(offset),
+      utcOffsetMinutes: (() => {
+        const raw = String(offset ?? "").trim();
+        if (!raw) return null;
+        const n = Number(raw);
+        return Number.isInteger(n) ? n : null;
+      })(),
     });
     daSecret = daToken = daRefresh = "";
     if (result.url) window.open(result.url, "_blank", "noopener,noreferrer");
@@ -126,6 +131,14 @@
               href={status.device.verificationUri}
               target="_blank"
               rel="noreferrer">Открыть страницу входа</a
+            >
+            <button
+              class="outline small"
+              disabled={busy}
+              onclick={() =>
+                run(async () => {
+                  await api("twitch/disconnect", {});
+                })}>Отменить</button
             >
           </div>{/if}
         {#if status.twitch.detail}<p class="small muted">

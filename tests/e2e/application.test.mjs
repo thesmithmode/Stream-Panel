@@ -147,14 +147,14 @@ test(
         .waitFor();
       checks.push("stop manual recording");
       await page
-        .getByRole("button", { name: "Интеграции", exact: true })
+        .getByRole("navigation").getByRole("button", { name: "Интеграции", exact: true })
         .click();
       await page
         .getByRole("button", { name: "Создать резервную копию", exact: true })
         .click();
       await page
         .getByRole("status")
-        .filter({ hasText: "Резервная копия сохранена" })
+        .filter({ hasText: "Резервная копия:" })
         .waitFor();
       checks.push("SQLite backup through UI");
       for (const width of [390, 768, 1536]) {
@@ -188,7 +188,7 @@ test(
           "people overflow at " + width,
         );
         await page
-          .getByRole("button", { name: "Интеграции", exact: true })
+          .getByRole("navigation").getByRole("button", { name: "Интеграции", exact: true })
           .click();
         assert.equal(
           await page.evaluate(

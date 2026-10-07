@@ -100,6 +100,7 @@ test(
         .filter({ hasText: "REQUEST_FAILED" })
         .waitFor();
       await twitch.getByRole("textbox").fill("client123");
+      await twitch.locator("details.compact-details").first().locator("summary").click();
       await twitch.getByRole("checkbox").check();
       await twitch.getByRole("button", { name: "Войти через Twitch" }).click();
       await page
@@ -116,7 +117,7 @@ test(
         "https://twitch.tv/activate",
       );
       await twitch
-        .getByRole("button", { name: "Отключить", exact: true })
+        .getByRole("button", { name: "Отменить", exact: true })
         .click();
       await page
         .getByText("Код: ABCD", { exact: true })
@@ -130,9 +131,8 @@ test(
         .waitFor();
       await da.getByLabel("Client ID", { exact: true }).fill("da-app");
       await da.getByLabel("Client secret", { exact: true }).fill("secret-app");
-      await da
-        .getByLabel("Подтверждённый UTC offset времени DA, в минутах")
-        .fill("180");
+      await da.locator("details.compact-details").locator("summary").click();
+      await da.getByLabel("UTC offset (минуты)", { exact: true }).fill("180");
       await context.route(
         "https://www.donationalerts.com/oauth/authorize?**",
         (route) =>
@@ -165,12 +165,12 @@ test(
         `${a.origin}/oauth/donationalerts/callback?code=provider-code&state=${oauth.searchParams.get("state")}`,
       );
       await page
-        .getByRole("button", { name: "Интеграции", exact: true })
+        .getByRole("navigation").getByRole("button", { name: "Интеграции", exact: true })
         .click();
       await until(() => a.da.status.state === "connected", 8000);
       await reload(page);
       await page
-        .getByRole("button", { name: "Интеграции", exact: true })
+        .getByRole("navigation").getByRole("button", { name: "Интеграции", exact: true })
         .click();
       await page.getByText("Сбор донатов включён", { exact: true }).waitFor();
       const publicStatus = await page.evaluate(() =>
@@ -184,7 +184,7 @@ test(
         false,
       );
       await da
-        .getByRole("button", { name: "Повторить импорт истории" })
+        .getByRole("button", { name: "Повторить импорт" })
         .click();
       await page
         .getByRole("status")
@@ -196,10 +196,8 @@ test(
       await da
         .getByLabel("Access token", { exact: true })
         .fill("manual-access");
-      await da.getByLabel("Refresh token (если есть)").fill("manual-refresh");
-      await da
-        .getByLabel("Подтверждённый UTC offset времени DA, в минутах")
-        .fill("");
+      await da.getByLabel("Refresh token", { exact: true }).fill("manual-refresh");
+      await da.getByLabel("UTC offset (минуты)", { exact: true }).fill("");
       await da
         .getByRole("button", { name: "Подключить DonationAlerts" })
         .click();
@@ -212,7 +210,7 @@ test(
         "",
       );
       assert.equal(
-        await da.getByLabel("Refresh token (если есть)").inputValue(),
+        await da.getByLabel("Refresh token", { exact: true }).inputValue(),
         "",
       );
       assert.equal(a.configuration.value.daUtcOffsetMinutes, null);
@@ -220,7 +218,7 @@ test(
       await a.db.call("gap", "twitch", "fixture_gap", Date.now(), null);
       await reload(page);
       await page
-        .getByRole("button", { name: "Интеграции", exact: true })
+        .getByRole("navigation").getByRole("button", { name: "Интеграции", exact: true })
         .click();
       await page.getByText("twitch: fixture_gap", { exact: true }).waitFor();
       await saveCoverage(page);
