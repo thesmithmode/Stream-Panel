@@ -1039,3 +1039,124 @@ select:focus-visible {
     min-width: 0;
   }
 }
+
+.secondary-metrics {
+  margin-top: -18px;
+  margin-bottom: 28px;
+}
+.gap-badge {
+  color: #f0c674;
+}
+.insights-metric {
+  position: relative;
+  align-items: flex-start;
+}
+.insights-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  position: relative;
+}
+.insights-toggle {
+  align-self: flex-start;
+}
+.insights-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  width: min(420px, 90vw);
+  max-height: 360px;
+  overflow: auto;
+  background: #171925;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.insight-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #12141f;
+}
+.series-panel {
+  margin-bottom: 24px;
+}
+.spark-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  min-height: 72px;
+  padding: 8px 4px 4px;
+  overflow-x: auto;
+}
+.spark-bar {
+  flex: 0 0 8px;
+  width: 8px;
+  border-radius: 3px 3px 0 0;
+  background: linear-gradient(180deg, #6ee7c5, #3b82f6);
+  opacity: 0.9;
+}
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin: 0 0 18px;
+  padding: 0 4px;
+}
+.kpi {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 72px;
+  background: #141722;
+}
+.kpi span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.kpi strong {
+  font-size: 16px;
+  font-weight: 650;
+  color: #f3f3f7;
+  overflow-wrap: anywhere;
+}
+.kpi strong.kpi-dates {
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.35;
+}
+.tops-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+.tops-tabs button {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tops-tabs button.active {
+  color: #f3f3f7;
+  border-color: var(--accent);
+  background: rgba(110, 231, 197, 0.08);
+}
+.tops-hint {
+  margin: 0 0 8px;
+}

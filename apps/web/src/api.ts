@@ -63,4 +63,51 @@ export interface Summary {
   chatters: number | null;
   lastPollAtMs: number | null;
   events: number;
+  uniquePersons?: number;
+  uniqueIdentities?: number;
+  uniquePersonsObserved?: number | null;
+  uniqueIdentitiesObserved?: number | null;
+  messagesPerMinuteOfSession?: number | null;
+  sessionDurationMs?: number | null;
+  coverage?: {
+    knownMinutes: number;
+    totalMinutes: number;
+    ratio: number | null;
+  } | null;
+  chattersOverTime?: { atMs: number; chatters: number }[];
+  gapCount?: number;
+}
+export interface PersonStats {
+  personId: string;
+  displayName: string;
+  sessionId: string | null;
+  messageCount: number;
+  donationCount: number;
+  donationTotals: Record<string, string>;
+  firstEventMs: number | null;
+  lastEventMs: number | null;
+  firstObservedMs: number | null;
+  lastObservedMs: number | null;
+  observedMinutesThisSession: number | null;
+  avgObservedMinutes: number | null;
+  avgFirstObservedOffsetMs: number | null;
+  sessionsWithObservation: number;
+}
+export interface PersonTop {
+  id: string;
+  display_name: string;
+  revision: number;
+  sources: string;
+  messageCount: number;
+  donationCount: number;
+  donationTotals: Record<string, string>;
+  observedMinutes: number;
+}
+export interface InsightCard {
+  kind: string;
+  title: string;
+  detail: string;
+  personId: string | null;
+  sessionId: string | null;
+  metrics: Record<string, unknown>;
 }

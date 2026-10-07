@@ -177,7 +177,9 @@
         <p class="small muted">{error}</p>
       </section>{:else}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}
-      {#if tab === "overview"}{#if sessions.length}<div class="session-picker">
+      {#if tab === "overview" || tab === "people"}{#if sessions.length}<div
+            class="session-picker"
+          >
             <label
               >Период<select
                 aria-label="Период аналитики"
@@ -190,11 +192,17 @@
                       : ""}</option
                   >{/each}</select
               ></label
-            ><span class="small muted">Лента: последние 200 событий</span>
-          </div>{/if}<Overview
+            >{#if tab === "overview"}<span class="small muted"
+                >Лента: последние 200 событий</span
+              >{:else}<span class="small muted"
+                >Фильтр для топов и KPI карточки</span
+              >{/if}
+          </div>{/if}{/if}
+      {#if tab === "overview"}<Overview
           {summary}
           {events}
           {status}
+          {sessionFilter}
           connect={() => navigate("connections")}
           onPerson={openPerson}
         />
@@ -205,6 +213,7 @@
       {:else if tab === "people"}<People
           {people}
           {sessions}
+          {sessionFilter}
           initialId={personId}
           onChange={refresh}
         />

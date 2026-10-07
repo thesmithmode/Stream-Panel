@@ -1,24 +1,60 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
   import EventList from "./EventList.svelte";
-  import { money, date, type Event, type Summary } from "./api";
+  import {
+    api,
+    money,
+    date,
+    type Event,
+    type Summary,
+    type InsightCard,
+  } from "./api";
   let {
     summary,
     events,
     status,
+    sessionFilter = "",
     connect,
     onPerson,
   }: {
     summary: Summary;
     events: Event[];
     status: any;
+    sessionFilter?: string;
     connect: () => void;
     onPerson: (id: string) => void;
   } = $props();
   let filter = $state("all");
+  let insightsOpen = $state(false);
+  let insights = $state<InsightCard[]>([]);
+  let insightsLoading = $state(false);
+  let insightsError = $state("");
   const visible = $derived(
     events.filter((e) => filter === "all" || e.type === filter),
   );
+  const maxChatters = $derived(
+    Math.max(1, ...(summary.chattersOverTime ?? []).map((p) => p.chatters)),
+  );
+  async function loadInsights() {
+    insightsOpen = !insightsOpen;
+    if (!insightsOpen) return;
+    insightsLoading = true;
+    insightsError = "";
+    try {
+      const q = sessionFilter ? `?session=${sessionFilter}` : "";
+      insights = await api<InsightCard[]>(`insights${q}`);
+    } catch (e) {
+      insightsError = (e as Error).message;
+      insights = [];
+    } finally {
+      insightsLoading = false;
+    }
+  }
+  function coverageLabel() {
+    const c = summary.coverage;
+    if (!c || c.ratio === null) return "—";
+    return `${Math.round(c.ratio * 100)}% (${c.knownMinutes}/${c.totalMinutes} мин)`;
+  }
 </script>
 
 <section class="metrics">
@@ -28,6 +64,10 @@
       <span>Сообщения</span><strong
         >{summary.messages.toLocaleString("ru-RU")}</strong
       >
+      {#if summary.messagesPerMinuteOfSession != null}<small
+          >{summary.messagesPerMinuteOfSession.toLocaleString("ru-RU")} сообщ./мин
+          сессии</small
+        >{/if}
     </div>
   </div>
   <div class="metric">
@@ -37,6 +77,9 @@
         >{summary.chatters ?? "—"}</strong
       >{#if summary.lastPollAtMs}<small
           >Опрос: {date(summary.lastPollAtMs)}</small
+        >{/if}
+      {#if summary.uniquePersonsObserved != null}<small
+          >Уникальных за сессию: {summary.uniquePersonsObserved}</small
         >{/if}
     </div>
   </div>
@@ -53,6 +96,67 @@
     </div>
   </div>
 </section>
+<section class="metrics secondary-metrics">
+  <div class="metric">
+    <div>
+      <span>Уникальные люди (события)</span><strong
+        >{(summary.uniquePersons ?? 0).toLocaleString("ru-RU")}</strong
+      >
+    </div>
+  </div>
+  <div class="metric">
+    <div>
+      <span>Покрытие опросов</span><strong>{coverageLabel()}</strong>
+      {#if (summary.gapCount ?? 0) > 0}<small class="gap-badge"
+          >Пропуски сбора: {summary.gapCount}</small
+        >{/if}
+    </div>
+  </div>
+  <div class="metric insights-metric">
+    <div class="insights-wrap">
+      <span>Инсайты</span>
+      <button
+        type="button"
+        class="outline small insights-toggle"
+        aria-expanded={insightsOpen}
+        aria-haspopup="dialog"
+        onclick={loadInsights}
+        >{insightsOpen ? "Скрыть" : "Показать паттерны"}</button
+      >
+      {#if insightsOpen}<div class="insights-popover" role="dialog" aria-label="Инсайты">
+          {#if insightsLoading}<p class="small muted">Считаем…</p>
+          {:else if insightsError}<p class="notice error" role="alert"
+              >{insightsError}</p
+            >
+          {:else if !insights.length}<p class="empty-small">
+              Пока нет заметных паттернов по текущим данным.
+            </p>
+          {:else}{#each insights as card}<article class="insight-card">
+                <strong>{card.title}</strong>
+                <p class="small">{card.detail}</p>
+                {#if card.personId}<button
+                    type="button"
+                    class="outline small"
+                    onclick={() => onPerson(card.personId!)}>Открыть человека</button
+                  >{/if}
+              </article>{/each}{/if}
+        </div>{/if}
+    </div>
+  </div>
+</section>
+{#if summary.chattersOverTime?.length}<section class="panel series-panel">
+    <header>
+      <h2>Наблюдаемые участники по опросам</h2>
+      <span class="small muted">Не просмотры Twitch — только chatters poll</span>
+    </header>
+    <div class="spark-bars" aria-label="Ряд наблюдаемых участников">
+      {#each summary.chattersOverTime as point}<div
+          class="spark-bar"
+          title={`${date(point.atMs)}: ${point.chatters}`}
+          style={`height:${Math.max(8, Math.round((point.chatters / maxChatters) * 64))}px`}
+        ></div>{/each}
+    </div>
+  </section>{/if}
 <div class="overview-grid">
   <section class="panel feed">
     <header>

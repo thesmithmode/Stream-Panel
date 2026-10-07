@@ -1,21 +1,33 @@
 <script lang="ts">
-  import { api, date, type Person, type Session, type Event } from "./api";
+  import {
+    api,
+    date,
+    money,
+    type Person,
+    type Session,
+    type Event,
+    type PersonStats,
+    type PersonTop,
+  } from "./api";
   import EventList from "./EventList.svelte";
   import Icon from "./Icon.svelte";
   let {
     people,
     sessions,
+    sessionFilter = "",
     initialId = "",
     onChange,
   }: {
     people: Person[];
     sessions: Session[];
+    sessionFilter?: string;
     initialId?: string;
     onChange: () => Promise<void>;
   } = $props();
   let search = $state(""),
     selectedId = $state(""),
     detail = $state<any>(null),
+    stats = $state<PersonStats | null>(null),
     error = $state(""),
     name = $state(""),
     target = $state(""),
@@ -26,13 +38,37 @@
     merges = $state<any[]>([]),
     candidates = $state<string[]>([]),
     busy = $state(false),
-    minute = $state<number | null>(null);
+    minute = $state<number | null>(null),
+    sortBy = $state<"default" | "messages" | "donations" | "observed_minutes">(
+      "default",
+    ),
+    tops = $state<PersonTop[]>([]);
   let searchResults = $state<Person[]>([]);
-  const visible = $derived(search.trim() ? searchResults : people);
+  const visible = $derived(
+    sortBy === "default"
+      ? search.trim()
+        ? searchResults
+        : people
+      : tops.map(
+          (t) =>
+            ({
+              id: t.id,
+              display_name: t.display_name,
+              revision: t.revision,
+              event_count:
+                sortBy === "messages"
+                  ? t.messageCount
+                  : sortBy === "donations"
+                    ? t.donationCount
+                    : t.observedMinutes,
+              sources: t.sources,
+            }) as Person,
+        ),
+  );
   $effect(() => {
     const term = search.trim();
     let cancelled = false;
-    if (!term) {
+    if (!term || sortBy !== "default") {
       searchResults = [];
       return;
     }
@@ -50,6 +86,27 @@
       clearTimeout(timer);
     };
   });
+  $effect(() => {
+    const by = sortBy;
+    const session = sessionFilter;
+    let cancelled = false;
+    if (by === "default") {
+      tops = [];
+      return;
+    }
+    const q = new URLSearchParams({ by });
+    if (session) q.set("session", session);
+    void api<PersonTop[]>(`persons/tops?${q}`)
+      .then((rows) => {
+        if (!cancelled) tops = rows;
+      })
+      .catch((e) => {
+        if (!cancelled) error = e.message;
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
   let minuteEvents = $state<Event[]>([]);
   async function selectMinute(at: number) {
     minute = at;
@@ -60,9 +117,14 @@
       );
     });
   }
+  async function loadStats(id: string) {
+    const q = sessionFilter ? `?session=${sessionFilter}` : "";
+    stats = await api<PersonStats>(`persons/${id}/stats${q}`);
+  }
   async function select(id: string) {
     selectedId = id;
     error = "";
+    stats = null;
     try {
       detail = await api(`persons/${id}`);
       name = detail.display_name;
@@ -71,6 +133,7 @@
       grid = [];
       minute = null;
       candidates = await api(`persons/${id}/candidates`);
+      await loadStats(id);
     } catch (e) {
       error = (e as Error).message;
     }
@@ -114,12 +177,33 @@
   $effect(() => {
     if (initialId) void select(initialId);
   });
+  $effect(() => {
+    // reload stats when session filter changes while a person is open
+    const id = selectedId;
+    const session = sessionFilter;
+    if (!id) return;
+    let cancelled = false;
+    const q = session ? `?session=${session}` : "";
+    void api<PersonStats>(`persons/${id}/stats${q}`)
+      .then((s) => {
+        if (!cancelled) stats = s;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  });
   import { onMount } from "svelte";
   onMount(() => {
     void api<any[]>("merges")
       .then((v) => (merges = v))
       .catch((e) => (error = e.message));
   });
+  function formatOffset(ms: number | null) {
+    if (ms === null) return "—";
+    const min = Math.round(ms / 60000);
+    return `${min.toLocaleString("ru-RU")} мин`;
+  }
 </script>
 
 <div class="people-grid">
@@ -128,11 +212,35 @@
       <h2>Люди</h2>
       <span class="muted small">{people.length}</span>
     </header>
+    <div class="tops-tabs" role="tablist" aria-label="Сортировка людей">
+      {#each [
+        ["default", "Все"],
+        ["messages", "Чат"],
+        ["donations", "Донаты"],
+        ["observed_minutes", "Набл. мин"],
+      ] as const as [key, label]}<button
+          type="button"
+          role="tab"
+          class:active={sortBy === key}
+          aria-selected={sortBy === key}
+          onclick={() => (sortBy = key)}>{label}</button
+        >{/each}
+    </div>
+    {#if sortBy !== "default"}<p class="small muted tops-hint">
+        Топ по {sortBy === "messages"
+          ? "сообщениям"
+          : sortBy === "donations"
+            ? "донатам"
+            : "наблюдаемым минутам"}{sessionFilter
+          ? " за выбранную сессию"
+          : " (вся история)"}
+      </p>{/if}
     <div class="search">
       <input
         aria-label="Поиск человека"
         placeholder="Найти по имени…"
         bind:value={search}
+        disabled={sortBy !== "default"}
       />
     </div>
     {#if !visible.length}<div class="empty-small">
@@ -162,6 +270,57 @@
         <h2>{detail.display_name}</h2>
         <span class="small muted">Группа активности</span>
       </header>
+      {#if stats}<div class="kpi-strip" aria-label="Показатели человека">
+          <div class="kpi">
+            <span>Сообщения</span><strong
+              >{stats.messageCount.toLocaleString("ru-RU")}</strong
+            >
+          </div>
+          <div class="kpi">
+            <span>Донаты</span><strong
+              >{Object.keys(stats.donationTotals).length
+                ? Object.entries(stats.donationTotals)
+                    .map(([c, a]) => money(a, c))
+                    .join(" · ")
+                : stats.donationCount
+                  ? String(stats.donationCount)
+                  : "—"}</strong
+            >
+          </div>
+          <div class="kpi">
+            <span>Набл. минуты (сессия)</span><strong
+              >{stats.observedMinutesThisSession === null
+                ? "—"
+                : stats.observedMinutesThisSession.toLocaleString(
+                    "ru-RU",
+                  )}</strong
+            >
+          </div>
+          <div class="kpi">
+            <span>Сред. набл. мин / сессия</span><strong
+              >{stats.avgObservedMinutes === null
+                ? "—"
+                : stats.avgObservedMinutes.toLocaleString("ru-RU")}</strong
+            >
+          </div>
+          <div class="kpi">
+            <span>Первое / последнее событие</span><strong class="kpi-dates"
+              >{date(stats.firstEventMs)} → {date(stats.lastEventMs)}</strong
+            >
+          </div>
+          <div class="kpi">
+            <span>Первое / последнее наблюдение</span><strong class="kpi-dates"
+              >{date(stats.firstObservedMs)} → {date(
+                stats.lastObservedMs,
+              )}</strong
+            >
+          </div>
+          <div class="kpi">
+            <span>Сред. сдвиг до первого наблюдения</span><strong
+              >{formatOffset(stats.avgFirstObservedOffsetMs)}</strong
+            >
+          </div>
+        </div>{/if}
       <div class="settings-body">
         <label
           >Имя группы
