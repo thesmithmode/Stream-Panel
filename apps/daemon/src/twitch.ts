@@ -260,7 +260,17 @@ export class TwitchConnection {
       const body = object(await response.json());
       if (generation !== this.authGeneration)
         throw new Error("TWITCH_AUTH_CANCELLED");
-      if (!response.ok) throw new Error("TWITCH_REAUTH_REQUIRED");
+      if (!response.ok) {
+        // Expired/revoked refresh: clear credentials so reconnect stops looping.
+        delete this.config.value.twitch;
+        await this.config.save();
+        this.status = {
+          state: "error",
+          detail: "Требуется повторный вход в Twitch",
+          capabilities: {},
+        };
+        throw new Error("TWITCH_REAUTH_REQUIRED");
+      }
       const previous = this.token;
       this.config.value.twitch = {
         ...previous,
@@ -343,6 +353,13 @@ export class TwitchConnection {
       throw new Error("MISSING_CHAT_SCOPE");
     await this.config.save();
     this.status.account = string(body.login);
+    await this.db.call(
+      "ensureOwnerIdentity",
+      this.token.userId,
+      this.token.userId,
+      string(body.login) || this.token.userId,
+      Date.now(),
+    );
   }
   async start(): Promise<void> {
     if (!this.config.value.twitch) {
@@ -374,6 +391,11 @@ export class TwitchConnection {
     } catch (error) {
       if (this.stopped || generation !== this.authGeneration) return;
       this.report(error);
+      if (
+        error instanceof Error &&
+        error.message === "TWITCH_REAUTH_REQUIRED"
+      )
+        return;
       this.scheduleReconnect();
     }
   }
@@ -644,12 +666,17 @@ export class TwitchConnection {
     }
   }
   private report(error: unknown): void {
+    const message = error instanceof Error ? error.message : "TWITCH_ERROR";
+    if (message === "TWITCH_REAUTH_REQUIRED") {
+      this.status.state = "error";
+      this.status.detail = "Требуется повторный вход в Twitch";
+      return;
+    }
     this.status.state = "degraded";
-    this.status.detail =
-      error instanceof Error ? error.message : "TWITCH_ERROR";
+    this.status.detail = message;
   }
   private scheduleReconnect(): void {
-    if (this.stopped || this.retry) return;
+    if (this.stopped || this.retry || !this.config.value.twitch) return;
     const wait =
       Math.min(60000, 1000 * 2 ** Math.min(6, this.reconnectAttempt++)) +
       Math.random() * 1000;

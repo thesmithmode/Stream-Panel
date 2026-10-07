@@ -366,3 +366,31 @@ test("DA OAuth refuses missing or mismatched state before exchanging any authori
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("expired Twitch refresh clears credentials and sets reauth state without looping", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stream-panel-reauth-"));
+  const config = new Configuration(directory);
+  await config.load();
+  config.value.twitchClientId = "public-client";
+  config.value.twitch = {
+    access: "old-access",
+    refresh: "dead-refresh",
+    expiresAt: 0,
+    userId: "42",
+    scopes: [],
+  };
+  const request = (async () =>
+    new Response(JSON.stringify({ status: "invalid" }), {
+      status: 400,
+    })) as typeof fetch;
+  const { TwitchConnection } = await import("../src/twitch.js");
+  const connection = new TwitchConnection(config, null as never, request);
+  try {
+    await assert.rejects(connection.refresh(), /TWITCH_REAUTH_REQUIRED/);
+    assert.equal(config.value.twitch, undefined);
+    assert.equal(connection.status.state, "error");
+    assert.match(connection.status.detail, /повторный вход/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
