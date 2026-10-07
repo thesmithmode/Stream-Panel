@@ -23,7 +23,7 @@
 | U7 | Windows + Linux | ⏳ | Один TS-код; CI Ubuntu+Windows; native Win11/Mint install — G5 |
 | U8 | Долгоживущий процесс / reconnect | ⏳ | Reconnect/backoff в twitch/DA; 8h soak — G6 |
 | U9 | Presence: кто/как долго/когда + минуты | ✅ honest | Chatters poll + grid `presence.ts`/`store.ts`; честный контракт PRD §2 (не canonical watch) |
-| U10 | UI аналитики (экраны v1) | ✅ MVP | Overview/Sessions/People/Connections/grid; расширенные топы — P1 |
+| U10 | UI аналитики (экраны v1) | ✅ MVP+ | Overview KPI/coverage/series + Insights popover; People KPI strip + tops (chat/donations/observed minutes) |
 | U11 | Вне скоупа: OBS-виджеты, SaaS, анонимы | ✅ | Не реализовано намеренно |
 
 ## PRD functional (FR01–FR14)
@@ -51,8 +51,8 @@
 | --- | --- | --- |
 | Подключения и диагностика | ✅ / ⏳ | `Connections.svelte` + `/status`; live scopes freshness — G1/G3 |
 | Сессии | ✅ | `/sessions`, start/stop manual |
-| Эфир / Overview | ✅ | `/summary`, `/events` |
-| Люди + карточка | ✅ | `/persons`, detail, aliases |
+| Эфир / Overview | ✅ | `/summary` (+coverage/msgs/min/series), `/events`, Insights popover `/insights` |
+| Люди + карточка | ✅ | `/persons`, detail, aliases, `/persons/:id/stats`, tops `/persons/tops` |
 | Минутная сетка | ✅ | `/presence` observed/not_observed/unknown |
 | Сопоставления (кандидаты) | ✅ suggest / ❌ durable reject | GET candidates + merge; нет POST reject / owner rules |
 | Honesty table (не «все viewers») | ✅ | UI copy + PRD §2; bot disclaimer via filter |

@@ -307,3 +307,6 @@ donations(…)  -- может быть проекцией events type=donation
 18. **Stream Tools public FAQ:** local analytics DB confirmed on product page; Person-merge model still unpublished → keep independent Person design (§3.3).
 
 19. **Product decisions (user / orphanator 2026-10-07):** (1) YouTube / Stream Tools analytics video **out of scope** — product is Twitch + DonationAlerts only. (2) FR07 **KEEP** unique Twitch↔DA nick auto-link; wording fixed (not suggestions-only). (3) Manual merge **required** for different nicks; merges all past **and** future donations/activity into one Person; undo/split unchanged. (4) Twitch auth drop: UI must show **explicit** reauth («Войди снова») on definitive failure HTTP **400/401** (`state=error`, `TWITCH_REAUTH_REQUIRED`) — no silent OK look. **Do not** advance-warn about ~30-day public refresh expiry (useless beforehand). Connections + Overview surface the alert; daemon detail «Требуется повторный вход в Twitch».
+
+20. **Stage 2 analytics UI (2026-10-07):** `GET /persons/:id/stats`, extended `GET /summary`, `GET /persons/tops`, `GET /insights`. Labels stay honest: observed minutes / chatters — never Twitch watch time or view counts. **Insights is a dropdown/popover on Overview**, not a separate nav section. Bot filter respected in message/chatter/top/insight aggregates.
+
