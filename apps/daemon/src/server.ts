@@ -291,9 +291,41 @@ export async function createApplication(
       configuration.value.excludedBotLogins,
     ),
   );
+  app.get("/api/v1/persons/tops", async (request) => {
+    const q = object(request.query);
+    const sortRaw = string(q.by) || "messages";
+    const sortBy =
+      sortRaw === "donations" || sortRaw === "observed_minutes"
+        ? sortRaw
+        : "messages";
+    return db.call(
+      "personsTop",
+      sortBy,
+      string(q.session) || undefined,
+      configuration.value.excludedBotLogins,
+      q.limit === undefined ? 50 : Number(q.limit),
+    );
+  });
+  app.get("/api/v1/insights", async (request) =>
+    db.call(
+      "insights",
+      string(object(request.query).session) || undefined,
+      configuration.value.excludedBotLogins,
+    ),
+  );
   app.get("/api/v1/persons/:id", async (request) =>
     db.call("person", string(object(request.params).id)),
   );
+  app.get("/api/v1/persons/:id/stats", async (request) => {
+    const id = string(object(request.params).id);
+    const session = string(object(request.query).session) || undefined;
+    return db.call(
+      "personStats",
+      id,
+      session,
+      configuration.value.excludedBotLogins,
+    );
+  });
   app.get("/api/v1/persons/:id/candidates", async (request) => {
     const person = await db.call<Record<string, unknown>>(
       "person",

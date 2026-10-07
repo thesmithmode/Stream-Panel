@@ -230,3 +230,83 @@ test("unexpected internal errors return 500, filesystem failures return 503 and 
     await f.close();
   }
 });
+test("person stats, tops and insights endpoints return shaped aggregates", async () => {
+  const f = await fixture();
+  try {
+    const get = (url: string) => f.a.app.inject({ url, headers: f.headers });
+    const personId = await f.a.db.call<string>(
+      "ensureOwnerIdentity",
+      "owner",
+      "owner",
+      "Owner",
+      Date.now(),
+    );
+    const session = await f.a.db.call<string>(
+      "startSession",
+      "owner",
+      "http-analytics",
+      Date.now() - 120_000,
+      "platform",
+      Date.now() - 120_000,
+    );
+    await f.a.db.call("ingest", {
+      source: "twitch",
+      accountId: "owner",
+      externalId: "http-msg-1",
+      type: "chat.message",
+      actor: { externalId: "owner", displayName: "Owner" },
+      occurredAtMs: Date.now() - 60_000,
+      receivedAtMs: Date.now() - 59_000,
+      sourceTime: null,
+      timeQuality: "provider",
+      transport: "eventsub",
+      payload: { text: "hi" },
+    });
+    await f.a.db.call("recordPoll", session, "owner", {
+      startedAtMs: Date.now() - 120_000,
+      completedAtMs: Date.now() - 60_000,
+      status: "complete",
+      userIds: ["owner"],
+    });
+    const stats = await get(`/api/v1/persons/${personId}/stats?session=${session}`);
+    assert.equal(stats.statusCode, 200);
+    assert.equal(typeof stats.json().messageCount, "number");
+    assert.ok("observedMinutesThisSession" in stats.json());
+    const tops = await get(
+      `/api/v1/persons/tops?by=messages&session=${session}`,
+    );
+    assert.equal(tops.statusCode, 200);
+    assert.ok(Array.isArray(tops.json()));
+    assert.equal(
+      (await get(`/api/v1/persons/tops?by=donations&limit=10`)).statusCode,
+      200,
+    );
+    assert.equal(
+      (
+        await get(
+          `/api/v1/persons/tops?by=observed_minutes&session=${session}&limit=5`,
+        )
+      ).statusCode,
+      200,
+    );
+    assert.equal(
+      (await get(`/api/v1/persons/tops?by=bogus`)).statusCode,
+      200,
+    );
+    const insights = await get(`/api/v1/insights?session=${session}`);
+    assert.equal(insights.statusCode, 200);
+    assert.ok(Array.isArray(insights.json()));
+    assert.equal((await get("/api/v1/insights")).statusCode, 200);
+    const summary = await get(`/api/v1/summary?session=${session}`);
+    assert.equal(summary.statusCode, 200);
+    assert.ok("coverage" in summary.json());
+    assert.ok("gapCount" in summary.json());
+    assert.equal(
+      (await get(`/api/v1/persons/${personId}/stats`)).statusCode,
+      200,
+    );
+    assert.equal((await get("/api/v1/persons/missing/stats")).statusCode, 404);
+  } finally {
+    await f.close();
+  }
+});
