@@ -154,7 +154,12 @@ export async function createApplication(
   let nonceExpiry = Date.now() + 600000;
   const sessions = new Map<string, { csrf: string; expires: number }>();
   const origin = `http://127.0.0.1:${port}`;
-  const callback = `http://127.0.0.1:${port}/oauth/donationalerts/callback`;
+  const rawDaRedirectHost = process.env.STREAM_PANEL_DA_REDIRECT_HOST;
+  const daRedirectHost =
+    rawDaRedirectHost === "localhost" || rawDaRedirectHost === "127.0.0.1"
+      ? rawDaRedirectHost
+      : "127.0.0.1";
+  const callback = `http://${daRedirectHost}:${port}/oauth/donationalerts/callback`;
   const same = (a: string, b: string) => {
     const left = Buffer.from(a),
       right = Buffer.from(b);

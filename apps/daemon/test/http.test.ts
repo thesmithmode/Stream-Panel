@@ -151,8 +151,48 @@ test("HTTP contracts: missing entities, conflicts, bounded grids, callback rejec
     assert.match(backup.json().filename, /\.sqlite$/);
     const status = (await get("/api/v1/status")).json();
     assert.equal(JSON.stringify(status).includes("accessToken"), false);
+    assert.equal(
+      status.config.daRedirectUri,
+      "http://127.0.0.1:47831/oauth/donationalerts/callback",
+    );
   } finally {
     await f.close();
+  }
+});
+test("DA redirect host env allows only localhost or 127.0.0.1; default stays 127.0.0.1", async () => {
+  const previous = process.env.STREAM_PANEL_DA_REDIRECT_HOST;
+  const cases: Array<[string | undefined, string]> = [
+    [undefined, "127.0.0.1"],
+    ["127.0.0.1", "127.0.0.1"],
+    ["localhost", "localhost"],
+    ["evil.example", "127.0.0.1"],
+    ["", "127.0.0.1"],
+  ];
+  try {
+    for (const [env, host] of cases) {
+      if (env === undefined) delete process.env.STREAM_PANEL_DA_REDIRECT_HOST;
+      else process.env.STREAM_PANEL_DA_REDIRECT_HOST = env;
+      const f = await fixture();
+      try {
+        const status = (
+          await f.a.app.inject({
+            url: "/api/v1/status",
+            headers: f.headers,
+          })
+        ).json();
+        assert.equal(
+          status.config.daRedirectUri,
+          `http://${host}:47831/oauth/donationalerts/callback`,
+          `env=${JSON.stringify(env)}`,
+        );
+      } finally {
+        await f.close();
+      }
+    }
+  } finally {
+    if (previous === undefined)
+      delete process.env.STREAM_PANEL_DA_REDIRECT_HOST;
+    else process.env.STREAM_PANEL_DA_REDIRECT_HOST = previous;
   }
 });
 test("bootstrap expires, invalidates previous nonce and bounds local sessions; expired sessions are evicted", async (t) => {
