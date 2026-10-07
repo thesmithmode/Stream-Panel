@@ -69,7 +69,7 @@ Native addon `better-sqlite3` собирается при `pnpm install`. На W
 
 ### Пакеты (Stage 3)
 
-Сборка portable / `.deb` / Windows zip+`.exe`: `pnpm package` (см. [docs/ops/packaging.md](docs/ops/packaging.md)). CI: Actions workflow **Package release artifacts** (`workflow_dispatch` или tag `v*`).
+Сборка: `pnpm package`. **GitHub Release** — только `.deb` + один Windows zip (`--github-assets`; см. [docs/ops/packaging.md](docs/ops/packaging.md)). CI: **Package release artifacts** (`workflow_dispatch` или tag `v*`).
 
 ## Данные и восстановление
 

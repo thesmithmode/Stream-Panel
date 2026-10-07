@@ -2,15 +2,19 @@
 /**
  * Build portable + platform packages for Stream Panel.
  *
- * Outputs under artifacts/release/:
- *   - stream-panel-<ver>-linux-x64.tar.gz   (portable)
- *   - stream-panel_<ver>_amd64.deb          (Linux; when dpkg-deb available)
- *   - stream-panel-<ver>-win-x64.zip        (portable; Windows runner)
- *   - StreamPanel.exe inside the win zip   (required on win32; fails if csc missing)
- *   - stream-panel-<ver>-source.zip        (optional; --source)
+ * GitHub Release assets (HARD POLICY — upload ONLY these two):
+ *   1. stream-panel_<ver>_amd64.deb          (Linux installer)
+ *   2. stream-panel-<ver>-win-x64.zip        (single Windows package; contains StreamPanel.exe)
+ * Do NOT upload tar.gz, source.zip, SHA256SUMS, manifest.json, or other texts to the Release.
+ * Use --github-assets so the script emits only those publishable binaries.
+ *
+ * Local / CI debug outputs under artifacts/release/ (not for GitHub Release):
+ *   - stream-panel-<ver>-linux-x64.tar.gz   (portable; omitted with --github-assets)
+ *   - stream-panel-<ver>-source.zip         (optional; --source; omit for Release)
+ *   - SHA256SUMS + manifest.json            (local verify only; never Release assets)
  *
  * Usage:
- *   node scripts/package-release.mjs [--skip-build] [--skip-runtime] [--source]
+ *   node scripts/package-release.mjs [--skip-build] [--skip-runtime] [--source] [--github-assets]
  * Env:
  *   STREAM_PANEL_VERSION  override package.json version
  *   STREAM_PANEL_NODE_VERSION  override bundled Node (default: .node-version)
@@ -40,6 +44,8 @@ const args = new Set(process.argv.slice(2));
 const skipBuild = args.has("--skip-build");
 const skipRuntime = args.has("--skip-runtime");
 const wantSource = args.has("--source");
+/** Emit only GitHub Release binaries: .deb (linux) or win zip. No tar.gz / source. */
+const githubAssets = args.has("--github-assets");
 
 function readVersion() {
   if (process.env.STREAM_PANEL_VERSION) return process.env.STREAM_PANEL_VERSION;
@@ -442,14 +448,20 @@ Bundled Node: ${skipRuntime ? "(none)" : nodeVersion}
 
     if (platform === "linux") {
       writeLauncherUnix(stagingRoot);
-      const tarName = `stream-panel-${version}-linux-${arch}.tar.gz`;
-      const tarPath = join(outDir, tarName);
-      archiveTarGz(stagingRoot, tarPath);
-      artifacts.push(tarPath);
+      if (!githubAssets) {
+        const tarName = `stream-panel-${version}-linux-${arch}.tar.gz`;
+        const tarPath = join(outDir, tarName);
+        archiveTarGz(stagingRoot, tarPath);
+        artifacts.push(tarPath);
+      }
       if (!skipRuntime && existsSync("/usr/bin/dpkg-deb") && arch === "x64") {
         const debPath = join(outDir, `stream-panel_${version}_amd64.deb`);
         buildDeb({ version, stagingRoot, debPath, nodeVersion });
         artifacts.push(debPath);
+      } else if (githubAssets) {
+        throw new Error(
+          "--github-assets on linux requires dpkg-deb and x64 (no .deb produced)",
+        );
       }
     } else if (platform === "win32") {
       writeLauncherWindowsCmd(stagingRoot);
@@ -472,7 +484,7 @@ Bundled Node: ${skipRuntime ? "(none)" : nodeVersion}
       artifacts.push(tarPath);
     }
 
-    if (wantSource) {
+    if (wantSource && !githubAssets) {
       const sourceZip = join(outDir, `stream-panel-${version}-source.zip`);
       rmSync(sourceZip, { force: true });
       run(
@@ -489,6 +501,7 @@ Bundled Node: ${skipRuntime ? "(none)" : nodeVersion}
       artifacts.push(sourceZip);
     }
 
+    // Checksums / manifest are for local or CI verification only — never GitHub Release assets.
     writeChecksums(artifacts);
     writeFileSync(
       join(outDir, "manifest.json"),
@@ -498,6 +511,7 @@ Bundled Node: ${skipRuntime ? "(none)" : nodeVersion}
           nodeVersion,
           platform,
           arch,
+          githubAssets,
           createdAt: new Date().toISOString(),
           artifacts: artifacts.map((f) => ({
             file: basenameSafe(f),
@@ -511,6 +525,11 @@ Bundled Node: ${skipRuntime ? "(none)" : nodeVersion}
     );
     console.log("Artifacts:");
     for (const f of artifacts) console.log(" -", f);
+    if (githubAssets) {
+      console.log(
+        "GitHub Release policy: upload ONLY the binary artifact(s) above (.deb + win zip). Do not upload SHA256SUMS, manifest.json, tar.gz, or source.zip.",
+      );
+    }
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

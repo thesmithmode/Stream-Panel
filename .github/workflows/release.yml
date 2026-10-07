@@ -6,6 +6,7 @@ on:
       - "v*"
     branches:
       - codex-init-grok
+      - release-assets-slim
     paths:
       - "scripts/package-release.mjs"
       - "scripts/windows-launcher.cs"
@@ -18,6 +19,10 @@ concurrency:
   group: package-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  # GitHub Release assets MUST be ONLY:
+  #   1. stream-panel_*_amd64.deb
+  #   2. stream-panel-*-win-*.zip  (single Windows package with StreamPanel.exe)
+  # Never upload tar.gz, source.zip, SHA256SUMS, or manifest*.json to the Release.
   package-linux:
     runs-on: ubuntu-latest
     steps:
@@ -29,16 +34,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: node scripts/package-release.mjs --skip-build --source
+      - run: node scripts/package-release.mjs --skip-build --github-assets
       - uses: actions/upload-artifact@v4
         with:
           name: stream-panel-linux
           path: |
             artifacts/release/*.deb
-            artifacts/release/*.tar.gz
-            artifacts/release/*-source.zip
-            artifacts/release/SHA256SUMS
-            artifacts/release/manifest.json
           if-no-files-found: error
           retention-days: 14
 
@@ -71,7 +72,7 @@ jobs:
           "CSC=$csc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: node scripts/package-release.mjs --skip-build
+      - run: node scripts/package-release.mjs --skip-build --github-assets
       - name: Verify StreamPanel.exe in zip
         shell: pwsh
         run: |
@@ -89,7 +90,5 @@ jobs:
           name: stream-panel-windows
           path: |
             artifacts/release/*.zip
-            artifacts/release/SHA256SUMS
-            artifacts/release/manifest.json
           if-no-files-found: error
           retention-days: 14
