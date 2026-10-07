@@ -394,7 +394,7 @@ function buildInnoInstaller({ version, stagingRoot, exeOutPath }) {
   const iss = join(root, "scripts", "installer", "stream-panel.iss");
   if (!existsSync(iss)) throw new Error(`missing ${iss}`);
   const outputDir = dirname(exeOutPath);
-  const outputBase = basenameSafe(exeOutPath).replace(/\\.exe$/i, "");
+  const outputBase = basenameSafe(exeOutPath).replace(/\.exe$/i, "");
   mkdirSync(outputDir, { recursive: true });
   const candidates = resolveIsccCandidates();
   const errors = [];
