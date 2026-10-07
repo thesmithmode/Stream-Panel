@@ -4,6 +4,14 @@ on:
   push:
     tags:
       - "v*"
+    branches:
+      - codex-init-grok
+    paths:
+      - "scripts/package-release.mjs"
+      - "scripts/windows-launcher.cs"
+      - ".github/workflows/release.yml"
+      - "docs/ops/packaging.md"
+      - "package.json"
 permissions:
   contents: read
 concurrency:

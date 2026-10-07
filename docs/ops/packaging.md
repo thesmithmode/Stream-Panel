@@ -37,8 +37,9 @@ Linux `.deb` требует `dpkg-deb`. Windows `.exe` собирается че
 
 Workflow: [`.github/workflows/release.yml`](../../.github/workflows/release.yml)
 
-- `workflow_dispatch` — ручной запуск с ветки `codex-init-grok`
-- push tag `v*` — артефакты к прогону
+- push в `codex-init-grok` при изменении packaging-файлов
+- push tag `v*`
+- `workflow_dispatch` (после попадания workflow на default branch)
 
 Артефакты GitHub Actions: `stream-panel-linux`, `stream-panel-windows` (retention 14d). GitHub Release upload не делается автоматически на этой стадии (нет write `contents` / merge в `main`).
 
