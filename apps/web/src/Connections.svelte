@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "./api";
+  import { statusLabel } from "./labels";
   let { status, onChange }: { status: any; onChange: () => Promise<void> } =
     $props();
   let twitchClient = $state(""),
@@ -53,7 +54,7 @@
     <header>
       <h2>Twitch</h2>
       <span class="state" class:online={status.twitch.state === "connected"}
-        >{status.twitch.state}</span
+        >{statusLabel(status.twitch.state)}</span
       >
     </header>
     <div class="settings-body">
@@ -107,7 +108,7 @@
       {#each Object.entries(status.twitch.capabilities || {}) as [key, value]}<div
           class="capability"
         >
-          <span>{key}</span><span>{String(value)}</span>
+          <span>{key}</span><span>{statusLabel(value)}</span>
         </div>{/each}
     </div>
   </section>
@@ -117,7 +118,7 @@
       <span
         class="state"
         class:online={status.donationalerts.state === "connected"}
-        >{status.donationalerts.state}</span
+        >{statusLabel(status.donationalerts.state)}</span
       >
     </header>
     <div class="settings-body">
@@ -198,11 +199,16 @@
             message = "Повторный импорт запущен.";
           })}>Повторить импорт истории</button
       >
-      <p class="small muted">{status.donationalerts.detail}</p>
+      <p class="small muted">
+        {#if status.donationalerts.account}<strong
+            >{status.donationalerts.account}</strong
+          >{/if}
+        {status.donationalerts.detail}
+      </p>
       {#each Object.entries(status.donationalerts.capabilities || {}) as [key, value]}<div
           class="capability"
         >
-          <span>{key}</span><span>{String(value)}</span>
+          <span>{key}</span><span>{statusLabel(value)}</span>
         </div>{/each}
     </div>
   </section>

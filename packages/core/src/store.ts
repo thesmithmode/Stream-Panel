@@ -134,7 +134,7 @@ export class StreamStore {
             event.actor.externalId,
             event.actor.displayName,
           );
-          const personId = linked ?? randomUUID();
+          const personId = linked?.personId ?? randomUUID();
           autoLinked = linked !== null;
           identity = { id: randomUUID(), person_id: personId };
           if (!linked) {
@@ -157,6 +157,11 @@ export class StreamStore {
               matchKey(event.actor.displayName),
             );
           if (linked) {
+            const how =
+              event.source === "twitch" &&
+              event.actor.externalId === event.accountId
+                ? "owner"
+                : linked.how;
             this.db
               .prepare(
                 "INSERT INTO membership_operations VALUES (?, ?, ?, ?, ?)",
@@ -169,11 +174,7 @@ export class StreamStore {
                   {
                     id: identity.id,
                     personId,
-                    how:
-                      event.source === "twitch" &&
-                      event.actor.externalId === event.accountId
-                        ? "owner"
-                        : "login_match",
+                    how,
                   },
                 ]),
                 event.receivedAtMs,
@@ -397,15 +398,19 @@ export class StreamStore {
   /**
    * High-confidence auto-link target person id, or null.
    * Exact platform id is handled by caller lookup. Strong name: unique
-   * cross-source match_key (exactly one person). Owner person is created via
-   * ensureOwnerIdentity so DA donations matching the owner login link here.
+   * cross-source match_key (exactly one person) — FR07 KEEP.
+   * Same-source DA: identical display match_key under the same recipient
+   * account attaches new donation identities to that person so DA donors
+   * are not split per donation id. Ambiguous historical multi-person splits
+   * are not auto-merged; new identities attach to a stable existing person
+   * to stop further dupes.
    */
   private resolveAutoLinkPerson(
     source: Source,
-    _accountId: string,
+    accountId: string,
     _externalId: string,
     displayName: string,
-  ): string | null {
+  ): { personId: string; how: string } | null {
     const key = matchKey(displayName);
     if (!key) return null;
     const other = source === "twitch" ? "donationalerts" : "twitch";
@@ -415,7 +420,19 @@ export class StreamStore {
          WHERE source = ? AND match_key = ?`,
       )
       .all(other, key) as { person_id: string }[];
-    if (rows.length === 1) return rows[0]!.person_id;
+    if (rows.length === 1) return { personId: rows[0]!.person_id, how: "login_match" };
+    // DA actor external_id is the donation occurrence id, so reuse by name.
+    if (source === "donationalerts") {
+      const same = this.db
+        .prepare(
+          `SELECT DISTINCT person_id FROM identities
+           WHERE source = 'donationalerts' AND account_id = ? AND match_key = ?
+           ORDER BY person_id`,
+        )
+        .all(accountId, key) as { person_id: string }[];
+      if (same.length >= 1)
+        return { personId: same[0]!.person_id, how: "da_name_attach" };
+    }
     return null;
   }
 

@@ -117,6 +117,69 @@ test("unique cross-source login match auto-links; ambiguous names stay separate;
   }
 });
 
+test("DA same display name + same account attaches to one person; Twitch ids stay separate", () => {
+  const store = new StreamStore(":memory:");
+  try {
+    const a = store.ingest({
+      ...donation,
+      externalId: "donation-egor-1",
+      actor: { externalId: "donation-egor-1", displayName: "Егор4ик" },
+    });
+    const b = store.ingest({
+      ...donation,
+      externalId: "donation-egor-2",
+      actor: { externalId: "donation-egor-2", displayName: "Егор4ик" },
+    });
+    const c = store.ingest({
+      ...donation,
+      externalId: "donation-egor-3",
+      actor: { externalId: "donation-egor-3", displayName: "Егор4ик" },
+    });
+    assert.equal(a.personId, b.personId);
+    assert.equal(b.personId, c.personId);
+    const detail = store.person(String(a.personId)) as {
+      identities: { source: string; external_id: string }[];
+    };
+    assert.equal(detail.identities.length, 3);
+    assert.ok(detail.identities.every((i) => i.source === "donationalerts"));
+    // Different DA account keeps separate people even with same nick.
+    const other = store.ingest({
+      ...donation,
+      accountId: "recipient-other",
+      externalId: "donation-egor-x",
+      actor: { externalId: "donation-egor-x", displayName: "Егор4ик" },
+    });
+    assert.notEqual(other.personId, a.personId);
+    // Twitch stable ids with same display name stay separate persons.
+    const t1 = store.ingest({
+      ...base,
+      externalId: "msg-t1",
+      actor: { externalId: "twitch-a", displayName: "SameNick" },
+    });
+    const t2 = store.ingest({
+      ...base,
+      externalId: "msg-t2",
+      actor: { externalId: "twitch-b", displayName: "SameNick" },
+    });
+    assert.notEqual(t1.personId, t2.personId);
+    // FR07 still links unique Twitch↔DA same nick.
+    const linked = store.ingest({
+      ...donation,
+      externalId: "donation-samenick",
+      actor: { externalId: "donation-samenick", displayName: "UniqueLink" },
+    });
+    const twitch = store.ingest({
+      ...base,
+      externalId: "msg-unique",
+      actor: { externalId: "twitch-unique", displayName: "UniqueLink" },
+    });
+    // Order: DA first then Twitch — Twitch should auto-link to DA person.
+    assert.equal(twitch.personId, linked.personId);
+  } finally {
+    store.close();
+  }
+});
+
 test("dedupe covers WS/REST and direct/Streamer.bot; scope separates recipient accounts", () => {
   const store = new StreamStore(":memory:");
   try {

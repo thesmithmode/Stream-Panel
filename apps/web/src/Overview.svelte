@@ -74,10 +74,12 @@
     <span class="teal"><Icon name="people" size={27} /></span>
     <div>
       <span>Наблюдаемые участники</span><strong
-        >{summary.chatters ?? "—"}</strong
+        >{summary.chatters != null
+          ? summary.chatters
+          : "нет данных"}</strong
       >{#if summary.lastPollAtMs}<small
           >Опрос: {date(summary.lastPollAtMs)}</small
-        >{/if}
+        >{:else}<small>эфир не идёт / нет опросов присутствия</small>{/if}
       {#if summary.uniquePersonsObserved != null}<small
           >Уникальных за сессию: {summary.uniquePersonsObserved}</small
         >{/if}
@@ -144,11 +146,12 @@
     </div>
   </div>
 </section>
-{#if summary.chattersOverTime?.length}<section class="panel series-panel">
-    <header>
-      <h2>Наблюдаемые участники по опросам</h2>
-      <span class="small muted">Не просмотры Twitch — только chatters poll</span>
-    </header>
+<section class="panel series-panel">
+  <header>
+    <h2>Наблюдаемые участники по опросам</h2>
+    <span class="small muted">Не просмотры Twitch — только chatters poll</span>
+  </header>
+  {#if summary.chattersOverTime?.length}
     <div class="spark-bars" aria-label="Ряд наблюдаемых участников">
       {#each summary.chattersOverTime as point}<div
           class="spark-bar"
@@ -156,7 +159,10 @@
           style={`height:${Math.max(8, Math.round((point.chatters / maxChatters) * 64))}px`}
         ></div>{/each}
     </div>
-  </section>{/if}
+  {:else}
+    <p class="empty-small presence-empty">нет данных — эфир не идёт</p>
+  {/if}
+</section>
 <div class="overview-grid">
   <section class="panel feed">
     <header>
@@ -211,7 +217,12 @@
       <header><h2>Присутствие в чате</h2></header>
       <div>
         <Icon name="people" size={42} />
-        <p>Наблюдение в чате не подтверждает просмотр видео.</p>
+        {#if summary.chatters == null && !summary.lastPollAtMs}
+          <p><strong>нет данных</strong></p>
+          <p class="small muted">эфир не идёт — опросы присутствия появятся после начала стрима.</p>
+        {:else}
+          <p>Наблюдение в чате не подтверждает просмотр видео.</p>
+        {/if}
       </div>
     </section>
   </aside>

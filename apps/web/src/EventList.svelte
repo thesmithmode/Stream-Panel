@@ -1,5 +1,6 @@
 <script lang="ts">
   import { date, money, type Event } from "./api";
+  import { isAudioDonation, audioUrl } from "./labels";
   let {
     events,
     onPerson,
@@ -44,6 +45,18 @@
         <p>
           {#if event.payload.redacted}
             <span class="muted">[скрыто модерацией]</span>
+          {:else if isAudioDonation(event.payload)}
+            <span class="audio-donation">
+              <span class="audio-label">Аудио</span>
+              {#if audioUrl(event.payload)}
+                <audio
+                  controls
+                  preload="none"
+                  src={audioUrl(event.payload)!}
+                  aria-label="Аудио-донат"
+                ></audio>
+              {/if}
+            </span>
           {:else}
             {event.payload.text || "—"}
           {/if}

@@ -37,6 +37,7 @@ export interface Event {
     amountMinor?: string;
     currency?: string;
     actorName?: string;
+    messageType?: string;
     originChannelId?: string;
   };
 }

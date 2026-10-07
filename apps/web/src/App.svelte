@@ -138,9 +138,15 @@
         >{/each}
     </nav>
     <div class="sidebar-bottom">
-      <span class="dot" class:off={!authorized}></span><span
-        >Локальная база</span
-      ><Icon name="arrow" size={17} />
+      <span class="dot" class:off={!authorized}></span>
+      <div class="sidebar-status">
+        <span>Локальная база</span>
+        <span class="small muted sidebar-hint"
+          >Вкладку можно закрыть — сбор продолжается. Выход: Ctrl+C или
+          STREAM_PANEL_STOP=1</span
+        >
+      </div>
+      <Icon name="arrow" size={17} />
     </div>
   </aside>
   <main>

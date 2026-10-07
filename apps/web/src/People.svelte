@@ -35,6 +35,7 @@
     splitName = $state(""),
     gridSession = $state(""),
     grid = $state<{ minuteStartMs: number; state: string }[]>([]),
+    gridLoaded = $state(false),
     merges = $state<any[]>([]),
     candidates = $state<string[]>([]),
     busy = $state(false),
@@ -131,6 +132,7 @@
       selectedIdentities = [];
       target = "";
       grid = [];
+      gridLoaded = false;
       minute = null;
       candidates = await api(`persons/${id}/candidates`);
       await loadStats(id);
@@ -172,6 +174,7 @@
     grid = await api(
       `presence?session=${gridSession}&person=${selectedId}&from=${start}&to=${end}`,
     );
+    gridLoaded = true;
     minute = null;
   }
   $effect(() => {
@@ -422,7 +425,10 @@
           {#if minute !== null}<p class="small">
               Выбрана минута: {date(minute)}. Показаны доступные события этой
               минуты.
-            </p>{/if}{/if}
+            </p>{/if}
+        {:else if gridLoaded}
+          <p class="empty-small presence-empty">нет данных — эфир не идёт</p>
+        {/if}
         <h3>Последние события <span class="small muted">до 200</span></h3>
         <EventList
           events={minute === null ? (detail.events as Event[]) : minuteEvents}
