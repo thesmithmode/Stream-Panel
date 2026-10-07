@@ -1,0 +1,57 @@
+name: Package release artifacts
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+permissions:
+  contents: read
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  package-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: node scripts/package-release.mjs --skip-build --source
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stream-panel-linux
+          path: |
+            artifacts/release/*.deb
+            artifacts/release/*.tar.gz
+            artifacts/release/*-source.zip
+            artifacts/release/SHA256SUMS
+            artifacts/release/manifest.json
+          if-no-files-found: error
+          retention-days: 14
+
+  package-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: node scripts/package-release.mjs --skip-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stream-panel-windows
+          path: |
+            artifacts/release/*.zip
+            artifacts/release/SHA256SUMS
+            artifacts/release/manifest.json
+          if-no-files-found: error
+          retention-days: 14

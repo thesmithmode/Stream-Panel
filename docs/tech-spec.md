@@ -310,3 +310,5 @@ donations(…)  -- может быть проекцией events type=donation
 
 20. **Stage 2 analytics UI (2026-10-07):** `GET /persons/:id/stats`, extended `GET /summary`, `GET /persons/tops`, `GET /insights`. Labels stay honest: observed minutes / chatters — never Twitch watch time or view counts. **Insights is a dropdown/popover on Overview**, not a separate nav section. Bot filter respected in message/chatter/top/insight aggregates.
 
+21. **Stage 3 packaging (2026-10-07):** `scripts/package-release.mjs` bundles production `dist` + deps + official Node runtime into Linux `.deb`/`tar.gz` and Windows zip + `StreamPanel.exe` (C# launcher). Workflow `.github/workflows/release.yml` (dispatch / `v*` tags) uploads artifacts. Not Electron/SEA; better-sqlite3 remains a native module installed per target OS. See [ops/packaging.md](./ops/packaging.md).
+

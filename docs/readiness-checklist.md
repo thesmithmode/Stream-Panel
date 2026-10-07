@@ -79,7 +79,8 @@
 | Durable merge rejection + owner rules TTL | Schema/API/UI/coverage; P1 — tech-spec §16 |
 | Historical auto-merge of already-split persons | Deferred with auto-link slice |
 | Full Streamer.bot live client | P3; needs SB + duplicate suppression |
-| OS credential store, installer, autostart | P1/P2 |
+| OS credential store, autostart | P1/P2 |
+| Installer Win `.exe` / Linux `.deb` | ✅ scripts+CI | `scripts/package-release.mjs`, `.github/workflows/release.yml`, [ops/packaging.md](./ops/packaging.md) — not yet signed/Store |
 | OBS widgets / other platforms / SaaS | Out of v1 |
 
 ## Verdict for orchestrator

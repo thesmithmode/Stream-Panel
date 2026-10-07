@@ -19,7 +19,9 @@
     "test:unit": "pnpm build:core && node --test --test-concurrency=2 dist/packages/core/test/*.test.js",
     "test:integration": "pnpm build && node --test --test-concurrency=2 dist/apps/daemon/test/*.test.js tests/integration/*.test.mjs",
     "test:e2e": "pnpm build && node --test --test-concurrency=2 tests/e2e/*.test.mjs",
-    "test:coverage": "pnpm build && node scripts/test-with-coverage.mjs"
+    "test:coverage": "pnpm build && node scripts/test-with-coverage.mjs",
+    "package": "node scripts/package-release.mjs",
+    "package:skip-build": "node scripts/package-release.mjs --skip-build"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.2",

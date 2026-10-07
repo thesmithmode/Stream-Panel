@@ -65,7 +65,11 @@ Native addon `better-sqlite3` собирается при `pnpm install`. На W
 - Локальный backup через SQLite API с проверкой integrity / FK / схемы.
 - Заглушка адаптера Streamer.bot (полный live client — P3).
 
-Ещё не реализованы: **durable отказ кандидатов / owner rules с TTL** (P1), расширенные топы/экспорт, полный Streamer.bot WS client, автостарт/установщик, OS credential store. OBS-виджеты — вне v1.
+Ещё не реализованы: **durable отказ кандидатов / owner rules с TTL** (P1), полный Streamer.bot WS client, автостарт OS, OS credential store. OBS-виджеты — вне v1.
+
+### Пакеты (Stage 3)
+
+Сборка portable / `.deb` / Windows zip+`.exe`: `pnpm package` (см. [docs/ops/packaging.md](docs/ops/packaging.md)). CI: Actions workflow **Package release artifacts** (`workflow_dispatch` или tag `v*`).
 
 ## Данные и восстановление
 

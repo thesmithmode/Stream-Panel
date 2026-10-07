@@ -11,3 +11,4 @@ coverage/
 data/
 secrets/
 *.log
+artifacts/
