@@ -394,3 +394,82 @@ test("expired Twitch refresh clears credentials and sets reauth state without lo
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("Twitch refresh invalid_grant clears credentials", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stream-panel-reauth-ig-"));
+  const config = new Configuration(directory);
+  await config.load();
+  config.value.twitchClientId = "public-client";
+  config.value.twitch = {
+    access: "old-access",
+    refresh: "dead-refresh",
+    expiresAt: 0,
+    userId: "42",
+    scopes: [],
+  };
+  const request = (async () =>
+    new Response(
+      JSON.stringify({ error: "invalid_grant", message: "Invalid refresh token" }),
+      { status: 400 },
+    )) as typeof fetch;
+  const { TwitchConnection } = await import("../src/twitch.js");
+  const connection = new TwitchConnection(config, null as never, request);
+  try {
+    await assert.rejects(connection.refresh(), /TWITCH_REAUTH_REQUIRED/);
+    assert.equal(config.value.twitch, undefined);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Twitch refresh 503 retains tokens for backoff retry", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stream-panel-refresh-503-"));
+  const config = new Configuration(directory);
+  await config.load();
+  config.value.twitchClientId = "public-client";
+  config.value.twitch = {
+    access: "old-access",
+    refresh: "keep-refresh",
+    expiresAt: 0,
+    userId: "42",
+    scopes: [],
+  };
+  const request = (async () =>
+    new Response("upstream unavailable", { status: 503 })) as typeof fetch;
+  const { TwitchConnection } = await import("../src/twitch.js");
+  const connection = new TwitchConnection(config, null as never, request);
+  try {
+    await assert.rejects(connection.refresh(), /TWITCH_REFRESH_HTTP_503/);
+    assert.equal(config.value.twitch?.refresh, "keep-refresh");
+    assert.equal(config.value.twitch?.access, "old-access");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Twitch refresh 429 retains tokens for backoff retry", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "stream-panel-refresh-429-"));
+  const config = new Configuration(directory);
+  await config.load();
+  config.value.twitchClientId = "public-client";
+  config.value.twitch = {
+    access: "old-access",
+    refresh: "keep-refresh",
+    expiresAt: 0,
+    userId: "42",
+    scopes: [],
+  };
+  const request = (async () =>
+    new Response(JSON.stringify({ message: "slow down" }), {
+      status: 429,
+    })) as typeof fetch;
+  const { TwitchConnection } = await import("../src/twitch.js");
+  const connection = new TwitchConnection(config, null as never, request);
+  try {
+    await assert.rejects(connection.refresh(), /TWITCH_REFRESH_HTTP_429/);
+    assert.equal(config.value.twitch?.refresh, "keep-refresh");
+    assert.equal(config.value.twitch?.access, "old-access");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

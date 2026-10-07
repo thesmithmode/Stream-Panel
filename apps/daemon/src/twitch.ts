@@ -113,6 +113,27 @@ export function normalizeTwitch(
   };
 }
 
+/** Clear tokens only on definitive OAuth failure (400/401 or invalid_grant). */
+export function isDefinitiveTwitchAuthFailure(
+  status: number,
+  body: Record<string, unknown>,
+): boolean {
+  if (status === 400 || status === 401) return true;
+  const error = string(body.error).toLowerCase();
+  if (
+    error === "invalid_grant" ||
+    error === "unauthorized" ||
+    error === "invalid_token"
+  )
+    return true;
+  const message = string(body.message).toLowerCase();
+  return (
+    message.includes("invalid refresh token") ||
+    message.includes("invalid_grant") ||
+    message.includes("unauthorized")
+  );
+}
+
 export class TwitchConnection {
   status: ConnectionStatus = {
     state: "disconnected",
@@ -248,28 +269,47 @@ export class TwitchConnection {
     if (this.refreshPromise) return this.refreshPromise;
     const generation = this.authGeneration;
     this.refreshPromise = (async () => {
-      const response = await this.request("https://id.twitch.tv/oauth2/token", {
-        method: "POST",
-        body: new URLSearchParams({
-          client_id: this.config.value.twitchClientId,
-          grant_type: "refresh_token",
-          refresh_token: this.token.refresh,
-        }),
-        signal: AbortSignal.timeout(15000),
-      });
-      const body = object(await response.json());
+      let response: Response;
+      try {
+        response = await this.request("https://id.twitch.tv/oauth2/token", {
+          method: "POST",
+          body: new URLSearchParams({
+            client_id: this.config.value.twitchClientId,
+            grant_type: "refresh_token",
+            refresh_token: this.token.refresh,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+      } catch (error) {
+        // Network/timeout: keep tokens so reconnect/backoff can retry.
+        throw error instanceof Error
+          ? error
+          : new Error("TWITCH_REFRESH_TRANSIENT");
+      }
+      let body: Record<string, unknown>;
+      try {
+        body = object(await response.json());
+      } catch (parseError) {
+        // Non-JSON error bodies (e.g. HTML 5xx) still classify by status.
+        if (response.ok) throw parseError;
+        body = {};
+      }
       if (generation !== this.authGeneration)
         throw new Error("TWITCH_AUTH_CANCELLED");
       if (!response.ok) {
-        // Expired/revoked refresh: clear credentials so reconnect stops looping.
-        delete this.config.value.twitch;
-        await this.config.save();
-        this.status = {
-          state: "error",
-          detail: "Требуется повторный вход в Twitch",
-          capabilities: {},
-        };
-        throw new Error("TWITCH_REAUTH_REQUIRED");
+        if (isDefinitiveTwitchAuthFailure(response.status, body)) {
+          // Expired/revoked refresh: clear credentials so reconnect stops looping.
+          delete this.config.value.twitch;
+          await this.config.save();
+          this.status = {
+            state: "error",
+            detail: "Требуется повторный вход в Twitch",
+            capabilities: {},
+          };
+          throw new Error("TWITCH_REAUTH_REQUIRED");
+        }
+        // 429/5xx/other: keep tokens for existing reconnect/backoff.
+        throw new Error(`TWITCH_REFRESH_HTTP_${response.status}`);
       }
       const previous = this.token;
       this.config.value.twitch = {
