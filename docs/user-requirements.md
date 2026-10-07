@@ -73,4 +73,5 @@
 
 - Person auto-link: high-confidence unique login match Twitch↔DA + owner bind on Twitch login; manual merge/undo/split remain. Ambiguous names stay suggestions only.
 - Bot filter in analytics (configurable + well-known); Litestream path documented; Streamer.bot stub only until P3.
+- Durable rejection of merge candidates and scoped owner rules with TTL stay **P1** (not implemented in this readiness tick): needs schema + API + UI + coverage; offline suggestions + manual merge are enough to start live validation. See tech-spec Implementation decisions §16.
 

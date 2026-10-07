@@ -2,13 +2,15 @@
 
 Локальная программа для аналитики Twitch + DonationAlerts: чат, донаты, сессии, люди и наблюдения по минутам. Данные хранятся на вашем компьютере в SQLite. Интерфейс открывается в браузере, сбор работает в отдельном процессе.
 
-**Стадия: работающая ранняя версия в `codex-init-grok` (от `dev`).** Долгосрочная интеграция — ветка `dev`; релизы — `main`. Локальный цикл проверен тестами и браузером. Адаптеры Twitch/DA написаны, но вход в реальные аккаунты и получение живых событий ещё требуют проверки. Наблюдение участника в чате не означает просмотр видео. Полный набор целевой v1 отмечен отдельно в документации.
+**Стадия: работающая ранняя версия в ветке `codex-init-grok`.** Долгосрочная интеграция — `dev`; релизы — `main`. Не клонируйте `codex-init` для этой линии работ. Локальный цикл проверен тестами и браузером. Адаптеры Twitch/DA написаны; вход в реальные аккаунты и живые события ещё требуют ручной проверки. Наблюдение участника в чате не означает просмотр видео. Готовность по требованиям — [docs/readiness-checklist.md](docs/readiness-checklist.md); живой прогон — [docs/live-validation-checklist.md](docs/live-validation-checklist.md).
 
 ![Первый запуск Stream Panel](docs/assets/overview.png)
 
-## Запуск
+## Установка и запуск (Windows и Linux)
 
-Нужны Node.js **24.19.0 или новее в ветке 24**, pnpm **11.25.0** и Git. Если pnpm ещё нет: `npm install -g pnpm@11.25.0`.
+Нужны **Node.js 24.19.0+** (ветка 24), **pnpm 11.25.0** и Git. На Linux/macOS Node можно поставить в `~/.local/node24` и добавить в `PATH`. Если pnpm ещё нет: `npm install -g pnpm@11.25.0`.
+
+**Linux / macOS (bash):**
 
 ```sh
 git clone --branch codex-init-grok https://github.com/thesmithmode/Stream-Panel.git
@@ -18,54 +20,71 @@ pnpm build
 pnpm start
 ```
 
-Откройте ссылку, напечатанную в терминале. Она одноразовая, действует 10 минут; после входа её ключ удаляется из адреса. Вкладку можно закрыть, процесс в терминале продолжит работать. Завершение — Ctrl+C. После перезапуска откройте новую напечатанную ссылку. Программа не заполняет базу выдуманными событиями.
+**Windows (PowerShell):**
+
+```powershell
+git clone --branch codex-init-grok https://github.com/thesmithmode/Stream-Panel.git
+cd Stream-Panel
+pnpm install --frozen-lockfile
+pnpm build
+pnpm start
+```
+
+Откройте ссылку из терминала. Она одноразовая (≈10 мин); после входа ключ удаляется из адреса. Вкладку можно закрыть — процесс продолжит работать. Остановка: Ctrl+C (Linux/macOS и Windows terminal). После перезапуска откройте новую напечатанную ссылку. Программа не заполняет базу выдуманными событиями.
+
+Native addon `better-sqlite3` собирается при `pnpm install`. На Windows нужны Build Tools for Visual Studio (C++); на Linux — обычный toolchain (`build-essential` / эквивалент). CI проверяет Ubuntu и Windows.
 
 В «Подключениях»:
 
-- **Twitch:** зарегистрируйте своё public OAuth-приложение в [Developer Console](https://dev.twitch.tv/console/apps), введите Client ID и подтвердите Device Code вход владельцем канала. Client secret Twitch не нужен. Основные права: чтение чата и участников; подписки, Bits и фолловеры включаются отдельно.
-- **DonationAlerts:** своё OAuth-приложение с Client ID / secret и redirect URI `http://localhost:47831/oauth/donationalerts/callback`, либо собственный уже полученный access token. Для обновления токена нужны refresh token и реквизиты приложения. Регистрацию localhost callback, возврат state и живой legacy WS handshake ещё необходимо проверить на аккаунте; при отказе REST и realtime имеют независимую диагностику.
-- Время DA по умолчанию **неизвестно**: донаты сохраняются и входят в общую сумму, но не присваиваются минуте/сессии. UTC offset вводится только после проверки времени источника. Он применяется к новым фактам; старые автоматически не переписываются.
+- **Twitch:** своё public OAuth-приложение в [Developer Console](https://dev.twitch.tv/console/apps), Client ID и Device Code вход владельцем канала. Client secret Twitch не нужен. Основные права: чтение чата и участников; подписки, Bits и фолловеры — отдельно.
+- **DonationAlerts:** своё OAuth-приложение с Client ID / secret и redirect URI `http://localhost:47831/oauth/donationalerts/callback`, либо уже полученный access token. Для refresh нужны refresh token и реквизиты приложения. Localhost callback, state и legacy WS handshake ещё нужно проверить на аккаунте; REST и realtime имеют независимую диагностику.
+- Время DA по умолчанию **неизвестно**: донаты сохраняются и входят в сумму, но не присваиваются минуте/сессии. UTC offset — только после проверки времени источника; применяется к новым фактам.
 
-Секреты вводите в локальной панели. Их нет в API, git и snapshot базы. Пока они сохраняются в отдельном **незашифрованном** `secrets.json` (POSIX mode0600); интеграция с хранилищем ОС запланирована.
+### Где лежат секреты и данные
+
+| ОС | Каталог по умолчанию |
+| --- | --- |
+| Linux | `$XDG_DATA_HOME/stream-panel` или `~/.local/share/stream-panel` |
+| Windows | `%LOCALAPPDATA%\StreamPanel` |
+
+Внутри: `data.sqlite`, **`secrets.json`** (токены, client id/secret, offset, poll interval, `excludedBotLogins`), `backups/`. Переопределение: `STREAM_PANEL_DATA_DIR`. Порт: `STREAM_PANEL_PORT` (default **47831**); при смене порта обновите DA redirect URI.
+
+Секреты вводятся в локальной панели. Их нет в HTTP API, git и snapshot базы. Файл `secrets.json` **незашифрован**; на POSIX пишется с mode `0600`, каталог данных `0700`. Интеграция с OS credential store — P1. Не коммитьте и не шарьте этот файл.
+
+### Опционально: Litestream → R2/B2
+
+Локальные snapshot через кнопку «Создать резервную копию» достаточны для старта. Непрерывная репликация в Cloudflare R2 или Backblaze B2 — опциональна: см. [docs/ops/litestream.md](docs/ops/litestream.md), пример `litestream.yml.example`, скрипт `scripts/litestream-replicate.sh` (тихо пропускает запуск, если Litestream или ключи не заданы). Секреты R2/B2 только в env.
 
 ## Что работает
 
-- Обзор: сообщения, отдельные суммы валют, последний полный опрос участников, лента и состояние источников.
-- Сессии: ручная запись; в адаптере Twitch — обнаружение текущего эфира, стабильный stream ID и опрос chatters каждые 60–120 с (по умолчанию 60).
-- Люди: отдельные Twitch ID и донатные события, кандидаты по имени, переименование, merge, undo и выборочный split с проверкой ревизий.
-- Минутная сетка: «наблюдался / не наблюдался / нет данных», события выбранной минуты из базы.
-- Согласованный локальный backup через SQLite API, с проверкой integrity / foreign keys / версии схемы.
-- Дедупликация повторов WS/REST, точная арифметика денег, миграции и история aliases.
+- Обзор: сообщения, суммы по валютам, последний полный опрос участников, лента и состояние источников.
+- Сессии: ручная запись; Twitch — обнаружение эфира, стабильный stream ID, опрос chatters каждые 60–120 с (default 60).
+- Люди: Twitch ID и донатные события, кандидаты по имени, переименование, merge, undo и split с ревизиями; автопривязка по platform id и уникальному login-match Twitch↔DA; owner bind при входе Twitch.
+- Фильтр известных ботов в summary/persons (+ `excludedBotLogins` в secrets); события не удаляются.
+- Минутная сетка: «наблюдался / не наблюдался / нет данных».
+- Локальный backup через SQLite API с проверкой integrity / FK / схемы.
+- Заглушка адаптера Streamer.bot (полный live client — P3).
 
-Реализовано в этой ветке: автопривязка Person по точному platform id и уникальному login-match (Twitch↔DA), owner bind при входе Twitch, фильтр известных ботов в summary/persons (плюс `excludedBotLogins` в secrets), пример Litestream→R2/B2, заглушка адаптера Streamer.bot.
-
-Ещё не реализованы: отказ от кандидатов / durable owner rules, расширенные топы/экспорт, полный live Streamer.bot client, автостарт/установщик. OBS-виджеты — последующие этапы.
+Ещё не реализованы: **durable отказ кандидатов / owner rules с TTL** (P1), расширенные топы/экспорт, полный Streamer.bot WS client, автостарт/установщик, OS credential store. OBS-виджеты — вне v1.
 
 ## Данные и восстановление
 
-По умолчанию: Linux — `$XDG_DATA_HOME/stream-panel` либо `~/.local/share/stream-panel`; Windows — `%LOCALAPPDATA%/StreamPanel`. Внутри: `data.sqlite`, `secrets.json`, `backups/`. Папку можно изменить через `STREAM_PANEL_DATA_DIR`; порт — `STREAM_PANEL_PORT` (default47831). При изменении порта измените зарегистрированный DA redirect URI; панель показывает актуальный URI.
-
-Кнопка «Создать резервную копию» сохраняет проверенный snapshot в `backups/`. Для восстановления остановите программу, сохраните текущую папку отдельно, скопируйте snapshot в **новую** папку как `data.sqlite` и запустите с этой папкой через `STREAM_PANEL_DATA_DIR`. Вход в сервисы выполните заново. Не копируйте живую базу без WAL, не синхронизируйте её одновременно с двух компьютеров. Автоматического облачного sync сейчас нет.
+Кнопка «Создать резервную копию» пишет проверенный snapshot в `backups/`. Для восстановления: остановите программу, сохраните текущую папку отдельно, скопируйте snapshot в **новую** папку как `data.sqlite`, запустите с `STREAM_PANEL_DATA_DIR`. Вход в сервисы — заново. Не копируйте живую базу без WAL и не пишите в неё с двух машин сразу.
 
 ## Разработчику
 
-1. [Требования владельца](docs/user-requirements.md) и [PRD](docs/prd.md).
-2. [Архитектура и инварианты](docs/tech-spec.md).
-3. [Реальный контракт API](docs/api-contract.md).
-4. [Проверенные источники и исправленные гипотезы](docs/research-notes.md).
-5. [Выполненные проверки и ограничения](docs/validation.md).
-6. [TDD, команды тестов и политика покрытия](docs/testing-strategy.md).
-7. [Следующие задачи и критерии готовности](docs/implementation-plan.md).
+1. [Требования](docs/user-requirements.md) и [PRD](docs/prd.md)
+2. [Архитектура](docs/tech-spec.md) · [API](docs/api-contract.md)
+3. [Readiness checklist](docs/readiness-checklist.md) · [Live validation](docs/live-validation-checklist.md)
+4. [Research](docs/research-notes.md) · [Validation](docs/validation.md) · [Testing](docs/testing-strategy.md) · [Plan](docs/implementation-plan.md)
 
 ```sh
 pnpm check
 pnpm benchmark
 ```
 
-Перед первой проверкой установите Chromium: `pnpm exec playwright install chromium` (на Linux runner — `--with-deps chromium`). `pnpm check` проверяет TypeScript/Svelte, собирает UI, запускает unit/integration/E2E и контролирует покрытие: минимум 90% строк, ветвлений и функций суммарно, 90% строк каждого runtime-файла. Тесты используют временные данные и искусственные реквизиты, не требуют живого аккаунта. Подробности, команды и границы доказательств — в [стратегии тестирования](docs/testing-strategy.md). CI настроен для push во все ветки и всех PR на Ubuntu/Windows; фактические результаты отмечены в [validation](docs/validation.md).
+Перед первой проверкой: `pnpm exec playwright install chromium` (на Linux CI — `--with-deps chromium`). `pnpm check` — TypeScript/Svelte, UI build, unit/integration/E2E и coverage ≥90% строк/ветвлений/функций (и ≥90% строк каждого runtime-файла). Живые аккаунты не нужны. CI: push во все ветки и PR на Ubuntu/Windows (`.github/workflows/core.yml`).
 
-[Benchmark](docs/benchmark-results.json) — синтетический storage smoke, не доказательство годовой нагрузки. Живая запись на целевых Win11/Mint остаётся отдельным этапом.
+Структура: `packages/core` — домен/SQLite; `apps/daemon` — worker, HTTP, OAuth, адаптеры; `apps/web` — Svelte UI; `scripts` — измерения. В `allowBuilds` разрешён только `better-sqlite3`.
 
-Структура: `packages/core` — домен/SQLite; `apps/daemon` — worker, HTTP, OAuth и адаптеры; `apps/web` — Svelte UI; `scripts` — измерения. Exact dependencies и lockfile фиксированы. В `allowBuilds` разрешён только `better-sqlite3`.
-
-[Stream Tools](https://b1trat3.ru/products/stream-tools) — ориентир локального рабочего процесса. Аналитическая модель спроектирована по требованиям владельца; её наличие в референсе публично не подтверждено.
+[Stream Tools](https://b1trat3.ru/products/stream-tools) — ориентир процесса; аналитическая модель — по требованиям владельца.

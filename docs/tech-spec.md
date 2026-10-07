@@ -295,10 +295,11 @@ donations(…)  -- может быть проекцией events type=donation
 8. **Resub text:** для `channel.subscription.message` брать `event.message.text` из объекта message.
 9. **CI:** параллельные jobs types / unit / integration / e2e / coverage-gate; concurrency cancel-in-progress; без live OAuth.
 
-10. **Person auto-link (2026-10-07):** exact `source+account+external_id` unchanged. High-confidence auto-link attaches a **new** identity to an existing person when `matchKey` (NFKC, trim, lower, strip leading `@`/`#`) uniquely matches exactly one person on the other platform (Twitch↔DA). Owner: `ensureOwnerIdentity` on Twitch validate. Manual merge/undo/split kept. Deferred: historical backfill merge of already-split persons; durable rejection/owner rules with TTL (P1).
+10. **Person auto-link (2026-10-07):** exact `source+account+external_id` unchanged. High-confidence auto-link attaches a **new** identity to an existing person when `matchKey` (NFKC, trim, lower, strip leading `@`/`#`) uniquely matches exactly one person on the other platform (Twitch↔DA). Owner: `ensureOwnerIdentity` on Twitch validate. Manual merge/undo/split kept. Deferred: historical backfill merge of already-split persons.
 11. **Bot filter:** well-known Twitch bot logins + `excludedBotLogins` in secrets; marked `is_bot` on `/persons`; excluded from summary message/chatter counts. Events not deleted.
 12. **Twitch expired refresh:** clear tokens, status `error` «Требуется повторный вход», no reconnect backoff loop. Dead `watchdog` timer field (present on `codex-init`) remains absent on this branch.
 13. **summary/persons:** SQL aggregates / JOIN counts — no per-request JS parse of every event row for summary totals.
 14. **Litestream:** docs + `litestream.yml.example` + graceful `scripts/litestream-replicate.sh` (skip if unset). No secrets in repo.
 15. **Streamer.bot:** stub adapter + `mapStreamerBotTwitchChatMessage` + test; full `@streamerbot/client` WS deferred to P3 (needs live SB + duplicate suppression).
+16. **Durable rejection / owner rules (P1, stays deferred — 2026-10-07 readiness tick):** not a quick slice. Needs schema migration (persisted pair rejections + scoped owner rules with TTL), API + UI reject/apply, candidate filtering, collision/revision audit, and ≥90% coverage on new paths. Current offline path already has suggestions (`candidatePersons`), manual merge/undo/split, and owner bind — enough for live validation without durable reject. Tracked in [implementation-plan.md](./implementation-plan.md) P1 «Сопоставления».
 
