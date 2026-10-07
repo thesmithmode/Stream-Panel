@@ -6,7 +6,7 @@
  *   - stream-panel-<ver>-linux-x64.tar.gz   (portable)
  *   - stream-panel_<ver>_amd64.deb          (Linux; when dpkg-deb available)
  *   - stream-panel-<ver>-win-x64.zip        (portable; Windows runner)
- *   - StreamPanel.exe inside the win zip   (when csc available)
+ *   - StreamPanel.exe inside the win zip   (required on win32; fails if csc missing)
  *   - stream-panel-<ver>-source.zip        (optional; --source)
  *
  * Usage:
@@ -272,37 +272,115 @@ exit 0
   rmSync(debRoot, { recursive: true, force: true });
 }
 
+function resolveCscCandidates() {
+  const windir = process.env.WINDIR || "C:\\Windows";
+  const programFilesX86 =
+    process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+  const programFiles = process.env.ProgramFiles || "C:\\Program Files";
+  const candidates = [];
+  if (process.env.CSC) candidates.push(process.env.CSC);
+  candidates.push("csc");
+  candidates.push(
+    join(windir, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
+  );
+  candidates.push(
+    join(windir, "Microsoft.NET", "Framework", "v4.0.30319", "csc.exe"),
+  );
+
+  const vswhere = join(
+    programFilesX86,
+    "Microsoft Visual Studio",
+    "Installer",
+    "vswhere.exe",
+  );
+  if (existsSync(vswhere)) {
+    const found = spawnSync(
+      vswhere,
+      [
+        "-latest",
+        "-products",
+        "*",
+        "-requires",
+        "Microsoft.Component.MSBuild",
+        "-find",
+        "MSBuild\\**\\Bin\\Roslyn\\csc.exe",
+      ],
+      { encoding: "utf8" },
+    );
+    if (found.status === 0 && found.stdout) {
+      for (const line of found.stdout.split(/\r?\n/)) {
+        const p = line.trim();
+        if (p) candidates.push(p);
+      }
+    }
+  }
+
+  for (const edition of [
+    "Enterprise",
+    "Professional",
+    "Community",
+    "BuildTools",
+  ]) {
+    candidates.push(
+      join(
+        programFiles,
+        "Microsoft Visual Studio",
+        "2022",
+        edition,
+        "MSBuild",
+        "Current",
+        "Bin",
+        "Roslyn",
+        "csc.exe",
+      ),
+    );
+  }
+
+  const seen = new Set();
+  const out = [];
+  for (const c of candidates) {
+    if (!c || seen.has(c)) continue;
+    seen.add(c);
+    out.push(c);
+  }
+  return out;
+}
+
 function tryBuildWindowsExe(stagingRoot) {
   const cs = join(root, "scripts", "windows-launcher.cs");
-  if (!existsSync(cs)) return null;
+  if (!existsSync(cs)) {
+    throw new Error(`missing ${cs}`);
+  }
   const exePath = join(stagingRoot, "StreamPanel.exe");
-  // Prefer csc from .NET Framework / Build Tools
-  const candidates = [
-    process.env.CSC,
-    "csc",
-    join(
-      process.env["WINDIR"] || "C:\\\\Windows",
-      "Microsoft.NET",
-      "Framework64",
-      "v4.0.30319",
-      "csc.exe",
-    ),
-  ].filter(Boolean);
+  const candidates = resolveCscCandidates();
+  const errors = [];
   for (const csc of candidates) {
+    if (csc !== "csc" && csc !== process.env.CSC && !existsSync(csc)) {
+      continue;
+    }
     const result = spawnSync(
       csc,
-      ["/nologo", "/optimize", `/out:${exePath}`, cs],
+      ["/nologo", "/optimize", "/t:exe", `/out:${exePath}`, cs],
       { encoding: "utf8" },
     );
     if (result.status === 0 && existsSync(exePath)) {
       console.log("Built StreamPanel.exe via", csc);
       return exePath;
     }
+    const detail = [
+      result.error ? result.error.message : null,
+      result.stderr && String(result.stderr).trim(),
+      result.stdout && String(result.stdout).trim(),
+      `exit=${result.status}`,
+    ]
+      .filter(Boolean)
+      .join(" | ");
+    errors.push(`${csc}: ${detail || "failed"}`);
   }
-  console.warn(
-    "csc not available — shipping StreamPanel.cmd only (CI windows-latest builds .exe).",
+  throw new Error(
+    "Failed to build StreamPanel.exe (csc required on Windows packaging).\n" +
+      errors.map((e) => `  - ${e}`).join("\n"),
   );
-  return null;
 }
 
 function writeChecksums(files) {
@@ -376,6 +454,12 @@ Bundled Node: ${skipRuntime ? "(none)" : nodeVersion}
     } else if (platform === "win32") {
       writeLauncherWindowsCmd(stagingRoot);
       tryBuildWindowsExe(stagingRoot);
+      const exeBuilt = join(stagingRoot, "StreamPanel.exe");
+      if (!existsSync(exeBuilt)) {
+        throw new Error(
+          "StreamPanel.exe missing after csc — refusing cmd-only Windows package",
+        );
+      }
       const zipName = `stream-panel-${version}-win-${arch}.zip`;
       const zipPath = join(outDir, zipName);
       archiveZip(stagingRoot, zipPath);

@@ -31,7 +31,7 @@ node scripts/package-release.mjs --skip-build --source
 - `--source` — добавить source zip
 - `STREAM_PANEL_VERSION` / `STREAM_PANEL_NODE_VERSION` — переопределения
 
-Linux `.deb` требует `dpkg-deb`. Windows `.exe` собирается через `csc` (.NET Framework) на `windows-latest`.
+Linux `.deb` требует `dpkg-deb`. Windows `.exe` собирается через `csc` (.NET Framework / vswhere Roslyn) на `windows-latest`; job падает, если `StreamPanel.exe` нет в zip (без silent cmd-only).
 
 ## CI
 

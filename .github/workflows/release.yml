@@ -51,9 +51,39 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
+      - name: Locate .NET Framework csc
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe",
+            "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+          )
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            $roslyn = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\Roslyn\csc.exe" 2>$null
+            if ($roslyn) { $candidates = @($roslyn) + $candidates }
+          }
+          $csc = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+          if (-not $csc) {
+            throw "csc.exe not found (Framework64 v4.0.30319 or VS Roslyn). Install Build Tools / ensure windows-latest image."
+          }
+          Write-Host "Using CSC=$csc"
+          "CSC=$csc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: node scripts/package-release.mjs --skip-build
+      - name: Verify StreamPanel.exe in zip
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = Get-ChildItem artifacts/release/*-win-*.zip | Select-Object -First 1
+          if (-not $zip) { throw "Windows zip artifact missing" }
+          $entries = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName).Entries | ForEach-Object { $_.FullName }
+          $entries | ForEach-Object { Write-Host $_ }
+          if (-not ($entries | Where-Object { $_ -match '(^|[/\\])StreamPanel\.exe$' })) {
+            throw "StreamPanel.exe missing from $($zip.Name)"
+          }
+          Write-Host "OK: StreamPanel.exe present in $($zip.Name)"
       - uses: actions/upload-artifact@v4
         with:
           name: stream-panel-windows

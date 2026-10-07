@@ -1,8 +1,10 @@
 // Minimal Windows launcher: starts bundled Node with the daemon entry.
-// Compiled on windows-latest via: csc /nologo /optimize /out:StreamPanel.exe windows-launcher.cs
+// Must compile with .NET Framework csc (C# 5 / net40 APIs) on windows-latest:
+//   csc /nologo /optimize /t:exe /out:StreamPanel.exe windows-launcher.cs
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 
 internal static class Program
 {
@@ -10,9 +12,24 @@ internal static class Program
     {
         try
         {
-            var root = AppContext.BaseDirectory;
-            var node = Path.Combine(root, "runtime", "node.exe");
-            var entry = Path.Combine(root, "app", "dist", "apps", "daemon", "src", "index.js");
+            string location = Assembly.GetExecutingAssembly().Location;
+            string root = Path.GetDirectoryName(location);
+            if (string.IsNullOrEmpty(root))
+            {
+                Console.Error.WriteLine("Stream Panel: cannot resolve install directory");
+                return 1;
+            }
+
+            string node = Path.Combine(root, "runtime", "node.exe");
+            string entry = Path.Combine(
+                root,
+                "app",
+                "dist",
+                "apps",
+                "daemon",
+                "src",
+                "index.js"
+            );
             if (!File.Exists(node))
             {
                 Console.Error.WriteLine("Stream Panel: missing runtime\\node.exe");
@@ -20,27 +37,38 @@ internal static class Program
             }
             if (!File.Exists(entry))
             {
-                Console.Error.WriteLine("Stream Panel: missing app entry (dist/apps/daemon/src/index.js)");
+                Console.Error.WriteLine(
+                    "Stream Panel: missing app entry (dist/apps/daemon/src/index.js)"
+                );
                 return 1;
             }
-            var psi = new ProcessStartInfo
-            {
-                FileName = node,
-                Arguments = Quote(entry),
-                WorkingDirectory = Path.Combine(root, "app"),
-                UseShellExecute = false,
-            };
-            using var process = Process.Start(psi);
-            if (process is null)
+
+            ProcessStartInfo psi = new ProcessStartInfo();
+            psi.FileName = node;
+            psi.Arguments = Quote(entry);
+            psi.WorkingDirectory = Path.Combine(root, "app");
+            psi.UseShellExecute = false;
+
+            Process process = Process.Start(psi);
+            if (process == null)
             {
                 Console.Error.WriteLine("Stream Panel: failed to start Node runtime");
                 return 1;
             }
-            Console.CancelKeyPress += (_, e) =>
+
+            Console.CancelKeyPress += delegate(object sender, ConsoleCancelEventArgs e)
             {
                 e.Cancel = true;
-                try { process.Kill(entireProcessTree: true); } catch { /* ignore */ }
+                try
+                {
+                    process.Kill();
+                }
+                catch
+                {
+                    /* ignore */
+                }
             };
+
             process.WaitForExit();
             return process.ExitCode;
         }
@@ -51,6 +79,12 @@ internal static class Program
         }
     }
 
-    private static string Quote(string path) =>
-        path.Contains(' ') ? "\"" + path.Replace("\"", "\\\"") + "\"" : path;
+    private static string Quote(string path)
+    {
+        if (path.IndexOf(' ') >= 0)
+        {
+            return "\"" + path.Replace("\"", "\\\"") + "\"";
+        }
+        return path;
+    }
 }
