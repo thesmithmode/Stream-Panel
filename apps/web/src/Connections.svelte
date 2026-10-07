@@ -12,7 +12,24 @@
     offset = $state(""),
     busy = $state(false),
     message = $state(""),
-    error = $state("");
+    error = $state(""),
+    seeded = $state(false);
+  // Prefill from saved secrets/config once; keep user edits afterwards.
+  $effect(() => {
+    const cfg = status?.config;
+    if (!cfg || seeded) return;
+    if (cfg.twitchClientId) twitchClient = cfg.twitchClientId;
+    if (cfg.daClientId) daClient = cfg.daClientId;
+    if (cfg.daUtcOffsetMinutes != null && cfg.daUtcOffsetMinutes !== "")
+      offset = String(cfg.daUtcOffsetMinutes);
+    seeded = true;
+  });
+  const twitchConnected = $derived(status?.twitch?.state === "connected");
+  const twitchError = $derived(status?.twitch?.state === "error");
+  const daConnected = $derived(status?.donationalerts?.state === "connected");
+  const daLive = $derived(
+    ["connected", "degraded"].includes(status?.donationalerts?.state),
+  );
   async function run(action: () => Promise<void>) {
     busy = true;
     error = "";
@@ -53,181 +70,188 @@
   <section class="panel settings">
     <header>
       <h2>Twitch</h2>
-      <span class="state" class:online={status.twitch.state === "connected"}
+      <span class="state" class:online={twitchConnected}
         >{statusLabel(status.twitch.state)}</span
       >
     </header>
     <div class="settings-body">
-      <p class="muted">
-        Вход владельца канала. Приложение читает чат и события.
-      </p>
-      {#if status.twitch.state === "error"}<p role="alert" class="notice error">
-          Войди снова в Twitch — авторизация сброшена (HTTP 400/401).
+      {#if twitchError}<p role="alert" class="notice error">
+          Войди снова в Twitch — авторизация сброшена.
         </p>{/if}
-      <label
-        >Client ID своего public OAuth-приложения<input
-          bind:value={twitchClient}
-          placeholder={status.config.twitchClientId || "Client ID"}
-          autocomplete="off"
-        /></label
-      >
-      <p class="small muted">
-        Создайте приложение в <a
-          href="https://dev.twitch.tv/console/apps"
-          target="_blank"
-          rel="noreferrer">Twitch Developer Console</a
-        >, выбрав public client для Device Code flow.
-      </p>
-      <label class="check"
-        ><input type="checkbox" bind:checked={extended} /> Также подписки, Bits и
-        фолловеры</label
-      >
-      <div class="actions">
-        <button class="primary" disabled={busy} onclick={() => run(twitch)}
-          >Войти через Twitch</button
-        ><button
-          class="outline"
-          disabled={busy}
-          onclick={() =>
-            run(async () => {
-              await api("twitch/disconnect", {});
-            })}>Отключить</button
-        >
-      </div>
-      {#if status.device}<div class="device">
-          <strong>Код: {status.device.userCode}</strong><a
-            href={status.device.verificationUri}
-            target="_blank"
-            rel="noreferrer">Открыть страницу входа</a
+      {#if twitchConnected}
+        <p class="small">
+          {#if status.twitch.account}<strong>{status.twitch.account}</strong
+            >{/if}
+          <span class="muted">{status.twitch.detail}</span>
+        </p>
+        <div class="actions">
+          <button
+            class="outline"
+            disabled={busy}
+            onclick={() =>
+              run(async () => {
+                await api("twitch/disconnect", {});
+              })}>Отключить</button
           >
-        </div>{/if}
-      <p class="small muted">
-        {status.twitch.account || ""}
-        {status.twitch.detail}
-      </p>
-      {#each Object.entries(status.twitch.capabilities || {}) as [key, value]}<div
-          class="capability"
+        </div>
+      {:else}
+        <label
+          >Client ID<input
+            bind:value={twitchClient}
+            placeholder={status.config.twitchClientId || "Client ID"}
+            autocomplete="off"
+          /></label
         >
-          <span>{key}</span><span>{statusLabel(value)}</span>
-        </div>{/each}
+        <details class="compact-details">
+          <summary>Дополнительно</summary>
+          <label class="check"
+            ><input type="checkbox" bind:checked={extended} /> Подписки, Bits и
+            фолловеры</label
+          >
+          <p class="small muted">
+            <a
+              href="https://dev.twitch.tv/console/apps"
+              target="_blank"
+              rel="noreferrer">Twitch Developer Console</a
+            > — public client, Device Code.
+          </p>
+        </details>
+        <div class="actions">
+          <button class="primary" disabled={busy} onclick={() => run(twitch)}
+            >Войти через Twitch</button
+          >
+        </div>
+        {#if status.device}<div class="device">
+            <strong>Код: {status.device.userCode}</strong><a
+              href={status.device.verificationUri}
+              target="_blank"
+              rel="noreferrer">Открыть страницу входа</a
+            >
+          </div>{/if}
+        {#if status.twitch.detail}<p class="small muted">
+            {status.twitch.detail}
+          </p>{/if}
+      {/if}
     </div>
   </section>
   <section class="panel settings">
     <header>
       <h2>DonationAlerts</h2>
-      <span
-        class="state"
-        class:online={status.donationalerts.state === "connected"}
+      <span class="state" class:online={daConnected}
         >{statusLabel(status.donationalerts.state)}</span
       >
     </header>
     <div class="settings-body">
-      <p class="muted">
-        Своё OAuth-приложение или уже полученный собственный access token.
-      </p>
-      <label
-        >Client ID<input
-          bind:value={daClient}
-          placeholder={status.config.daClientId || "Client ID"}
-          autocomplete="off"
-        /></label
-      ><label
-        >Client secret<input
-          type="password"
-          bind:value={daSecret}
-          placeholder={status.config.hasDaSecret
-            ? "Сохранён; пустое поле не меняет"
-            : "Client secret"}
-          autocomplete="new-password"
-        /></label
-      >
-      <p class="small muted">
-        Redirect URI: <code>{status.config.daRedirectUri}</code>.
-        <a
-          href="https://www.donationalerts.com/application/clients"
-          target="_blank"
-          rel="noreferrer">Регистрация приложения</a
-        >
-      </p>
-      <details>
-        <summary>Подключить собственный токен</summary><label
-          >Access token<input
-            type="password"
-            bind:value={daToken}
-            autocomplete="new-password"
-          /></label
-        ><label
-          >Refresh token (если есть)<input
-            type="password"
-            bind:value={daRefresh}
-            autocomplete="new-password"
+      {#if daLive}
+        <p class="small">
+          {#if status.donationalerts.account}<strong
+              >{status.donationalerts.account}</strong
+            >{/if}
+          <span class="muted">{status.donationalerts.detail}</span>
+        </p>
+        <div class="actions">
+          <button
+            class="outline"
+            disabled={busy}
+            onclick={() =>
+              run(async () => {
+                await api("donationalerts/disconnect", {});
+              })}>Отключить</button
+          >
+          <button
+            class="text-button"
+            disabled={busy}
+            onclick={() =>
+              run(async () => {
+                await api("donationalerts/rescan", {});
+                message = "Повторный импорт запущен.";
+              })}>Повторить импорт</button
+          >
+        </div>
+        {#if status.config.daUtcOffsetMinutes != null}<p class="small muted">
+            UTC offset: {status.config.daUtcOffsetMinutes} мин
+          </p>{/if}
+      {:else}
+        <label
+          >Client ID<input
+            bind:value={daClient}
+            placeholder={status.config.daClientId || "Client ID"}
+            autocomplete="off"
           /></label
         >
-      </details>
-      <label
-        >Подтверждённый UTC offset времени DA, в минутах<input
-          type="number"
-          min="-840"
-          max="840"
-          bind:value={offset}
-          placeholder="Неизвестен — оставить пустым"
-        /></label
-      >
-      <p class="small muted">
-        Не угадывайте offset: без проверки донаты сохраняются, но не
-        приписываются минуте эфира. Offset действует на новые события;
-        перепроекция истории появится отдельно.
-      </p>
-      <div class="actions">
-        <button class="primary" disabled={busy} onclick={() => run(donation)}
-          >Подключить DonationAlerts</button
-        ><button
-          class="outline"
-          disabled={busy}
-          onclick={() =>
-            run(async () => {
-              await api("donationalerts/disconnect", {});
-            })}>Отключить</button
+        <label
+          >Client secret<input
+            type="password"
+            bind:value={daSecret}
+            placeholder={status.config.hasDaSecret
+              ? "Сохранён — можно не вводить"
+              : "Client secret"}
+            autocomplete="new-password"
+          /></label
         >
-      </div>
-      <button
-        class="text-button"
-        disabled={busy}
-        onclick={() =>
-          run(async () => {
-            await api("donationalerts/rescan", {});
-            message = "Повторный импорт запущен.";
-          })}>Повторить импорт истории</button
-      >
-      <p class="small muted">
-        {#if status.donationalerts.account}<strong
-            >{status.donationalerts.account}</strong
-          >{/if}
-        {status.donationalerts.detail}
-      </p>
-      {#each Object.entries(status.donationalerts.capabilities || {}) as [key, value]}<div
-          class="capability"
-        >
-          <span>{key}</span><span>{statusLabel(value)}</span>
-        </div>{/each}
+        {#if status.config.hasDaSecret && !daSecret}<p class="small muted">
+            Secret уже сохранён.
+          </p>{/if}
+        <p class="small muted">
+          Redirect: <code>{status.config.daRedirectUri}</code>
+        </p>
+        <details class="compact-details">
+          <summary>Дополнительно</summary>
+          <label
+            >UTC offset (минуты)<input
+              type="number"
+              min="-840"
+              max="840"
+              bind:value={offset}
+              placeholder="пусто = неизвестен"
+            /></label
+          >
+          <label
+            >Access token<input
+              type="password"
+              bind:value={daToken}
+              autocomplete="new-password"
+            /></label
+          >
+          <label
+            >Refresh token<input
+              type="password"
+              bind:value={daRefresh}
+              autocomplete="new-password"
+            /></label
+          >
+          <p class="small muted">
+            <a
+              href="https://www.donationalerts.com/application/clients"
+              target="_blank"
+              rel="noreferrer">Регистрация приложения DA</a
+            >
+          </p>
+        </details>
+        <div class="actions">
+          <button class="primary" disabled={busy} onclick={() => run(donation)}
+            >Подключить DonationAlerts</button
+          >
+        </div>
+        {#if status.donationalerts.detail}<p class="small muted">
+            {status.donationalerts.detail}
+          </p>{/if}
+      {/if}
     </div>
   </section>
   <section class="panel settings wide">
     <header><h2>Локальные данные</h2></header>
     <div class="settings-body">
-      <p class="muted">
-        Данные остаются на этом компьютере. Секреты хранятся отдельно от
-        резервной копии базы; облачный backup пока не включён.
-      </p>
       <button
         class="outline"
         disabled={busy}
         onclick={() =>
           run(async () => {
             const result = await api("backup", {});
-            message = `Резервная копия сохранена: ${result.filename}`;
+            message = `Резервная копия: ${result.filename}`;
           })}>Создать резервную копию</button
-      >{#if status.gaps?.length}<h3>Пробелы сбора</h3>
+      >
+      {#if status.gaps?.length}<h3>Пробелы сбора</h3>
         {#each status.gaps as gap}<div class="capability">
             <span>{gap.source}: {gap.reason}</span><span
               >{new Date(gap.started_at_ms).toLocaleString("ru-RU")}</span

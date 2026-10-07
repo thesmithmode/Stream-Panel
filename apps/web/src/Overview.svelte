@@ -182,7 +182,7 @@
         <Icon name="chat" size={62} />
         <h3>Подключите Twitch и DonationAlerts</h3>
         <p>Новые события появятся здесь.</p>
-        <button class="primary" onclick={connect}>Подключить сервисы</button>
+        <button class="primary" onclick={connect}>Открыть интеграции</button>
       </div>{/if}
   </section>
   <aside class="right-rail">
@@ -208,7 +208,7 @@
             >{status?.[key]?.state === "error"
               ? "Войти снова"
               : status?.[key]?.state === "connected"
-                ? "Настроить"
+                ? "Интеграции"
                 : "Подключить"}</button
           >
         </div>{/each}

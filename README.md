@@ -43,7 +43,7 @@ STREAM_PANEL_STOP=1 pnpm start
 
 Native addon `better-sqlite3` собирается при `pnpm install`. На Windows нужны Build Tools for Visual Studio (C++); на Linux — обычный toolchain (`build-essential` / эквивалент). CI проверяет Ubuntu и Windows.
 
-В «Подключениях»:
+В «Интеграциях»:
 
 - **Twitch:** своё public OAuth-приложение в [Developer Console](https://dev.twitch.tv/console/apps), Client ID и Device Code вход владельцем канала. Client secret Twitch не нужен. Основные права: чтение чата и участников; подписки, Bits и фолловеры — отдельно.
 - **DonationAlerts:** своё OAuth-приложение с Client ID / secret и redirect URI `http://127.0.0.1:47831/oauth/donationalerts/callback`, либо уже полученный access token. Для refresh нужны refresh token и реквизиты приложения. 127.0.0.1 callback, state и legacy WS handshake ещё нужно проверить на аккаунте; REST и realtime имеют независимую диагностику.

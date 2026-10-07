@@ -36,19 +36,19 @@
     overview: "Обзор эфира",
     sessions: "Сессии",
     people: "Люди",
-    connections: "Подключения",
+    connections: "Интеграции",
   };
   const descriptions: Record<string, string> = {
     overview: "История чата, донаты и наблюдения.",
     sessions: "История записей и полнота собранных данных.",
     people: "Активность людей и управляемые связи аккаунтов.",
-    connections: "Подключите сервисы и проверьте сбор данных.",
+    connections: "Twitch и DonationAlerts — вход и статус сбора.",
   };
   const nav = [
     ["overview", "Обзор"],
     ["sessions", "Сессии"],
     ["people", "Люди"],
-    ["connections", "Подключения"],
+    ["connections", "Интеграции"],
   ] as const;
   const activeSession = $derived(sessions.find((s) => s.ended_at_ms === null));
   async function refresh() {

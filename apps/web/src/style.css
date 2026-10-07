@@ -1236,3 +1236,14 @@ select:focus-visible {
     background: var(--bg);
   }
 }
+
+.compact-details {
+  margin: 10px 0 4px;
+}
+.compact-details summary {
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.compact-details .check {
+  margin-bottom: 8px;
+}
