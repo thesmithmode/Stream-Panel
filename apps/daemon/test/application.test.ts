@@ -348,7 +348,7 @@ test("DA OAuth refuses missing or mismatched state before exchanging any authori
   try {
     const url = new URL(
       connection.authUrl(
-        "http://localhost:47831/oauth/donationalerts/callback",
+        "http://127.0.0.1:47831/oauth/donationalerts/callback",
       ),
     );
     assert.equal(url.searchParams.get("response_type"), "code");

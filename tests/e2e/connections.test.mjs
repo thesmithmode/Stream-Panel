@@ -153,7 +153,7 @@ test(
       assert.equal(oauth.searchParams.get("client_id"), "da-app");
       assert.equal(
         oauth.searchParams.get("redirect_uri"),
-        `http://localhost:${new URL(a.origin).port}/oauth/donationalerts/callback`,
+        `http://127.0.0.1:${new URL(a.origin).port}/oauth/donationalerts/callback`,
       );
       await popup.close();
       assert.equal(

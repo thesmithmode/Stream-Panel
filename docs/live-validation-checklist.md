@@ -19,7 +19,7 @@
 
 ## DonationAlerts OAuth + realtime
 
-- [ ] Своё DA OAuth app; redirect `http://localhost:47831/oauth/donationalerts/callback` (или свой порт)
+- [ ] Своё DA OAuth app; redirect `http://127.0.0.1:47831/oauth/donationalerts/callback` (или свой порт)
 - [ ] Callback + state успешны; либо безопасный import access/refresh token
 - [ ] REST history и WS одного alert **не** удваивают сумму
 - [ ] Контрольный донат с независимо записанным UTC; offset выставить только после сверки; unknown не приписывать минуте

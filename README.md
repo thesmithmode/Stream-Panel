@@ -39,7 +39,7 @@ Native addon `better-sqlite3` собирается при `pnpm install`. На W
 В «Подключениях»:
 
 - **Twitch:** своё public OAuth-приложение в [Developer Console](https://dev.twitch.tv/console/apps), Client ID и Device Code вход владельцем канала. Client secret Twitch не нужен. Основные права: чтение чата и участников; подписки, Bits и фолловеры — отдельно.
-- **DonationAlerts:** своё OAuth-приложение с Client ID / secret и redirect URI `http://localhost:47831/oauth/donationalerts/callback`, либо уже полученный access token. Для refresh нужны refresh token и реквизиты приложения. Localhost callback, state и legacy WS handshake ещё нужно проверить на аккаунте; REST и realtime имеют независимую диагностику.
+- **DonationAlerts:** своё OAuth-приложение с Client ID / secret и redirect URI `http://127.0.0.1:47831/oauth/donationalerts/callback`, либо уже полученный access token. Для refresh нужны refresh token и реквизиты приложения. 127.0.0.1 callback, state и legacy WS handshake ещё нужно проверить на аккаунте; REST и realtime имеют независимую диагностику.
 - Время DA по умолчанию **неизвестно**: донаты сохраняются и входят в сумму, но не присваиваются минуте/сессии. UTC offset — только после проверки времени источника; применяется к новым фактам.
 
 ### Где лежат секреты и данные

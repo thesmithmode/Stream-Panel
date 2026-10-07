@@ -154,7 +154,7 @@ export async function createApplication(
   let nonceExpiry = Date.now() + 600000;
   const sessions = new Map<string, { csrf: string; expires: number }>();
   const origin = `http://127.0.0.1:${port}`;
-  const callback = `http://localhost:${port}/oauth/donationalerts/callback`;
+  const callback = `http://127.0.0.1:${port}/oauth/donationalerts/callback`;
   const same = (a: string, b: string) => {
     const left = Buffer.from(a),
       right = Buffer.from(b);
