@@ -219,3 +219,10 @@ Litestream v0.5+ автодетектит `*.r2.cloudflarestorage.com` (`sign-pa
 - Текущая рабочая ветка реализации: **`codex-init-grok`**.
 - `dev` — долгосрочная интеграция; `main` — релизы.
 - README не должен указывать пользователям клонировать `codex-init`.
+
+### Person auto-link / Litestream / Streamer.bot (codex-init-grok)
+
+- Auto-link uses `matchKey` (strip `@`/`#`) for unique cross-source matches only; `candidateKey` stays suggestion-only without stripping.
+- Litestream example checked against research checklist; script no-ops without credentials.
+- Streamer.bot: interface + stub; live client deferred.
+

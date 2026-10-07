@@ -70,3 +70,7 @@
 - Неполный/сбойный опрос ≠ «человека не было».
 - Удалённые модерацией сообщения: хранить оригинал, помечать redacted, в интерфейсе скрывать по умолчанию; действие ограничено текущей сессией (или узким окном).
 - Рабочая ветка для клонирования ранней версии: `codex-init-grok` (не `codex-init`). Интеграция — в `dev`, релизы — в `main`.
+
+- Person auto-link: high-confidence unique login match Twitch↔DA + owner bind on Twitch login; manual merge/undo/split remain. Ambiguous names stay suggestions only.
+- Bot filter in analytics (configurable + well-known); Litestream path documented; Streamer.bot stub only until P3.
+
