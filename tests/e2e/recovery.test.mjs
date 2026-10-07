@@ -25,7 +25,7 @@ test(
       await startCoverage(page);
       await goto(page, a.bootstrap());
       await page
-        .getByRole("button", { name: "Подключить сервисы", exact: true })
+        .getByRole("button", { name: "Открыть интеграции", exact: true })
         .waitFor();
       await a.db.call(
         "startSession",

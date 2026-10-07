@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
   import EventList from "./EventList.svelte";
+  import { onMount } from "svelte";
   import {
     api,
     money,
@@ -50,6 +51,26 @@
       insightsLoading = false;
     }
   }
+  function closeInsights() {
+    insightsOpen = false;
+  }
+  onMount(() => {
+    const onPointer = (event: PointerEvent) => {
+      if (!insightsOpen) return;
+      const target = event.target as Node | null;
+      const root = document.querySelector(".insights-wrap");
+      if (root && target && !root.contains(target)) closeInsights();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && insightsOpen) closeInsights();
+    };
+    document.addEventListener("pointerdown", onPointer);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      window.removeEventListener("keydown", onKey);
+    };
+  });
   function coverageLabel() {
     const c = summary.coverage;
     if (!c || c.ratio === null) return "—";
@@ -74,10 +95,12 @@
     <span class="teal"><Icon name="people" size={27} /></span>
     <div>
       <span>Наблюдаемые участники</span><strong
-        >{summary.chatters ?? "—"}</strong
+        >{summary.chatters != null
+          ? summary.chatters
+          : "нет данных"}</strong
       >{#if summary.lastPollAtMs}<small
           >Опрос: {date(summary.lastPollAtMs)}</small
-        >{/if}
+        >{:else}<small>эфир не идёт / нет опросов присутствия</small>{/if}
       {#if summary.uniquePersonsObserved != null}<small
           >Уникальных за сессию: {summary.uniquePersonsObserved}</small
         >{/if}
@@ -144,11 +167,12 @@
     </div>
   </div>
 </section>
-{#if summary.chattersOverTime?.length}<section class="panel series-panel">
-    <header>
-      <h2>Наблюдаемые участники по опросам</h2>
-      <span class="small muted">Не просмотры Twitch — только chatters poll</span>
-    </header>
+<section class="panel series-panel">
+  <header>
+    <h2>Наблюдаемые участники по опросам</h2>
+    <span class="small muted">Не просмотры Twitch — только chatters poll</span>
+  </header>
+  {#if summary.chattersOverTime?.length}
     <div class="spark-bars" aria-label="Ряд наблюдаемых участников">
       {#each summary.chattersOverTime as point}<div
           class="spark-bar"
@@ -156,7 +180,10 @@
           style={`height:${Math.max(8, Math.round((point.chatters / maxChatters) * 64))}px`}
         ></div>{/each}
     </div>
-  </section>{/if}
+  {:else}
+    <p class="empty-small presence-empty">нет данных — эфир не идёт</p>
+  {/if}
+</section>
 <div class="overview-grid">
   <section class="panel feed">
     <header>
@@ -176,7 +203,7 @@
         <Icon name="chat" size={62} />
         <h3>Подключите Twitch и DonationAlerts</h3>
         <p>Новые события появятся здесь.</p>
-        <button class="primary" onclick={connect}>Подключить сервисы</button>
+        <button class="primary" onclick={connect}>Открыть интеграции</button>
       </div>{/if}
   </section>
   <aside class="right-rail">
@@ -202,7 +229,7 @@
             >{status?.[key]?.state === "error"
               ? "Войти снова"
               : status?.[key]?.state === "connected"
-                ? "Настроить"
+                ? "Интеграции"
                 : "Подключить"}</button
           >
         </div>{/each}
@@ -211,7 +238,12 @@
       <header><h2>Присутствие в чате</h2></header>
       <div>
         <Icon name="people" size={42} />
-        <p>Наблюдение в чате не подтверждает просмотр видео.</p>
+        {#if summary.chatters == null && !summary.lastPollAtMs}
+          <p><strong>нет данных</strong></p>
+          <p class="small muted">эфир не идёт — опросы присутствия появятся после начала стрима.</p>
+        {:else}
+          <p>Наблюдение в чате не подтверждает просмотр видео.</p>
+        {/if}
       </div>
     </section>
   </aside>

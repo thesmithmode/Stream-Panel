@@ -35,6 +35,7 @@
     splitName = $state(""),
     gridSession = $state(""),
     grid = $state<{ minuteStartMs: number; state: string }[]>([]),
+    gridLoaded = $state(false),
     merges = $state<any[]>([]),
     candidates = $state<string[]>([]),
     busy = $state(false),
@@ -131,6 +132,7 @@
       selectedIdentities = [];
       target = "";
       grid = [];
+      gridLoaded = false;
       minute = null;
       candidates = await api(`persons/${id}/candidates`);
       await loadStats(id);
@@ -172,6 +174,7 @@
     grid = await api(
       `presence?session=${gridSession}&person=${selectedId}&from=${start}&to=${end}`,
     );
+    gridLoaded = true;
     minute = null;
   }
   $effect(() => {
@@ -243,6 +246,7 @@
         disabled={sortBy !== "default"}
       />
     </div>
+    <div class="people-list">
     {#if !visible.length}<div class="empty-small">
         <Icon name="people" size={36} />
         <p>Пока никого нет</p>
@@ -260,6 +264,7 @@
           ></span
         ><span class="count">{person.event_count}</span></button
       >{/each}
+    </div>
   </section>
   <section class="panel person-detail">
     {#if !detail}<div class="empty">
@@ -336,9 +341,11 @@
             >
           </div></label
         >
-        <h3>Аккаунты и донатные события</h3>
+        <h3>Зрители и донатеры</h3>
         <p class="small muted">
-          Одинаковое имя не доказывает, что это один человек.
+          Person — связка. Twitch login = один зритель; одно имя DA = один
+          донатер. Одинаковое имя между платформами не доказывает, что это один
+          человек, пока нет авто-связи или ручного объединения.
         </p>
         {#each detail.identities as identity}<label class="identity-row"
             ><input
@@ -346,7 +353,9 @@
               bind:group={selectedIdentities}
               value={identity.id}
             /><strong>{identity.display_name}</strong><span class="small muted"
-              >{identity.source} · {identity.external_id}</span
+              >{identity.source === "twitch"
+                ? "Зритель"
+                : "Донатер"} · {identity.source} · {identity.external_id}</span
             ></label
           >{/each}
         {#if selectedIdentities.length}<div class="inline">
@@ -422,7 +431,10 @@
           {#if minute !== null}<p class="small">
               Выбрана минута: {date(minute)}. Показаны доступные события этой
               минуты.
-            </p>{/if}{/if}
+            </p>{/if}
+        {:else if gridLoaded}
+          <p class="empty-small presence-empty">нет данных — эфир не идёт</p>
+        {/if}
         <h3>Последние события <span class="small muted">до 200</span></h3>
         <EventList
           events={minute === null ? (detail.events as Event[]) : minuteEvents}

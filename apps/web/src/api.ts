@@ -1,6 +1,12 @@
+import { demoApi, getDataMode, setDataMode, type DataMode } from "./demo-data";
+export { getDataMode, setDataMode, type DataMode };
+
 let csrf = "";
 export const setCsrf = (value: string) => (csrf = value);
 export async function api<T = any>(path: string, body?: unknown): Promise<T> {
+  if (getDataMode() === "demo") {
+    return (await demoApi(path, body)) as T;
+  }
   const response = await fetch(`/api/v1/${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers:
@@ -37,6 +43,7 @@ export interface Event {
     amountMinor?: string;
     currency?: string;
     actorName?: string;
+    messageType?: string;
     originChannelId?: string;
   };
 }

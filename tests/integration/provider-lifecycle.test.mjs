@@ -480,7 +480,7 @@ test("DA OAuth state is single use; handshake, history, rate limiting and discon
     await flush();
     assert.equal(c.status.detail, "DA_CENTRIFUGO_ERROR");
     s.emit("error", new Error("socket"));
-    assert.equal(c.status.capabilities.realtime, "WebSocket error");
+    assert.equal(c.status.capabilities.realtime, "Ошибка WebSocket");
     s.close();
     await f.tick(30000);
     await f.tick(1100);
@@ -534,7 +534,7 @@ test("DA failed channel authorization preserves REST, missing history metadata f
     );
     await f.tick(20000);
     assert.equal(f.sockets[0].closed, true);
-    assert.equal(c.status.capabilities.realtime, "disconnected");
+    assert.equal(c.status.capabilities.realtime, "отключено");
   } finally {
     await c.stop();
   }

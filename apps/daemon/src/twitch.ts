@@ -597,7 +597,7 @@ export class TwitchConnection {
             transport: { method: "websocket", session_id: sessionId },
           }),
         });
-        this.status.capabilities[type] = "enabled";
+        this.status.capabilities[type] = "включено";
       } catch (error) {
         this.status.capabilities[type] =
           error instanceof Error ? error.message : "error";

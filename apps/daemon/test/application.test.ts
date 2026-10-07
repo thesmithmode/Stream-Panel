@@ -10,6 +10,7 @@ import {
   parseDonationTime,
   findDonation,
 } from "../src/donationalerts.js";
+import { daDonorExternalId } from "../../../packages/core/src/domain.js";
 import { normalizeTwitch } from "../src/twitch.js";
 import { Configuration } from "../src/config.js";
 
@@ -70,7 +71,8 @@ test("lossless DA money and recipient are normalized; missing timezone stays unk
   assert.equal(event.payload.amountMinor, "29");
   assert.equal(event.occurredAtMs, null);
   assert.equal(event.timeQuality, "unknown");
-  assert.equal(event.actor!.externalId, event.externalId);
+  assert.equal(event.actor!.externalId, daDonorExternalId("Alice"));
+  assert.notEqual(event.actor!.externalId, event.externalId);
   assert.equal(findDonation({ result: { data: raw } }), raw);
 });
 test("manual DA source offset is explicit and invalid calendar dates fail closed", () => {

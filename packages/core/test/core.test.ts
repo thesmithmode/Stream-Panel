@@ -4,7 +4,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { moneyToMinor, candidateKey, matchKey, type EventInput } from "../src/domain.js";
+import { moneyToMinor, candidateKey, matchKey,
+  daDonorExternalId, type EventInput } from "../src/domain.js";
 import {
   botExclusionSet,
   WELL_KNOWN_TWITCH_BOTS,
@@ -38,7 +39,7 @@ const donation: EventInput = {
   accountId: "recipient-1",
   externalId: "donation-1",
   type: "donation",
-  actor: { externalId: "donation-1", displayName: "Vasya" },
+  actor: { externalId: daDonorExternalId("Vasya"), displayName: "Vasya" },
   transport: "rest",
   sourceTime: "2026-10-06 20:00:00",
   occurredAtMs: null,
@@ -74,7 +75,7 @@ test("unique cross-source login match auto-links; ambiguous names stay separate;
     const third = store.ingest({
       ...donation,
       externalId: "donation-2",
-      actor: { externalId: "donation-2", displayName: "Vasya" },
+      actor: { externalId: daDonorExternalId("Vasya"), displayName: "Vasya" },
     });
     // Second DA donation with same name also links to the unique Twitch person.
     assert.equal(second.personId, third.personId);
@@ -93,7 +94,7 @@ test("unique cross-source login match auto-links; ambiguous names stay separate;
     const daTwin = store.ingest({
       ...donation,
       externalId: "donation-twin",
-      actor: { externalId: "donation-twin", displayName: "Twin" },
+      actor: { externalId: daDonorExternalId("Twin"), displayName: "Twin" },
     });
     assert.equal(store.candidatePersons("Twin").length, 3);
     const twinDetail = store.person(String(daTwin.personId)) as {
@@ -107,13 +108,232 @@ test("unique cross-source login match auto-links; ambiguous names stay separate;
           externalId: "donation-bad-actor",
           actor: { externalId: "Vasya", displayName: "Vasya" },
         }),
-      /DA_ACTOR/,
+      /DA_ACTOR_MUST_BE_DONOR_NAME/,
     );
     assert.equal(matchKey("@Vasya"), "vasya");
     assert.equal(matchKey("#Vasya"), "vasya");
     assert.notEqual(candidateKey("@Vasya"), candidateKey("Vasya"));
   } finally {
     store.close();
+  }
+});
+
+test("DA same display name + same account is one Donor identity / one Person; Twitch viewers stay separate", () => {
+  const store = new StreamStore(":memory:");
+  try {
+    const a = store.ingest({
+      ...donation,
+      externalId: "donation-egor-1",
+      actor: { externalId: daDonorExternalId("Егор4ик"), displayName: "Егор4ик" },
+    });
+    const b = store.ingest({
+      ...donation,
+      externalId: "donation-egor-2",
+      actor: { externalId: daDonorExternalId("Егор4ик"), displayName: "Егор4ик" },
+    });
+    const c = store.ingest({
+      ...donation,
+      externalId: "donation-egor-3",
+      actor: { externalId: daDonorExternalId("Егор4ик"), displayName: "Егор4ик" },
+    });
+    assert.equal(a.personId, b.personId);
+    assert.equal(b.personId, c.personId);
+    assert.equal(a.identityId, b.identityId);
+    assert.equal(b.identityId, c.identityId);
+    const detail = store.person(String(a.personId)) as {
+      identities: { source: string; external_id: string }[];
+    };
+    assert.equal(detail.identities.length, 1);
+    assert.equal(detail.identities[0]!.source, "donationalerts");
+    assert.equal(detail.identities[0]!.external_id, daDonorExternalId("Егор4ик"));
+    // Different DA account keeps separate people even with same nick.
+    const other = store.ingest({
+      ...donation,
+      accountId: "recipient-other",
+      externalId: "donation-egor-x",
+      actor: { externalId: daDonorExternalId("Егор4ик"), displayName: "Егор4ик" },
+    });
+    assert.notEqual(other.personId, a.personId);
+    // Twitch stable ids with same display name stay separate persons.
+    const t1 = store.ingest({
+      ...base,
+      externalId: "msg-t1",
+      actor: { externalId: "twitch-a", displayName: "SameNick" },
+    });
+    const t2 = store.ingest({
+      ...base,
+      externalId: "msg-t2",
+      actor: { externalId: "twitch-b", displayName: "SameNick" },
+    });
+    assert.notEqual(t1.personId, t2.personId);
+    // FR07 still links unique Twitch↔DA same nick.
+    const linked = store.ingest({
+      ...donation,
+      externalId: "donation-samenick",
+      actor: { externalId: daDonorExternalId("UniqueLink"), displayName: "UniqueLink" },
+    });
+    const twitch = store.ingest({
+      ...base,
+      externalId: "msg-unique",
+      actor: { externalId: "twitch-unique", displayName: "UniqueLink" },
+    });
+    // Order: DA first then Twitch — Twitch should auto-link to DA person.
+    assert.equal(twitch.personId, linked.personId);
+  } finally {
+    store.close();
+  }
+});
+
+
+test("collapseDuplicateDaDonors merges legacy per-tip DA identities into one Donor", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sp-collapse-"));
+  const dbPath = join(dir, "data.sqlite");
+  try {
+    const bootstrap = new StreamStore(dbPath);
+    bootstrap.close();
+    const raw = new Database(dbPath);
+    raw.pragma("foreign_keys = ON");
+    const personA = "person-legacy-a";
+    const personB = "person-legacy-b";
+    const idA = "id-legacy-a";
+    const idB = "id-legacy-b";
+    raw.prepare("INSERT INTO persons(id, display_name, revision) VALUES (?, ?, 1)").run(personA, "LegacyDonor");
+    raw.prepare("INSERT INTO persons(id, display_name, revision) VALUES (?, ?, 1)").run(personB, "LegacyDonor");
+    raw.prepare(
+      `INSERT INTO identities(id, source, account_id, external_id, display_name, candidate_key, person_id, match_key)
+       VALUES (?, 'donationalerts', 'recipient-1', ?, 'LegacyDonor', 'legacydonor', ?, 'legacydonor')`,
+    ).run(idA, "tip-1", personA);
+    raw.prepare(
+      `INSERT INTO identities(id, source, account_id, external_id, display_name, candidate_key, person_id, match_key)
+       VALUES (?, 'donationalerts', 'recipient-1', ?, 'LegacyDonor', 'legacydonor', ?, 'legacydonor')`,
+    ).run(idB, "tip-2", personB);
+    raw.prepare(
+      `INSERT INTO events(id, source, account_id, external_id, type, identity_id, occurred_at_ms, received_at_ms, source_time, time_quality, transport, payload_json)
+       VALUES ('e1','donationalerts','recipient-1','d1','donation',?,null,1,null,'unknown','rest','{}')`,
+    ).run(idA);
+    raw.prepare(
+      `INSERT INTO events(id, source, account_id, external_id, type, identity_id, occurred_at_ms, received_at_ms, source_time, time_quality, transport, payload_json)
+       VALUES ('e2','donationalerts','recipient-1','d2','donation',?,null,2,null,'unknown','rest','{}')`,
+    ).run(idB);
+    raw.prepare(
+      `INSERT INTO identity_aliases(identity_id, name, candidate_key, first_seen_ms, last_seen_ms)
+       VALUES (?, 'LegacyDonor', 'legacydonor', 1, 2)`,
+    ).run(idB);
+    raw.close();
+
+    const store = new StreamStore(dbPath);
+    try {
+      store.collapseDuplicateDaDonors();
+      const donors = new Database(dbPath)
+        .prepare(
+          `SELECT id, person_id, external_id FROM identities
+           WHERE source='donationalerts' AND match_key='legacydonor'`,
+        )
+        .all() as { id: string; person_id: string; external_id: string }[];
+      assert.equal(donors.length, 1);
+      assert.equal(donors[0]!.external_id, daDonorExternalId("LegacyDonor"));
+      const events = new Database(dbPath)
+        .prepare("SELECT identity_id FROM events ORDER BY id")
+        .all() as { identity_id: string }[];
+      assert.equal(events[0]!.identity_id, donors[0]!.id);
+      assert.equal(events[1]!.identity_id, donors[0]!.id);
+      const aliases = new Database(dbPath)
+        .prepare("SELECT identity_id, name FROM identity_aliases")
+        .all() as { identity_id: string; name: string }[];
+      assert.equal(aliases.length, 1);
+      assert.equal(aliases[0]!.identity_id, donors[0]!.id);
+    } finally {
+      store.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("collapseDuplicateDaDonors does not move DA tips across Twitch+DA person boundary", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sp-collapse-safe-"));
+  const dbPath = join(dir, "data.sqlite");
+  try {
+    // Twitch+DA linked person via normal ingest.
+    {
+      const store = new StreamStore(dbPath);
+      store.ingest({
+        ...base,
+        actor: { externalId: "twitch-shared", displayName: "SharedNick" },
+      });
+      store.ingest({
+        ...donation,
+        externalId: "da-shared-1",
+        actor: {
+          externalId: daDonorExternalId("SharedNick"),
+          displayName: "SharedNick",
+        },
+        timeQuality: "unknown",
+        occurredAtMs: null,
+      });
+      store.close();
+    }
+    const raw = new Database(dbPath);
+    raw.pragma("foreign_keys = ON");
+    const linked = raw
+      .prepare(
+        `SELECT i.id AS daId, i.person_id AS personId FROM identities i
+         WHERE i.source='donationalerts' AND i.match_key='sharednick'`,
+      )
+      .get() as { daId: string; personId: string };
+    assert.ok(linked);
+    const twitch = raw
+      .prepare(
+        `SELECT id FROM identities WHERE source='twitch' AND person_id=?`,
+      )
+      .get(linked.personId) as { id: string };
+    assert.ok(twitch);
+
+    // Legacy tip-keyed DA identity under a different pure-DA person (same match_key).
+    const purePerson = "person-pure-da";
+    const tipId = "id-tip-legacy";
+    raw.prepare("INSERT INTO persons(id, display_name, revision) VALUES (?, ?, 1)").run(
+      purePerson,
+      "SharedNick",
+    );
+    raw.prepare(
+      `INSERT INTO identities(id, source, account_id, external_id, display_name, candidate_key, person_id, match_key)
+       VALUES (?, 'donationalerts', 'recipient-1', 'tip-legacy-99', 'SharedNick', 'sharednick', ?, 'sharednick')`,
+    ).run(tipId, purePerson);
+    raw.prepare(
+      `INSERT INTO events(id, source, account_id, external_id, type, identity_id, occurred_at_ms, received_at_ms, source_time, time_quality, transport, payload_json)
+       VALUES ('e-tip','donationalerts','recipient-1','d-tip','donation',?,null,9,null,'unknown','rest','{"amountMinor":"1","currency":"RUB"}')`,
+    ).run(tipId);
+    raw.close();
+
+    const store = new StreamStore(dbPath);
+    try {
+      store.collapseDuplicateDaDonors();
+      const db = new Database(dbPath);
+      const tipEvent = db
+        .prepare("SELECT identity_id FROM events WHERE id='e-tip'")
+        .get() as { identity_id: string };
+      // Tip event must stay on the pure-DA side — not stolen onto Twitch+DA identity.
+      assert.equal(tipEvent.identity_id, tipId);
+      const tipIdent = db
+        .prepare("SELECT person_id FROM identities WHERE id=?")
+        .get(tipId) as { person_id: string };
+      assert.equal(tipIdent.person_id, purePerson);
+      const linkedDa = db
+        .prepare("SELECT person_id FROM identities WHERE id=?")
+        .get(linked.daId) as { person_id: string };
+      assert.equal(linkedDa.person_id, linked.personId);
+      // Twitch still on the linked person.
+      const twitchStill = db
+        .prepare("SELECT person_id FROM identities WHERE id=?")
+        .get(twitch.id) as { person_id: string };
+      assert.equal(twitchStill.person_id, linked.personId);
+      db.close();
+    } finally {
+      store.close();
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });
 
@@ -168,7 +388,7 @@ test("merge updates historical query; undo restores identities without rewriting
     const a = store.ingest(base).personId!;
     const b = store.ingest({
       ...donation,
-      actor: { externalId: "donation-1", displayName: "OtherNick" },
+      actor: { externalId: daDonorExternalId("OtherNick"), displayName: "OtherNick" },
     }).personId!;
     const merge = store.merge(
       b,
@@ -196,7 +416,7 @@ test("stale merge and undo after another membership change fail atomically", () 
     const a = store.ingest(base).personId!;
     const b = store.ingest({
       ...donation,
-      actor: { externalId: "donation-1", displayName: "OtherNick" },
+      actor: { externalId: daDonorExternalId("OtherNick"), displayName: "OtherNick" },
     }).personId!;
     const c = store.ingest({
       ...base,
@@ -464,7 +684,7 @@ test("selective split preserves events and invalidates stale undo", () => {
     const a = store.ingest(base),
       b = store.ingest({
         ...donation,
-        actor: { externalId: "donation-1", displayName: "OtherNick" },
+        actor: { externalId: daDonorExternalId("OtherNick"), displayName: "OtherNick" },
       });
     const merge = store.merge(
       b.personId!,
@@ -493,7 +713,7 @@ test("known-time DA donations join the single Twitch session; unknown time never
     const known = {
       ...donation,
       externalId: "known",
-      actor: { externalId: "known", displayName: "Vasya" },
+      actor: { externalId: daDonorExternalId("Vasya"), displayName: "Vasya" },
       occurredAtMs: 60000,
       timeQuality: "configured" as const,
     };
@@ -511,7 +731,7 @@ test("known-time DA donations join the single Twitch session; unknown time never
     store.ingest({
       ...known,
       externalId: "second",
-      actor: { externalId: "second", displayName: "Vasya" },
+      actor: { externalId: daDonorExternalId("Vasya"), displayName: "Vasya" },
       occurredAtMs: 90000,
     });
     assert.equal(store.summary(session).donations, 2);
@@ -566,7 +786,7 @@ test("owner ensureOwnerIdentity binds channel owner; DA matching owner login aut
     assert.equal(ownerPerson, again);
     const tip = store.ingest({
       ...donation,
-      actor: { externalId: "donation-owner", displayName: "@Streamer" },
+      actor: { externalId: daDonorExternalId("@Streamer"), displayName: "@Streamer" },
       externalId: "donation-owner",
     });
     assert.equal(tip.personId, ownerPerson);
@@ -738,7 +958,7 @@ test("personStats aggregates donations, messages, observed minutes and cross-ses
     store.ingest({
       ...donation,
       externalId: "donation-stats",
-      actor: { externalId: "donation-stats", displayName: "Vasya" },
+      actor: { externalId: daDonorExternalId("Vasya"), displayName: "Vasya" },
       occurredAtMs: 90_000,
       timeQuality: "configured",
       sourceTime: "1970-01-01T00:01:30Z",
@@ -854,7 +1074,7 @@ test("personsTop ranks by messages, donations and observed minutes for a session
     store.ingest({
       ...donation,
       externalId: "donation-b",
-      actor: { externalId: "donation-b", displayName: "Petya" },
+      actor: { externalId: daDonorExternalId("Petya"), displayName: "Petya" },
       occurredAtMs: 85_000,
       timeQuality: "configured",
       sourceTime: "1970-01-01T00:01:25Z",
@@ -912,7 +1132,7 @@ test("insights detectors surface first-timers, silent presence, donors without t
     store.ingest({
       ...donation,
       externalId: "donation-only",
-      actor: { externalId: "donation-only", displayName: "OnlyDA" },
+      actor: { externalId: daDonorExternalId("OnlyDA"), displayName: "OnlyDA" },
       occurredAtMs: 1_300_000_100_000,
       timeQuality: "configured",
       sourceTime: "2011-03-13T07:06:40Z",
@@ -1034,7 +1254,7 @@ test("personsTop all-time observed minutes and invalid sort; insights chatty/reg
     store.ingest({
       ...donation,
       externalId: "top-don",
-      actor: { externalId: "top-don", displayName: "Chatty" },
+      actor: { externalId: daDonorExternalId("Chatty"), displayName: "Chatty" },
       occurredAtMs: newStart + 5000,
       timeQuality: "configured",
       sourceTime: "x",
