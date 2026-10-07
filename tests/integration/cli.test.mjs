@@ -67,9 +67,11 @@ test(
       assert.match(await html.text(), /<title>Stream Panel<\/title>/);
       const duplicate = start(dir, await port());
       children.push(duplicate);
-      const rejected = await duplicate.exit;
-      assert.equal(rejected.code, 1);
-      assert.match(rejected.stderr, /DATA_DIR_ALREADY_IN_USE/);
+      const reopened = await duplicate.exit;
+      // Second start against a live lock requests a fresh bootstrap URL (exit 0).
+      assert.equal(reopened.code, 0);
+      assert.match(reopened.stdout, /Stream Panel: http:\/\/127\.0\.0\.1/);
+      assert.match(reopened.stdout, /уже запущен/);
       running.child.send("shutdown");
       const completed = await Promise.race([
         running.exit,

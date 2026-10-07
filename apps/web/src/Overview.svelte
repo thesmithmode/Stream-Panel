@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
   import EventList from "./EventList.svelte";
+  import { onMount } from "svelte";
   import {
     api,
     money,
@@ -50,6 +51,26 @@
       insightsLoading = false;
     }
   }
+  function closeInsights() {
+    insightsOpen = false;
+  }
+  onMount(() => {
+    const onPointer = (event: PointerEvent) => {
+      if (!insightsOpen) return;
+      const target = event.target as Node | null;
+      const root = document.querySelector(".insights-wrap");
+      if (root && target && !root.contains(target)) closeInsights();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && insightsOpen) closeInsights();
+    };
+    document.addEventListener("pointerdown", onPointer);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      window.removeEventListener("keydown", onKey);
+    };
+  });
   function coverageLabel() {
     const c = summary.coverage;
     if (!c || c.ratio === null) return "—";

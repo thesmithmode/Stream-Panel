@@ -75,3 +75,10 @@ export function matchKey(name: string): string {
     .toLowerCase()
     .replace(/^[@#]+/, "");
 }
+
+/** Stable DonationAlerts Donor identity key: one Donor per (account, display name). */
+export function daDonorExternalId(displayName: string): string {
+  const key = matchKey(displayName);
+  if (!key) throw new Error("INVALID_DA_DONOR_NAME");
+  return `name:${key}`;
+}

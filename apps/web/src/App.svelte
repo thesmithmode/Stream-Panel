@@ -8,6 +8,9 @@
     api,
     setCsrf,
     date,
+    getDataMode,
+    setDataMode,
+    type DataMode,
     type Session,
     type Person,
     type Summary,
@@ -31,7 +34,8 @@
     }),
     sessionFilter = $state(""),
     personId = $state(""),
-    busy = $state(false);
+    busy = $state(false),
+    dataMode = $state<DataMode>(getDataMode());
   const titles: Record<string, string> = {
     overview: "Обзор эфира",
     sessions: "Сессии",
@@ -88,6 +92,13 @@
     navigate("people");
     personId = id;
   }
+  async function switchMode(mode: DataMode) {
+    if (mode === dataMode) return;
+    setDataMode(mode);
+    dataMode = mode;
+    error = "";
+    await action(async () => {});
+  }
   onMount(() => {
     let alive = true;
     let timer: ReturnType<typeof setInterval> | undefined;
@@ -140,10 +151,11 @@
     <div class="sidebar-bottom">
       <span class="dot" class:off={!authorized}></span>
       <div class="sidebar-status">
-        <span>Локальная база</span>
+        <span>{dataMode === "demo" ? "Демо-данные" : "Локальная база"}</span>
         <span class="small muted sidebar-hint"
-          >Вкладку можно закрыть — сбор продолжается. Выход: Ctrl+C или
-          STREAM_PANEL_STOP=1</span
+          >{dataMode === "demo"
+            ? "Фикстуры в памяти — SQLite и secrets не трогаем."
+            : "Вкладку можно закрыть — сбор продолжается. Выход: Ctrl+C или STREAM_PANEL_STOP=1"}</span
         >
       </div>
       <Icon name="arrow" size={17} />
@@ -155,6 +167,22 @@
         <h1>{titles[tab]}</h1>
         <p>{descriptions[tab]}</p>
       </div>
+      <div class="inline" style="justify-content:flex-end">
+        {#if authorized}<div class="mode-toggle" role="group" aria-label="Режим данных">
+            <button
+              type="button"
+              class:active={dataMode === "real"}
+              disabled={busy}
+              onclick={() => switchMode("real")}>Реальные</button
+            >
+            <button
+              type="button"
+              class:active={dataMode === "demo"}
+              class:demo={true}
+              disabled={busy}
+              onclick={() => switchMode("demo")}>Демо</button
+            >
+          </div>{/if}
       {#if authorized && tab === "overview"}<button
           class="outline record-button"
           disabled={busy || activeSession?.kind === "platform"}
@@ -170,6 +198,7 @@
               ? "Завершить запись"
               : "Начать запись"}</button
         >{/if}
+      </div>
     </div>
     {#if loading}<div class="panel empty">
         <p>Открываем локальную базу…</p>
@@ -183,6 +212,10 @@
         <p class="small muted">{error}</p>
       </section>{:else}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}
+      {#if dataMode === "demo"}<p class="demo-banner" role="status">
+          Режим <strong>Демо</strong>: показаны фикстуры. Запись в SQLite и
+          secrets.json отключена.
+        </p>{/if}
       {#if tab === "overview" || tab === "people"}{#if sessions.length}<div
             class="session-picker"
           >

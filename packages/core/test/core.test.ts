@@ -4,7 +4,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { moneyToMinor, candidateKey, matchKey, type EventInput } from "../src/domain.js";
+import { moneyToMinor, candidateKey, matchKey,
+  daDonorExternalId, type EventInput } from "../src/domain.js";
 import {
   botExclusionSet,
   WELL_KNOWN_TWITCH_BOTS,
@@ -38,7 +39,7 @@ const donation: EventInput = {
   accountId: "recipient-1",
   externalId: "donation-1",
   type: "donation",
-  actor: { externalId: "donation-1", displayName: "Vasya" },
+  actor: { externalId: daDonorExternalId("Vasya"), displayName: "Vasya" },
   transport: "rest",
   sourceTime: "2026-10-06 20:00:00",
   occurredAtMs: null,
@@ -74,7 +75,7 @@ test("unique cross-source login match auto-links; ambiguous names stay separate;
     const third = store.ingest({
       ...donation,
       externalId: "donation-2",
-      actor: { externalId: "donation-2", displayName: "Vasya" },
+      actor: { externalId: daDonorExternalId("Vasya"), displayName: "Vasya" },
     });
     // Second DA donation with same name also links to the unique Twitch person.
     assert.equal(second.personId, third.personId);
@@ -93,7 +94,7 @@ test("unique cross-source login match auto-links; ambiguous names stay separate;
     const daTwin = store.ingest({
       ...donation,
       externalId: "donation-twin",
-      actor: { externalId: "donation-twin", displayName: "Twin" },
+      actor: { externalId: daDonorExternalId("Twin"), displayName: "Twin" },
     });
     assert.equal(store.candidatePersons("Twin").length, 3);
     const twinDetail = store.person(String(daTwin.personId)) as {
@@ -107,7 +108,7 @@ test("unique cross-source login match auto-links; ambiguous names stay separate;
           externalId: "donation-bad-actor",
           actor: { externalId: "Vasya", displayName: "Vasya" },
         }),
-      /DA_ACTOR/,
+      /DA_ACTOR_MUST_BE_DONOR_NAME/,
     );
     assert.equal(matchKey("@Vasya"), "vasya");
     assert.equal(matchKey("#Vasya"), "vasya");
@@ -117,37 +118,40 @@ test("unique cross-source login match auto-links; ambiguous names stay separate;
   }
 });
 
-test("DA same display name + same account attaches to one person; Twitch ids stay separate", () => {
+test("DA same display name + same account is one Donor identity / one Person; Twitch viewers stay separate", () => {
   const store = new StreamStore(":memory:");
   try {
     const a = store.ingest({
       ...donation,
       externalId: "donation-egor-1",
-      actor: { externalId: "donation-egor-1", displayName: "Егор4ик" },
+      actor: { externalId: daDonorExternalId("Егор4ик"), displayName: "Егор4ик" },
     });
     const b = store.ingest({
       ...donation,
       externalId: "donation-egor-2",
-      actor: { externalId: "donation-egor-2", displayName: "Егор4ик" },
+      actor: { externalId: daDonorExternalId("Егор4ик"), displayName: "Егор4ик" },
     });
     const c = store.ingest({
       ...donation,
       externalId: "donation-egor-3",
-      actor: { externalId: "donation-egor-3", displayName: "Егор4ик" },
+      actor: { externalId: daDonorExternalId("Егор4ик"), displayName: "Егор4ик" },
     });
     assert.equal(a.personId, b.personId);
     assert.equal(b.personId, c.personId);
+    assert.equal(a.identityId, b.identityId);
+    assert.equal(b.identityId, c.identityId);
     const detail = store.person(String(a.personId)) as {
       identities: { source: string; external_id: string }[];
     };
-    assert.equal(detail.identities.length, 3);
-    assert.ok(detail.identities.every((i) => i.source === "donationalerts"));
+    assert.equal(detail.identities.length, 1);
+    assert.equal(detail.identities[0]!.source, "donationalerts");
+    assert.equal(detail.identities[0]!.external_id, daDonorExternalId("Егор4ик"));
     // Different DA account keeps separate people even with same nick.
     const other = store.ingest({
       ...donation,
       accountId: "recipient-other",
       externalId: "donation-egor-x",
-      actor: { externalId: "donation-egor-x", displayName: "Егор4ик" },
+      actor: { externalId: daDonorExternalId("Егор4ик"), displayName: "Егор4ик" },
     });
     assert.notEqual(other.personId, a.personId);
     // Twitch stable ids with same display name stay separate persons.
@@ -166,7 +170,7 @@ test("DA same display name + same account attaches to one person; Twitch ids sta
     const linked = store.ingest({
       ...donation,
       externalId: "donation-samenick",
-      actor: { externalId: "donation-samenick", displayName: "UniqueLink" },
+      actor: { externalId: daDonorExternalId("UniqueLink"), displayName: "UniqueLink" },
     });
     const twitch = store.ingest({
       ...base,
@@ -175,6 +179,33 @@ test("DA same display name + same account attaches to one person; Twitch ids sta
     });
     // Order: DA first then Twitch — Twitch should auto-link to DA person.
     assert.equal(twitch.personId, linked.personId);
+  } finally {
+    store.close();
+  }
+});
+
+
+test("collapseDuplicateDaDonors merges legacy per-tip DA identities into one Donor", () => {
+  const store = new StreamStore(":memory:");
+  try {
+    const first = store.ingest({
+      ...donation,
+      externalId: "legacy-1",
+      actor: { externalId: daDonorExternalId("LegacyDonor"), displayName: "LegacyDonor" },
+    });
+    const second = store.ingest({
+      ...donation,
+      externalId: "legacy-2",
+      actor: { externalId: daDonorExternalId("LegacyDonor"), displayName: "LegacyDonor" },
+    });
+    assert.equal(first.identityId, second.identityId);
+    assert.equal(first.personId, second.personId);
+    store.collapseDuplicateDaDonors();
+    const detail = store.person(String(first.personId)) as {
+      identities: { external_id: string }[];
+    };
+    assert.equal(detail.identities.length, 1);
+    assert.equal(detail.identities[0]!.external_id, daDonorExternalId("LegacyDonor"));
   } finally {
     store.close();
   }
@@ -231,7 +262,7 @@ test("merge updates historical query; undo restores identities without rewriting
     const a = store.ingest(base).personId!;
     const b = store.ingest({
       ...donation,
-      actor: { externalId: "donation-1", displayName: "OtherNick" },
+      actor: { externalId: daDonorExternalId("OtherNick"), displayName: "OtherNick" },
     }).personId!;
     const merge = store.merge(
       b,
@@ -259,7 +290,7 @@ test("stale merge and undo after another membership change fail atomically", () 
     const a = store.ingest(base).personId!;
     const b = store.ingest({
       ...donation,
-      actor: { externalId: "donation-1", displayName: "OtherNick" },
+      actor: { externalId: daDonorExternalId("OtherNick"), displayName: "OtherNick" },
     }).personId!;
     const c = store.ingest({
       ...base,
@@ -527,7 +558,7 @@ test("selective split preserves events and invalidates stale undo", () => {
     const a = store.ingest(base),
       b = store.ingest({
         ...donation,
-        actor: { externalId: "donation-1", displayName: "OtherNick" },
+        actor: { externalId: daDonorExternalId("OtherNick"), displayName: "OtherNick" },
       });
     const merge = store.merge(
       b.personId!,
@@ -556,7 +587,7 @@ test("known-time DA donations join the single Twitch session; unknown time never
     const known = {
       ...donation,
       externalId: "known",
-      actor: { externalId: "known", displayName: "Vasya" },
+      actor: { externalId: daDonorExternalId("Vasya"), displayName: "Vasya" },
       occurredAtMs: 60000,
       timeQuality: "configured" as const,
     };
@@ -574,7 +605,7 @@ test("known-time DA donations join the single Twitch session; unknown time never
     store.ingest({
       ...known,
       externalId: "second",
-      actor: { externalId: "second", displayName: "Vasya" },
+      actor: { externalId: daDonorExternalId("Vasya"), displayName: "Vasya" },
       occurredAtMs: 90000,
     });
     assert.equal(store.summary(session).donations, 2);
@@ -629,7 +660,7 @@ test("owner ensureOwnerIdentity binds channel owner; DA matching owner login aut
     assert.equal(ownerPerson, again);
     const tip = store.ingest({
       ...donation,
-      actor: { externalId: "donation-owner", displayName: "@Streamer" },
+      actor: { externalId: daDonorExternalId("@Streamer"), displayName: "@Streamer" },
       externalId: "donation-owner",
     });
     assert.equal(tip.personId, ownerPerson);
@@ -801,7 +832,7 @@ test("personStats aggregates donations, messages, observed minutes and cross-ses
     store.ingest({
       ...donation,
       externalId: "donation-stats",
-      actor: { externalId: "donation-stats", displayName: "Vasya" },
+      actor: { externalId: daDonorExternalId("Vasya"), displayName: "Vasya" },
       occurredAtMs: 90_000,
       timeQuality: "configured",
       sourceTime: "1970-01-01T00:01:30Z",
@@ -917,7 +948,7 @@ test("personsTop ranks by messages, donations and observed minutes for a session
     store.ingest({
       ...donation,
       externalId: "donation-b",
-      actor: { externalId: "donation-b", displayName: "Petya" },
+      actor: { externalId: daDonorExternalId("Petya"), displayName: "Petya" },
       occurredAtMs: 85_000,
       timeQuality: "configured",
       sourceTime: "1970-01-01T00:01:25Z",
@@ -975,7 +1006,7 @@ test("insights detectors surface first-timers, silent presence, donors without t
     store.ingest({
       ...donation,
       externalId: "donation-only",
-      actor: { externalId: "donation-only", displayName: "OnlyDA" },
+      actor: { externalId: daDonorExternalId("OnlyDA"), displayName: "OnlyDA" },
       occurredAtMs: 1_300_000_100_000,
       timeQuality: "configured",
       sourceTime: "2011-03-13T07:06:40Z",
@@ -1097,7 +1128,7 @@ test("personsTop all-time observed minutes and invalid sort; insights chatty/reg
     store.ingest({
       ...donation,
       externalId: "top-don",
-      actor: { externalId: "top-don", displayName: "Chatty" },
+      actor: { externalId: daDonorExternalId("Chatty"), displayName: "Chatty" },
       occurredAtMs: newStart + 5000,
       timeQuality: "configured",
       sourceTime: "x",

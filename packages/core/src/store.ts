@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   candidateKey,
   matchKey,
+  daDonorExternalId,
   eventKey,
   assertTimestamp,
   type EventInput,
@@ -67,6 +68,9 @@ export class StreamStore {
             update.run(matchKey(row.display_name), row.id);
         })();
       }
+      // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
+      // Person = link umbrella. Collapse historical per-tip DA identity dupes.
+      this.db.transaction(() => this.collapseDuplicateDaDonors())();
     } catch (error) {
       this.db.close();
       throw error;
@@ -88,12 +92,10 @@ export class StreamStore {
       throw new Error("MISSING_EVENT_KEY");
     if ((event.timeQuality === "unknown") !== (event.occurredAtMs === null))
       throw new Error("INVALID_TIME_QUALITY");
-    if (
-      event.source === "donationalerts" &&
-      event.actor &&
-      event.actor.externalId !== event.externalId
-    ) {
-      throw new Error("DA_ACTOR_MUST_BE_DONATION_OCCURRENCE");
+    if (event.source === "donationalerts" && event.actor) {
+      // Donor identity is name-scoped; event.externalId remains the donation occurrence id.
+      if (event.actor.externalId !== daDonorExternalId(event.actor.displayName))
+        throw new Error("DA_ACTOR_MUST_BE_DONOR_NAME");
     }
     if (event.actor && !event.actor.externalId)
       throw new Error("MISSING_ACTOR_KEY");
@@ -126,6 +128,37 @@ export class StreamStore {
             .get(event.source, event.accountId, event.actor.externalId) as
             | IdentityRow
             | undefined) ?? null;
+        // Legacy DA rows keyed donation id per tip — reuse Donor by match_key.
+        if (!identity && event.source === "donationalerts") {
+          const key = matchKey(event.actor.displayName);
+          if (key) {
+            identity =
+              (this.db
+                .prepare(
+                  `SELECT id, person_id FROM identities
+                   WHERE source = 'donationalerts' AND account_id = ? AND match_key = ?
+                   ORDER BY CASE WHEN external_id LIKE 'name:%' THEN 0 ELSE 1 END, id
+                   LIMIT 1`,
+                )
+                .get(event.accountId, key) as IdentityRow | undefined) ?? null;
+            if (identity) {
+              // Promote legacy occurrence-keyed Donor to stable name key when free.
+              const stable = daDonorExternalId(event.actor.displayName);
+              const taken = this.db
+                .prepare(
+                  "SELECT id FROM identities WHERE source = ? AND account_id = ? AND external_id = ?",
+                )
+                .get("donationalerts", event.accountId, stable) as
+                | { id: string }
+                | undefined;
+              if (!taken) {
+                this.db
+                  .prepare("UPDATE identities SET external_id = ? WHERE id = ?")
+                  .run(stable, identity.id);
+              }
+            }
+          }
+        }
         if (!identity) {
           newIdentity = true;
           const linked = this.resolveAutoLinkPerson(
@@ -396,14 +429,129 @@ export class StreamStore {
 
 
   /**
+   * Repair historical DA Person/Donor duplication: same recipient account +
+   * same display match_key must be ONE Donor identity under ONE Person when
+   * unambiguous (persons whose membership is only that DA name group).
+   * Viewer (Twitch) identities are never collapsed by name.
+   */
+  collapseDuplicateDaDonors(): void {
+    const groups = this.db
+      .prepare(
+        `SELECT account_id, match_key, COUNT(*) AS n,
+                GROUP_CONCAT(id, char(31)) AS ids,
+                GROUP_CONCAT(person_id, char(31)) AS person_ids,
+                GROUP_CONCAT(external_id, char(31)) AS external_ids
+         FROM identities
+         WHERE source = 'donationalerts' AND match_key != ''
+         GROUP BY account_id, match_key
+         HAVING n > 1`,
+      )
+      .all() as {
+      account_id: string;
+      match_key: string;
+      n: number;
+      ids: string;
+      person_ids: string;
+      external_ids: string;
+    }[];
+    const sep = String.fromCharCode(31);
+    for (const group of groups) {
+      const ids = group.ids.split(sep);
+      const personIds = [...new Set(group.person_ids.split(sep))];
+      const externalIds = group.external_ids.split(sep);
+      const mergeable: string[] = [];
+      for (const personId of personIds) {
+        const members = this.db
+          .prepare(
+            "SELECT id, match_key, source FROM identities WHERE person_id = ?",
+          )
+          .all(personId) as { id: string; match_key: string; source: string }[];
+        const pure = members.every(
+          (m) =>
+            m.source === "donationalerts" &&
+            m.match_key === group.match_key &&
+            ids.includes(m.id),
+        );
+        if (pure) mergeable.push(personId);
+      }
+      if (mergeable.length > 1) {
+        mergeable.sort();
+        const target = mergeable[0]!;
+        for (const source of mergeable.slice(1)) {
+          this.db
+            .prepare("UPDATE identities SET person_id = ? WHERE person_id = ?")
+            .run(target, source);
+          this.db
+            .prepare(
+              "UPDATE persons SET revision = revision + 1 WHERE id IN (?, ?)",
+            )
+            .run(source, target);
+        }
+      }
+      let canonical = ids[0]!;
+      for (let i = 0; i < ids.length; i++) {
+        if (externalIds[i]!.startsWith("name:")) {
+          canonical = ids[i]!;
+          break;
+        }
+      }
+      const sorted = [...ids].sort();
+      if (!externalIds[ids.indexOf(canonical)]?.startsWith("name:")) {
+        canonical = sorted[0]!;
+      }
+      const stable = `name:${group.match_key}`;
+      const taken = this.db
+        .prepare(
+          "SELECT id FROM identities WHERE source = 'donationalerts' AND account_id = ? AND external_id = ?",
+        )
+        .get(group.account_id, stable) as { id: string } | undefined;
+      if (taken) canonical = taken.id;
+      else {
+        this.db
+          .prepare("UPDATE identities SET external_id = ? WHERE id = ?")
+          .run(stable, canonical);
+      }
+      for (const id of ids) {
+        if (id === canonical) continue;
+        this.db
+          .prepare("UPDATE events SET identity_id = ? WHERE identity_id = ?")
+          .run(canonical, id);
+        const polls = this.db
+          .prepare(
+            "SELECT poll_id AS pollId FROM presence_members WHERE identity_id = ?",
+          )
+          .all(id) as { pollId: string }[];
+        const insertMember = this.db.prepare(
+          "INSERT OR IGNORE INTO presence_members(poll_id, identity_id) VALUES (?, ?)",
+        );
+        for (const row of polls) insertMember.run(row.pollId, canonical);
+        this.db
+          .prepare("DELETE FROM presence_members WHERE identity_id = ?")
+          .run(id);
+        this.db
+          .prepare("DELETE FROM identity_aliases WHERE identity_id = ?")
+          .run(id);
+        this.db.prepare("DELETE FROM identities WHERE id = ?").run(id);
+      }
+      this.db
+        .prepare("INSERT INTO membership_operations VALUES (?, ?, ?, ?, ?)")
+        .run(
+          randomUUID(),
+          "da_donor_collapse",
+          JSON.stringify({ ids, match_key: group.match_key }),
+          JSON.stringify({ canonical, external_id: stable }),
+          Date.now(),
+        );
+    }
+  }
+
+  /**
    * High-confidence auto-link target person id, or null.
-   * Exact platform id is handled by caller lookup. Strong name: unique
-   * cross-source match_key (exactly one person) — FR07 KEEP.
-   * Same-source DA: identical display match_key under the same recipient
-   * account attaches new donation identities to that person so DA donors
-   * are not split per donation id. Ambiguous historical multi-person splits
-   * are not auto-merged; new identities attach to a stable existing person
-   * to stop further dupes.
+   * Exact platform id / Donor name key is handled by caller lookup.
+   * Strong name: unique cross-source match_key (exactly one person) — FR07 KEEP.
+   * Same-source DA fallback: if a Donor identity was not reused, attach a new
+   * Donor row to an existing Person that already owns that DA match_key
+   * (historical repair path). Prefer one Donor identity per name going forward.
    */
   private resolveAutoLinkPerson(
     source: Source,

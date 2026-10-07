@@ -5,6 +5,7 @@ import type { Configuration } from "./config.js";
 import type { StoreClient } from "./db.js";
 import {
   moneyToMinor,
+  daDonorExternalId,
   type EventInput,
 } from "../../../packages/core/src/domain.js";
 import {
@@ -55,7 +56,9 @@ export function normalizeDonation(
     accountId,
     externalId: id,
     type: "donation",
-    actor: name.trim() ? { externalId: id, displayName: name } : null,
+    actor: name.trim()
+      ? { externalId: daDonorExternalId(name), displayName: name }
+      : null,
     occurredAtMs,
     receivedAtMs: Date.now(),
     sourceTime,
