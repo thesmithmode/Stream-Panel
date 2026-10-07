@@ -93,7 +93,8 @@ test(
         "the adapter must use its transport dependency",
       );
       await until(() => c.status.state === "connected");
-      assert.equal(c.status.capabilities.presence, "complete");
+      // Presence poll is async after connect; wait rather than race the assertion.
+      await until(() => c.status.capabilities.presence === "complete");
       assert.equal((await f.db.call("summary")).chatters, 2);
       const subs = p.requests
         .filter((r) => r.url.includes("/subscriptions"))
