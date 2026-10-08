@@ -187,6 +187,11 @@ export async function createApplication(
       !request.headers["content-type"]?.startsWith("application/json"))
       return reply.code(415).send({ error: "JSON_REQUIRED" });
   });
+  app.get("/api/v1/profile", async () => ({ profile: options.profile ?? "ruslan" }));
+  app.post("/api/v1/profile", { schema: { body: {
+    type: "object", additionalProperties: false, required: ["profile"],
+    properties: { profile: { type: "string", enum: ["ruslan"] } },
+  } } }, async () => ({ profile: options.profile ?? "ruslan" }));
   app.get("/api/v1/analytics", async request => {
     const q=object(request.query);
     return db.call("analytics", {
