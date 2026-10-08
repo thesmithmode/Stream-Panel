@@ -191,6 +191,7 @@ test(
         .filter({ hasText: "Повторный импорт запущен" })
         .waitFor();
       await da.getByRole("button", { name: "Отключить", exact: true }).click();
+      await until(() => a.configuration.value.daAccessToken === "", 8000);
       assert.equal(a.configuration.value.daAccessToken, "");
       await da.locator("summary").click();
       await da
@@ -243,7 +244,7 @@ test(
       await startCoverage(page);
       await goto(page, a.origin);
       await page
-        .getByRole("heading", { name: "Откройте ссылку из терминала" })
+        .getByRole("heading", { name: "Вход в Stream Panel" })
         .waitFor();
       await goto(page, a.bootstrap());
       await page

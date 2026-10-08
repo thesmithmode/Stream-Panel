@@ -5,6 +5,7 @@
     $props();
   let twitchClient = $state(""),
     extended = $state(false),
+    youtubeClient = $state(""), youtubeSecret = $state(""),
     daClient = $state(""),
     daSecret = $state(""),
     daToken = $state(""),
@@ -18,6 +19,7 @@
   $effect(() => {
     const cfg = status?.config;
     if (!cfg || seeded) return;
+    if (cfg.youtubeClientId) youtubeClient = cfg.youtubeClientId;
     if (cfg.twitchClientId) twitchClient = cfg.twitchClientId;
     if (cfg.daClientId) daClient = cfg.daClientId;
     if (cfg.daUtcOffsetMinutes != null && cfg.daUtcOffsetMinutes !== "")
@@ -252,8 +254,25 @@
       {/if}
     </div>
   </section>
+  <section class="panel settings">
+    <header><h2>YouTube</h2><span class="state" class:online={status.youtube?.state === "connected"}>{statusLabel(status.youtube?.state ?? "disconnected")}</span></header>
+    <div class="settings-body">
+      <p class="small muted">{status.youtube?.detail ?? "Подключите канал этого профиля"}</p>
+      {#if ["connected", "error"].includes(status.youtube?.state)}
+        <button class="outline" disabled={busy} onclick={() => run(async () => { await api("youtube/disconnect", {}); })}>Отключить YouTube</button>
+      {:else}
+        <label>YouTube Client ID<input bind:value={youtubeClient} autocomplete="off" /></label>
+        <label>YouTube Client secret<input type="password" bind:value={youtubeSecret} autocomplete="new-password" placeholder={status.config.hasYoutubeSecret ? "Сохранён" : "Client secret"} /></label>
+        <p class="small muted">Redirect: <code>{status.config.youtubeRedirectUri ?? ""}</code></p>
+        <button class="primary" disabled={busy} onclick={() => run(async () => {
+          const result = await api("youtube/connect", {clientId: youtubeClient, clientSecret: youtubeSecret}); youtubeSecret = "";
+          window.open(result.url, "_blank", "noopener,noreferrer"); message = "Завершите вход в Google в открытой вкладке.";
+        })}>Войти через YouTube</button>
+      {/if}
+    </div>
+  </section>
   <section class="panel settings wide">
-    <header><h2>Локальные данные</h2></header>
+    <header><h2>Резервные копии</h2></header>
     <div class="settings-body">
       <button
         class="outline"

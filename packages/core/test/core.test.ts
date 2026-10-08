@@ -221,10 +221,11 @@ test("collapseDuplicateDaDonors merges legacy per-tip DA identities into one Don
     ).run(idB);
     raw.close();
 
+    const inspect = new Database(dbPath);
     const store = new StreamStore(dbPath);
     try {
       store.collapseDuplicateDaDonors();
-      const donors = new Database(dbPath)
+      const donors = inspect
         .prepare(
           `SELECT id, person_id, external_id FROM identities
            WHERE source='donationalerts' AND match_key='legacydonor'`,
@@ -232,18 +233,19 @@ test("collapseDuplicateDaDonors merges legacy per-tip DA identities into one Don
         .all() as { id: string; person_id: string; external_id: string }[];
       assert.equal(donors.length, 1);
       assert.equal(donors[0]!.external_id, daDonorExternalId("LegacyDonor"));
-      const events = new Database(dbPath)
+      const events = inspect
         .prepare("SELECT identity_id FROM events ORDER BY id")
         .all() as { identity_id: string }[];
       assert.equal(events[0]!.identity_id, donors[0]!.id);
       assert.equal(events[1]!.identity_id, donors[0]!.id);
-      const aliases = new Database(dbPath)
+      const aliases = inspect
         .prepare("SELECT identity_id, name FROM identity_aliases")
         .all() as { identity_id: string; name: string }[];
       assert.equal(aliases.length, 1);
       assert.equal(aliases[0]!.identity_id, donors[0]!.id);
     } finally {
       store.close();
+      inspect.close();
     }
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -1138,6 +1140,9 @@ test("insights detectors surface first-timers, silent presence, donors without t
       sourceTime: "2011-03-13T07:06:40Z",
       payload: { amountMinor: "2500", currency: "RUB" },
     });
+    for (const name of ["jeetbot", "fullrandomname_twitch", "streamelements", "streemelements"]) {
+      store.ingest({...donation, externalId: `excluded-${name}`, actor: {externalId: daDonorExternalId(name), displayName: name}, occurredAtMs: 1_300_000_100_000, timeQuality: "configured", payload: {amountMinor: "100", currency: "RUB"}});
+    }
     // First-timer chatter
     store.ingest({
       ...base,
@@ -1152,6 +1157,7 @@ test("insights detectors surface first-timers, silent presence, donors without t
       kind: string;
       personId: string | null;
     }[];
+    assert.equal(cards.filter(c=>c.kind==="donor_no_twitch").length,1);
     const kinds = new Set(cards.map((c) => c.kind));
     assert.ok(kinds.has("silent_presence"));
     assert.ok(kinds.has("donor_no_twitch"));

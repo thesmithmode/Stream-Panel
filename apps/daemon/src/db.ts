@@ -8,9 +8,9 @@ export class StoreClient {
     { resolve: (value: unknown) => void; reject: (error: Error) => void }
   >();
   readonly ready: Promise<void>;
-  constructor(path: string) {
+  constructor(path: string, profile?: string) {
     this.worker = new Worker(new URL("./db-worker.js", import.meta.url), {
-      workerData: { path },
+      workerData: { path, profile },
     });
     this.ready = new Promise((resolve, reject) => {
       this.worker.on("message", (message) => {

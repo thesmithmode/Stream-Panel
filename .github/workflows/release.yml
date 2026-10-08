@@ -1,32 +1,34 @@
-name: Package release artifacts
+name: Linux preview release
 on:
+  workflow_run:
+    workflows: [Quality gate]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
-    branches:
-      - main
-    paths:
-      - "scripts/package-release.mjs"
-      - "scripts/windows-launcher.cs"
-      - "scripts/installer/**"
-      - ".github/workflows/release.yml"
-      - "docs/ops/packaging.md"
-      - "package.json"
 permissions:
-  contents: read
+  contents: write
+  actions: read
 concurrency:
-  group: package-${{ github.ref }}
-  cancel-in-progress: true
+  group: stream-panel-linux-release
+  cancel-in-progress: false
 jobs:
-  # GitHub Release assets MUST be ONLY:
-  #   1. stream-panel_*_amd64.deb
-  #   2. StreamPanel-Setup-*.exe
-  # Never upload zip, tar.gz, source.zip, SHA256SUMS, or manifest*.json to the Release.
-  package-linux:
-    runs-on: ubuntu-latest
+  release:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' || github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Verify current main and its passing quality gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          test "$sha" = "$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha')"
+          gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&per_page=20" --jq '.workflow_runs | any(.conclusion == "success" and .head_branch == "main")' | grep -qx true
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -34,72 +36,24 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: node scripts/package-release.mjs --skip-build --github-assets
-      - name: Verify .desktop in deb
-        run: |
-          deb=$(ls artifacts/release/stream-panel_*_amd64.deb | head -1)
-          dpkg-deb -c "$deb" | grep -E 'usr/share/applications/stream-panel\.desktop'
-          echo "OK: desktop entry present in $deb"
+      - run: pnpm prune --prod
+      - run: node scripts/package-deb.mjs
+      - run: node --test tests/packaging/deb.test.mjs
       - uses: actions/upload-artifact@v4
         with:
-          name: stream-panel-linux
-          path: |
-            artifacts/release/*.deb
-          if-no-files-found: error
-          retention-days: 14
-
-  package-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .node-version
-          cache: pnpm
-      - name: Locate .NET Framework csc
-        shell: pwsh
+          name: linux-deb
+          path: artifacts/*.deb
+      - name: Publish preview package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
-          $candidates = @(
-            "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe",
-            "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
-          )
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          if (Test-Path $vswhere) {
-            $roslyn = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\Roslyn\csc.exe" 2>$null
-            if ($roslyn) { $candidates = @($roslyn) + $candidates }
-          }
-          $csc = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-          if (-not $csc) {
-            throw "csc.exe not found (Framework64 v4.0.30319 or VS Roslyn). Install Build Tools / ensure windows-latest image."
-          }
-          Write-Host "Using CSC=$csc"
-          "CSC=$csc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - name: Install Inno Setup
-        shell: pwsh
-        run: |
-          choco install innosetup -y --no-progress
-          $iscc = @(
-            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
-          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $iscc) { throw "ISCC.exe not found after Inno Setup install" }
-          Write-Host "Using ISCC=$iscc"
-          "ISCC=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: node scripts/package-release.mjs --skip-build --github-assets
-      - name: Verify Setup exe
-        shell: pwsh
-        run: |
-          $setup = Get-ChildItem artifacts/release/StreamPanel-Setup-*.exe | Select-Object -First 1
-          if (-not $setup) { throw "StreamPanel-Setup-*.exe missing" }
-          if ($setup.Length -lt 1MB) { throw "Setup exe too small: $($setup.Length)" }
-          Write-Host "OK: $($setup.Name) ($($setup.Length) bytes)"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: stream-panel-windows
-          path: |
-            artifacts/release/StreamPanel-Setup-*.exe
-          if-no-files-found: error
-          retention-days: 14
+          set -euo pipefail
+          version=$(node -p "JSON.parse(require('fs').readFileSync('package.json')).version")
+          tag="v$version"
+          if gh release view "$tag" --repo "$REPO" > /dev/null 2>&1; then
+            test "$(gh api "repos/$REPO/commits/$tag" --jq '.sha')" = "$(git rev-parse HEAD)"
+            echo 'This exact release already exists'
+            exit 0
+          fi
+          gh release create "$tag" artifacts/*.deb --repo "$REPO" --target "$(git rev-parse HEAD)" --prerelease --title "Stream Panel $version — Linux preview" --notes-file docs/linux-preview-release.md

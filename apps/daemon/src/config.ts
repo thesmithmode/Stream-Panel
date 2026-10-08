@@ -11,6 +11,10 @@ export interface Tokens {
 }
 export interface Config {
   version: 1;
+  youtubeClientId?: string;
+  youtubeAccountId?: string;
+  youtubeClientSecret?: string;
+  youtube?: Tokens;
   twitchClientId: string;
   twitch?: Tokens;
   daClientId: string;
@@ -31,21 +35,16 @@ const defaults: Config = {
   daRefreshToken: "",
   daUtcOffsetMinutes: null,
   chattersPollSeconds: 60,
-  excludedBotLogins: [],
+  excludedBotLogins: ["fullrandomname_twitch", "jeetbot", "streemelements", "streamelements"],
 };
 export function defaultDataDir(): string {
   return (
     process.env.STREAM_PANEL_DATA_DIR ??
-    (process.platform === "win32"
-      ? join(process.env.LOCALAPPDATA ?? homedir(), "StreamPanel")
-      : join(
-          process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"),
-          "stream-panel",
-        ))
+    join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "stream-panel")
   );
 }
 export class Configuration {
-  value: Config = { ...defaults };
+  value: Config = { ...defaults, excludedBotLogins: [...defaults.excludedBotLogins] };
   private saving: Promise<void> = Promise.resolve();
   constructor(readonly dir: string) {}
   async load(): Promise<void> {
@@ -56,6 +55,7 @@ export class Configuration {
       ) as Config;
       if (saved.version !== 1) throw new Error("UNSUPPORTED_CONFIG");
       this.value = { ...defaults, ...saved };
+      this.value.youtubeAccountId = this.value.youtube?.userId ?? this.value.youtubeAccountId ?? "";
       this.value.chattersPollSeconds = clampChattersPollSeconds(
         this.value.chattersPollSeconds,
       );
@@ -66,6 +66,7 @@ export class Configuration {
             .filter(Boolean)
             .slice(0, 200)
         : [];
+      this.value.excludedBotLogins = [...new Set([...defaults.excludedBotLogins,...this.value.excludedBotLogins])];
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
@@ -75,7 +76,7 @@ export class Configuration {
     const path = join(this.dir, "secrets.json");
     const operation = this.saving.then(async () => {
       await writeFile(path + ".tmp", data, { mode: 0o600 });
-      if (process.platform !== "win32") await chmod(path + ".tmp", 0o600);
+      await chmod(path + ".tmp", 0o600);
       await rename(path + ".tmp", path);
     });
     this.saving = operation.catch(() => {});
@@ -83,6 +84,8 @@ export class Configuration {
   }
   publicView() {
     return {
+      youtubeClientId: this.value.youtubeClientId ?? "",
+      hasYoutubeSecret: !!this.value.youtubeClientSecret,
       twitchClientId: this.value.twitchClientId,
       daClientId: this.value.daClientId,
       hasDaSecret: !!this.value.daClientSecret,

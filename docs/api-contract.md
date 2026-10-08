@@ -1,12 +1,14 @@
 # HTTP API ранней версии
 
-Это контракт реализованных routes в `apps/daemon/src/server.ts`, а не список будущих endpoints. База URL: `http://127.0.0.1:47831/api/v1`. Ответы JSON, времена UTC epoch milliseconds; отсутствующее время — null, деньги в minor units — **строки**. UI отображает время в зоне браузера.
+Это контракт реализованных routes в `apps/daemon/src/server.ts`, а не список будущих endpoints. База URL: `<HTTPS origin>/api/v1`. Ответы JSON, времена UTC epoch milliseconds; отсутствующее время — null, деньги в minor units — **строки**. UI отображает время в зоне браузера.
 
 ## Вход и защита
 
-Первый адрес приложения содержит `#key=…` (одноразовый nonce, TTL10min). UI отправляет `POST /bootstrap {"key":"…"}`, получает `{csrf}` и HttpOnly SameSite=Strict cookie `sp_session` на `/api` на 24h, удаляет fragment. Все остальные API требуют cookie; каждый POST — `Content-Type: application/json` и `X-CSRF-Token`. `GET /status` возвращает текущий CSRF для восстановления вкладки. Cookie и CSRF сбрасываются при перезапуске демона.
+Серверный вход: POST /auth/login {username,password} → {csrf,user}; публичной регистрации и /bootstrap нет. Secure HttpOnly SameSite=Lax cookie sp_session на / действует 24 часа, хранится в SQLite в виде хэша. GET /auth/me возвращает свой профиль; POST /auth/logout требует CSRF и отзывает текущую сессию. Перезапуск не отзывает сессии автоматически. Все записи требуют точный Origin и X-CSRF-Token, точный Host проверяется для всех запросов. API профиля выбирается сервером из сессии, клиент не передаёт profile ID для доступа к чужой базе.
 
-Точный Host localhost/127.0.0.1 с портом; Origin допускает только эти адреса этого порта; CORS отсутствует. Не открывать LAN. Bootstrap не является постоянным bearer token. OAuth callback DA расположен вне `/api`: проверяет отдельный short-lived state, после успеха возвращает на 127.0.0.1.
+Публичный URL — HTTPS за reverse proxy; backend слушает только 127.0.0.1. GET /healthz проверяет workers без токенов/учётных данных, возвращает ok и release. Во время maintenance API возвращает 503 SERVER_UPDATING. OAuth callbacks DA/YouTube требуют ту же парольную сессию и short-lived одноразовый state. Утилита createApplication сохраняет старый локальный bootstrap только для низкоуровневых fixture-тестов; production entrypoint использует createHostedApplication.
+
+YouTube: POST /youtube/connect {clientId,clientSecret?} → {url}, GET /oauth/youtube/callback, POST /youtube/disconnect {}, GET /youtube/data → {snapshots,messages}. Секреты и токены никогда не выдаются; snapshots/report, channel, broadcasts и ограниченные последние 200 сообщений принадлежат подключённому каналу текущего профиля. Денежные значения YouTube amountMicros хранятся в исходном строковом формате, не суммируются с minor units DA. POST /backup — общий шифрованный снимок обоих профилей, возвращает только имя закрытого серверного файла. Не чаще 1 запроса/10 минут, без настроенного backup key — 503 BACKUP_NOT_CONFIGURED; скачивания базы через API нет.
 
 ## Чтение
 
@@ -53,3 +55,25 @@ DA OAuth callback: `GET /oauth/donationalerts/callback?code=…&state=…`. От
 Нет cursor pagination, общего currency/excluded-identity фильтра, экспорта и durable rejection/owner rules. Лента честно показывает лимит 200. Для выбранной минуты UI делает отдельный запрос к базе, поэтому старые минуты доступны независимо от последних 200 глобальных событий. Person-list ограничен 500, поиск выполняется сервером.
 
 Same-origin policy и ошибки проверены HTTP injection tests и работающим браузером. JSON schema есть на каждом POST: лишние поля отвергаются, преобразование строк в числа/boolean отключено, массив split имеет ограничение и уникальные ID. Ошибка остановленного worker/очереди/SQLite возвращает 503; конфликт — 409, отсутствующий объект — 404. Ошибки проверки входных данных возвращают 400, превышение body limit — 413; известные файловые отказы — 503, неизвестные внутренние ошибки — 500. Пути файлов и SQL из сообщений ошибок не выдаются клиенту.
+
+## Аналитика
+
+`GET /analytics?from=<UTC ms>&to=<UTC ms>` — до 90 дней и 1000 пересекающихся эфиров. `to` не может выйти в будущее. Дополнительные параметры: `source=all|twitch|youtube`, `category=<Twitch category ID>`, `timezone=Europe/Moscow` (валидная IANA zone), `minSessions` (0–1000, default 3), `minMinutes` (0–129600, default 30), `minMessages` (0–1000000, default 5), `coreRule=either|both|frequency`, `chatWindowMinutes=1..30` (default 5). IDs владельцев и исключения берутся из серверной конфигурации профиля, а не из запроса клиента.
+
+Ответ: `filters`, `summary`, `audience`, `categories`, `availableCategories`, `timeline`, `hours`, `streamComparison`, `sessions`, `excluded`. В audience: источник, стабильный ID, сообщения, множество посещённых сессий, отдельные `observedMinutes` / `estimatedChatMinutes`, `intervals {from,to,session,kind}`, `visits` (число сегментов сигнала, не доказанные входы), `core`, DA donations в minor-unit строках. В streamComparison `newInPeriod`/`returning` относятся к предыдущим эфирам только в выбранном периоде. Частота ядра также вычисляется внутри выбранных фильтров.
+
+Twitch категория привязана ко времени, включая смену внутри эфира. YouTube использует эту же историю по времени simulcast; нет Twitch-сессии — нет придуманной атрибуции YouTube эфиру. Неизвестная старая категория сохраняется неизвестной. Агрегатные view counters не фильтруются по личности; отсутствующий счётчик не приравнивается нулю. Персональная статистика исключает owner ID и bot aliases, исходные события остаются в истории.
+
+Большие выборки/развёртка минут ограничены (`ANALYTICS_RANGE_TOO_LARGE`, HTTP 400): требуется меньший диапазон. Возвращается список аккаунтов, не обещание точного числа разных людей между YouTube и Twitch. Cursor pagination/экспорт и независимая идентификация YouTube↔Twitch пока не реализованы.
+
+Аналитика возвращает все минуты записанного выбранного интервала, включая успешные пустые опросы и неизвестные промежутки. Категория содержит `observedKnownMinutes`, `coverageRatio`, `observedPerKnownMinute`; участник — `sessionRatio`, `observedMinutesPerSession`. Исторические aliases ботов и стабильный owner ID исключаются даже после переименования/отключения. Окно YouTube, начавшееся до границы периода, обрезается; сообщение вне периода не увеличивает счётчик.
+
+`youtubeReport` — последняя агрегатная дневная выгрузка YouTube Analytics (с собственными `start`, `end`, `updatedAt`), для всего канала, отдельно от фильтров персональной аналитики. Последний привязанный `youtubeAccountId` сохраняется после disconnect, без сохранения отключённых токенов.
+
+### Постоянники и состав столбцов
+
+`GET /api/v1/analytics` принимает `regularThresholdPercent` (число 0–100, по умолчанию 50). Постоянник имеет сигналы наблюдений/чата на строго большей доле выбранных записанных эфиров, чем порог. Категория ограничивает знаменатель эфирами с выбранной категорией; классификация фиксирована для всего выбранного диапазона, не вычисляется заново для каждого столбца. Донат без наблюдений/сообщений не подтверждает посещение. При пустой выборке доля постоянников — `null`.
+
+Участник возвращает `attendanceSessionIds`, `attendanceRatio`, `regular`; существующие `sessionIds` описывают всю активность, включая донаты. Summary: `attendees`, `regulars`, `regularShare` (0–1 или null). Timeline: `regularObserved`, `regularEstimated`, `regularMessages` — подмножества соответствующих полных показателей. Один участник учитывается в минуте один раз даже при смене и возврате категории внутри минуты. Владельцы/боты исключены до классификации.
+
+График усредняет полную и регулярную аудиторию по одному набору известных минут; сообщения суммирует. Жёлтый сегмент занимает пропорциональную часть полной высоты снизу, не прибавляется к ней. Общий счётчик площадки не имеет персональной разбивки. Twitch и YouTube accounts не считаются одним человеком без подтверждённой связи; оценки YouTube не становятся доказанным временем просмотра.

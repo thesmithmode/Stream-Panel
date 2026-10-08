@@ -5,6 +5,7 @@ export interface PresencePoll {
   completedAtMs: number;
   status: "complete" | "partial" | "failed";
   userIds: readonly string[];
+  userNames?: Readonly<Record<string,string>>;
 }
 
 export interface PresenceMinute {

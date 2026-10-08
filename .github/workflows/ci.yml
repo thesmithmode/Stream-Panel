@@ -1,0 +1,89 @@
+name: Quality gate
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  segment:
+    name: Tests / ${{ matrix.segment }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        segment: [unit, integration, e2e]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+        if: matrix.segment == 'e2e'
+      - run: pnpm check:web
+        if: matrix.segment == 'unit'
+      - run: pnpm build
+      - run: node scripts/test-with-coverage.mjs ${{ matrix.segment }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.segment }}
+          path: coverage/
+          retention-days: 7
+  operations:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tests/deploy -p '*test.py'
+      - run: bash -n ops/bootstrap.sh ops/preflight.sh
+  packaging:
+    name: Linux package upgrade checks
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm prune --prod
+      - run: node scripts/package-deb.mjs
+      - run: node --test tests/packaging/deb.test.mjs
+      - run: bash -n packaging/stream-panel
+  check:
+    name: Combined quality gate
+    needs: [segment, operations, packaging]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: coverage/segments
+      - run: node scripts/coverage-gate.mjs segments
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-combined
+          path: |
+            coverage/coverage-final.json
+            coverage/coverage-summary.json
+          retention-days: 7

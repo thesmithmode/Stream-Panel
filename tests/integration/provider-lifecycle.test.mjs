@@ -62,6 +62,7 @@ function fixture(t) {
       daClientSecret: "secret",
       daUtcOffsetMinutes: null,
       chattersPollSeconds: 60,
+      excludedBotLogins: [],
     },
     save: async () => {},
   };

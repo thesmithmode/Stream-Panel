@@ -1,6 +1,6 @@
 {
   "name": "stream-panel",
-  "version": "0.0.3",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.25.0",
@@ -12,16 +12,14 @@
     "test": "pnpm build && node --test --test-concurrency=2 dist/packages/core/test/*.test.js dist/apps/daemon/test/*.test.js",
     "check": "pnpm check:web && pnpm test:coverage",
     "benchmark": "pnpm build:core && node dist/scripts/benchmark.js",
-    "build:core": "tsc -p tsconfig.json",
+    "build:core": "node scripts/build-core.mjs",
     "build:web": "vite build --config apps/web/vite.config.ts",
     "start": "node dist/apps/daemon/src/index.js",
     "check:web": "svelte-check --workspace apps/web --tsconfig ./tsconfig.json",
     "test:unit": "pnpm build:core && node --test --test-concurrency=2 dist/packages/core/test/*.test.js",
     "test:integration": "pnpm build && node --test --test-concurrency=2 dist/apps/daemon/test/*.test.js tests/integration/*.test.mjs",
     "test:e2e": "pnpm build && node --test --test-concurrency=2 tests/e2e/*.test.mjs",
-    "test:coverage": "pnpm build && node scripts/test-with-coverage.mjs",
-    "package": "node scripts/package-release.mjs",
-    "package:skip-build": "node scripts/package-release.mjs --skip-build"
+    "test:coverage": "pnpm build && node scripts/test-with-coverage.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.2",
@@ -29,7 +27,6 @@
     "better-sqlite3": "13.0.3",
     "fastify": "5.12.5",
     "lossless-json": "4.3.1",
-    "postgres": "3.4.7",
     "ws": "8.22.0"
   },
   "devDependencies": {
