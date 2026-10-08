@@ -8,7 +8,6 @@
   import People from "./People.svelte";
   import {
     api,
-    setCsrf,
     date,
     getDataMode,
     setDataMode,
@@ -19,7 +18,6 @@
     type Event,
   } from "./api";
   let tab = $state("overview"),
-    authorized = $state(false),
     loading = $state(true),
     error = $state(""),
     status = $state<any>(null),
@@ -38,31 +36,8 @@
     personId = $state(""),
     busy = $state(false),
     dataMode = $state<DataMode>(getDataMode());
-  let username = $state("ruslan"), password = $state(""), user = $state<any>(null);
+  let activeProfile = $state<"ruslan" | "gulnaz">("ruslan");
   let epoch = 0;
-  const authMessage = (code: string) => ({ INVALID_LOGIN: "Неверный логин или пароль", LOGIN_RATE_LIMIT: "Слишком много попыток. Попробуйте позже.", LOGIN_REQUIRED: "Войдите в свой профиль", LOCAL_LOGIN_REQUIRED: "Войдите в свой профиль", INVALID_HOST: "Откройте панель по адресу из терминала (для локальной установки — http://127.0.0.1:47831)", INVALID_ORIGIN: "Откройте панель по адресу из терминала", TimeoutError: "Сервер не ответил. Проверьте, что терминал Stream Panel открыт.", "Failed to fetch": "Не удалось связаться с панелью. Проверьте, что её терминал открыт." }[code] ?? code);
-  async function login() {
-    busy = true; error = "";
-    try {
-      const response = await fetch("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: username.trim(), password }), signal: AbortSignal.timeout(15000) });
-      const result = await response.json();
-      password = "";
-      if (!response.ok) throw new Error(result.error);
-      epoch++; setCsrf(result.csrf); user = result.user;
-      await refresh(); authorized = true;
-    } catch (e) { error = authMessage((e as Error).name === "TimeoutError" ? "TimeoutError" : (e as Error).message); }
-    finally { busy = false; }
-  }
-  async function logout() {
-    try {
-      await api("auth/logout", {});
-      epoch++; authorized = false; user = null; status = null;
-      sessions = []; people = []; events = []; personId = sessionFilter = "";
-      summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
-      setCsrf(""); setDataMode("real"); dataMode = "real";
-      error = "";
-    } catch (e) { error = authMessage((e as Error).message); }
-  }
   const titles: Record<string, string> = {
     overview: "Обзор эфира",
     sessions: "Сессии",
@@ -100,7 +75,6 @@
     ]);
     if (current !== epoch) return;
     status = values[0];
-    if (dataMode === "real") { setCsrf(status.csrf); user = status.user ?? user; }
     sessions = values[1];
     people = values[2];
     events = values[3];
@@ -134,43 +108,46 @@
     error = "";
     await action(async () => {});
   }
+  async function switchProfile(profile: "ruslan" | "gulnaz") {
+    if (profile === activeProfile || busy || loading) return;
+    busy = true; error = ""; epoch++;
+    try {
+      await api("profile", { profile });
+      activeProfile = profile;
+      sessionFilter = ""; personId = "";
+      sessions = []; people = []; events = [];
+      summary = { messages:0, donations:0, totals:{}, chatters:null, lastPollAtMs:null, events:0 };
+      setDataMode("real"); dataMode = "real";
+      await refresh();
+    } catch (e) {
+      try { await api("profile", { profile: activeProfile }); } catch { /* retain selected profile and surface original error */ }
+      error = (e as Error).message;
+    }
+    finally { busy = false; }
+  }
   onMount(() => {
     let alive = true;
     const timer = setInterval(() => {
-      if (authorized) void refresh().catch((e) => {
-        if (["LOGIN_REQUIRED", "LOCAL_LOGIN_REQUIRED"].includes(e.message)) { epoch++; authorized = false; people = []; events = []; sessions = []; }
-        error = authMessage(e.message);
-      });
+      void refresh().catch((e) => { error = (e as Error).message; });
     }, 5000);
     async function initialize() {
       setDataMode("real"); dataMode = "real";
       loading = true;
       error = "";
       try {
-        const key = new URLSearchParams(location.hash.slice(1)).get("key");
-        if (key) {
-          const response = await api("bootstrap", { key });
-          setCsrf(response.csrf);
-          history.replaceState(null, "", location.pathname);
-        }
+        const selected = await api<{profile:"ruslan"|"gulnaz"}>("profile");
+        activeProfile = selected.profile;
         await refresh();
         if (!alive) return;
-        authorized = true;
       } catch (e) {
-        error = authMessage((e as Error).message);
+        error = (e as Error).message;
       } finally {
         loading = false;
       }
     }
     void initialize();
-    const onHashChange = () => {
-      if (new URLSearchParams(location.hash.slice(1)).has("key"))
-        void initialize();
-    };
-    window.addEventListener("hashchange", onHashChange);
     return () => {
       alive = false;
-      window.removeEventListener("hashchange", onHashChange);
       clearInterval(timer);
     };
   });
@@ -186,16 +163,15 @@
         >{/each}
     </nav>
     <div class="sidebar-bottom">
-      <span class="dot" class:off={!authorized}></span>
-      <div class="sidebar-status">
-        <span>{user?.displayName ?? (dataMode === "demo" ? "Демо-данные" : "Stream Panel")}</span>
-        <span class="small muted sidebar-hint"
-          >{dataMode === "demo"
-            ? "Демонстрационные данные"
-            : "Сбор продолжается, когда вкладка закрыта"}</span
-        >
-      </div>
-      <Icon name="arrow" size={17} />
+      <label class="profile-switcher">
+        <span>Профиль</span>
+        <select aria-label="Профиль" value={activeProfile} disabled={busy || loading}
+          onchange={(event) => void switchProfile(event.currentTarget.value as "ruslan" | "gulnaz")}>
+          <option value="ruslan">Руслан</option>
+          <option value="gulnaz">Гульназ</option>
+        </select>
+        <span class="small muted sidebar-hint">Отдельные история и подключения</span>
+      </label>
     </div>
   </aside>
   <main>
@@ -205,8 +181,7 @@
         <p>{descriptions[tab]}</p>
       </div>
       <div class="inline" style="justify-content:flex-end">
-        {#if authorized && user}<button class="outline" onclick={logout}>Выйти</button>{/if}
-        {#if authorized}<div class="mode-toggle" role="group" aria-label="Режим данных">
+        <div class="mode-toggle" role="group" aria-label="Режим данных">
             <button
               type="button"
               class:active={dataMode === "real"}
@@ -220,8 +195,8 @@
               disabled={busy}
               onclick={() => switchMode("demo")}>Демо</button
             >
-          </div>{/if}
-      {#if authorized && tab === "overview"}<button
+          </div>
+      {#if !loading && tab === "overview"}<button
           class="outline record-button"
           disabled={busy || activeSession?.kind === "platform"}
           onclick={() =>
@@ -240,18 +215,7 @@
     </div>
     {#if loading}<div class="panel empty">
         <p>Загружаем профиль…</p>
-      </div>{:else if !authorized}<section class="panel empty">
-        <Icon name="connections" size={48} />
-        <h2>Вход в Stream Panel</h2>
-        <p>Каждый профиль видит только свою аналитику.</p>
-        <form class="login-form" onsubmit={(event) => { event.preventDefault(); void login(); }}>
-          <label>Логин<input autocomplete="username" bind:value={username} required maxlength="32" /></label>
-          <label>Пароль<input type="password" autocomplete="current-password" bind:value={password} required maxlength="256" /></label>
-          <button class="primary" disabled={busy}>{busy ? "Входим…" : "Войти"}</button>
-        </form>
-        <p class="small muted">Забыли пароль локальной панели? Остановите её и выполните <code>stream-panel --reset-password</code> в терминале.</p>
-        {#if error}<p role="alert" class="small notice error">{error}</p>{/if}
-      </section>{:else}
+      </div>{:else}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}
       {#if dataMode === "demo"}<p class="demo-banner" role="status">
           Режим <strong>Демо</strong>: показаны фикстуры. Запись в SQLite и
@@ -287,7 +251,7 @@
           onPerson={openPerson}
         />
       {:else if tab === "analytics"}
-        <Analytics profile={user?.profile ?? "local"} mode={dataMode} onPerson={openPerson} />
+        <Analytics profile={activeProfile} mode={dataMode} onPerson={openPerson} />
       {:else if tab === "youtube"}
         <YouTube mode={dataMode} />
       {:else if tab === "connections"}<Connections

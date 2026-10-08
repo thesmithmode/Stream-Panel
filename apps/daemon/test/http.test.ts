@@ -5,30 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApplication } from "../src/server.js";
 async function fixture() {
-  const dir = await mkdtemp(join(tmpdir(), "sp-http-"));
-  const a = await createApplication(dir, 47831, false);
-  const host = { host: "127.0.0.1:47831" };
-  const key = new URLSearchParams(a.bootstrap().split("#")[1]).get("key");
-  const login = await a.app.inject({
-    method: "POST",
-    url: "/api/v1/bootstrap",
-    headers: host,
-    payload: { key },
-  });
-  const headers = {
-    ...host,
-    cookie: String(login.headers["set-cookie"]).split(";")[0]!,
-    "x-csrf-token": login.json().csrf,
-  };
-  return {
-    a,
-    headers,
-    dir,
-    close: async () => {
-      await a.app.close();
-      await rm(dir, { recursive: true, force: true });
-    },
-  };
+  const dir=await mkdtemp(join(tmpdir(),"sp-http-")),a=await createApplication(dir,47831,false),headers={host:"127.0.0.1:47831"};
+  return {a,headers,dir,close:async()=>{await a.app.close();await rm(dir,{recursive:true,force:true});}};
 }
 test("mutation API rejects extra properties and number/boolean coercion before side effects", async () => {
   const f = await fixture();
@@ -152,40 +130,6 @@ test("HTTP contracts: missing entities, conflicts, bounded grids, callback rejec
     const status = (await get("/api/v1/status")).json();
     assert.equal(JSON.stringify(status).includes("accessToken"), false);
   } finally {
-    await f.close();
-  }
-});
-test("bootstrap expires, invalidates previous nonce and bounds local sessions; expired sessions are evicted", async (t) => {
-  const f = await fixture();
-  try {
-    const bootstrap = () =>
-      new URLSearchParams(f.a.bootstrap().split("#")[1]).get("key");
-    const login = (key: string | null) =>
-      f.a.app.inject({
-        method: "POST",
-        url: "/api/v1/bootstrap",
-        headers: { host: "127.0.0.1:47831" },
-        payload: { key },
-      });
-    let key = bootstrap();
-    bootstrap();
-    assert.equal((await login(key)).statusCode, 401);
-    t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
-    key = bootstrap();
-    t.mock.timers.tick(600001);
-    assert.equal((await login(key)).statusCode, 401);
-    for (let i = 0; i < 20; i++)
-      assert.equal((await login(bootstrap())).statusCode, 200);
-    assert.equal((await login(bootstrap())).statusCode, 429);
-    t.mock.timers.tick(86400001);
-    assert.equal(
-      (await f.a.app.inject({ url: "/api/v1/status", headers: f.headers }))
-        .statusCode,
-      401,
-    );
-    assert.equal((await login(bootstrap())).statusCode, 200);
-  } finally {
-    t.mock.timers.reset();
     await f.close();
   }
 });

@@ -4,7 +4,6 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import net from 'node:net';
-import {AccountStore} from '../../dist/apps/daemon/src/auth.js';
 import {createHostedApplication} from '../../dist/apps/daemon/src/hosted.js';
 import {assertUiLayout} from '../helpers/ui-layout.mjs';
 import {launchBrowser} from '../helpers/browser.mjs';
@@ -13,8 +12,7 @@ const minute=60000;
 test('analytics browser shows core, categories, scoped accounts, minute evidence, configurable thresholds, filters and responsive charts',{timeout:90000},async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-analytics-ui-'));
  const port=await new Promise(resolve=>{const s=net.createServer();s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p));});});
- const origin=`http://127.0.0.1:${port}`,accounts=new AccountStore(join(dir,'data.sqlite'));
- for(const profile of ['ruslan','gulnaz'])await accounts.createUser(profile,profile,profile,`${profile}-analytics-password`);accounts.close();
+ const origin=`http://127.0.0.1:${port}`;
  const h=await createHostedApplication(dir,origin,false);await h.app.listen({host:'127.0.0.1',port});
  for(const profile of ['ruslan','gulnaz']){
   const runtime=h.runtimes.get(profile),db=runtime.db;
@@ -37,7 +35,7 @@ test('analytics browser shows core, categories, scoped accounts, minute evidence
   for(const profile of ['ruslan','gulnaz']){
    const context=await browser.newContext();const page=await context.newPage();await page.clock.install();page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
    const apply=async()=>{await page.getByRole('button',{name:'Применить',exact:true}).click();await page.getByRole('button',{name:'Применить',exact:true}).waitFor();};
-   await goto(page,origin);await page.getByLabel('Логин',{exact:true}).fill(profile);await page.getByLabel('Пароль',{exact:true}).fill(`${profile}-analytics-password`);await page.getByRole('button',{name:'Войти',exact:true}).click();
+   await goto(page,origin);if(profile==='gulnaz')await page.getByLabel('Профиль').selectOption('gulnaz');
    await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).waitFor();await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
    for(const name of ['RenamedOwner','jeetbot','fullrandomname_twitch','streemelements',`Regular ${profile==='ruslan'?'gulnaz':'ruslan'}`])assert.equal(await page.getByRole('button',{name,exact:true}).count(),0);
    await page.getByText('Настроить отображение',{exact:true}).click();await page.getByLabel('Детализация графика').selectOption('1');await page.locator('.regular-segment').first().waitFor();await page.getByText('Настроить отображение',{exact:true}).click();

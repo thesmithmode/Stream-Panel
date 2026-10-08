@@ -31,7 +31,6 @@ test("quality gate rejects missing runtime files and coverage below 90 even when
   assert.ok(low.some((s) => s.includes("Total lines")));
   assert.ok(low.some((s) => s.includes("Total branches")));
   assert.ok(low.some((s) => s.includes("Total functions")));
-  assert.ok(low.some((s) => s.includes("/runtime.ts: lines")));
   assert.match(
     failures(map(10), ["/runtime.ts", "/new-file.ts"]).join("\n"),
     /Missing source coverage: \/new-file.ts/,

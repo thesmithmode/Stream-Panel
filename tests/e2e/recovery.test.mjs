@@ -10,7 +10,7 @@ import {
   reload,
 } from "../helpers/browser-coverage.mjs";
 test(
-  "browser conflict, failed worker and daemon restart retain data and require a fresh bootstrap",
+  "browser conflict, failed worker and daemon restart retain data without login",
   { timeout: 45000 },
   async () => {
     const a = await application(),
@@ -23,7 +23,7 @@ test(
       page.setDefaultTimeout(12000);
       page.on("pageerror", (e) => errors.push(e.message));
       await startCoverage(page);
-      await goto(page, a.bootstrap());
+      await goto(page, a.origin);
       await page
         .getByRole("button", { name: "Открыть интеграции", exact: true })
         .waitFor();
@@ -52,17 +52,12 @@ test(
         .filter({ hasText: "DB_WORKER_STOPPED" })
         .waitFor();
       await reload(page);
-      await page
-        .getByRole("heading", { name: "Вход в Stream Panel" })
-        .waitFor();
       await page.getByText("DB_WORKER_STOPPED", { exact: true }).waitFor();
       await a.app.close();
       const port = Number(new URL(a.origin).port);
       restarted = await createApplication(a.dir, port, false);
       await restarted.app.listen({ host: "127.0.0.1", port });
       await reload(page);
-      await page.getByText("Войдите в свой профиль", { exact: true }).waitFor();
-      await goto(page, restarted.bootstrap());
       await page
         .getByRole("button", { name: "Завершить запись", exact: true })
         .waitFor();

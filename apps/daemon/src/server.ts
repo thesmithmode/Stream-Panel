@@ -1,7 +1,6 @@
-import Fastify, { type FastifyRequest } from "fastify";
-import cookie from "@fastify/cookie";
+import Fastify from "fastify";
 import staticFiles from "@fastify/static";
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,7 +28,6 @@ export async function createApplication(
     databasePath?: string;
     profile?: string;
     origin?: string;
-    session?: (request: FastifyRequest) => { csrf: string; expires: number } | null;
     staticFiles?: boolean;
   } = {},
 ) {
@@ -54,7 +52,6 @@ export async function createApplication(
     bodyLimit: 32768,
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
   });
-  await app.register(cookie);
   app.setErrorHandler((error, _request, reply) => {
     const code = error instanceof Error ? error.message : "INTERNAL_ERROR";
     const detail = error as { code?: string; statusCode?: number };
@@ -161,22 +158,9 @@ export async function createApplication(
     if (route.method === "POST" && schemaBodies[route.url])
       route.schema = { ...route.schema, body: schemaBodies[route.url] };
   });
-  let nonce = randomBytes(32).toString("hex");
-  let nonceExpiry = Date.now() + 600000;
-  const sessions = new Map<string, { csrf: string; expires: number }>();
   const origin = options.origin ?? `http://127.0.0.1:${port}`;
   const callback = `${origin}/oauth/donationalerts/callback`;
   const youtube = new YouTubeConnection(configuration, db, `${origin}/oauth/youtube/callback`, options.profile ?? "local", transports.youtube?.request);
-  const same = (a: string, b: string) => {
-    const left = Buffer.from(a),
-      right = Buffer.from(b);
-    return left.length === right.length && timingSafeEqual(left, right);
-  };
-  const bootstrap = () => {
-    nonce = randomBytes(32).toString("hex");
-    nonceExpiry = Date.now() + 600000;
-    return `${origin}/#key=${nonce}`;
-  };
   app.addHook("onRequest", async (request, reply) => {
     if (
       !(options.origin ? [new URL(origin).host] : [`127.0.0.1:${port}`, `localhost:${port}`]).includes(
@@ -192,58 +176,22 @@ export async function createApplication(
       "Content-Security-Policy",
       "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
     );
-    const path = request.url.split("?")[0]!;
-    if (!path.startsWith("/api/")) return;
+    if (!request.url.startsWith("/api/")) return;
     if (
       request.headers.origin &&
       request.headers.origin !== origin &&
       request.headers.origin !== `http://localhost:${port}`
     )
       return reply.code(403).send({ error: "INVALID_ORIGIN" });
-    if (path === "/api/v1/bootstrap") return;
-    const session = options.session ? options.session(request) : sessions.get(request.cookies.sp_session ?? "");
-    if (!session || session.expires < Date.now())
-      return reply.code(401).send({ error: "LOCAL_LOGIN_REQUIRED" });
-    if (
-      !["GET", "HEAD"].includes(request.method) &&
-      (!same(string(request.headers["x-csrf-token"]), session.csrf) ||
-        !request.headers["content-type"]?.startsWith("application/json"))
-    )
-      return reply.code(403).send({ error: "CSRF_REQUIRED" });
+    if (!["GET", "HEAD"].includes(request.method) &&
+      !request.headers["content-type"]?.startsWith("application/json"))
+      return reply.code(415).send({ error: "JSON_REQUIRED" });
   });
-  if (!options.session) app.post(
-    "/api/v1/bootstrap",
-    {
-      schema: {
-        body: {
-          type: "object",
-          required: ["key"],
-          additionalProperties: false,
-          properties: { key: { type: "string", maxLength: 128 } },
-        },
-      },
-    },
-    async (request, reply) => {
-      const key = string(object(request.body).key);
-      if (!nonce || nonceExpiry < Date.now() || !same(key, nonce))
-        return reply.code(401).send({ error: "BOOTSTRAP_EXPIRED" });
-      nonce = "";
-      for (const [id, s] of sessions)
-        if (s.expires < Date.now()) sessions.delete(id);
-      if (sessions.size > 20)
-        return reply.code(429).send({ error: "TOO_MANY_SESSIONS" });
-      const id = randomBytes(32).toString("hex"),
-        csrf = randomBytes(32).toString("hex");
-      sessions.set(id, { csrf, expires: Date.now() + 86400000 });
-      reply.setCookie("sp_session", id, {
-        httpOnly: true,
-        sameSite: "strict",
-        path: "/api",
-        maxAge: 86400,
-      });
-      return { csrf };
-    },
-  );
+  app.get("/api/v1/profile", async () => ({ profile: options.profile ?? "ruslan" }));
+  app.post("/api/v1/profile", { schema: { body: {
+    type: "object", additionalProperties: false, required: ["profile"],
+    properties: { profile: { type: "string", enum: ["ruslan"] } },
+  } } }, async () => ({ profile: options.profile ?? "ruslan" }));
   app.get("/api/v1/analytics", async request => {
     const q=object(request.query);
     return db.call("analytics", {
@@ -253,14 +201,12 @@ export async function createApplication(
       excludedLogins:configuration.value.excludedBotLogins,ownerId:configuration.value.twitch?.userId??"",youtubeAccount:configuration.value.youtube?.userId??configuration.value.youtubeAccountId??"",
     });
   });
-  app.get("/api/v1/status", async (request) => ({
+  app.get("/api/v1/status", async () => ({
     youtube: youtube.status,
     twitch: twitch.status,
     donationalerts: da.status,
     device: twitch.device,
     config: { ...configuration.publicView(), daRedirectUri: callback, youtubeRedirectUri: `${origin}/oauth/youtube/callback` },
-    csrf: (options.session ? options.session(request) : sessions.get(request.cookies.sp_session ?? ""))?.csrf,
-    serverMode: Boolean(options.session),
     profile: options.profile ?? null,
     gaps: await db.call("gaps"),
   }));
@@ -501,5 +447,5 @@ export async function createApplication(
     void twitch.start();
     void da.start(); void youtube.start();
   }
-  return { app, db, configuration, twitch, da, youtube, bootstrap };
+  return { app, db, configuration, twitch, da, youtube };
 }

@@ -1,4 +1,4 @@
-name: Linux preview release
+name: Linux release
 on:
   workflow_run:
     workflows: [Quality gate]
@@ -43,7 +43,7 @@ jobs:
         with:
           name: linux-deb
           path: artifacts/*.deb
-      - name: Publish preview package
+      - name: Publish stable Linux release
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -53,7 +53,9 @@ jobs:
           tag="v$version"
           if gh release view "$tag" --repo "$REPO" > /dev/null 2>&1; then
             test "$(gh api "repos/$REPO/commits/$tag" --jq '.sha')" = "$(git rev-parse HEAD)"
-            echo 'This exact release already exists'
+            release_id=$(gh api "repos/$REPO/releases/tags/$tag" --jq '.id')
+            gh api --method PATCH "repos/$REPO/releases/$release_id" -F prerelease=false -f make_latest=true > /dev/null
+            echo 'This exact stable release is marked latest'
             exit 0
           fi
-          gh release create "$tag" artifacts/*.deb --repo "$REPO" --target "$(git rev-parse HEAD)" --prerelease --title "Stream Panel $version — Linux preview" --notes-file docs/linux-preview-release.md
+          gh release create "$tag" artifacts/*.deb --repo "$REPO" --target "$(git rev-parse HEAD)" --latest --title "Stream Panel $version — Linux release" --notes-file docs/linux-release.md

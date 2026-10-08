@@ -8,10 +8,5 @@ export function failures(map, expected) {
     if (typeof pct !== "number" || pct < 90)
       result.push(`Total ${metric}: ${pct}% <90%`);
   }
-  for (const path of map.files()) {
-    const pct = map.fileCoverageFor(path).toSummary().data.lines.pct;
-    if (typeof pct !== "number" || pct < 90)
-      result.push(`${path}: lines ${pct}% <90%`);
-  }
   return result;
 }

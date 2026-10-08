@@ -4,9 +4,9 @@
 
 ## Вход и защита
 
-Серверный вход: POST /auth/login {username,password} → {csrf,user}; публичной регистрации и /bootstrap нет. Secure HttpOnly SameSite=Lax cookie sp_session на / действует 24 часа, хранится в SQLite в виде хэша. GET /auth/me возвращает свой профиль; POST /auth/logout требует CSRF и отзывает текущую сессию. Перезапуск не отзывает сессии автоматически. Все записи требуют точный Origin и X-CSRF-Token, точный Host проверяется для всех запросов. API профиля выбирается сервером из сессии, клиент не передаёт profile ID для доступа к чужой базе.
+Панель не требует логина. GET /profile возвращает выбранный профиль (`ruslan` по умолчанию); POST /profile `{profile}` переключает его и сохраняет выбор локально. Данные профилей изолированы пространствами имён в SQLite и отдельными файлами `profiles/<profile>/secrets.json`. Записи требуют точный Origin; точный Host проверяется для всех запросов. Браузер не может переключить профиль межсайтовым POST.
 
-Публичный URL — HTTPS за reverse proxy; backend слушает только 127.0.0.1. GET /healthz проверяет workers без токенов/учётных данных, возвращает ok и release. Во время maintenance API возвращает 503 SERVER_UPDATING. OAuth callbacks DA/YouTube требуют ту же парольную сессию и short-lived одноразовый state. Утилита createApplication сохраняет старый локальный bootstrap только для низкоуровневых fixture-тестов; production entrypoint использует createHostedApplication.
+Публичный URL — HTTPS за reverse proxy; backend слушает только 127.0.0.1. GET /healthz проверяет workers и возвращает ok и release. Во время maintenance API возвращает 503 SERVER_UPDATING. OAuth callbacks DA/YouTube проверяют short-lived одноразовый state.
 
 YouTube: POST /youtube/connect {clientId,clientSecret?} → {url}, GET /oauth/youtube/callback, POST /youtube/disconnect {}, GET /youtube/data → {snapshots,messages}. Секреты и токены никогда не выдаются; snapshots/report, channel, broadcasts и ограниченные последние 200 сообщений принадлежат подключённому каналу текущего профиля. Денежные значения YouTube amountMicros хранятся в исходном строковом формате, не суммируются с minor units DA. POST /backup — общий шифрованный снимок обоих профилей, возвращает только имя закрытого серверного файла. Не чаще 1 запроса/10 минут, без настроенного backup key — 503 BACKUP_NOT_CONFIGURED; скачивания базы через API нет.
 
@@ -14,7 +14,7 @@ YouTube: POST /youtube/connect {clientId,clientSecret?} → {url}, GET /oauth/yo
 
 | GET path                  | Параметры                             | Ответ                                                                                                                                      |
 | ------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/status`                 | —                                     | Twitch/DA `{state,detail,account?,capabilities,lastEventAt?}`, device, публичная config, csrf и gaps. Секретов нет                         |
+| `/status`                 | —                                     | Twitch/DA `{state,detail,account?,capabilities,lastEventAt?}`, device, публичная config, gaps. Секретов нет                         |
 | `/sessions`               | —                                     | До100 последних: id, account_id, stream_id, kind, started_at_ms, recording_started_at_ms, ended_at_ms, end_quality, event_count            |
 | `/summary`                | `session?`                            | Базовые KPI + uniquePersons/Identities, messagesPerMinuteOfSession, coverage, chattersOverTime, gapCount, uniquePersonsObserved. Chatters — из последнего complete poll, не Twitch view count |
 | `/events`                 | `session?`, `person?`, `from?`, `to?` | До200 событий, по времени убывание. `[from,to)` фильтрует known occurred_at; unknown не попадает в time range                              |
@@ -50,7 +50,7 @@ DA OAuth callback: `GET /oauth/donationalerts/callback?code=…&state=…`. От
 
 ## Ошибки и ограничения
 
-`{error:"UPPERCASE_CODE"}`:401 вход,403Host/Origin/CSRF,409 конфликт,404 не найдено,400 некорректный запрос,413 превышение body limit,503 недоступность worker/хранилища,500 неизвестный внутренний отказ. Ошибки валидации Fastify не выводят тело/секреты; UI показывает ошибку, не подменяет её успехом.
+`{error:"UPPERCASE_CODE"}`:403 неверный Host/Origin,409 конфликт,404 не найдено,400 некорректный запрос,413 превышение body limit,503 недоступность worker/хранилища,500 неизвестный внутренний отказ. Ошибки валидации Fastify не выводят тело/секреты; UI показывает ошибку, не подменяет её успехом.
 
 Нет cursor pagination, общего currency/excluded-identity фильтра, экспорта и durable rejection/owner rules. Лента честно показывает лимит 200. Для выбранной минуты UI делает отдельный запрос к базе, поэтому старые минуты доступны независимо от последних 200 глобальных событий. Person-list ограничен 500, поиск выполняется сервером.
 

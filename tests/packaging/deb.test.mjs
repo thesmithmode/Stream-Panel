@@ -8,7 +8,7 @@ import {createServer} from 'node:net';
 import {StreamStore} from '../../dist/packages/core/src/store.js';
 const version=JSON.parse(await readFile('package.json')).version;
 const run=(command,args,options={})=>execFileSync(command,args,{encoding:'utf8',...options});
-test('Deb upgrade preserves user history and credentials; relocated runtime, login, UI and restart work',{timeout:60000},async()=>{
+test('Deb upgrade preserves user history and credentials; relocated runtime, profile switching and restart work',{timeout:60000},async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-deb-'));let child;
  try{
  const file=resolve(`artifacts/stream-panel_${version}_amd64.deb`),installed=join(dir,'installed'),oldPackage=join(dir,'old-package'),data=join(dir,'user-data'),legacy=join(data,'stream-panel');
@@ -32,21 +32,19 @@ test('Deb upgrade preserves user history and credentials; relocated runtime, log
  const app=join(installed,'opt/stream-panel-local'),node=join(app,'bin/node'),launcher=join(installed,'usr/bin/stream-panel');
  assert.ok((await stat(join(app,'apps/web/dist/index.html'))).size>0);assert.equal((await stat(launcher)).mode&0o111,0o111);
  const server=createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;await new Promise(r=>server.close(r));
- const env={...process.env,STREAM_PANEL_INSTALL_ROOT:app,XDG_DATA_HOME:data,XDG_RUNTIME_DIR:join(dir,'locks'),STREAM_PANEL_PORT:String(port),STREAM_PANEL_NO_BROWSER:'1',STREAM_PANEL_INITIAL_PASSWORD:'package-test-password'};
+ const env={...process.env,STREAM_PANEL_INSTALL_ROOT:app,XDG_DATA_HOME:data,XDG_RUNTIME_DIR:join(dir,'locks'),STREAM_PANEL_PORT:String(port),STREAM_PANEL_NO_BROWSER:'1'};
  delete env.STREAM_PANEL_DATA_DIR;delete env.STREAM_PANEL_PUBLIC_ORIGIN;delete env.STREAM_PANEL_LEGACY_DIR;
  const start=()=>{let out='',err='';const c=spawn(launcher,[],{env,stdio:['ignore','pipe','pipe']});c.stdout.on('data',b=>out+=b);c.stderr.on('data',b=>err+=b);const exit=new Promise(r=>c.on('exit',code=>r({code,err})));return {c,exit,ready:async()=>{const until=Date.now()+15000;while(!out.includes('server listening')){assert.equal(c.exitCode,null,err);assert.ok(Date.now()<until,err);await new Promise(r=>setTimeout(r,20));}}};};
  child=start();await child.ready();const origin=`http://127.0.0.1:${port}`;
- const login=async(password='package-test-password')=>{const result=await fetch(origin+'/api/v1/auth/login',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({username:'ruslan',password})});assert.equal(result.status,200);return result.headers.get('set-cookie').split(';')[0];};
- let cookie=await login();assert.equal((await fetch(origin+'/')).status,200);
- let status=await(await fetch(origin+'/api/v1/status',{headers:{Cookie:cookie}})).json();assert.equal(status.config.daClientId,'fixture-da');
- assert.equal((await(await fetch(origin+'/api/v1/sessions',{headers:{Cookie:cookie}})).json()).length,1);
+ assert.equal((await fetch(origin+'/')).status,200);
+ let status=await(await fetch(origin+'/api/v1/status')).json();assert.equal(status.config.daClientId,'fixture-da');
+ assert.equal((await(await fetch(origin+'/api/v1/sessions')).json()).length,1);
+ assert.equal((await fetch(origin+'/api/v1/profile',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({profile:'gulnaz'})})).status,200);
  child.c.kill('SIGTERM');assert.equal((await child.exit).code,0);
  assert.deepEqual(await readFile(join(legacy,'data.sqlite')),original);assert.deepEqual(JSON.parse(await readFile(join(data,'stream-panel-local/profiles/ruslan/secrets.json'))),config);
- delete env.STREAM_PANEL_INITIAL_PASSWORD;child=start();await child.ready();cookie=await login();assert.equal((await(await fetch(origin+'/api/v1/sessions',{headers:{Cookie:cookie}})).json()).length,1);
+ child=start();await child.ready();assert.equal((await(await fetch(origin+'/api/v1/profile')).json()).profile,'gulnaz');
+ assert.equal((await(await fetch(origin+'/api/v1/sessions')).json()).length,0);
  child.c.kill('SIGTERM');assert.equal((await child.exit).code,0);
- assert.throws(()=>run(launcher,['--reset-password'],{env,input:'first-password\nsecond-password\n'}),/Пароли не совпали/);
- run(launcher,['--reset-password'],{env,input:'replacement-package-password\nreplacement-package-password\n'});
- child=start();await child.ready();await login('replacement-package-password');child.c.kill('SIGTERM');assert.equal((await child.exit).code,0);
  const listing=run('dpkg-deb',['-c',file],{maxBuffer:20*1024*1024});assert.doesNotMatch(listing,/secrets\.json|data\.sqlite|backup-key|\/home\//);
  }finally{if(child){child.c.kill();await child.exit;}await rm(dir,{recursive:true,force:true});}
 });

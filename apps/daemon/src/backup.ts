@@ -99,8 +99,5 @@ export async function restoreBackup(blob: Buffer, key: Buffer, destination: stri
       const dir = join(destination,"profiles",profile); await mkdir(dir,{recursive:true,mode:0o700});
       await writeFile(join(dir,"secrets.json"),JSON.stringify(metadata.profiles[profile]),{mode:0o600,flag:"wx"});
     }
-    // A stolen old session must not regain access after a disaster restore.
-    const sessions = new Database(database);
-    try { sessions.exec("DELETE FROM sp_auth_sessions"); } finally { sessions.close(); }
   } catch (e) { await rm(destination,{recursive:true,force:true}); throw e; }
 }

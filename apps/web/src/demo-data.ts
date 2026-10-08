@@ -305,6 +305,8 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
   const q = parseQuery(path);
   const isPost = body !== undefined;
 
+  if (p === "profile") return { profile: body && typeof body === "object" && "profile" in body ? (body as {profile:string}).profile : "ruslan" };
+
   if (p === "analytics") {
     const from=Number(q.get("from")),to=Number(q.get("to")),start=Math.max(from,to-2*hour),source=q.get("source")||"all";
     const regularThresholdPercent=Number(q.get("regularThresholdPercent")??50);
@@ -339,7 +341,6 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
         daUtcOffsetMinutes: 180,
         daRedirectUri: "http://127.0.0.1:47831/oauth/donationalerts/callback",
       },
-      csrf: "demo-csrf",
       gaps: [
         {
           source: "twitch",
