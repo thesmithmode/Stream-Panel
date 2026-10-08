@@ -1,7 +1,12 @@
 import { demoApi, getDataMode, setDataMode, type DataMode } from "./demo-data";
+import { createProfileSelection } from "./profile";
 export { getDataMode, setDataMode, type DataMode };
 
 let csrf = "";
+export type { Profile } from "./profile";
+const selection = createProfileSelection(() => localStorage);
+export const getProfile = selection.get;
+export const setProfile = selection.set;
 export const setCsrf = (value: string) => (csrf = value);
 export async function api<T = any>(path: string, body?: unknown): Promise<T> {
   if (getDataMode() === "demo" && !path.startsWith("auth/")) {
@@ -11,8 +16,8 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
     method: body === undefined ? "GET" : "POST",
     headers:
       body === undefined
-        ? {}
-        : { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+        ? { "X-Stream-Panel-Profile": getProfile() }
+        : { "Content-Type": "application/json", "X-CSRF-Token": csrf, "X-Stream-Panel-Profile": getProfile() },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const data = await response.json();

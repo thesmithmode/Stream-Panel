@@ -12,6 +12,9 @@
     date,
     getDataMode,
     setDataMode,
+    getProfile,
+    setProfile,
+    type Profile,
     type DataMode,
     type Session,
     type Person,
@@ -39,6 +42,7 @@
     busy = $state(false),
     dataMode = $state<DataMode>(getDataMode());
   let username = $state(""), password = $state(""), user = $state<any>(null);
+  let profile = $state<Profile>(getProfile());
   let epoch = 0;
   const authMessage = (code: string) => ({ INVALID_LOGIN: "Неверный логин или пароль", LOGIN_RATE_LIMIT: "Слишком много попыток. Попробуйте позже.", LOGIN_REQUIRED: "Войдите в свой профиль", LOCAL_LOGIN_REQUIRED: "Войдите в свой профиль" }[code] ?? code);
   async function login() {
@@ -49,6 +53,7 @@
       password = "";
       if (!response.ok) throw new Error(result.error);
       epoch++; setCsrf(result.csrf); user = result.user;
+      if (result.user?.profile) { setProfile(result.user.profile); profile = result.user.profile; }
       await refresh(); authorized = true;
     } catch (e) { error = authMessage((e as Error).message); }
     finally { busy = false; }
@@ -107,15 +112,16 @@
     summary = values[4];
   }
   async function action(fn: () => Promise<void>) {
+    const current = epoch;
     busy = true;
     error = "";
     try {
       await fn();
       await refresh();
     } catch (e) {
-      error = (e as Error).message;
+      if (current === epoch) error = (e as Error).message;
     } finally {
-      busy = false;
+      if (current === epoch) busy = false;
     }
   }
   function navigate(next: string) {
@@ -132,6 +138,13 @@
     setDataMode(mode);
     dataMode = mode;
     error = "";
+    await action(async () => {});
+  }
+  async function switchProfile(next: Profile) {
+    if (next === profile) return;
+    epoch++; setProfile(next); profile = next;
+    status = null; sessions = []; people = []; events = []; personId = sessionFilter = ""; error = "";
+    summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
     await action(async () => {});
   }
   onMount(() => {
@@ -188,7 +201,7 @@
     <div class="sidebar-bottom">
       <span class="dot" class:off={!authorized}></span>
       <div class="sidebar-status">
-        <span>{user?.displayName ?? (dataMode === "demo" ? "Демо-данные" : "Stream Panel")}</span>
+        {#if authorized}<label class="profile-label">Профиль<select aria-label="Профиль" value={profile} disabled={busy} onchange={(event) => void switchProfile(event.currentTarget.value as Profile)}><option value="ruslan">Руслан</option><option value="gulnaz">Гульназ</option></select></label>{:else}<span>Stream Panel</span>{/if}
         <span class="small muted sidebar-hint"
           >{dataMode === "demo"
             ? "Демонстрационные данные"
@@ -243,7 +256,6 @@
       </div>{:else if !authorized}<section class="panel empty">
         <Icon name="connections" size={48} />
         <h2>Вход в Stream Panel</h2>
-        <p>Каждый профиль видит только свою аналитику.</p>
         <form class="login-form" onsubmit={(event) => { event.preventDefault(); void login(); }}>
           <label>Логин<input autocomplete="username" bind:value={username} required maxlength="32" /></label>
           <label>Пароль<input type="password" autocomplete="current-password" bind:value={password} required maxlength="256" /></label>
@@ -256,6 +268,7 @@
           Режим <strong>Демо</strong>: показаны фикстуры. Запись в SQLite и
           secrets.json отключена.
         </p>{/if}
+      {#key `${profile}:${dataMode}`}
       {#if tab === "overview" || tab === "people"}{#if sessions.length}<div
             class="session-picker"
           >
@@ -348,6 +361,7 @@
               </table>
             </div>{/if}
         </section>{/if}
+      {/key}
     {/if}
   </main>
 </div>

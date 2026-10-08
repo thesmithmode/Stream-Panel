@@ -30,9 +30,10 @@ test("two browser accounts see only their own data; logout in demo revokes the r
     await runtime.db.call("youtubeSnapshot", "channel", "report", {start:"2026-09-09",end:"2026-10-06",columnHeaders:[{name:"day"},{name:"views"}],rows:[["2026-10-06",profile==="ruslan"?42:17]]});
     await runtime.db.call("youtubeMessages", "channel", "chat", [{id:"same-yt-id",snippet:{publishedAt:"2026-10-07T12:00:00Z",displayMessage:`YouTube private ${profile}`},authorDetails:{displayName:"Viewer"}}]);
   }
-  const browser = await launchBrowser();
+  let browser;
   const contexts = [];
   try {
+    browser = await launchBrowser();
     for (const profile of ["ruslan", "gulnaz"]) {
       const context = await browser.newContext(); contexts.push(context);
       const page = await context.newPage(); page.setDefaultTimeout(5000);
@@ -81,5 +82,58 @@ test("two browser accounts see only their own data; logout in demo revokes the r
       assert.deepEqual(errors, []);
       await saveCoverage(page);
     }
-  } finally { await Promise.all(contexts.map((c) => c.close())); await browser.close(); await h.app.close(); await rm(dir, { recursive: true, force: true }); }
+  } finally { await Promise.all(contexts.map((c) => c.close())); await browser?.close(); await h.app.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test("profile switch reloads all views, preserves other clients and remains visible on mobile", { timeout: 30000 }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sp-profile-browser-"));
+  const h = await createHostedApplication(dir, "http://127.0.0.1:47839", false);
+  let browser;
+  const contexts = [];
+  try {
+    await h.accounts.createUser("ruslan", "ruslan", "Руслан", "profile-browser-password");
+    for (const profile of ["ruslan", "gulnaz"]) {
+      await h.runtimes.get(profile).db.call("ingest", { source: "twitch", accountId: "same-channel", externalId: "same-event", type: "chat.message", actor: { externalId: "viewer", displayName: `Viewer ${profile}` }, occurredAtMs: Date.now(), receivedAtMs: Date.now(), sourceTime: null, timeQuality: "provider", transport: "eventsub", payload: { text: `Message ${profile}` } });
+    }
+    await h.app.listen({ host: "127.0.0.1", port: 47839 });
+    browser = await launchBrowser();
+    const pages = [];
+    for (let i = 0; i < 2; i++) {
+      const context = await browser.newContext(); contexts.push(context);
+      const page = await context.newPage(); pages.push(page);
+      await goto(page, "http://127.0.0.1:47839");
+      await page.getByLabel("Логин", { exact: true }).fill("ruslan");
+      await page.getByLabel("Пароль", { exact: true }).fill("profile-browser-password");
+      await page.getByRole("button", { name: "Войти", exact: true }).click();
+      await page.getByText("Message ruslan", { exact: true }).waitFor();
+    }
+    const [a, b] = pages;
+    await a.getByLabel("Профиль", { exact: true }).selectOption("gulnaz");
+    await a.getByText("Message gulnaz", { exact: true }).waitFor();
+    assert.equal(await a.getByText("Message ruslan", { exact: true }).count(), 0);
+    assert.equal(await b.getByText("Message ruslan", { exact: true }).count(), 1);
+    await a.getByRole("button", { name: "Люди", exact: true }).click();
+    await a.getByText("Viewer gulnaz", { exact: true }).first().waitFor();
+    assert.equal(await a.getByText("Viewer ruslan", { exact: true }).count(), 0);
+    await a.getByLabel("Профиль", { exact: true }).selectOption("ruslan");
+    await a.getByText("Viewer ruslan", { exact: true }).first().waitFor();
+    assert.equal(await a.getByText("Viewer gulnaz", { exact: true }).count(), 0);
+    await a.setViewportSize({ width: 390, height: 844 });
+    await a.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    const box = await a.getByLabel("Профиль", { exact: true }).boundingBox();
+    assert.ok(box && box.y >= 0 && box.y + box.height <= 844);
+    assert.equal(await a.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await a.getByLabel("Профиль", { exact: true }).selectOption("gulnaz");
+    await a.getByText("Viewer gulnaz", { exact: true }).first().waitFor();
+    await a.reload();
+    await a.getByLabel("Профиль", { exact: true }).waitFor();
+    assert.equal(await a.getByLabel("Профиль", { exact: true }).inputValue(), "gulnaz");
+    await a.getByRole("button", { name: "Выйти", exact: true }).click();
+    await a.getByRole("heading", { name: "Вход в Stream Panel" }).waitFor();
+    assert.equal(await a.evaluate(() => fetch("/api/v1/events").then(r => r.status)), 401);
+    for (const page of pages) await saveCoverage(page);
+  } finally {
+    await Promise.all(contexts.map(c => c.close()));
+    await browser?.close(); await h.app.close(); await rm(dir, { recursive: true, force: true });
+  }
 });

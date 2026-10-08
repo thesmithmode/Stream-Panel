@@ -109,8 +109,8 @@ small,
   position: sticky;
   top: 0;
   height: 100vh;
-  min-height: 100%;
-  align-self: stretch;
+  min-height: 0;
+  align-self: start;
   overflow-y: auto;
 }
 .brand {
@@ -908,7 +908,9 @@ select:focus-visible {
     left: 0;
   }
   .sidebar-bottom {
-    display: none;
+    display: flex;
+    margin-top: 8px;
+    padding-top: 8px;
   }
   main {
     padding: 28px 18px;
