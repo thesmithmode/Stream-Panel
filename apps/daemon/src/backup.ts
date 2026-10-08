@@ -5,9 +5,11 @@ import { mkdir, readFile, writeFile, readdir, rm, stat, rename } from "node:fs/p
 import { join } from "node:path";
 const magic = Buffer.from("SPBK1");
 const maxSize = 48 * 1024 * 1024;
+const maxPayloadSize = 64 * 1024 * 1024;
 const profiles = ["ruslan", "gulnaz"] as const;
 export function sealBackup(payload: Buffer, key: Buffer): Buffer {
   if (key.length !== 32) throw new Error("INVALID_BACKUP_KEY");
+  if (payload.length > maxPayloadSize) throw new Error("BACKUP_SIZE_LIMIT");
   const iv = randomBytes(12), cipher = createCipheriv("aes-256-gcm", key, iv);
   const compressed = gzipSync(payload);
   return Buffer.concat([magic, iv, cipher.update(compressed), cipher.final(), cipher.getAuthTag()]);
@@ -16,7 +18,7 @@ export function openBackup(blob: Buffer, key: Buffer): Buffer {
   if (key.length !== 32 || blob.length < 33 || !blob.subarray(0, 5).equals(magic)) throw new Error("INVALID_BACKUP");
   const cipher = createDecipheriv("aes-256-gcm", key, blob.subarray(5, 17));
   cipher.setAuthTag(blob.subarray(-16));
-  return gunzipSync(Buffer.concat([cipher.update(blob.subarray(17, -16)), cipher.final()]), { maxOutputLength: 64 * 1024 * 1024 });
+  return gunzipSync(Buffer.concat([cipher.update(blob.subarray(17, -16)), cipher.final()]), { maxOutputLength: maxPayloadSize });
 }
 export class BackupService {
   status = { state: "disabled", lastSuccessAt: 0, error: "" };
@@ -47,6 +49,8 @@ export class BackupService {
         catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
       }
       const metadata = Buffer.from(JSON.stringify({version:1,profiles:secrets}));
+      const snapshotSize = (await stat(snapshot)).size;
+      if (metadata.length + 4 + snapshotSize > maxPayloadSize) throw new Error("BACKUP_SIZE_LIMIT");
       const length = Buffer.alloc(4); length.writeUInt32BE(metadata.length);
       const blob = sealBackup(Buffer.concat([length, metadata, await readFile(snapshot)]), key);
       if (blob.length > maxSize) throw new Error("BACKUP_SIZE_LIMIT");
