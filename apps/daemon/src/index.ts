@@ -19,7 +19,6 @@ const backupOptions = process.env.STREAM_PANEL_BACKUP_KEY_FILE ? {
 const hosted = await createHostedApplication(dir, origin, false, backupOptions);
 try {
   await hosted.app.listen({ host: "127.0.0.1", port });
-  console.log(`Stream Panel server listening on 127.0.0.1:${port}`);
 } catch (error) { await hosted.app.close(); throw error; }
 let closing = false, collectorsStarted = false;
 const startCollectors = async () => {
@@ -43,3 +42,6 @@ const shutdown = async () => {
   catch { process.exit(1); }
 };
 for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => void shutdown());
+
+// Readiness includes installed signal handlers, so immediate shutdown closes SQLite.
+console.log(`Stream Panel server listening on 127.0.0.1:${port}`);
