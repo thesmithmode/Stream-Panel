@@ -936,8 +936,61 @@ export class StreamStore {
     url: string | null,
     title: string,
   ): void {
+    if (typeof sessionId !== "string" || !sessionId.trim() || sessionId.length > 256)
+      throw new Error("INVALID_PLATFORM_STREAM");
+    this.validatePlatformStreamInput(platform, accountId, externalId, startedAtMs, observedAtMs, url, title);
+    this.db.transaction(() => this.attachPlatformStreamInTransaction(sessionId, platform, accountId, externalId, startedAtMs, observedAtMs, url, title)).immediate();
+  }
+
+  observePlatformStream(
+    platform: "twitch" | "youtube",
+    accountId: string,
+    externalId: string,
+    startedAtMs: number,
+    observedAtMs: number,
+    url: string | null,
+    title: string,
+  ): string | null {
+    this.validatePlatformStreamInput(platform, accountId, externalId, startedAtMs, observedAtMs, url, title);
+    return this.db.transaction(() => {
+      const existing = this.db.prepare(`
+        SELECT session_id,ended_at_ms,last_observed_at_ms,first_missing_at_ms
+        FROM platform_streams WHERE platform=? AND account_id=? AND external_id=?
+      `).get(platform, accountId, externalId) as {session_id:string;ended_at_ms:number|null;last_observed_at_ms:number;first_missing_at_ms:number|null} | undefined;
+      if (existing?.ended_at_ms !== null && existing !== undefined) return null;
+
+      let sessionId = existing?.session_id;
+      if (sessionId === undefined) {
+        const active = this.db.prepare(`
+          SELECT s.id,s.started_at_ms FROM sessions s
+          WHERE s.kind='platform' AND s.ended_at_ms IS NULL
+            AND EXISTS (SELECT 1 FROM platform_streams p WHERE p.session_id=s.id AND p.ended_at_ms IS NULL)
+          ORDER BY s.started_at_ms DESC,s.id DESC LIMIT 1
+        `).get() as {id:string;started_at_ms:number} | undefined;
+        if (startedAtMs <= observedAtMs && active && observedAtMs >= active.started_at_ms)
+          sessionId = active.id;
+        else {
+          // Do not close or reuse an unrelated open session for this provider account.
+          const occupied = this.db.prepare("SELECT 1 FROM sessions WHERE account_id=? AND ended_at_ms IS NULL LIMIT 1").get(accountId);
+          const streamId = `${platform}:${externalId}`;
+          const prior = this.db.prepare("SELECT 1 FROM sessions WHERE account_id=? AND stream_id=? LIMIT 1").get(accountId, streamId);
+          if (occupied || prior) return null;
+          sessionId = randomUUID();
+          this.db.prepare("INSERT INTO sessions VALUES (?,?,?,?,?,?,NULL,'unknown')")
+            .run(sessionId, accountId, streamId, "platform", startedAtMs, observedAtMs);
+        }
+      }
+      this.attachPlatformStreamInTransaction(sessionId, platform, accountId, externalId, startedAtMs, observedAtMs, url, title);
+      this.backfillPlatformEvents(sessionId, observedAtMs);
+      return sessionId;
+    }).immediate();
+  }
+
+  private validatePlatformStreamInput(
+    platform: "twitch" | "youtube", accountId: string, externalId: string,
+    startedAtMs: number, observedAtMs: number, url: string | null, title: string,
+  ): void {
     if (
-      typeof sessionId !== "string" || !sessionId.trim() || sessionId.length > 256 ||
       (platform !== "twitch" && platform !== "youtube") ||
       typeof accountId !== "string" || !accountId.trim() || accountId.length > 256 ||
       typeof externalId !== "string" || !externalId.trim() || externalId.length > 256 ||
@@ -948,37 +1001,65 @@ export class StreamStore {
     assertTimestamp(observedAtMs);
     if (observedAtMs < startedAtMs || (url !== null && !this.validPlatformStreamUrl(platform, url)))
       throw new Error("INVALID_PLATFORM_STREAM");
+  }
 
-    this.db.transaction(() => {
-      const existing = this.db.prepare(`
-        SELECT session_id,ended_at_ms,last_observed_at_ms,first_missing_at_ms
-        FROM platform_streams WHERE platform=? AND account_id=? AND external_id=?
-      `).get(platform, accountId, externalId) as {session_id:string;ended_at_ms:number|null;last_observed_at_ms:number;first_missing_at_ms:number|null} | undefined;
-      if (existing && (existing.session_id !== sessionId || existing.ended_at_ms !== null))
-        throw new Error("PLATFORM_STREAM_CONFLICT");
-      const session = this.db.prepare("SELECT kind,ended_at_ms FROM sessions WHERE id=?")
-        .get(sessionId) as {kind:string;ended_at_ms:number|null} | undefined;
-      if (!session || session.kind !== "platform" || session.ended_at_ms !== null)
-        throw new Error(existing ? "PLATFORM_STREAM_CONFLICT" : "PLATFORM_STREAM_SESSION");
-      if (existing) {
-        if (observedAtMs < existing.last_observed_at_ms ||
-          (existing.first_missing_at_ms !== null && observedAtMs < existing.first_missing_at_ms)) return;
-        this.db.prepare(`
-          UPDATE platform_streams SET
-            last_observed_at_ms=MAX(last_observed_at_ms,?),
-            offline_checks=0,first_missing_at_ms=NULL,
-            url=CASE WHEN ?>=last_observed_at_ms THEN ? ELSE url END,
-            title=CASE WHEN ?>=last_observed_at_ms THEN ? ELSE title END
-          WHERE platform=? AND account_id=? AND external_id=?
-        `).run(observedAtMs, observedAtMs, url, observedAtMs, title, platform, accountId, externalId);
-      } else {
-        this.db.prepare(`
-          INSERT INTO platform_streams
-            (platform,account_id,external_id,session_id,started_at_ms,last_observed_at_ms,url,title)
-          VALUES (?,?,?,?,?,?,?,?)
-        `).run(platform, accountId, externalId, sessionId, startedAtMs, observedAtMs, url, title);
-      }
-    }).immediate();
+  private attachPlatformStreamInTransaction(
+    sessionId: string, platform: "twitch" | "youtube", accountId: string,
+    externalId: string, startedAtMs: number, observedAtMs: number, url: string | null, title: string,
+  ): void {
+    const existing = this.db.prepare(`
+      SELECT session_id,ended_at_ms,last_observed_at_ms,first_missing_at_ms
+      FROM platform_streams WHERE platform=? AND account_id=? AND external_id=?
+    `).get(platform, accountId, externalId) as {session_id:string;ended_at_ms:number|null;last_observed_at_ms:number;first_missing_at_ms:number|null} | undefined;
+    if (existing && (existing.session_id !== sessionId || existing.ended_at_ms !== null))
+      throw new Error("PLATFORM_STREAM_CONFLICT");
+    const session = this.db.prepare("SELECT kind,ended_at_ms FROM sessions WHERE id=?")
+      .get(sessionId) as {kind:string;ended_at_ms:number|null} | undefined;
+    if (!session || session.kind !== "platform" || session.ended_at_ms !== null)
+      throw new Error(existing ? "PLATFORM_STREAM_CONFLICT" : "PLATFORM_STREAM_SESSION");
+    if (existing) {
+      if (observedAtMs < existing.last_observed_at_ms ||
+        (existing.first_missing_at_ms !== null && observedAtMs < existing.first_missing_at_ms)) return;
+      this.db.prepare(`
+        UPDATE platform_streams SET
+          last_observed_at_ms=MAX(last_observed_at_ms,?),
+          offline_checks=0,first_missing_at_ms=NULL,
+          url=CASE WHEN ?>=last_observed_at_ms THEN ? ELSE url END,
+          title=CASE WHEN ?>=last_observed_at_ms THEN ? ELSE title END
+        WHERE platform=? AND account_id=? AND external_id=?
+      `).run(observedAtMs, observedAtMs, url, observedAtMs, title, platform, accountId, externalId);
+    } else {
+      this.db.prepare(`
+        INSERT INTO platform_streams
+          (platform,account_id,external_id,session_id,started_at_ms,last_observed_at_ms,url,title)
+        VALUES (?,?,?,?,?,?,?,?)
+      `).run(platform, accountId, externalId, sessionId, startedAtMs, observedAtMs, url, title);
+    }
+    this.db.prepare(`
+      UPDATE sessions SET started_at_ms=MIN(started_at_ms,(
+        SELECT MIN(started_at_ms) FROM platform_streams WHERE session_id=?
+      )) WHERE id=?
+    `).run(sessionId, sessionId);
+  }
+
+  private backfillPlatformEvents(sessionId: string, observedAtMs: number): void {
+    // Events already assigned to a manual or other session are never stolen.
+    // This schema currently has Twitch and donation-alert events; YouTube chat is stored separately.
+    this.db.prepare(`
+      INSERT OR IGNORE INTO event_sessions(event_id,session_id)
+      SELECT e.id,? FROM events e JOIN sessions s ON s.id=?
+      WHERE e.occurred_at_ms IS NOT NULL
+        AND e.occurred_at_ms>=s.recording_started_at_ms AND e.occurred_at_ms<=?
+        AND ((e.source='twitch' AND EXISTS (
+          SELECT 1 FROM platform_streams ps WHERE ps.session_id=s.id
+            AND ps.platform='twitch' AND ps.account_id=e.account_id
+        )) OR e.source='donationalerts')
+        AND NOT EXISTS (SELECT 1 FROM event_sessions es WHERE es.event_id=e.id)
+        AND NOT EXISTS (
+          SELECT 1 FROM sessions m WHERE m.kind='manual' AND m.started_at_ms<=e.occurred_at_ms
+            AND (m.ended_at_ms IS NULL OR m.ended_at_ms>e.occurred_at_ms)
+        )
+    `).run(sessionId, sessionId, observedAtMs);
   }
 
   private validPlatformStreamUrl(platform: "twitch" | "youtube", value: string): boolean {

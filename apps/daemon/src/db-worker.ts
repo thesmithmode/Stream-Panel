@@ -8,6 +8,7 @@ const allowed = new Set([
   "sessions",
   "platformStreams",
   "attachPlatformStream",
+  "observePlatformStream",
   "activeLogicalStream",
   "startSession",
   "endSession",

@@ -31,3 +31,4 @@
 - CI37850422864 terminal failure: backup validation оставаласьschema5 (unit/HTTP/E2E общийкорень); local-login иduration exactbutton expectations поправлены. Помощь/profile/recovery E2Esuccess; packaging skip. Нельзявыпускать.
 - Receiver health проверяет exact validated bind-host из root-owned file, defaultloopback; bridge иошибочныеадреса покрытыoperations tests. Bootstrap пишетfileбезnewline.
 - CI backup rootcause fixed: CURRENT_SCHEMA_VERSION6 используетсяsupported/online validation, migration6 сохраняетliteral6 дляfuture migrations. Regression профильный/обычный online snapshot; statictypes0error.
+- Positive observe создаёт standaloneYT безfakeTwitch, coalescesTwitch/YT вbothorders, restart/closedidempotence, manualhistory protection, allconfirmedTwitchlinksbackfill. RootreviewcorrectedMINstart/recordingpreservation andYTinitiatedbackfill; CI next.
