@@ -26,3 +26,4 @@
 - Помощь по присутствию открывается по клику, Escape/outside close и mobile viewport clamp; Root проверил cleanup и границы. E2E подготовлен, запуск только CI.
 - CI37845339070 unit/integration/ops success, E2E connections ожидал удалённую ручную кнопку. Обновлён автоматический platform fixture сценарий и фактический invalid-login check; подготовлен повторный CI.
 - Hosted bind/proxy config проверяется до listen: loopback или privateIPv4, proxy exactIP; исключены wildcard/public/CIDR. Необходим для существующего Docker Traefik, bootstrap всё ещё только будущий mainCI.
+- Attach platform primitive: transactional positive-only attach; closed/cross-session conflicts denied, monotonic observations and offline markers, stale reports no-op; confirmed provider URLs. Root review corrections included; tests prepared for CI.

@@ -926,6 +926,73 @@ export class StreamStore {
     `).all(sessionId) as Record<string, unknown>[];
   }
 
+  attachPlatformStream(
+    sessionId: string,
+    platform: "twitch" | "youtube",
+    accountId: string,
+    externalId: string,
+    startedAtMs: number,
+    observedAtMs: number,
+    url: string | null,
+    title: string,
+  ): void {
+    if (
+      typeof sessionId !== "string" || !sessionId.trim() || sessionId.length > 256 ||
+      (platform !== "twitch" && platform !== "youtube") ||
+      typeof accountId !== "string" || !accountId.trim() || accountId.length > 256 ||
+      typeof externalId !== "string" || !externalId.trim() || externalId.length > 256 ||
+      typeof title !== "string" || title.length > 1000 ||
+      (url !== null && (typeof url !== "string" || url.length > 2048))
+    ) throw new Error("INVALID_PLATFORM_STREAM");
+    assertTimestamp(startedAtMs);
+    assertTimestamp(observedAtMs);
+    if (observedAtMs < startedAtMs || (url !== null && !this.validPlatformStreamUrl(platform, url)))
+      throw new Error("INVALID_PLATFORM_STREAM");
+
+    this.db.transaction(() => {
+      const existing = this.db.prepare(`
+        SELECT session_id,ended_at_ms,last_observed_at_ms,first_missing_at_ms
+        FROM platform_streams WHERE platform=? AND account_id=? AND external_id=?
+      `).get(platform, accountId, externalId) as {session_id:string;ended_at_ms:number|null;last_observed_at_ms:number;first_missing_at_ms:number|null} | undefined;
+      if (existing && (existing.session_id !== sessionId || existing.ended_at_ms !== null))
+        throw new Error("PLATFORM_STREAM_CONFLICT");
+      const session = this.db.prepare("SELECT kind,ended_at_ms FROM sessions WHERE id=?")
+        .get(sessionId) as {kind:string;ended_at_ms:number|null} | undefined;
+      if (!session || session.kind !== "platform" || session.ended_at_ms !== null)
+        throw new Error(existing ? "PLATFORM_STREAM_CONFLICT" : "PLATFORM_STREAM_SESSION");
+      if (existing) {
+        if (observedAtMs < existing.last_observed_at_ms ||
+          (existing.first_missing_at_ms !== null && observedAtMs < existing.first_missing_at_ms)) return;
+        this.db.prepare(`
+          UPDATE platform_streams SET
+            last_observed_at_ms=MAX(last_observed_at_ms,?),
+            offline_checks=0,first_missing_at_ms=NULL,
+            url=CASE WHEN ?>=last_observed_at_ms THEN ? ELSE url END,
+            title=CASE WHEN ?>=last_observed_at_ms THEN ? ELSE title END
+          WHERE platform=? AND account_id=? AND external_id=?
+        `).run(observedAtMs, observedAtMs, url, observedAtMs, title, platform, accountId, externalId);
+      } else {
+        this.db.prepare(`
+          INSERT INTO platform_streams
+            (platform,account_id,external_id,session_id,started_at_ms,last_observed_at_ms,url,title)
+          VALUES (?,?,?,?,?,?,?,?)
+        `).run(platform, accountId, externalId, sessionId, startedAtMs, observedAtMs, url, title);
+      }
+    }).immediate();
+  }
+
+  private validPlatformStreamUrl(platform: "twitch" | "youtube", value: string): boolean {
+    try {
+      const url = new URL(value);
+      if (url.protocol !== "https:" || url.username || url.password || url.port || url.hash) return false;
+      if (platform === "youtube")
+        return (url.hostname === "youtube.com" || url.hostname === "www.youtube.com") &&
+          url.pathname === "/watch" && Boolean(url.searchParams.get("v"));
+      return (url.hostname === "twitch.tv" || url.hostname === "www.twitch.tv") &&
+        /^\/[A-Za-z0-9_]+(?:\/.*)?$/.test(url.pathname);
+    } catch { return false; }
+  }
+
   activeLogicalStream(): Record<string, unknown> | null {
     return (this.db.prepare(`
       SELECT s.* FROM sessions s
