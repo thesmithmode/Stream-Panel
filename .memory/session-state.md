@@ -25,3 +25,4 @@
 - Длительности Person отображаются человекочитаемо с сохранением unknown; unit boundaries и E2E120min подготовлены, статические gates0errors. Полная lifetime attendance пока не реализована.
 - Помощь по присутствию открывается по клику, Escape/outside close и mobile viewport clamp; Root проверил cleanup и границы. E2E подготовлен, запуск только CI.
 - CI37845339070 unit/integration/ops success, E2E connections ожидал удалённую ручную кнопку. Обновлён автоматический platform fixture сценарий и фактический invalid-login check; подготовлен повторный CI.
+- Hosted bind/proxy config проверяется до listen: loopback или privateIPv4, proxy exactIP; исключены wildcard/public/CIDR. Необходим для существующего Docker Traefik, bootstrap всё ещё только будущий mainCI.

@@ -8,8 +8,18 @@ import { fileURLToPath } from "node:url";
 import { AccountStore, profiles, type Profile } from "./auth.js";
 import { BackupService } from "./backup.js";
 import { createApplication } from "./server.js";
+import {
+  DEFAULT_HOSTED_NETWORK_CONFIG,
+  type HostedNetworkConfig,
+} from "./hosted-network.js";
 
-export async function createHostedApplication(dir: string, publicOrigin: string, connect = true, backupOptions?: ConstructorParameters<typeof BackupService>[1]) {
+export async function createHostedApplication(
+  dir: string,
+  publicOrigin: string,
+  connect = true,
+  backupOptions?: ConstructorParameters<typeof BackupService>[1],
+  network: HostedNetworkConfig = DEFAULT_HOSTED_NETWORK_CONFIG,
+) {
   const origin = new URL(publicOrigin);
   if (origin.origin !== publicOrigin || origin.username || origin.password ||
     (origin.protocol !== "https:" && !(origin.protocol === "http:" && origin.hostname === "127.0.0.1")))
@@ -22,7 +32,7 @@ export async function createHostedApplication(dir: string, publicOrigin: string,
     request.headers["x-stream-panel-profile"] as Profile | undefined ?? fallback;
   const oauthBindings = new Map<string, { profile: Profile; tokenHash: string; provider: string; expires: number }>();
   const runtimes = new Map<Profile, Awaited<ReturnType<typeof createApplication>>>();
-  const app = Fastify({ logger: false, bodyLimit: 32768, trustProxy: ["127.0.0.1", "::1"],
+  const app = Fastify({ logger: false, bodyLimit: 32768, trustProxy: [...network.trustedProxies],
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
   await app.register(cookie);
   // Provider configuration changes for one profile are serialized. Different
