@@ -114,3 +114,26 @@ CREATE TABLE stream_samples (
 ) WITHOUT ROWID;
 PRAGMA user_version = 5;
 `;
+
+export const schemaV6 = `
+CREATE TABLE platform_streams (
+  platform TEXT NOT NULL CHECK(platform IN ('twitch','youtube')),
+  account_id TEXT NOT NULL, external_id TEXT NOT NULL,
+  session_id TEXT NOT NULL REFERENCES sessions(id),
+  started_at_ms INTEGER NOT NULL, ended_at_ms INTEGER,
+  last_observed_at_ms INTEGER NOT NULL,
+  offline_checks INTEGER NOT NULL DEFAULT 0,
+  first_missing_at_ms INTEGER,
+  url TEXT, title TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(platform, account_id, external_id)
+) STRICT;
+CREATE INDEX platform_streams_session_end ON platform_streams(session_id, ended_at_ms);
+INSERT INTO platform_streams
+  (platform,account_id,external_id,session_id,started_at_ms,ended_at_ms,last_observed_at_ms,offline_checks,first_missing_at_ms,url,title)
+SELECT 'twitch',s.account_id,s.stream_id,s.id,s.started_at_ms,s.ended_at_ms,
+  COALESCE((SELECT MAX(observed_at_ms) FROM stream_samples WHERE session_id=s.id),s.recording_started_at_ms),
+  0,NULL,NULL,
+  COALESCE((SELECT title FROM stream_samples WHERE session_id=s.id ORDER BY observed_at_ms DESC LIMIT 1),'')
+FROM sessions s WHERE s.kind='platform';
+PRAGMA user_version = 6;
+`;

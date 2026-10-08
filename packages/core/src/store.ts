@@ -11,7 +11,7 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { schemaV1, schemaV2, schemaV3, schemaV4, schemaV5 } from "./schema.js";
+import { schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
 import { presenceMinutes, pollCoveredMinutes, type PresencePoll } from "./presence.js";
 
@@ -50,7 +50,7 @@ export class StreamStore {
       this.db.pragma("foreign_keys = ON");
       this.db.pragma("busy_timeout = 5000");
       const version = this.db.pragma("user_version", { simple: true });
-      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5)
+      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6)
         throw new Error("UNSUPPORTED_SCHEMA_VERSION");
       this.db.pragma("journal_mode = WAL");
       this.db.pragma("synchronous = FULL");
@@ -74,6 +74,8 @@ export class StreamStore {
         this.db.transaction(() => this.db.exec(schemaV4)).immediate();
       if ((this.db.pragma("user_version", { simple: true }) as number) < 5)
         this.db.transaction(() => this.db.exec(schemaV5)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 6)
+        this.db.transaction(() => this.db.exec(schemaV6)).immediate();
       this.db.exec("CREATE TABLE IF NOT EXISTS sp_youtube_quota (day TEXT NOT NULL, profile TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(day,profile)) WITHOUT ROWID");
       // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
@@ -850,18 +852,32 @@ export class StreamStore {
           "SELECT id FROM sessions WHERE account_id = ? AND stream_id = ?",
         )
         .get(accountId, streamId) as { id: string } | undefined;
-      if (prior) return prior.id;
-      this.db
+      if (prior) {
+        if (kind === "platform") this.db.prepare(`
+          INSERT OR IGNORE INTO platform_streams
+            (platform,account_id,external_id,session_id,started_at_ms,ended_at_ms,last_observed_at_ms)
+          SELECT 'twitch',account_id,stream_id,id,started_at_ms,ended_at_ms,recording_started_at_ms
+          FROM sessions WHERE id=? AND kind='platform'
+        `).run(prior.id);
+        return prior.id;
+      }
+      const closed = this.db
         .prepare(
           "UPDATE sessions SET ended_at_ms = ?, end_quality = 'estimated' WHERE account_id = ? AND ended_at_ms IS NULL",
         )
         .run(startedAtMs, accountId);
+      if (closed.changes) this.db.prepare("UPDATE platform_streams SET ended_at_ms=? WHERE session_id IN (SELECT id FROM sessions WHERE account_id=? AND ended_at_ms=? AND end_quality='estimated') AND ended_at_ms IS NULL").run(startedAtMs, accountId, startedAtMs);
       const id = randomUUID();
       this.db
         .prepare(
           "INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, NULL, 'unknown')",
         )
         .run(id, accountId, streamId, kind, startedAtMs, nowMs);
+      if (kind === "platform") this.db.prepare(`
+        INSERT OR IGNORE INTO platform_streams
+          (platform,account_id,external_id,session_id,started_at_ms,ended_at_ms,last_observed_at_ms)
+        VALUES ('twitch',?,?,?, ?,NULL,?)
+      `).run(accountId, streamId, id, startedAtMs, nowMs);
       const events = this.db
         .prepare(
           "SELECT id, account_id, occurred_at_ms FROM events WHERE (account_id = ? OR source='donationalerts' OR ?='manual') AND occurred_at_ms >= ?",
@@ -880,11 +896,12 @@ export class StreamStore {
   endSession(id: string, atMs: number, quality = "observed"): void {
     assertTimestamp(atMs);
     this.db.transaction(() => {
-      this.db
+      const ended = this.db
         .prepare(
           "UPDATE sessions SET ended_at_ms = ?, end_quality = ? WHERE id = ? AND ended_at_ms IS NULL AND started_at_ms <= ?",
         )
         .run(atMs, quality, id, atMs);
+      if (ended.changes) this.db.prepare("UPDATE platform_streams SET ended_at_ms=(SELECT ended_at_ms FROM sessions WHERE id=?) WHERE session_id=? AND ended_at_ms IS NULL").run(id, id);
       this.db
         .prepare(
           `DELETE FROM event_sessions WHERE session_id = ? AND event_id IN (SELECT id FROM events WHERE occurred_at_ms >= ?)`,
@@ -900,6 +917,25 @@ export class StreamStore {
       FROM sessions s ORDER BY started_at_ms DESC LIMIT 100`,
       )
       .all() as Record<string, unknown>[];
+  }
+
+  platformStreams(sessionId: string): Record<string, unknown>[] {
+    return this.db.prepare(`
+      SELECT * FROM platform_streams WHERE session_id=?
+      ORDER BY platform,account_id,external_id
+    `).all(sessionId) as Record<string, unknown>[];
+  }
+
+  activeLogicalStream(): Record<string, unknown> | null {
+    return (this.db.prepare(`
+      SELECT s.* FROM sessions s
+      WHERE s.kind='platform' AND s.ended_at_ms IS NULL
+        AND EXISTS (
+          SELECT 1 FROM platform_streams p
+          WHERE p.session_id=s.id AND p.ended_at_ms IS NULL
+        )
+      ORDER BY s.started_at_ms DESC,s.id DESC LIMIT 1
+    `).get() as Record<string, unknown> | undefined) ?? null;
   }
 
   recordPoll(sessionId: string, accountId: string, poll: PresencePoll): void {

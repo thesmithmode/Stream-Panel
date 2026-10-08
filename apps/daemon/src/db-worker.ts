@@ -6,6 +6,8 @@ const allowed = new Set([
   "youtubeQuota", "youtubeSnapshot", "youtubeMessages", "youtubeData",
   "ingest",
   "sessions",
+  "platformStreams",
+  "activeLogicalStream",
   "startSession",
   "endSession",
   "recordPoll",
