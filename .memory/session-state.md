@@ -28,3 +28,4 @@
 - Hosted bind/proxy config проверяется до listen: loopback или privateIPv4, proxy exactIP; исключены wildcard/public/CIDR. Необходим для существующего Docker Traefik, bootstrap всё ещё только будущий mainCI.
 - Attach platform primitive: transactional positive-only attach; closed/cross-session conflicts denied, monotonic observations and offline markers, stale reports no-op; confirmed provider URLs. Root review corrections included; tests prepared for CI.
 - Auto analytics: ручное Apply и knobs убраны, дефолты алгоритма сохранены; debounce/stale guard/unmount, stale selection disable; E2E точные queries/clock. Root исправил scope audience assertion.
+- CI37850422864 terminal failure: backup validation оставаласьschema5 (unit/HTTP/E2E общийкорень); local-login иduration exactbutton expectations поправлены. Помощь/profile/recovery E2Esuccess; packaging skip. Нельзявыпускать.

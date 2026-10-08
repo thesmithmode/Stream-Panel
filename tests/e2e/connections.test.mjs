@@ -248,8 +248,14 @@ test(
         .waitFor();
       await page.getByLabel("Логин", { exact: true }).fill("unknown-user");
       await page.getByLabel("Пароль", { exact: true }).fill("invalid-password");
+      const localLogin = page.waitForResponse((response) =>
+        response.url().endsWith("/api/v1/auth/login"),
+      );
       await page.getByRole("button", { name: "Войти", exact: true }).click();
-      await page.getByRole("alert").filter({ hasText: "Неверный логин или пароль" }).waitFor();
+      const loginResponse = await localLogin;
+      assert.equal(loginResponse.status(), 401);
+      assert.deepEqual(await loginResponse.json(), { error: "LOCAL_LOGIN_REQUIRED" });
+      await page.getByRole("alert").filter({ hasText: "Войдите в свой профиль" }).waitFor();
       await goto(page, a.bootstrap());
       await page
         .getByRole("button", { name: "Открыть интеграции", exact: true })

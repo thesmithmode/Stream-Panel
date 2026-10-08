@@ -50,9 +50,10 @@ test("People duration cards render the session and average observations as hours
     await goto(page, app.bootstrap());
     await page.getByRole("button", { name: "Люди", exact: true }).waitFor();
     await page.getByRole("button", { name: "Люди", exact: true }).click();
-    await page.getByRole("button", { name: "Duration Viewer", exact: true }).waitFor();
+    const personRow = page.locator(".person-row").filter({ hasText: "Duration Viewer" });
+    await personRow.waitFor();
     await page.getByLabel("Период аналитики").selectOption(sessionId);
-    await page.getByRole("button", { name: "Duration Viewer", exact: true }).click();
+    await personRow.click();
     await page.getByLabel("Показатели человека").waitFor();
 
     const person = await page.evaluate(() =>
