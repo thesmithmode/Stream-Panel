@@ -166,6 +166,72 @@ function twitchRequest(f, options = {}) {
     throw new Error("unexpected " + url);
   };
 }
+
+test("Twitch polls offline every five minutes, reacts online immediately and never closes on malformed responses", async t => {
+  const f = fixture(t), opts = { offline: true };
+  let polls = 0, malformed = false;
+  const original = twitchRequest(f, opts);
+  const request = async (url, init) => {
+    if (new URL(url).pathname.endsWith("/streams")) {
+      polls++;
+      if (malformed) return response({ data: {} });
+    }
+    return original(url, init);
+  };
+  const c = new TwitchConnection(f.config, f.db, request, f.socket);
+  try {
+    await c.start();
+    f.sockets[0].push({ ...welcome, payload: { session: { id: "wire", keepalive_timeout_seconds: 3600 } } });
+    await flush();
+    assert.equal(polls, 1);
+    await f.tick(299999); assert.equal(polls, 1);
+    await f.tick(1); assert.equal(polls, 2);
+    opts.offline = false;
+    f.sockets[0].push(notification("stream.online", { broadcaster_user_id: "owner", id: "online", started_at: new Date().toISOString() }));
+    await flush(); assert.equal(polls, 3);
+    await f.tick(59999); assert.equal(polls, 3);
+    await f.tick(1); assert.equal(polls, 4);
+    malformed = true;
+    await f.tick(60000);
+    assert.equal(f.calls.filter(x => x.method === "endSession").length, 0);
+    assert.equal(c.status.detail, "INVALID_TWITCH_STREAMS");
+    malformed = false; opts.offline = true;
+    await f.tick(60000);
+    assert.equal(f.calls.filter(x => x.method === "endSession").length, 0);
+    await f.tick(60000);
+    assert.equal(f.calls.filter(x => x.method === "endSession").length, 1);
+    const count = polls;
+    await f.tick(299999); assert.equal(polls, count);
+    await f.tick(1); assert.equal(polls, count + 1);
+    await c.stop();
+    await f.tick(300000); assert.equal(polls, count + 1);
+  } finally { await c.stop(); }
+});
+test("Twitch restart does not let an old pending poll block or overwrite the new generation", async t => {
+  const f = fixture(t), options = { offline: true, scopes: ["user:read:chat"] };
+  let polls = 0, release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const original = twitchRequest(f, options);
+  const request = async (url, init) => {
+    if (new URL(url).pathname.endsWith("/streams")) {
+      if (++polls === 1) return pending;
+    }
+    return original(url, init);
+  };
+  const c = new TwitchConnection(f.config, f.db, request, f.socket);
+  try {
+    await c.start(); await flush(); assert.equal(polls, 1);
+    await c.start(); await flush(); assert.equal(polls, 2);
+    f.sockets.at(-1).push({ ...welcome, payload: { session: { id: "new", keepalive_timeout_seconds: 3600 } } });
+    await flush();
+    release(response({ data: [{ id: "stale", started_at: new Date().toISOString() }] }));
+    await flush();
+    assert.equal(f.calls.filter(x => x.method === "startSession").length, 0);
+    await f.tick(300000); assert.equal(polls, 3);
+    await c.stop(); await f.tick(300000); assert.equal(polls, 3);
+  } finally { release(response({ data: [] })); await c.stop(); }
+});
+
 test("Twitch lifecycle: full subscriptions, safe handoff, transient gap, offline confirmation and stop", async (t) => {
   const f = fixture(t),
     subs = [],
@@ -820,18 +886,13 @@ test("a stream poll from the previous account is never applied to the new login"
       }),
     );
     await starting;
-    assert.equal(
-      f.calls.filter((x) => x.method === "startSession").length,
-      0,
-      "a cancelled response must not attach the old stream to the new owner",
-    );
+    assert.ok(f.calls.filter(x => x.method === "startSession").every(x => x.args[0] === "new-owner" && x.args[1] === "new-stream"), "a cancelled response must not attach the old stream to the new owner");
     f.sockets.at(-1).push(welcome);
     await flush();
     await f.tick(60000);
     const sessions = f.calls.filter((x) => x.method === "startSession");
-    assert.equal(sessions.length, 1);
-    assert.equal(sessions[0].args[0], "new-owner");
-    assert.equal(sessions[0].args[1], "new-stream");
+    assert.equal(sessions.length, 2, "the new login checks immediately and again after one minute");
+    assert.ok(sessions.every(x => x.args[0] === "new-owner" && x.args[1] === "new-stream"));
   } finally {
     await c.stop();
   }
