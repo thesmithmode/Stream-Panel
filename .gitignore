@@ -17,3 +17,6 @@ release-assets/
 # Out-of-tree live credentials (never commit)
 stream-panel-live-creds/
 **/stream-panel-live-creds/
+
+__pycache__/
+*.pyc

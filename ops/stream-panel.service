@@ -1,0 +1,36 @@
+[Unit]
+Description=Stream Panel private analytics
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+[Service]
+Type=simple
+User=stream-panel
+Group=stream-panel
+WorkingDirectory=/opt/stream-panel/current
+EnvironmentFile=/etc/stream-panel/server.env
+Environment=NODE_ENV=production
+ExecStart=/opt/stream-panel/current/bin/node /opt/stream-panel/current/dist/apps/daemon/src/index.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/var/lib/stream-panel
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryMax=512M
+CPUQuota=75%
+TasksMax=128
+LimitNOFILE=4096
+[Install]
+WantedBy=multi-user.target

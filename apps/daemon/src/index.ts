@@ -1,120 +1,45 @@
-import { createApplication } from "./server.js";
-import { defaultDataDir } from "./config.js";
-import { openBrowser, shouldOpenBrowser } from "./browser-launch.js";
-import {
-  formatLock,
-  isProcessAlive,
-  LOCK_NAME,
-  parseLock,
-  stopLockedDaemon,
-  wantsStop,
-} from "./lifecycle.js";
-import { open, readFile, unlink, mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import {
-  describeRemoteDb,
-  resolveDatabaseUrls,
-  startRemoteSync,
-} from "./remote-db.js";
+import { createHostedApplication } from "./hosted.js";
+import { mkdir, access, realpath } from "node:fs/promises";
+import { join, basename } from "node:path";
 
-const dir = defaultDataDir();
+const dir = process.env.STREAM_PANEL_DATA_DIR;
+const origin = process.env.STREAM_PANEL_PUBLIC_ORIGIN;
 const port = Number(process.env.STREAM_PANEL_PORT ?? 47831);
-if (!Number.isInteger(port) || port < 1024 || port > 65535)
-  throw new Error("INVALID_PORT");
-
+if (!dir) throw new Error("DATA_DIR_REQUIRED");
+if (!origin) throw new Error("PUBLIC_ORIGIN_REQUIRED");
+if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("INVALID_PORT");
+const releaseName = basename(await realpath(process.cwd()));
+process.env.STREAM_PANEL_RELEASE ??= /^[a-f0-9]{40}$/.test(releaseName) ? releaseName : "development";
 await mkdir(dir, { recursive: true, mode: 0o700 });
-const lockPath = join(dir, LOCK_NAME);
-
-if (wantsStop()) {
-  const result = await stopLockedDaemon(dir);
-  if (result === "not_running") {
-    console.log("Stream Panel не запущен.");
-    process.exit(0);
-  }
-  if (result === "timeout") {
-    console.error(
-      "Не дождались остановки. Проверьте процесс вручную и удалите daemon.lock при необходимости.",
-    );
-    process.exit(1);
-  }
-  console.log("Stream Panel остановлен.");
-  process.exit(0);
-}
-
-// The local listening port prevents a second app instance; the file also guards a shared data-dir on another port.
-let lock;
+const backupOptions = process.env.STREAM_PANEL_BACKUP_KEY_FILE ? {
+  keyFile: process.env.STREAM_PANEL_BACKUP_KEY_FILE,
+  ...(process.env.STREAM_PANEL_SUPABASE_URL ? {url: process.env.STREAM_PANEL_SUPABASE_URL} : {}),
+  ...(process.env.STREAM_PANEL_SUPABASE_KEY_FILE ? {serviceKeyFile: process.env.STREAM_PANEL_SUPABASE_KEY_FILE} : {}),
+} : undefined;
+const hosted = await createHostedApplication(dir, origin, false, backupOptions);
 try {
-  lock = await open(lockPath, "wx", 0o600);
-} catch (error) {
-  if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-  const raw = await readFile(lockPath, "utf8");
-  const info = parseLock(raw);
-  const pid = info?.pid ?? Number(raw.trim().split(/\r?\n/)[0]);
-  const active =
-    info !== null
-      ? isProcessAlive(info.pid)
-      : Number.isInteger(pid) && pid > 0
-        ? isProcessAlive(pid)
-        : true;
-  if (active && info) {
-    console.log(
-      `Stream Panel уже запущен (PID ${info.pid}). Останавливаю старый процесс и поднимаю новый…`,
-    );
-    const stopped = await stopLockedDaemon(dir);
-    if (stopped === "timeout") {
-      console.error(
-        "Не дождались остановки предыдущего процесса. Остановите его вручную и повторите запуск.",
-      );
-      throw new Error("DATA_DIR_ALREADY_IN_USE");
-    }
-  } else if (active || !info) {
-    throw new Error("DATA_DIR_ALREADY_IN_USE");
-  } else {
-    await unlink(lockPath).catch(() => {});
+  await hosted.app.listen({ host: "127.0.0.1", port });
+  console.log(`Stream Panel server listening on 127.0.0.1:${port}`);
+} catch (error) { await hosted.app.close(); throw error; }
+let closing = false, collectorsStarted = false;
+const startCollectors = async () => {
+  if (collectorsStarted || closing) return;
+  try { await access(join(dir, "deploying")); return; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") { console.error("Maintenance state unavailable; collectors remain stopped"); return; } }
+  collectorsStarted = true;
+  void hosted.backup?.run().catch(() => console.error("Backup failed; see protected status"));
+  for (const runtime of hosted.runtimes.values()) {
+    void runtime.twitch.start(); void runtime.da.start(); void runtime.youtube.start();
   }
-  lock = await open(lockPath, "wx", 0o600);
-}
-await lock.writeFile(formatLock(process.pid, port));
-await lock.close();
-
-try {
-  const remoteUrls = await resolveDatabaseUrls(process.env);
-  const remote = describeRemoteDb(process.env, remoteUrls);
-  if (remote.configured)
-    console.log(
-      `Удалённая БД: ${remote.kind}${remote.hostHint ? " @ " + remote.hostHint : ""} (prefer pooler; sync lean).`,
-    );
-  const application = await createApplication(dir, port);
-  await application.app.listen({ host: "127.0.0.1", port });
-  const stopRemoteSync = startRemoteSync({ dataDir: dir });
-  const url = application.bootstrap();
-  console.log(`Stream Panel: ${url}`);
-  console.log(
-    "Интерфейс открывается в браузере. Токен одноразовый; повторный запуск остановит старый процесс и откроет новую ссылку.",
-  );
-  console.log(
-    "Закрытие вкладки не останавливает сбор. Остановка: Ctrl+C здесь или STREAM_PANEL_STOP=1 pnpm start",
-  );
-  if (shouldOpenBrowser()) openBrowser(url);
-  let closing = false;
-  const shutdown = () => {
-    if (closing) return;
-    closing = true;
-    stopRemoteSync();
-    void application.app
-      .close()
-      .then(() => unlink(lockPath))
-      .then(() => process.exit(0))
-      .catch(() => process.exit(1));
-  };
-  for (const signal of ["SIGINT", "SIGTERM"] as const)
-    process.on(signal, shutdown);
-  // A desktop launcher can request the same graceful shutdown on Windows via IPC.
-  if (process.connected)
-    process.on("message", (message) => {
-      if (message === "shutdown") shutdown();
-    });
-} catch (error) {
-  await unlink(lockPath).catch(() => {});
-  throw error;
-}
+};
+await startCollectors();
+const backupTimer = setInterval(() => { if (collectorsStarted) void hosted.backup?.run().catch(() => console.error("Backup failed; see protected status")); }, 12 * 60 * 60 * 1000);
+const timer = setInterval(() => void startCollectors(), 2000);
+const shutdown = async () => {
+  if (closing) return;
+  closing = true; clearInterval(timer); clearInterval(backupTimer);
+  const timeout = setTimeout(() => process.exit(1), 10000); timeout.unref();
+  try { await hosted.app.close(); clearTimeout(timeout); process.exit(0); }
+  catch { process.exit(1); }
+};
+for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => void shutdown());

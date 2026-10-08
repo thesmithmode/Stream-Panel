@@ -1,3 +1,5 @@
+> Исторический документ desktop v0.0.4. Актуальные серверная архитектура и условия выпуска: [readiness-checklist.md](readiness-checklist.md), [ops/server.md](ops/server.md), [api-contract.md](api-contract.md). Требования Windows/локального демона/sync двух БД ниже заменены серверным решением.
+
 # Live validation checklist (owner)
 
 Короткий чеклист после offline readiness на `codex-init-grok`. Токены и секреты **не** присылать в чат/git — только локальный UI.

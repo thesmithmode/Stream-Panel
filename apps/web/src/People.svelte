@@ -48,8 +48,8 @@
   const visible = $derived(
     sortBy === "default"
       ? search.trim()
-        ? searchResults
-        : people
+        ? searchResults.filter(p=>!p.is_bot)
+        : people.filter(p=>!p.is_bot)
       : tops.map(
           (t) =>
             ({

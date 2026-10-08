@@ -1,88 +1,35 @@
-# Readiness checklist — `codex-init-grok`
+# Готовность серверной Stream Panel 0.1
 
-Дата: **2026-10-07** (МСК). Легенда:
+Текущая архитектура: постоянно работающий Linux-сервер, HTTPS-панель в браузере, два аккаунта с изолированными профилями, одна SQLite и шифрованный резервный снимок в Supabase Storage. Десктопный v0.0.4 — исторический выпуск. Windows-установщики, синхронизация двух БД и остановка чужого desktop daemon больше не входят в план.
 
-| Символ | Смысл |
+## Реализовано и проверяется автоматически
+
+| Поведение | Где реализовано / проверено |
 | --- | --- |
-| ✅ | Закрыто **offline** (код + автотесты / локальный прогон) |
-| ⏳ | Offline есть; **подтверждение только на живом** аккаунте/ОС |
-| ❌ | Отложено / вне текущего среза (короткая причина) |
+| Парольный вход, CSRF, отзыв и сохранение сессий, ограничения попыток, закрытые API | `auth.ts`, `hosted.ts`; auth/hosted tests, двухпрофильный browser E2E |
+| Разделение Twitch/DA/YouTube, истории и записей Руслана и Гульназ | Profile DB proxy, отдельные workers/configs; profile isolation + hosted tests |
+| Атомарные записи, ревизии merge/undo/split, SQLite WAL + busy timeout | Core transactions, worker queue; concurrency/conflict tests |
+| Twitch и DA: подключение, refresh, reconnect, дедупликация и отмена поздних ответов | Provider tests + integration lifecycle/wire tests |
+| YouTube: OAuth PKCE, live chat, история курсоров, отчёты своего канала, общая квота | YouTube tests; реальный вход ещё нужен |
+| Категория, заголовок и счётчики эфира из Twitch | `stream_samples`, Twitch reconcile, analytics tests |
+| Отдельная аналитика, ядро, категории, дни/часы, возвращения и минутные сигналы | `analytics.ts`, `Analytics.svelte`, `TrendChart.svelte`; core + browser tests |
+| Исключения владельцев и ботов из персональной статистики | ID владельца + имена/aliases; тесты с переименованным owner, jeetbot, fullrandomname_twitch, обеими формами StreamElements |
+| Полный пустой опрос отличается от сбоя/неизвестности; оценка YouTube помечена отдельно | Presence/analytics tests + UI; личного времени просмотра API не предоставляет |
+| Шифрованный online backup обоих профилей, ротация только своих объектов, restore с отзывом сессий | `backup.ts`, backup tests |
+| Деплой неизменяемого артефакта, maintenance, проверка здоровья, возврат версии/БД/секретов | `ops/receive.py`, четыре deploy tests |
+| Отдельные пользователи/каталоги/unit, лимиты ресурсов, закреплённый SSH host key | `ops/bootstrap.sh`, `docs/ops/server.md`; живой сервер ещё не настроен |
 
-Источник требований: [user-requirements.md](./user-requirements.md), [prd.md](./prd.md), [tech-spec.md](./tech-spec.md). Доказательства — пути в репозитории.
+## Что обязательно подтвердить на живой инфраструктуре
 
-## User requirements
+1. Доступ к VPS, объём памяти/диска и отсутствие конфликтов с существующими службами. В предыдущей проверке SSH из среды выполнения возвращал `Network is unreachable` для предоставленных серверов; актуальная доступность и серверная установка ещё не подтверждены.
+2. Однократная изолированная установка, публичный HTTPS-hostname без покупки домена, сертификат и проверка закрытого доступа извне.
+3. GitHub production secrets, первое обновление через CI/CD и rollback на самом VPS. Наличие workflow не означает выполненный деплой.
+4. Перенос исходной пользовательской SQLite в нужный профиль до начала нового сбора. Тестовые данные не заменяют историю.
+5. Реальные Twitch/DA/YouTube авторизации Руслана; Гульназ подключает свои аккаунты позже.
+6. Закрытый Supabase Storage bucket, серверный service key, отдельный ключ AES и его безопасная копия вне VPS. Живой upload/download/restore ещё не подтверждён.
+7. Длительный одновременный эфир Twitch+YouTube, перезапуск/обрыв сети/refresh, два браузера и обоих профиля. Автотесты с fixtures не заменяют этот прогон.
+8. Контроль роста данных: текущий backup ограничен SQLite 40 MiB и объектом 48 MiB; нужно расширить формат/потоковую обработку до превышения. Квоты и свободное место показывать и наблюдать в эксплуатации.
 
-| # | Требование | Статус | Evidence |
-| --- | --- | --- | --- |
-| U1 | Локальная аналитика людей (не разрозненные ники) | ✅ | `packages/core/src/store.ts` persons/identities/merge; UI `apps/web/src/People.svelte` |
-| U2 | Twitch + DonationAlerts обязательны | ⏳ | Адаптеры `apps/daemon/src/twitch.ts`, `donationalerts.ts`; живой OAuth — G1/G3 |
-| U3 | Streamer.bot заложить на будущее | ✅ stub / ❌ live | Stub `packages/core/src/streamerbot.ts`; полный `@streamerbot/client` — P3 |
-| U4 | Автоматч (same nick) + ручное merge/unmerge | ✅ / ❌ reject | Unique Twitch↔DA auto-link + merge/undo/split offline; **durable reject/owner rules — P1** |
-| U5 | Данные локально (SQLite) | ✅ | `packages/core/src/schema.ts`, `store.ts`; путь `apps/daemon/src/config.ts` `defaultDataDir` |
-| U6 | Бесплатный remote backup/sync | ✅ docs | Litestream docs `docs/ops/litestream.md`, `litestream.yml.example`; не обязателен для старта |
-| U7 | Windows + Linux | ⏳ | Один TS-код; CI Ubuntu+Windows; native Win11/Mint install — G5 |
-| U8 | Долгоживущий процесс / reconnect | ⏳ | Reconnect/backoff в twitch/DA; 8h soak — G6 |
-| U9 | Presence: кто/как долго/когда + минуты | ✅ honest | Chatters poll + grid `presence.ts`/`store.ts`; честный контракт PRD §2 (не canonical watch) |
-| U10 | UI аналитики (экраны v1) | ✅ MVP+ | Overview KPI/coverage/series + Insights popover; People KPI strip + tops (chat/donations/observed minutes) |
-| U11 | Вне скоупа: OBS-виджеты, SaaS, анонимы | ✅ | Не реализовано намеренно |
+Политика качества: минимум 90% строк, ветвлений и функций в суммарном backend + браузерном отчёте. До успешного Quality gate текущего commit изменения не вливаются в `dev`/`main`. Не использовать результаты старой ОС или другой версии Chromium как подтверждение текущего GitHub CI.
 
-## PRD functional (FR01–FR14)
-
-| ID | Поведение | Статус | Evidence |
-| --- | --- | --- | --- |
-| FR01 | Подключить Twitch | ⏳ | Device Code + scopes UI `Connections.svelte`; live owner DCF — G1 |
-| FR02 | Подключить DA | ⏳ | OAuth/token + dedupe WS/REST offline; live callback — G3 |
-| FR03 | История эфиров / stream ID | ⏳ | Session reconcile в `twitch.ts`; mid-stream live — G2 |
-| FR04 | Сбор чата и событий | ✅ / ⏳ | Normalized ingest + gaps offline; live EventSub — G1/G2 |
-| FR05 | Presence (полные страницы, не silent empty) | ✅ | `packages/core/src/chatters.ts`, poll status complete/partial/failed |
-| FR06 | Person / Identity (rename, DA не unique account) | ✅ | Identity by platform id; DA alert occurrence key — core tests |
-| FR07 | Автоматч unique Twitch↔DA + предложения при неоднозначности | ✅ | unique `matchKey` auto-link; `candidatePersons` for ambiguous; manual merge FR08 |
-| FR08 | Ручные merge/undo/split + ревизии | ✅ | `store.merge` / `undoMerge` / `splitIdentities`; E2E People |
-| FR09 | Донатная история / unknown TZ | ✅ / ⏳ | Unknown time quality; incremental backfill offline; live offset — G4 |
-| FR10 | Согласованные фильтры экранов | ✅ partial | Session/person filters; cursor pagination / currency filter — P1 |
-| FR11 | Сохранность после commit | ✅ | Worker + SQLite; disk errors → 503 |
-| FR12 | Backup / restore | ✅ local / ❌ cloud schedule | In-app snapshot + verify; Litestream optional docs; scheduler rotation — P1 |
-| FR13 | Локальная защита API | ✅ | Host/Origin/CSRF/nonce — `server.ts` + http tests |
-| FR14 | Фон / SIGTERM / sleep gap | ✅ / ⏳ | SIGTERM/IPC shutdown offline; sleep/network на целевой ОС — G5/G6 |
-
-## PRD screens & honesty
-
-| Экран / контракт | Статус | Evidence |
-| --- | --- | --- |
-| Подключения и диагностика | ✅ / ⏳ | `Connections.svelte` + `/status`; live scopes freshness — G1/G3 |
-| Сессии | ✅ | `/sessions`, start/stop manual |
-| Эфир / Overview | ✅ | `/summary` (+coverage/msgs/min/series), `/events`, Insights popover `/insights` |
-| Люди + карточка | ✅ | `/persons`, detail, aliases, `/persons/:id/stats`, tops `/persons/tops` |
-| Минутная сетка | ✅ | `/presence` observed/not_observed/unknown |
-| Сопоставления (кандидаты) | ✅ suggest / ❌ durable reject | GET candidates + merge; нет POST reject / owner rules |
-| Honesty table (не «все viewers») | ✅ | UI copy + PRD §2; bot disclaimer via filter |
-
-## Tech-spec modules
-
-| Модуль | Статус | Evidence |
-| --- | --- | --- |
-| Stack Node24 / pnpm / Svelte / SQLite | ✅ | `package.json`, `.node-version` |
-| Twitch EventSub + Helix chatters | ⏳ | `twitch.ts`; live — G1/G2 |
-| DA Centrifugo + REST | ⏳ | `donationalerts.ts`; live — G3/G4 |
-| Person matcher auto + manual | ✅ / ❌ P1 reject | `store.resolveAutoLinkPerson`, `ensureOwnerIdentity` |
-| Bot filter | ✅ | `packages/core/src/bots.ts` |
-| Query API localhost | ✅ | `apps/daemon/src/server.ts`, `docs/api-contract.md` |
-| Litestream path | ✅ docs | `docs/ops/litestream.md` |
-| Streamer.bot adapter | ✅ stub / ❌ P3 live | `streamerbot.ts` |
-| Secrets not in git | ✅ | `.gitignore`; `secrets.json` local only |
-| CI hermetic | ✅ | `.github/workflows/core.yml` |
-
-## Explicit deferred (not blocking live validation start)
-
-| Item | Why |
-| --- | --- |
-| Durable merge rejection + owner rules TTL | Schema/API/UI/coverage; P1 — tech-spec §16 |
-| Historical auto-merge of already-split persons | Deferred with auto-link slice |
-| Full Streamer.bot live client | P3; needs SB + duplicate suppression |
-| OS credential store, autostart | P1/P2 |
-| Installer Win `.exe` / Linux `.deb` | ✅ scripts+CI | `scripts/package-release.mjs`, `.github/workflows/release.yml`, [ops/packaging.md](./ops/packaging.md) — not yet signed/Store |
-| OBS widgets / other platforms / SaaS | Out of v1 |
-
-## Verdict for orchestrator
-
-Offline product surface for Twitch+DA analytics is ready for **manual live validation** (OAuth, soak, Win+Mint). Remaining holes are live gates G1–G8 and documented P1+ items — not offline blockers for starting that validation.
+Локальный gate от 2026-10-08 прошёл: 136 тестов приложения + 4 deploy tests; строки 98,97%, ветвления 90,45%, функции 95,12%. Настройки и состав аналитики: [analytics.md](analytics.md). Детали и ограничения: [validation.md](validation.md). Разрешение на условный релиз дано; необходим зелёный GitHub CI текущего SHA и подтверждение живых условий выше.
