@@ -9,6 +9,7 @@
     type PersonStats,
     type PersonTop,
   } from "./api";
+  import { formatDuration } from "./duration";
   import EventList from "./EventList.svelte";
   import Icon from "./Icon.svelte";
   let {
@@ -294,18 +295,12 @@
           </div>
           <div class="kpi">
             <span>Набл. минуты (сессия)</span><strong
-              >{stats.observedMinutesThisSession === null
-                ? "—"
-                : stats.observedMinutesThisSession.toLocaleString(
-                    "ru-RU",
-                  )}</strong
+              >{formatDuration(stats.observedMinutesThisSession)}</strong
             >
           </div>
           <div class="kpi">
             <span>Сред. набл. мин / сессия</span><strong
-              >{stats.avgObservedMinutes === null
-                ? "—"
-                : stats.avgObservedMinutes.toLocaleString("ru-RU")}</strong
+              >{formatDuration(stats.avgObservedMinutes)}</strong
             >
           </div>
           <div class="kpi">
