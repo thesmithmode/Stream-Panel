@@ -23,3 +23,4 @@
 - Wave Luna3: backup payload limit64MiB общий для seal/open, проверяется snapshot+metadata+framing после SQLite backup; сохранены AES/format/48MiB object limit. Regression exact-boundary roundtrip, over-limit, malformed key/header и cleanup при огромной metadata. Root лично проверил; отправляется в CI.
 - Schema6: отдельный profile-scoped platform_streams ledger, миграция сохраняет Twitch history/manual rows/FK; read APIs и legacy import обновлены. Root review и статические проверки прошли до следующей незавершённой задачи; запуск тестов только CI.
 - Длительности Person отображаются человекочитаемо с сохранением unknown; unit boundaries и E2E120min подготовлены, статические gates0errors. Полная lifetime attendance пока не реализована.
+- Помощь по присутствию открывается по клику, Escape/outside close и mobile viewport clamp; Root проверил cleanup и границы. E2E подготовлен, запуск только CI.

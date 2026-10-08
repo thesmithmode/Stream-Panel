@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
+  import Help from "./Help.svelte";
   import EventList from "./EventList.svelte";
   import { onMount } from "svelte";
   import {
@@ -242,7 +243,11 @@
           <p><strong>нет данных</strong></p>
           <p class="small muted">эфир не идёт — опросы присутствия появятся после начала стрима.</p>
         {:else}
-          <p>Наблюдение в чате не подтверждает просмотр видео.</p>
+          <Help
+            label="Подробнее о присутствии в чате"
+            text="Наблюдение в чате не подтверждает просмотр видео."
+            id="presence-chat-help"
+          />
         {/if}
       </div>
     </section>
