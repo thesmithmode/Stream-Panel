@@ -92,7 +92,6 @@
     ["youtube", "YouTube"],
     ["connections", "Интеграции"],
   ] as const;
-  const activeSession = $derived(sessions.find((s) => s.ended_at_ms === null));
   async function refresh() {
     const current = epoch;
     const query = sessionFilter ? `?session=${sessionFilter}` : "";
@@ -234,21 +233,6 @@
               onclick={() => switchMode("demo")}>Демо</button
             >
           </div>{/if}
-      {#if authorized && tab === "overview"}<button
-          class="outline record-button"
-          disabled={busy || activeSession?.kind === "platform"}
-          onclick={() =>
-            action(async () => {
-              const open = sessions.find((s) => s.ended_at_ms === null);
-              if (open) await api(`sessions/${open.id}/stop`, {});
-              else await api("sessions/start", {});
-            })}
-          ><Icon name="record" />{activeSession?.kind === "platform"
-            ? "Эфир идёт"
-            : activeSession
-              ? "Завершить запись"
-              : "Начать запись"}</button
-        >{/if}
       </div>
     </div>
     {#if loading}<div class="panel empty">
@@ -321,10 +305,7 @@
           {#if !sessions.length}<div class="empty">
               <Icon name="sessions" size={48} />
               <h3>Записей пока нет</h3>
-              <p>Сессия появится при начале эфира или ручной записи.</p>
-              <button class="primary" onclick={() => navigate("overview")}
-                >Перейти к записи</button
-              >
+              <p>Сессия появится автоматически при начале эфира.</p>
             </div>{:else}<div class="table-scroll">
               <table>
                 <thead

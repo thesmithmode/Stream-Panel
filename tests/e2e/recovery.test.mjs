@@ -27,25 +27,17 @@ test(
       await page
         .getByRole("button", { name: "Открыть интеграции", exact: true })
         .waitFor();
-      await a.db.call(
+      const sessionId = await a.db.call(
         "startSession",
-        "local",
+        "test-channel",
         "outside-ui",
         Date.now() - 600000,
-        "manual",
+        "platform",
         Date.now(),
       );
-      await page
-        .getByRole("button", { name: "Начать запись", exact: true })
-        .click();
-      await page
-        .getByRole("alert")
-        .filter({ hasText: "SESSION_ALREADY_OPEN" })
-        .waitFor();
+      assert.equal(await page.locator(".record-button").count(), 0);
+      assert.equal(await page.getByRole("button", { name: /запись/i }).count(), 0);
       await seed(a);
-      await page
-        .getByRole("button", { name: "Завершить запись", exact: true })
-        .waitFor();
       await a.db.stop();
       await page
         .getByRole("alert")
@@ -63,21 +55,23 @@ test(
       await reload(page);
       await page.getByText("Войдите в свой профиль", { exact: true }).waitFor();
       await goto(page, restarted.bootstrap());
-      await page
-        .getByRole("button", { name: "Завершить запись", exact: true })
-        .waitFor();
+      assert.equal(await page.locator(".record-button").count(), 0);
+      assert.equal(await page.getByRole("button", { name: /запись/i }).count(), 0);
       const summary = await page.evaluate(() =>
         fetch("/api/v1/summary").then((r) => r.json()),
       );
       assert.equal(summary.messages, 8);
       assert.equal(summary.donations, 1);
       assert.equal(summary.totals.RUB, "25000");
-      await page
-        .getByRole("button", { name: "Завершить запись", exact: true })
-        .click();
-      await page
-        .getByRole("button", { name: "Начать запись", exact: true })
-        .waitFor();
+      const sessions = await restarted.db.call("sessions");
+      const recoveredSession = sessions.find((session) => session.id === sessionId);
+      assert.ok(recoveredSession);
+      assert.equal(recoveredSession.ended_at_ms, null);
+      await restarted.db.call("endSession", recoveredSession.id, Date.now(), "observed");
+      assert.notEqual(
+        (await restarted.db.call("sessions")).find((session) => session.id === recoveredSession.id).ended_at_ms,
+        null,
+      );
       assert.deepEqual(errors, []);
       await saveCoverage(page);
       await context.close();
