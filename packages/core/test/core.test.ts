@@ -1140,6 +1140,9 @@ test("insights detectors surface first-timers, silent presence, donors without t
       sourceTime: "2011-03-13T07:06:40Z",
       payload: { amountMinor: "2500", currency: "RUB" },
     });
+    for (const name of ["jeetbot", "fullrandomname_twitch", "streamelements", "streemelements"]) {
+      store.ingest({...donation, externalId: `excluded-${name}`, actor: {externalId: daDonorExternalId(name), displayName: name}, occurredAtMs: 1_300_000_100_000, timeQuality: "configured", payload: {amountMinor: "100", currency: "RUB"}});
+    }
     // First-timer chatter
     store.ingest({
       ...base,
@@ -1154,6 +1157,7 @@ test("insights detectors surface first-timers, silent presence, donors without t
       kind: string;
       personId: string | null;
     }[];
+    assert.equal(cards.filter(c=>c.kind==="donor_no_twitch").length,1);
     const kinds = new Set(cards.map((c) => c.kind));
     assert.ok(kinds.has("silent_presence"));
     assert.ok(kinds.has("donor_no_twitch"));

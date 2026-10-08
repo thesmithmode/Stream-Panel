@@ -2012,10 +2012,10 @@ export class StreamStore {
          WHERE EXISTS(
            SELECT 1 FROM events e
            JOIN identities i ON i.id = e.identity_id
-           WHERE i.person_id = p.id AND e.type = 'donation' AND ${inSession}
+           WHERE i.person_id = p.id AND e.type = 'donation' AND ${inSession} AND ${this.notBotClause("i")}
          )`,
       )
-      .all(sid) as {
+      .all(sid, botJson) as {
       id: string;
       display_name: string;
       has_twitch: number;

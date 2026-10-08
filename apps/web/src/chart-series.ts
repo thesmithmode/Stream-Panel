@@ -10,9 +10,10 @@ export interface ChartPoint {
   regularEstimated?: number;
   regularMessages?: number;
 }
-export function chartSeries(points: ChartPoint[], metric: ChartMetric) {
+export function chartSeries(points: ChartPoint[], metric: ChartMetric, resolutionMinutes = 0) {
   if (!points.length) return [];
-  const width = Math.max(60000, Math.ceil((points.at(-1)!.at - points[0]!.at + 60000) / 240 / 60000) * 60000);
+  const requested = Number.isFinite(resolutionMinutes) && resolutionMinutes > 0 ? resolutionMinutes : 0;
+  const width = Math.max(60000, requested * 60000, Math.ceil((points.at(-1)!.at - points[0]!.at + 60000) / (requested ? 600 : 240) / 60000) * 60000);
   const regularKey = {observed: 'regularObserved', estimated: 'regularEstimated', messages: 'regularMessages', viewers: null}[metric] as keyof ChartPoint | null;
   const map = new Map<number, {at: number; total: number; regular: number; n: number}>();
   for (const point of points) {

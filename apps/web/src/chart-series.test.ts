@@ -25,3 +25,14 @@ test('YouTube estimate segments remain bounded by the total and tolerate legacy 
  assert.equal(chartSeries([{at:0,estimated:4,regularEstimated:-2}],'estimated')[0]?.regularValue,0);
  assert.equal(chartSeries([{at:0,estimated:4}],'estimated')[0]?.regularValue,0);
 });
+
+ test('requested chart resolution aggregates accurately and caps long periods',()=>{
+ const points=[{at:0,messages:2,regularMessages:1},{at:60000,messages:3,regularMessages:2}];
+ assert.equal(chartSeries(points,'messages',5)[0]?.width,300000);
+ assert.equal(chartSeries(points,'messages',5)[0]?.value,5);
+ assert.equal(chartSeries(points,'messages',5)[0]?.regularValue,3);
+ assert.equal(chartSeries(points,'messages',1).length,2);
+ const long=Array.from({length:129600},(_,i)=>({at:i*60000,messages:1}));
+ assert.ok(chartSeries(long,'messages',1).length<=601);
+ assert.equal(chartSeries(points,'messages',NaN)[0]?.width,60000);
+ });
