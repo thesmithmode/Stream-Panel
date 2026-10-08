@@ -215,3 +215,21 @@ test('asynchronous YouTube counts retain their actual sample minute rather than 
   assert.equal(s.analytics({...opts,source:'youtube'}).timeline.find(x=>x.at===base+4*minute)?.viewers,null);
  }finally{s.close();}
 });
+
+test('unnamed categories and YouTube authors stay readable, while chat outside recorded streams is excluded',()=>{
+ const s=new StreamStore(':memory:');
+ try {
+  const sid=s.startSession('channel','unnamed',base,'platform',base);
+  s.streamSample(sid,base,'game','','',null);
+  s.streamSample(sid,base+minute,'talk','','',null);
+  s.streamSample(sid,base+3*minute,'future','Future','',null);
+  s.endSession(sid,base+4*minute,'observed');
+  s.youtubeMessages('yt-owner','chat',[{id:'unnamed',snippet:{type:'textMessageEvent',publishedAt:new Date(base+minute).toISOString()},authorDetails:{channelId:'unnamed-author'}},{id:'outside',snippet:{type:'textMessageEvent',publishedAt:new Date(base+10*minute).toISOString()},authorDetails:{channelId:'outside-author'}}]);
+  const result=s.analytics({...opts,toMs:base+2*minute});
+  assert.equal(result.audience[0]?.name,'unnamed-author');
+  assert.ok(result.categories.every(c=>c.name==='Категория неизвестна'));
+  assert.equal(s.analytics({...opts,fromMs:base+minute/2,toMs:base+2*minute}).categories[0]?.name,'Категория неизвестна');
+  assert.equal(s.analytics(opts).audience.some(e=>e.id==='youtube:outside-author'),false);
+  assert.deepEqual(unionSpans([{from:base,to:base+minute,session:sid,kind:'observed'},{from:base,to:base+2*minute,session:sid,kind:'observed'}]),[{from:base,to:base+2*minute,session:sid,kind:'observed'}]);
+ } finally {s.close();}
+});

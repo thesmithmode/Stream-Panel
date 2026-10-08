@@ -64,7 +64,7 @@ test('YouTube cancellation at OAuth, refresh, channel, broadcast, messages and r
   const config={value:{youtubeClientId:'id',youtubeClientSecret:'secret',youtube:{access:'old',refresh:'r',userId:'channel',scopes:scopes.split(' '),expiresAt:phase==='refresh'?0:Date.now()+3600000}},save:async()=>{}} as unknown as Configuration;
   const data={snapshots:{channel:{updatedAt:phase==='channel'?0:Date.now()},report:{updatedAt:phase==='report'?0:Date.now()}},messages:[]};
   const db={call:async(method:string,...args:any[])=>{if(method==='youtubeQuota')return true;if(method==='youtubeData')return data;writes.push([method,...args]);return null;}} as unknown as StoreClient;
-  const request:typeof fetch=async(input,init)=>{
+  const request:typeof fetch=async(input)=>{
    const path=new URL(String(input)).pathname;
    const delayed=phase==='oauth-token'&&path==='/token'||phase==='oauth-channel'&&path.endsWith('/channels')||phase==='refresh'&&path==='/token'||phase==='channel'&&path.endsWith('/channels')||phase==='broadcast'&&path.endsWith('/liveBroadcasts')||phase==='videos'&&path.endsWith('/videos')||phase==='messages'&&path.endsWith('/messages')||phase==='report'&&path.endsWith('/reports');
    const response=path==='/token'?{access_token:'fresh',refresh_token:'fresh-refresh',scope:scopes,expires_in:3600}:path.endsWith('/channels')?{items:[{id:'channel'}]}:path.endsWith('/liveBroadcasts')?{items:[{id:'live',snippet:{channelId:'channel',liveChatId:'chat'}}]}:path.endsWith('/messages')?{items:[{id:'stale'}],nextPageToken:'stale-cursor'}:{};
@@ -120,4 +120,17 @@ test('disconnect while loading persisted cursors cannot issue requests or append
  const yt=new YouTubeConnection(config,db,'https://panel.test/oauth/youtube/callback','ruslan',request,()=>now);
  const collecting=yt.collectOnce();await gate;await yt.disconnect();resolveRead({snapshots:{}});await collecting;
  assert.equal(requests,0);assert.equal(yt.status.state,'disconnected');assert.equal(config.value.youtube,undefined);
+});
+
+test('incomplete legacy credentials fail safely during refresh without issuing an unauthenticated data request',async()=>{
+ const now=Date.now(),config={value:{youtube:{access:'old',refresh:'r',userId:'channel',scopes:[],expiresAt:0}},save:async()=>{}} as unknown as Configuration;
+ const db={call:async()=>{assert.fail('no data access after rejected refresh');}} as unknown as StoreClient;
+ const request:typeof fetch=async(input,init)=>{
+  assert.equal(new URL(String(input)).pathname,'/token');const body=new URLSearchParams(String(init?.body));
+  assert.equal(body.get('client_id'),'');assert.equal(body.get('client_secret'),'');
+  return Response.json({error:'invalid_client'},{status:400});
+ };
+ const yt=new YouTubeConnection(config,db,'https://panel.test/oauth/youtube/callback','ruslan',request,()=>now);
+ try {await assert.rejects(yt.collectOnce(),/YOUTUBE_REQUEST_FAILED/);assert.equal(config.value.youtube?.access,'old');}
+ finally {await yt.stop();}
 });

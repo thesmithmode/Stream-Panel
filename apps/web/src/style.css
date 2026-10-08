@@ -204,6 +204,7 @@ main {
 }
 .page-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 22px;
@@ -310,6 +311,7 @@ main {
   overflow-x: clip;
 }
 .panel > header {
+  flex-wrap: wrap;
   padding: 21px 23px;
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -1273,11 +1275,6 @@ select:-webkit-autofill {
   box-shadow: 0 0 0 1000px #0d1016 inset;
   transition: background-color 99999s ease-out;
 }
-.insights-metric,
-.secondary-metrics,
-.metrics {
-  overflow: visible;
-}
 .actions button,
 .inline button {
   max-width: 100%;
@@ -1351,3 +1348,9 @@ td {
 
 .analytics-controls input[type="checkbox"]{width:16px;flex:0 0 16px}.analytics-controls label.check{flex:0 1 auto;min-width:180px}
 @media(max-width:720px){.sidebar nav{flex-wrap:wrap;justify-content:flex-start}.sidebar nav button{flex:1 1 28%;min-width:90px;white-space:normal}}
+
+.page-heading > div { min-width: 0; max-width: 100%; }
+.panel > header > label { display: grid; gap: 8px; min-width: 0; max-width: 100%; }
+@media (max-width: 1100px) {
+  .mode-toggle button { width: auto; }
+}

@@ -6,10 +6,11 @@ import {join} from 'node:path';
 import net from 'node:net';
 import {AccountStore} from '../../dist/apps/daemon/src/auth.js';
 import {createHostedApplication} from '../../dist/apps/daemon/src/hosted.js';
+import {assertUiLayout} from '../helpers/ui-layout.mjs';
 import {launchBrowser} from '../helpers/browser.mjs';
 import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';
 const minute=60000;
-test('analytics browser shows core, categories, scoped accounts, minute evidence, configurable thresholds, filters and responsive charts',{timeout:45000},async()=>{
+test('analytics browser shows core, categories, scoped accounts, minute evidence, configurable thresholds, filters and responsive charts',{timeout:90000},async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-analytics-ui-'));
  const port=await new Promise(resolve=>{const s=net.createServer();s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p));});});
  const origin=`http://127.0.0.1:${port}`,accounts=new AccountStore(join(dir,'data.sqlite'));
@@ -39,6 +40,17 @@ test('analytics browser shows core, categories, scoped accounts, minute evidence
    await goto(page,origin);await page.getByLabel('Логин',{exact:true}).fill(profile);await page.getByLabel('Пароль',{exact:true}).fill(`${profile}-analytics-password`);await page.getByRole('button',{name:'Войти',exact:true}).click();
    await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).waitFor();await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
    for(const name of ['RenamedOwner','jeetbot','fullrandomname_twitch','streemelements',`Regular ${profile==='ruslan'?'gulnaz':'ruslan'}`])assert.equal(await page.getByRole('button',{name,exact:true}).count(),0);
+   if(profile==='ruslan'){
+    for(const width of [320,390,768,1280,1440]){
+     await page.setViewportSize({width,height:900});
+     for(const tab of ['Обзор','Сессии','Люди','Аналитика','YouTube','Интеграции']){
+      await page.getByRole('button',{name:tab,exact:true}).click();await page.locator('main h1').waitFor();
+      if(tab==='Аналитика')await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
+      await assertUiLayout(page);
+     }
+    }
+    await page.setViewportSize({width:1280,height:800});await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
+   }
    await page.getByLabel('Только ядро').check();await page.getByLabel('Поиск участника').fill('Regular');await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).click();
    await page.getByRole('heading',{name:`Активность: Regular ${profile}`}).waitFor();assert.equal(await page.locator('.minute-dot').count(),1440);await page.getByRole('button',{name:'Закрыть детализацию'}).click();
    await page.getByLabel('Поиск участника').fill('');await page.getByLabel('Только ядро').uncheck();

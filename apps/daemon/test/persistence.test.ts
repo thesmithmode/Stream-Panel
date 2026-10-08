@@ -103,3 +103,16 @@ test("uncloneable worker arguments never consume queue capacity", async () => {
     await db.stop();
   }
 });
+
+test('legacy configuration preserves saved YouTube history and restores required exclusions from a malformed optional bot list',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-legacy-config-'));
+ try {
+  const path=join(dir,'secrets.json');
+  await writeFile(path,JSON.stringify({version:1,youtubeAccountId:'history-owner',excludedBotLogins:'wrong-type'}));
+  const config=new Configuration(dir);await config.load();
+  assert.equal(config.value.youtubeAccountId,'history-owner');
+  assert.deepEqual(config.value.excludedBotLogins,['fullrandomname_twitch','jeetbot','streemelements','streamelements']);
+  await writeFile(path,JSON.stringify({version:1,youtube:{userId:'connected-owner'}}));await config.load();
+  assert.equal(config.value.youtubeAccountId,'connected-owner');
+ } finally {await rm(dir,{recursive:true,force:true});}
+});

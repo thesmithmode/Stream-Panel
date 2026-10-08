@@ -2,7 +2,7 @@ import Fastify, { type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
 import staticFiles from "@fastify/static";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { mkdir, rename, unlink } from "node:fs/promises";
+import { mkdir, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StoreClient } from "./db.js";
@@ -55,7 +55,7 @@ export async function createApplication(
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
   });
   await app.register(cookie);
-  app.setErrorHandler((error, request, reply) => {
+  app.setErrorHandler((error, _request, reply) => {
     const code = error instanceof Error ? error.message : "INTERNAL_ERROR";
     const detail = error as { code?: string; statusCode?: number };
     const storage = /^(EIO|ENOSPC|EROFS|EACCES|EEXIST|ENOTDIR|ENOENT)$/.test(

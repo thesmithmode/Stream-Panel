@@ -34,10 +34,10 @@
   function preset(days:number){from=localInput(Date.now()-days*86400000);to=localInput(Date.now());void refresh();}
   async function refresh(){
     const id=++requestId;busy=true;error="";
-    const filter={fromMs:new Date(from).getTime(),toMs:new Date(to).getTime(),source,category,minSessions,minMinutes,minMessages,coreRule,chatWindowMinutes,timezone};
+    const fromMs=new Date(from).getTime(),toMs=new Date(to).getTime();
     try{
       try {localStorage.setItem(`sp-analytics-${profile}`,JSON.stringify({minSessions,minMinutes,minMessages,coreRule,chatWindowMinutes,timezone}));}catch{/* optional local preferences */}
-      const q=new URLSearchParams({from:String(filter.fromMs),to:String(filter.toMs),source,category,minSessions:String(minSessions),minMinutes:String(minMinutes),minMessages:String(minMessages),coreRule,chatWindowMinutes:String(chatWindowMinutes),timezone});
+      const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,minSessions:String(minSessions),minMinutes:String(minMinutes),minMessages:String(minMessages),coreRule,chatWindowMinutes:String(chatWindowMinutes),timezone});
       const result=await api(`analytics?${q}`);
       if(id===requestId){data=result;selected=null;}
     }catch(e){if(id===requestId){error=(e as Error).message;data=null;selected=null;}}
