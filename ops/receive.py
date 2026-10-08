@@ -1,12 +1,13 @@
 #!/usr/bin/python3
 """Root-owned, argument-free forced-command receiver. Never executes uploaded code as root."""
-import fcntl, hashlib, json, os, pathlib, pwd, re, shutil, sqlite3, subprocess, sys, tarfile, tempfile, time, urllib.request
+import fcntl, hashlib, ipaddress, json, os, pathlib, pwd, re, shutil, sqlite3, subprocess, sys, tarfile, tempfile, time, urllib.request
 BASE = pathlib.Path('/opt/stream-panel')
 DATA = pathlib.Path('/var/lib/stream-panel')
 STATE = pathlib.Path('/var/lib/stream-panel-deploy')
 SERVICE = 'stream-panel.service'
 MAX_ARCHIVE = 100 * 1024 * 1024
 MAX_EXPANDED = 450 * 1024 * 1024
+BIND_HOST_FILE = pathlib.Path('/etc/stream-panel/bind-host')
 
 def unpack(archive, destination):
     if not hasattr(tarfile, 'data_filter'):
@@ -37,8 +38,28 @@ def atomic_link(target):
 
 def health(origin, release):
     from urllib.parse import urlparse
+    try:
+        raw_host = BIND_HOST_FILE.read_bytes()
+        if len(raw_host) > 15:
+            raise RuntimeError('Invalid configured health host')
+        configured = raw_host.decode('ascii')
+    except FileNotFoundError:
+        configured = '127.0.0.1'
+    except (OSError, UnicodeDecodeError) as error:
+        raise RuntimeError('Invalid configured health host') from error
+    if not configured or '\n' in configured or '\r' in configured:
+        raise RuntimeError('Invalid configured health host')
+    try:
+        address = ipaddress.ip_address(configured)
+    except ValueError as error:
+        raise RuntimeError('Invalid configured health host') from error
+    allowed = address.is_loopback or any(address in ipaddress.ip_network(network) for network in (
+        '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16',
+    ))
+    if not isinstance(address, ipaddress.IPv4Address) or not allowed or str(address) != configured:
+        raise RuntimeError('Invalid configured health host')
     host = urlparse(origin).netloc
-    request = urllib.request.Request('http://127.0.0.1:47831/healthz', headers={'Host':host})
+    request = urllib.request.Request(f'http://{address}:47831/healthz', headers={'Host':host})
     for _ in range(30):
         try:
             with urllib.request.urlopen(request, timeout=2) as response:

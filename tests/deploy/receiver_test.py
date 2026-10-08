@@ -3,6 +3,34 @@ from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('receiver',pathlib.Path(__file__).resolve().parents[2]/'ops/receive.py')
 r=importlib.util.module_from_spec(spec);spec.loader.exec_module(r)
 class ReceiverTests(unittest.TestCase):
+ def test_health_defaults_to_loopback_when_bind_host_file_is_absent(self):
+  with tempfile.TemporaryDirectory() as folder:
+   missing=pathlib.Path(folder)/'bind-host';requests=[]
+   def healthy(request,timeout):
+    requests.append(request)
+    return io.BytesIO(b'{"ok":true,"release":"release"}')
+   with patch.object(r,'BIND_HOST_FILE',missing),patch.object(r.urllib.request,'urlopen',side_effect=healthy):
+    self.assertTrue(r.health('https://panel.example.test','release'))
+   self.assertEqual(requests[0].full_url,'http://127.0.0.1:47831/healthz')
+   self.assertEqual(requests[0].get_header('Host'),'panel.example.test')
+ def test_health_uses_validated_bridge_host_and_preserves_public_host_header(self):
+  with tempfile.TemporaryDirectory() as folder:
+   bind_host=pathlib.Path(folder)/'bind-host';bind_host.write_text('172.21.0.1');requests=[]
+   def healthy(request,timeout):
+    requests.append(request)
+    return io.BytesIO(b'{"ok":true,"release":"release"}')
+   with patch.object(r,'BIND_HOST_FILE',bind_host),patch.object(r.urllib.request,'urlopen',side_effect=healthy):
+    self.assertTrue(r.health('https://panel.example.test','release'))
+   self.assertEqual(requests[0].full_url,'http://172.21.0.1:47831/healthz')
+   self.assertEqual(requests[0].get_header('Host'),'panel.example.test')
+ def test_health_rejects_untrusted_or_multiline_bind_host_before_request(self):
+  with tempfile.TemporaryDirectory() as folder:
+   bind_host=pathlib.Path(folder)/'bind-host'
+   for value in ['0.0.0.0','8.8.8.8','invalid','172.21.0.1\n127.0.0.1','172.21.0.1\n']:
+    bind_host.write_text(value)
+    with patch.object(r,'BIND_HOST_FILE',bind_host),patch.object(r.urllib.request,'urlopen',side_effect=AssertionError('request must not be made')):
+     with self.assertRaisesRegex(RuntimeError,'Invalid configured health host'):
+      r.health('https://panel.example.test','release')
  def test_archive_rejects_escape_links_devices_and_oversize(self):
   with tempfile.TemporaryDirectory() as folder:
    root=pathlib.Path(folder)
