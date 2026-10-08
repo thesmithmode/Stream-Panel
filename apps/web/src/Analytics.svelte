@@ -7,11 +7,18 @@
   let view=$state(analyticsView(null));
   const localInput=(at:number)=>{const d=new Date(at);return new Date(at-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
   let from=$state(localInput(Date.now()-30*86400000)),to=$state(localInput(Date.now())),source=$state("all"),category=$state("");
-  let regularThresholdPercent=$state(50);
-  let minSessions=$state(3),minMinutes=$state(30),minMessages=$state(5),coreRule=$state("either"),chatWindowMinutes=$state(5),timezone=$state("Europe/Moscow");
+  let timezone=$state("Europe/Moscow");
   let search=$state(""),autoRefresh=$state(false),data=$state<any>(null),error=$state(""),busy=$state(false),selected=$state<any>(null),day=$state("");
   let requestId=0, mounted=$state(false);
-  $effect(()=>{mode;if(mounted)untrack(()=>void refresh());});
+  $effect(()=>{
+    const filters=[mounted,mode,from,to,source,category,timezone].join("|");
+    void filters;
+    if(!mounted)return;
+    busy=true;error="";selected=null;
+    let cancelled=false;
+    const timer=window.setTimeout(()=>{if(!cancelled)untrack(()=>void refresh());},250);
+    return ()=>{cancelled=true;window.clearTimeout(timer);requestId++;};
+  });
   $effect(()=>{const saved=JSON.stringify(view);if(mounted){try{localStorage.setItem(`sp-analytics-view-${profile}`,saved);}catch{/* optional preferences */}}});
   const visible=$derived((data?.audience??[]).filter((e:any)=>(!view.coreOnly||e.core)&&(!view.regularOnly||e.regular)&&e.name.toLowerCase().includes(search.toLowerCase())).sort((a:any,b:any)=>view.sort==="sessions"?b.sessionIds.length-a.sessionIds.length:(b[view.sort]??0)-(a[view.sort]??0)));
   const weekdays=["пн","вт","ср","чт","пт","сб","вс"];
@@ -35,43 +42,35 @@
     });
   });
   function selectEntity(e:any){selected=e;day=localInput(e.intervals.at(-1)?.from??new Date(to).getTime()).slice(0,10);}
-  function preset(days:number){from=localInput(Date.now()-days*86400000);to=localInput(Date.now());void refresh();}
+  function preset(days:number){from=localInput(Date.now()-days*86400000);to=localInput(Date.now());}
   async function refresh(){
     const id=++requestId;busy=true;error="";
     const fromMs=new Date(from).getTime(),toMs=new Date(to).getTime();
     try{
-      try {localStorage.setItem(`sp-analytics-${profile}`,JSON.stringify({regularThresholdPercent,minSessions,minMinutes,minMessages,coreRule,chatWindowMinutes,timezone}));}catch{/* optional local preferences */}
-      const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,regularThresholdPercent:String(regularThresholdPercent),minSessions:String(minSessions),minMinutes:String(minMinutes),minMessages:String(minMessages),coreRule,chatWindowMinutes:String(chatWindowMinutes),timezone});
+      try {localStorage.setItem(`sp-analytics-${profile}`,JSON.stringify({timezone}));}catch{/* optional local preferences */}
+      const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,timezone});
       const result=await api(`analytics?${q}`);
       if(id===requestId){data=result;selected=null;}
     }catch(e){if(id===requestId){error=(e as Error).message;data=null;selected=null;}}
     finally{if(id===requestId)busy=false;}
   }
   onMount(()=>{
-    try{const saved=JSON.parse(localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved){regularThresholdPercent=saved.regularThresholdPercent??50;minSessions=saved.minSessions??3;minMinutes=saved.minMinutes??30;minMessages=saved.minMessages??5;coreRule=saved.coreRule??"either";chatWindowMinutes=saved.chatWindowMinutes??5;timezone=saved.timezone??"Europe/Moscow";}}catch{/* private browser may deny storage */}
+    try{const saved=JSON.parse(localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved?.timezone)timezone=saved.timezone;}catch{/* private browser may deny storage */}
     try{view=analyticsView(JSON.parse(localStorage.getItem(`sp-analytics-view-${profile}`)??"null"));}catch{/* storage is optional */}
-    mounted=true;const timer=setInterval(()=>{if(autoRefresh&&!busy&&!selected){to=localInput(Date.now());void refresh();}},60000);return ()=>{requestId++;clearInterval(timer);};
+    mounted=true;const timer=setInterval(()=>{if(autoRefresh&&!busy&&!selected)to=localInput(Date.now());},60000);return ()=>{requestId++;clearInterval(timer);};
   });
 </script>
 <section class="panel analytics-filter">
   <header><h2>Настройки аналитики</h2><div class="actions"><button class="outline small" onclick={()=>preset(7)}>7 дней</button><button class="outline small" onclick={()=>preset(30)}>30 дней</button><button class="outline small" onclick={()=>preset(90)}>90 дней</button></div></header>
-  <form class="analytics-controls" onsubmit={(e)=>{e.preventDefault();void refresh();}}>
+  <div class="analytics-controls">
     <label>Начало периода<input type="datetime-local" bind:value={from} required /></label>
     <label>Конец периода<input type="datetime-local" bind:value={to} required /></label>
     <label>Площадка<select bind:value={source}><option value="all">Все площадки</option><option value="twitch">Twitch / DA</option><option value="youtube">YouTube</option></select></label>
     <label>Категория Twitch<select bind:value={category}><option value="">Все категории</option>{#each categoryOptions.filter((c:any)=>c.id) as c}<option value={c.id}>{c.name}</option>{/each}</select></label>
     <label>Часовой пояс сравнения<select bind:value={timezone}><option value="Europe/Moscow">Москва</option><option value="UTC">UTC</option><option value="Asia/Yekaterinburg">Екатеринбург</option></select></label>
-    <label>Порог постоянника, % посещений<input type="number" min="0" max="100" step="1" bind:value={regularThresholdPercent} required /></label>
-    <details class="analytics-thresholds"><summary>Как определять ядро аудитории</summary><div class="analytics-controls">
-      <label>Минимум эфиров<input type="number" min="1" max="1000" bind:value={minSessions} /></label>
-      <label>Минимум минут активности<input type="number" min="0" max="129600" bind:value={minMinutes} /></label>
-      <label>Минимум сообщений<input type="number" min="0" max="1000000" bind:value={minMessages} /></label>
-      <label>Правило ядра<select bind:value={coreRule}><option value="either">Часто + долго или много сообщений</option><option value="both">Часто + долго + много сообщений</option><option value="frequency">Только частота возвращений</option></select></label>
-      <label>Окно активности YouTube, мин<input type="number" min="1" max="30" bind:value={chatWindowMinutes} /></label>
-    </div></details>
     <label class="check"><input type="checkbox" bind:checked={autoRefresh} /> Обновлять каждую минуту</label>
-    <button class="primary" type="submit" disabled={busy}>{busy?"Считаем…":"Применить"}</button>
-  </form>
+    <span class="small muted" role="status">{busy?"Обновляем аналитику…":""}</span>
+  </div>
   <details class="analytics-thresholds"><summary>Настроить отображение</summary><div class="analytics-controls">
     <label>Детализация графика<select bind:value={view.resolution}><option value={0}>Автоматически</option><option value={1}>Минута</option><option value={5}>5 минут</option><option value={15}>15 минут</option><option value={60}>Час</option><option value={1440}>День</option></select></label>
     <label>Вид дней и часов<select bind:value={view.hourView}><option value="both">Карта и таблица</option><option value="map">Только карта</option><option value="table">Только таблица</option></select></label>
@@ -84,18 +83,18 @@
     <label class="check"><input type="checkbox" bind:checked={view.audience} /> Таблица аудитории</label>
     <button class="outline" onclick={()=>view=analyticsView(null)}>Сбросить отображение</button>
   </div><p class="small muted">Вид сохраняется в этом браузере отдельно для каждого профиля. Скрытые блоки не меняют сбор и расчёт данных.</p></details>
-  <p class="small muted">Даты — в часовом поясе браузера. Ядро требует заданного числа эфиров и выбранного правила. Владельцы каналов и боты исключены из персональных расчётов; исходные события сохранены.</p>
+  <p class="small muted">Даты — в часовом поясе браузера. Ядро аудитории учитывает повторные эфиры и активность в чате. Владельцы каналов и боты исключены из персональных расчётов; исходные события сохранены.</p>
 </section>
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 {#if data}
   <section class="metrics">
     <div class="metric"><div><span>Профили аудитории</span><strong>{data.summary.entities}</strong><small>Аккаунты YouTube отдельно от людей Twitch/DA</small></div></div>
-    <div class="metric"><div><span>Ядро аудитории</span><strong>{data.summary.core}</strong><small>По выбранным порогам</small></div></div>
+    <div class="metric"><div><span>Ядро аудитории</span><strong>{data.summary.core}</strong><small>Повторные эфиры и активность в чате</small></div></div>
     <div class="metric"><div><span>Эфиры / сообщения</span><strong>{data.summary.streams} / {data.summary.messages}</strong></div></div>
   </section>
   {#if view.report&&data.youtubeReport}<section class="panel"><header><h2>Агрегатный отчёт YouTube: все видео канала</h2></header><p class="small muted">Период отчёта платформы: {data.youtubeReport.data.start} — {data.youtubeReport.data.end}; обновлён {date(data.youtubeReport.updatedAt)}. Данные с задержкой, охватывают весь канал и не фильтруются по категории Twitch. Это минуты просмотра из YouTube Analytics; персональные исключения к этому агрегату неприменимы.</p><div class="table-wrap"><table class="analytics-table"><thead><tr>{#each data.youtubeReport.data.columnHeaders??[] as column}<th>{({day:"Дата",views:"Просмотры",estimatedMinutesWatched:"Минуты просмотра",subscribersGained:"Новые подписчики",subscribersLost:"Отписки"} as Record<string,string>)[column.name]??column.name}</th>{/each}</tr></thead><tbody>{#each data.youtubeReport.data.rows??[] as row}<tr>{#each row as value}<td>{value}</td>{/each}</tr>{/each}</tbody></table></div></section>{/if}
   {#if view.trend}<section class="panel analytics-chart"><header><h2>Активность по времени</h2><label>Метрика графика<select bind:value={view.metric}><option value="observed">Наблюдаемые участники Twitch</option><option value="estimated">Оценка активности YouTube</option><option value="messages">Сообщения</option><option value="viewers">Счётчик зрителей площадки</option></select></label></header>
-    <p class="small regular-summary">Постоянники: <strong>{data.summary.regulars??0} из {data.summary.attendees??0} ({data.summary.regularShare==null?"нет данных":(data.summary.regularShare*100).toFixed(1)+"%"})</strong>. Посещают больше {data.filters?.regularThresholdPercent??regularThresholdPercent}% записанных эфиров выбранного периода и категории по наблюдениям или сообщениям. Донат сам по себе посещение не подтверждает.</p>
+    <p class="small regular-summary">Постоянники: <strong>{data.summary.regulars??0} из {data.summary.attendees??0} ({data.summary.regularShare==null?"нет данных":(data.summary.regularShare*100).toFixed(1)+"%"})</strong>. Посещают больше {data.filters?.regularThresholdPercent??50}% записанных эфиров выбранного периода и категории по наблюдениям или сообщениям. Донат сам по себе посещение не подтверждает.</p>
     <TrendChart points={data.timeline} metric={view.metric} resolution={view.resolution} showRegulars={view.showRegulars} />
     <p class="small muted">Twitch — присутствие в опросах чата. YouTube — окно после сообщения, оценка, а не время просмотра. Серые отметки — неизвестные данные. Счётчик площадки агрегатный, персональные исключения к нему неприменимы.</p>
   </section>
@@ -107,10 +106,10 @@
       <div class="heatmap-labels"><span></span>{#each Array.from({length:24},(_,i)=>i) as hour}<span>{hour}</span>{/each}</div>
       {#each weekdays as weekday}<div class="heatmap-row"><strong>{weekday}</strong>{#each Array.from({length:24},(_,i)=>i) as hour}<span title={hourTitle(weekday,hour)} style:background={heatValue(hourCells.get(`${weekday}:${hour}`))!==null?`rgba(95,196,170,${.15+.85*(heatValue(hourCells.get(`${weekday}:${hour}`))??0)/hourMax})`:"#3b4350"}></span>{/each}</div>{/each}
     </div>{/if}<p class="small muted">Яркость соответствует выбранной метрике. Наблюдения Twitch усредняются по минутам с полными опросами; оценка YouTube и сообщения — по записанным минутам эфира. Серый — нет данных.</p>{#if view.hourView!=="map"}<div class="table-wrap"><table class="analytics-table"><thead><tr><th>День / час ({timezone})</th><th>Выбранная метрика</th><th>Сообщения</th><th>Минут с опросами</th></tr></thead><tbody>{#each data.hours as h}<tr><td>{h.day} · {h.hour}:00</td><td>{heatValue(h)===null?"нет данных":heatValue(h)!.toFixed(1)}</td><td>{h.messages}</td><td>{h.observedKnownMinutes}</td></tr>{/each}</tbody></table></div>{/if}</section>{/if}
-  {#if view.streams&&data.streamComparison?.length}<section class="panel"><header><h2>Возвращения по эфирам</h2></header><div class="table-wrap"><table class="analytics-table"><thead><tr><th>Эфир</th><th>Категории</th><th>Аудитория</th><th>Ядро</th><th>Вернулись / впервые в периоде</th><th>Сообщения</th></tr></thead><tbody>{#each data.streamComparison as stream}<tr><td><button class="text-button" onclick={()=>{from=localInput(stream.startedAt);to=localInput(stream.endedAt);void refresh();}}>{date(stream.startedAt)}</button></td><td>{stream.categories.join(" → ")}</td><td>{stream.audience}</td><td>{stream.core}</td><td>{stream.returning} / {stream.newInPeriod}</td><td>{stream.messages}</td></tr>{/each}</tbody></table></div><p class="small muted">Возвращения считаются по аккаунтам среди более ранних эфиров в выбранном периоде. Нажмите дату, чтобы рассмотреть один эфир.</p></section>{/if}
+  {#if view.streams&&data.streamComparison?.length}<section class="panel"><header><h2>Возвращения по эфирам</h2></header><div class="table-wrap"><table class="analytics-table"><thead><tr><th>Эфир</th><th>Категории</th><th>Аудитория</th><th>Ядро</th><th>Вернулись / впервые в периоде</th><th>Сообщения</th></tr></thead><tbody>{#each data.streamComparison as stream}<tr><td><button class="text-button" onclick={()=>{from=localInput(stream.startedAt);to=localInput(stream.endedAt);}}>{date(stream.startedAt)}</button></td><td>{stream.categories.join(" → ")}</td><td>{stream.audience}</td><td>{stream.core}</td><td>{stream.returning} / {stream.newInPeriod}</td><td>{stream.messages}</td></tr>{/each}</tbody></table></div><p class="small muted">Возвращения считаются по аккаунтам среди более ранних эфиров в выбранном периоде. Нажмите дату, чтобы рассмотреть один эфир.</p></section>{/if}
   {#if view.audience}<section class="panel"><header><h2>Состав аудитории</h2><span>{visible.length} профилей</span></header>
     <div class="analytics-controls"><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label>Сортировка<select bind:value={view.sort}><option value="observedMinutes">Наблюдаемые минуты</option><option value="estimatedChatMinutes">Оценка активности YouTube</option><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option><option value="attendanceRatio">Доля посещённых эфиров</option></select></label><label class="check"><input type="checkbox" bind:checked={view.regularOnly} /> Только постоянники</label><label class="check"><input type="checkbox" bind:checked={view.coreOnly} /> Только ядро</label></div>
-    <div class="table-wrap"><table class="analytics-table"><thead><tr><th>Участник</th><th>Площадка</th><th>Эфиры / доля</th><th>Минуты наблюдений / на эфир</th><th>Оценка YouTube, мин</th><th>Сообщения</th><th>Сегменты активности</th></tr></thead><tbody>{#each visible.slice(0,200) as e}<tr><td><button class="text-button" onclick={()=>selectEntity(e)}>{e.name}</button>{#if e.regular}<span class="regular-badge">Постоянник</span>{/if}{#if e.core}<span class="core-badge">Ядро</span>{/if}</td><td>{e.source==="youtube"?"YouTube":"Twitch / DA"}</td><td>{e.attendanceSessionIds?.length??0} / {Math.round((e.attendanceRatio??0)*100)}%</td><td>{e.observedMinutes} / {(e.observedMinutesPerSession??0).toFixed(1)}</td><td>{e.estimatedChatMinutes}</td><td>{e.messages}</td><td>{e.visits}</td></tr>{/each}</tbody></table></div>
+    <div class="table-wrap"><table class="analytics-table"><thead><tr><th>Участник</th><th>Площадка</th><th>Эфиры / доля</th><th>Минуты наблюдений / на эфир</th><th>Оценка YouTube, мин</th><th>Сообщения</th><th>Сегменты активности</th></tr></thead><tbody>{#each visible.slice(0,200) as e}<tr><td><button class="text-button" disabled={busy} onclick={()=>selectEntity(e)}>{e.name}</button>{#if e.regular}<span class="regular-badge">Постоянник</span>{/if}{#if e.core}<span class="core-badge">Ядро</span>{/if}</td><td>{e.source==="youtube"?"YouTube":"Twitch / DA"}</td><td>{e.attendanceSessionIds?.length??0} / {Math.round((e.attendanceRatio??0)*100)}%</td><td>{e.observedMinutes} / {(e.observedMinutesPerSession??0).toFixed(1)}</td><td>{e.estimatedChatMinutes}</td><td>{e.messages}</td><td>{e.visits}</td></tr>{/each}</tbody></table></div>
     {#if !visible.length}<p class="muted analytics-empty">Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.</p>{/if}
     {#if visible.length>200}<p class="small muted">Показаны первые 200; используйте поиск или меньший период.</p>{/if}
   </section>
