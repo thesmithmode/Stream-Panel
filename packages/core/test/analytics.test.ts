@@ -233,3 +233,46 @@ test('unnamed categories and YouTube authors stay readable, while chat outside r
   assert.deepEqual(unionSpans([{from:base,to:base+minute,session:sid,kind:'observed'},{from:base,to:base+2*minute,session:sid,kind:'observed'}]),[{from:base,to:base+2*minute,session:sid,kind:'observed'}]);
  } finally {s.close();}
 });
+
+test('regular audience uses attendance share, excludes donation-only profiles and stacks only attributable minute signals',()=>{
+ const s=new StreamStore(':memory:');
+ try {
+  for(let n=0;n<3;n++){
+   const start=base+n*5*minute,sid=s.startSession('channel',`regular-share-${n}`,start,'platform',start);
+   s.streamSample(sid,start,'game','Game','',10);
+   const ids=['regular',...(n<2?['two-thirds']:[]),...(n===0?['once']:[]),'owner','bot'];
+   s.recordPoll(sid,'channel',{startedAtMs:start,completedAtMs:start+minute,status:'complete',userIds:ids,userNames:{regular:'Regular','two-thirds':'Two thirds',once:'Once',owner:'Owner',bot:'jeetbot'}});
+   for(const actor of ['regular',...(n===0?['once']:[])])s.ingest({source:'twitch',accountId:'channel',externalId:`regular-msg-${n}-${actor}`,type:'chat.message',actor:{externalId:actor,displayName:actor},occurredAtMs:start,receivedAtMs:start,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
+   s.ingest({source:'donationalerts',accountId:'da',externalId:`tip-only-${n}`,type:'donation',actor:{externalId:'name:donor only',displayName:'Donor only'},occurredAtMs:start,receivedAtMs:start,sourceTime:null,timeQuality:'provider',transport:'rest',payload:{amountMinor:'100',currency:'RUB'}});
+   s.youtubeMessages('yt-owner','chat',[{id:`regular-yt-${n}`,snippet:{type:'textMessageEvent',publishedAt:new Date(start).toISOString()},authorDetails:{channelId:'regular-yt',displayName:'YT regular'}},...(n===0?[{id:'once-yt',snippet:{type:'textMessageEvent',publishedAt:new Date(start).toISOString()},authorDetails:{channelId:'once-yt',displayName:'YT once'}}]:[])]);
+   s.endSession(sid,start+3*minute,'observed');
+  }
+  const query={...opts,regularThresholdPercent:60},result=s.analytics(query);
+  assert.equal(result.summary.regulars,3);assert.equal(result.summary.attendees,5);assert.equal(result.summary.regularShare,.6);
+  assert.equal(result.audience.find(e=>e.name==='Two thirds')!.attendanceRatio,2/3);
+  assert.equal(result.audience.find(e=>e.name==='Donor only')!.regular,false);
+  const first=result.timeline.find(p=>p.at===base)!;
+  assert.equal(first.observed,3);assert.equal(first.regularObserved,2);
+  assert.equal(first.estimated,2);assert.equal(first.regularEstimated,1);
+  assert.equal(first.messages,4);assert.equal(first.regularMessages,2);
+  assert.equal(s.analytics({...query,regularThresholdPercent:100}).summary.regulars,0);
+  assert.equal(s.analytics({...query,regularThresholdPercent:0}).summary.regulars,5);
+  const exact=s.analytics({...query,regularThresholdPercent:100*2/3});
+  assert.equal(exact.audience.find(e=>e.name==='Two thirds')!.regular,false);
+  assert.equal(s.analytics({...query,category:'absent'}).summary.regularShare,null);
+  for(const threshold of [-1,101,NaN])assert.throws(()=>s.analytics({...query,regularThresholdPercent:threshold}),/INVALID_ANALYTICS_FILTER/);
+ }finally{s.close();}
+});
+
+test('switching away and back within one minute never counts a regular attendee twice in that bar',()=>{
+ const s=new StreamStore(':memory:');
+ try {
+  const sid=s.startSession('channel','minute-return',base,'platform',base);
+  s.streamSample(sid,base,'game','Game','',2);s.streamSample(sid,base+10000,'talk','Talk','',2);s.streamSample(sid,base+20000,'game','Game','',2);
+  s.recordPoll(sid,'channel',{startedAtMs:base,completedAtMs:base+minute,status:'complete',userIds:['human']});
+  s.youtubeMessages('yt-owner','chat',[{id:'minute-return',snippet:{type:'textMessageEvent',publishedAt:new Date(base+5000).toISOString()},authorDetails:{channelId:'yt-human',displayName:'Human'}}]);
+  s.endSession(sid,base+2*minute,'observed');
+  const point=s.analytics({...opts,category:'game'}).timeline.find(p=>p.at===base)!;
+  assert.equal(point.observed,1);assert.equal(point.regularObserved,1);assert.equal(point.estimated,1);assert.equal(point.regularEstimated,1);
+ }finally{s.close();}
+});

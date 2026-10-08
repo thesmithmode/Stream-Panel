@@ -1,0 +1,27 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {chartSeries} from './chart-series.ts';
+
+test('regular segments use the same known-minute denominator as the full bar; messages remain sums',()=>{
+ const points=[{at:0,observed:10,regularObserved:8,messages:5,regularMessages:4,presenceKnown:true},{at:60000,observed:10,regularObserved:2,messages:1,regularMessages:0,presenceKnown:true},{at:120000,observed:99,regularObserved:99,messages:7,regularMessages:7,presenceKnown:false},{at:480*60000,observed:0,messages:0,presenceKnown:true}];
+ const first=chartSeries(points,'observed')[0]!;
+ assert.equal(first.value,10);assert.equal(first.regularValue,5);assert.equal(first.known,true);
+ const messages=chartSeries(points,'messages')[0]!;
+ assert.equal(messages.value,13);assert.equal(messages.regularValue,11);
+});
+
+test('aggregate viewers have no personal split, zero is known, and unknown/empty samples never imply regulars',()=>{
+ assert.deepEqual(chartSeries([],'observed'),[]);
+ assert.equal(chartSeries([{at:0,viewers:null}], 'viewers')[0]?.known,false);
+ const zero=chartSeries([{at:0,viewers:0,regularObserved:5}], 'viewers')[0]!;
+ assert.equal(zero.known,true);assert.equal(zero.value,0);assert.equal(zero.regularValue,0);
+ const unknown=chartSeries([{at:0,observed:10,regularObserved:5,presenceKnown:false}],'observed')[0]!;
+ assert.equal(unknown.known,false);assert.equal(unknown.regularValue,0);
+});
+
+test('YouTube estimate segments remain bounded by the total and tolerate legacy samples without subgroup data',()=>{
+ assert.equal(chartSeries([{at:0,estimated:4,regularEstimated:2}],'estimated')[0]?.regularValue,2);
+ assert.equal(chartSeries([{at:0,estimated:4,regularEstimated:8}],'estimated')[0]?.regularValue,4);
+ assert.equal(chartSeries([{at:0,estimated:4,regularEstimated:-2}],'estimated')[0]?.regularValue,0);
+ assert.equal(chartSeries([{at:0,estimated:4}],'estimated')[0]?.regularValue,0);
+});

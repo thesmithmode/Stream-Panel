@@ -248,7 +248,7 @@ export async function createApplication(
     const q=object(request.query);
     return db.call("analytics", {
       fromMs:Number(q.from),toMs:Math.min(Number(q.to),Date.now()),source:string(q.source)||"all",category:string(q.category),
-      minSessions:q.minSessions===undefined?3:Number(q.minSessions),minMinutes:q.minMinutes===undefined?30:Number(q.minMinutes),minMessages:q.minMessages===undefined?5:Number(q.minMessages),
+      regularThresholdPercent:q.regularThresholdPercent===undefined?50:Number(q.regularThresholdPercent),minSessions:q.minSessions===undefined?3:Number(q.minSessions),minMinutes:q.minMinutes===undefined?30:Number(q.minMinutes),minMessages:q.minMessages===undefined?5:Number(q.minMessages),
       chatWindowMinutes:q.chatWindowMinutes===undefined?5:Number(q.chatWindowMinutes),coreRule:string(q.coreRule)||"either",timezone:string(q.timezone)||"Europe/Moscow",
       excludedLogins:configuration.value.excludedBotLogins,ownerId:configuration.value.twitch?.userId??"",youtubeAccount:configuration.value.youtube?.userId??configuration.value.youtubeAccountId??"",
     });

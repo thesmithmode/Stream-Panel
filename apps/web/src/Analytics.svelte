@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { api, date, money } from "./api";
+  import type {ChartMetric} from "./chart-series";
   import TrendChart from "./TrendChart.svelte";
   let { profile = "local", mode = "real", onPerson }: {profile?:string;mode?:string;onPerson:(id:string)=>void} = $props();
   const localInput=(at:number)=>{const d=new Date(at);return new Date(at-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
   let from=$state(localInput(Date.now()-30*86400000)),to=$state(localInput(Date.now())),source=$state("all"),category=$state("");
+  let regularThresholdPercent=$state(50);
   let minSessions=$state(3),minMinutes=$state(30),minMessages=$state(5),coreRule=$state("either"),chatWindowMinutes=$state(5),timezone=$state("Europe/Moscow");
-  let coreOnly=$state(false),search=$state(""),sort=$state("observedMinutes"),metric=$state("observed"),heatMetric=$state("observed"),autoRefresh=$state(false),data=$state<any>(null),error=$state(""),busy=$state(false),selected=$state<any>(null),day=$state("");
+  let coreOnly=$state(false),search=$state(""),sort=$state("observedMinutes"),metric=$state<ChartMetric>("observed"),heatMetric=$state("observed"),autoRefresh=$state(false),data=$state<any>(null),error=$state(""),busy=$state(false),selected=$state<any>(null),day=$state("");
   let requestId=0, mounted=$state(false);
   $effect(()=>{mode;if(mounted)untrack(()=>void refresh());});
   const visible=$derived((data?.audience??[]).filter((e:any)=>(!coreOnly||e.core)&&e.name.toLowerCase().includes(search.toLowerCase())).sort((a:any,b:any)=>sort==="sessions"?b.sessionIds.length-a.sessionIds.length:(b[sort]??0)-(a[sort]??0)));
@@ -36,15 +38,15 @@
     const id=++requestId;busy=true;error="";
     const fromMs=new Date(from).getTime(),toMs=new Date(to).getTime();
     try{
-      try {localStorage.setItem(`sp-analytics-${profile}`,JSON.stringify({minSessions,minMinutes,minMessages,coreRule,chatWindowMinutes,timezone}));}catch{/* optional local preferences */}
-      const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,minSessions:String(minSessions),minMinutes:String(minMinutes),minMessages:String(minMessages),coreRule,chatWindowMinutes:String(chatWindowMinutes),timezone});
+      try {localStorage.setItem(`sp-analytics-${profile}`,JSON.stringify({regularThresholdPercent,minSessions,minMinutes,minMessages,coreRule,chatWindowMinutes,timezone}));}catch{/* optional local preferences */}
+      const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,regularThresholdPercent:String(regularThresholdPercent),minSessions:String(minSessions),minMinutes:String(minMinutes),minMessages:String(minMessages),coreRule,chatWindowMinutes:String(chatWindowMinutes),timezone});
       const result=await api(`analytics?${q}`);
       if(id===requestId){data=result;selected=null;}
     }catch(e){if(id===requestId){error=(e as Error).message;data=null;selected=null;}}
     finally{if(id===requestId)busy=false;}
   }
   onMount(()=>{
-    try{const saved=JSON.parse(localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved){minSessions=saved.minSessions??3;minMinutes=saved.minMinutes??30;minMessages=saved.minMessages??5;coreRule=saved.coreRule??"either";chatWindowMinutes=saved.chatWindowMinutes??5;timezone=saved.timezone??"Europe/Moscow";}}catch{/* private browser may deny storage */}
+    try{const saved=JSON.parse(localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved){regularThresholdPercent=saved.regularThresholdPercent??50;minSessions=saved.minSessions??3;minMinutes=saved.minMinutes??30;minMessages=saved.minMessages??5;coreRule=saved.coreRule??"either";chatWindowMinutes=saved.chatWindowMinutes??5;timezone=saved.timezone??"Europe/Moscow";}}catch{/* private browser may deny storage */}
     mounted=true;const timer=setInterval(()=>{if(autoRefresh&&!busy&&!selected){to=localInput(Date.now());void refresh();}},60000);return ()=>{requestId++;clearInterval(timer);};
   });
 </script>
@@ -56,6 +58,7 @@
     <label>Площадка<select bind:value={source}><option value="all">Все площадки</option><option value="twitch">Twitch / DA</option><option value="youtube">YouTube</option></select></label>
     <label>Категория Twitch<select bind:value={category}><option value="">Все категории</option>{#each categoryOptions.filter((c:any)=>c.id) as c}<option value={c.id}>{c.name}</option>{/each}</select></label>
     <label>Часовой пояс сравнения<select bind:value={timezone}><option value="Europe/Moscow">Москва</option><option value="UTC">UTC</option><option value="Asia/Yekaterinburg">Екатеринбург</option></select></label>
+    <label>Порог постоянника, % посещений<input type="number" min="0" max="100" step="1" bind:value={regularThresholdPercent} required /></label>
     <details class="analytics-thresholds"><summary>Как определять ядро аудитории</summary><div class="analytics-controls">
       <label>Минимум эфиров<input type="number" min="1" max="1000" bind:value={minSessions} /></label>
       <label>Минимум минут активности<input type="number" min="0" max="129600" bind:value={minMinutes} /></label>
@@ -77,6 +80,7 @@
   </section>
   {#if data.youtubeReport}<section class="panel"><header><h2>Агрегатный отчёт YouTube: все видео канала</h2></header><p class="small muted">Период отчёта платформы: {data.youtubeReport.data.start} — {data.youtubeReport.data.end}; обновлён {date(data.youtubeReport.updatedAt)}. Данные с задержкой, охватывают весь канал и не фильтруются по категории Twitch. Это минуты просмотра из YouTube Analytics; персональные исключения к этому агрегату неприменимы.</p><div class="table-wrap"><table class="analytics-table"><thead><tr>{#each data.youtubeReport.data.columnHeaders??[] as column}<th>{({day:"Дата",views:"Просмотры",estimatedMinutesWatched:"Минуты просмотра",subscribersGained:"Новые подписчики",subscribersLost:"Отписки"} as Record<string,string>)[column.name]??column.name}</th>{/each}</tr></thead><tbody>{#each data.youtubeReport.data.rows??[] as row}<tr>{#each row as value}<td>{value}</td>{/each}</tr>{/each}</tbody></table></div></section>{/if}
   <section class="panel analytics-chart"><header><h2>Активность по времени</h2><label>Метрика графика<select bind:value={metric}><option value="observed">Наблюдаемые участники Twitch</option><option value="estimated">Оценка активности YouTube</option><option value="messages">Сообщения</option><option value="viewers">Счётчик зрителей площадки</option></select></label></header>
+    <p class="small regular-summary">Постоянники: <strong>{data.summary.regulars??0} из {data.summary.attendees??0} ({data.summary.regularShare==null?"нет данных":(data.summary.regularShare*100).toFixed(1)+"%"})</strong>. Посещают больше {data.filters?.regularThresholdPercent??regularThresholdPercent}% записанных эфиров выбранного периода и категории по наблюдениям или сообщениям. Донат сам по себе посещение не подтверждает.</p>
     <TrendChart points={data.timeline} {metric} />
     <p class="small muted">Twitch — присутствие в опросах чата. YouTube — окно после сообщения, оценка, а не время просмотра. Серые отметки — неизвестные данные. Счётчик площадки агрегатный, персональные исключения к нему неприменимы.</p>
   </section>
@@ -89,7 +93,7 @@
   {#if data.streamComparison?.length}<section class="panel"><header><h2>Возвращения по эфирам</h2></header><div class="table-wrap"><table class="analytics-table"><thead><tr><th>Эфир</th><th>Категории</th><th>Аудитория</th><th>Ядро</th><th>Вернулись / впервые в периоде</th><th>Сообщения</th></tr></thead><tbody>{#each data.streamComparison as stream}<tr><td><button class="text-button" onclick={()=>{from=localInput(stream.startedAt);to=localInput(stream.endedAt);void refresh();}}>{date(stream.startedAt)}</button></td><td>{stream.categories.join(" → ")}</td><td>{stream.audience}</td><td>{stream.core}</td><td>{stream.returning} / {stream.newInPeriod}</td><td>{stream.messages}</td></tr>{/each}</tbody></table></div><p class="small muted">Возвращения считаются по аккаунтам среди более ранних эфиров в выбранном периоде. Нажмите дату, чтобы рассмотреть один эфир.</p></section>{/if}
   <section class="panel"><header><h2>Состав аудитории</h2><span>{visible.length} профилей</span></header>
     <div class="analytics-controls"><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label>Сортировка<select bind:value={sort}><option value="observedMinutes">Наблюдаемые минуты</option><option value="estimatedChatMinutes">Оценка активности YouTube</option><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option></select></label><label class="check"><input type="checkbox" bind:checked={coreOnly} /> Только ядро</label></div>
-    <div class="table-wrap"><table class="analytics-table"><thead><tr><th>Участник</th><th>Площадка</th><th>Эфиры / доля</th><th>Минуты наблюдений / на эфир</th><th>Оценка YouTube, мин</th><th>Сообщения</th><th>Сегменты активности</th></tr></thead><tbody>{#each visible.slice(0,200) as e}<tr><td><button class="text-button" onclick={()=>selectEntity(e)}>{e.name}</button>{#if e.core}<span class="core-badge">Ядро</span>{/if}</td><td>{e.source==="youtube"?"YouTube":"Twitch / DA"}</td><td>{e.sessionIds.length} / {Math.round((e.sessionRatio??0)*100)}%</td><td>{e.observedMinutes} / {(e.observedMinutesPerSession??0).toFixed(1)}</td><td>{e.estimatedChatMinutes}</td><td>{e.messages}</td><td>{e.visits}</td></tr>{/each}</tbody></table></div>
+    <div class="table-wrap"><table class="analytics-table"><thead><tr><th>Участник</th><th>Площадка</th><th>Эфиры / доля</th><th>Минуты наблюдений / на эфир</th><th>Оценка YouTube, мин</th><th>Сообщения</th><th>Сегменты активности</th></tr></thead><tbody>{#each visible.slice(0,200) as e}<tr><td><button class="text-button" onclick={()=>selectEntity(e)}>{e.name}</button>{#if e.regular}<span class="regular-badge">Постоянник</span>{/if}{#if e.core}<span class="core-badge">Ядро</span>{/if}</td><td>{e.source==="youtube"?"YouTube":"Twitch / DA"}</td><td>{e.attendanceSessionIds?.length??0} / {Math.round((e.attendanceRatio??0)*100)}%</td><td>{e.observedMinutes} / {(e.observedMinutesPerSession??0).toFixed(1)}</td><td>{e.estimatedChatMinutes}</td><td>{e.messages}</td><td>{e.visits}</td></tr>{/each}</tbody></table></div>
     {#if !visible.length}<p class="muted analytics-empty">Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.</p>{/if}
     {#if visible.length>200}<p class="small muted">Показаны первые 200; используйте поиск или меньший период.</p>{/if}
   </section>

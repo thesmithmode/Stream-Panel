@@ -24,9 +24,9 @@ test('analytics browser shows core, categories, scoped accounts, minute evidence
   for(let n=0;n<3;n++){
    const base=Math.floor((Date.now()-(4-n)*86400000)/minute)*minute,sid=await db.call('startSession','channel',`stream-${n}`,base,'platform',base);
    await db.call('streamSample',sid,base,'game','Game A','Game A title',12);await db.call('streamSample',sid,base+10*minute,'talk','Just Chatting','Talk title',15);await db.call('youtubeViewers',base,4);
-   for(const [actor,name] of [['regular',`Regular ${profile}`],['owner','RenamedOwner'],['bot','jeetbot'],['self','fullrandomname_twitch'],['typo','streemelements']])await db.call('ingest',{source:'twitch',accountId:'channel',externalId:`${n}-${actor}`,type:'chat.message',actor:{externalId:actor,displayName:name},occurredAtMs:base+minute,receivedAtMs:base+minute,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
+   for(const [actor,name] of [['regular',`Regular ${profile}`],...(n===0?[['casual',`Occasional ${profile}`]]:[]),['owner','RenamedOwner'],['bot','jeetbot'],['self','fullrandomname_twitch'],['typo','streemelements']])await db.call('ingest',{source:'twitch',accountId:'channel',externalId:`${n}-${actor}`,type:'chat.message',actor:{externalId:actor,displayName:name},occurredAtMs:base+minute,receivedAtMs:base+minute,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
    await db.call('ingest',{source:'donationalerts',accountId:'da',externalId:`tip-${n}`,type:'donation',actor:{externalId:`name:regular ${profile}`,displayName:`Regular ${profile}`},occurredAtMs:base+minute,receivedAtMs:base+minute,sourceTime:null,timeQuality:'configured',transport:'rest',payload:{amountMinor:'100',currency:'RUB'}});
-   await db.call('recordPoll',sid,'channel',{startedAtMs:base,completedAtMs:base+9*minute,status:'complete',userIds:['regular','owner','bot','self','typo']});
+   await db.call('recordPoll',sid,'channel',{startedAtMs:base,completedAtMs:base+9*minute,status:'complete',userIds:['regular','owner','bot','self','typo',...(n===0?['casual']:[])]});
    await db.call('recordPoll',sid,'channel',{startedAtMs:base+12*minute,completedAtMs:base+15*minute,status:'complete',userIds:['regular']});
    await db.call('youtubeMessages','yt-owner',`chat-${n}`,[{id:`yt-${n}`,snippet:{type:'textMessageEvent',publishedAt:new Date(base+minute).toISOString(),displayMessage:'hello'},authorDetails:{channelId:'yt-regular',displayName:`YT ${profile}`}}]);
    await db.call('endSession',sid,base+20*minute,'observed');
@@ -40,6 +40,12 @@ test('analytics browser shows core, categories, scoped accounts, minute evidence
    await goto(page,origin);await page.getByLabel('Логин',{exact:true}).fill(profile);await page.getByLabel('Пароль',{exact:true}).fill(`${profile}-analytics-password`);await page.getByRole('button',{name:'Войти',exact:true}).click();
    await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).waitFor();await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
    for(const name of ['RenamedOwner','jeetbot','fullrandomname_twitch','streemelements',`Regular ${profile==='ruslan'?'gulnaz':'ruslan'}`])assert.equal(await page.getByRole('button',{name,exact:true}).count(),0);
+   assert.ok(await page.locator('.trend-chart rect.regular-segment').count()>0);
+   assert.ok(await page.locator('.trend-chart .chart-bar').evaluateAll(groups=>groups.some(group=>{const full=group.querySelector('.total-segment'),regular=group.querySelector('.regular-segment');return regular&&Math.abs(Number(regular.getAttribute('height'))/Number(full.getAttribute('height'))-.5)<.001&&Math.abs(Number(regular.getAttribute('y'))+Number(regular.getAttribute('height'))-190)<.001;})));
+   await page.getByLabel('Порог постоянника, % посещений').fill('100');await apply();assert.equal(await page.locator('.regular-badge').count(),0);assert.equal(await page.locator('.trend-chart rect.regular-segment').count(),0);
+   await page.getByLabel('Порог постоянника, % посещений').fill('0');await apply();assert.ok(await page.getByRole('row').filter({hasText:`Occasional ${profile}`}).locator('.regular-badge').count()>0);
+   await page.getByLabel('Порог постоянника, % посещений').fill('50');await apply();assert.equal(await page.getByRole('row').filter({hasText:`Occasional ${profile}`}).locator('.regular-badge').count(),0);
+   await page.getByLabel('Метрика графика').selectOption('viewers');assert.equal(await page.locator('.trend-chart rect.regular-segment').count(),0);await page.getByLabel('Метрика графика').selectOption('observed');
    if(profile==='ruslan'){
     for(const width of [320,390,768,1280,1440]){
      await page.setViewportSize({width,height:900});
@@ -54,7 +60,7 @@ test('analytics browser shows core, categories, scoped accounts, minute evidence
    await page.getByLabel('Только ядро').check();await page.getByLabel('Поиск участника').fill('Regular');await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).click();
    await page.getByRole('heading',{name:`Активность: Regular ${profile}`}).waitFor();assert.equal(await page.locator('.minute-dot').count(),1440);await page.getByRole('button',{name:'Закрыть детализацию'}).click();
    await page.getByLabel('Поиск участника').fill('');await page.getByLabel('Только ядро').uncheck();
-   for(const metric of ['estimated','messages','viewers','observed']){await page.getByLabel('Метрика графика').selectOption(metric);await page.getByLabel('Метрика карты').selectOption(metric);}
+   for(const metric of ['estimated','messages','viewers','observed']){await page.getByLabel('Метрика графика').selectOption(metric);await page.getByLabel('Метрика карты').selectOption(metric);if(metric!=='viewers')assert.ok(await page.locator('.trend-chart rect.regular-segment').count()>0);}
    await page.getByLabel('Обновлять каждую минуту').check();
    const refreshed=page.waitForResponse(r=>r.url().includes('/api/v1/analytics?')&&r.status()===200);await page.clock.fastForward(60001);await refreshed;await page.getByRole('button',{name:'Применить',exact:true}).waitFor();await page.getByLabel('Обновлять каждую минуту').uncheck();
    await page.getByRole('button',{name:`YT ${profile}`,exact:true}).click();await page.getByText('Оценка по чату YouTube',{exact:true}).first().waitFor();await page.getByRole('button',{name:'Закрыть детализацию'}).click();
