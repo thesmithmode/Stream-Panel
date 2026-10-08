@@ -1364,3 +1364,8 @@ td {
 
 .trend-plot { max-width:100%; overflow-x:auto; }
 .trend-plot svg { min-width:560px; }
+
+.analytics-filter > details { padding:16px 20px; }
+.analytics-filter > details > .analytics-controls { padding:16px 0; }
+.analytics-filter > details > p { padding:0; }
+@media(max-width:600px) { .analytics-filter > details { padding:16px; } }
