@@ -174,6 +174,8 @@ nav button.active svg {
   margin-left: auto;
   flex-shrink: 0;
 }
+.profile-switcher { display: grid; width: 100%; gap: 8px; }
+.profile-switcher select { width: 100%; min-width: 0; }
 .sidebar-status {
   display: flex;
   flex-direction: column;
@@ -908,7 +910,9 @@ select:focus-visible {
     left: 0;
   }
   .sidebar-bottom {
-    display: none;
+    display: flex;
+    margin-top: 12px;
+    padding: 12px 4px 0;
   }
   main {
     padding: 28px 18px;
@@ -1340,8 +1344,6 @@ td {
   }
 }
 
-.login-form { display: grid; gap: 16px; width: min(100%, 360px); margin: 20px auto; text-align: left; }
-.login-form label { display: grid; gap: 8px; }
 
 .analytics-controls{display:flex;flex-wrap:wrap;gap:16px;align-items:end;padding:20px}.analytics-controls label{display:flex;flex-direction:column;gap:8px;flex:1 1 180px;min-width:0}.analytics-controls .check{flex-direction:row;align-items:center}.analytics-controls input,.analytics-controls select{width:100%;min-width:0}.analytics-thresholds{flex:1 1 100%;border-top:1px solid var(--border);padding-top:12px}.analytics-thresholds summary{cursor:pointer}.analytics-filter>p,.analytics-chart>p,.panel>p.small{padding:0 20px 16px}.table-wrap{max-width:100%;overflow-x:auto}.analytics-table{width:100%;min-width:650px}.analytics-empty{padding:20px}.core-badge{display:inline-block;background:#183c36;color:#85e7c6;border-radius:4px;padding:2px 6px;margin-left:8px;font-size:11px}.trend-chart{padding:16px 20px}.trend-chart svg{display:block;width:100%;min-width:0;max-height:280px}.trend-chart rect{fill:#5fc4aa}.trend-chart rect.unknown{fill:#606d7d}.trend-chart rect.estimated{fill:#ac89ec}.analytics-minute-grid{display:grid;grid-template-columns:repeat(60,minmax(0,1fr));gap:2px;width:100%;margin-top:16px}.minute-dot{display:block;aspect-ratio:1;background:#4a5260;min-width:0}.minute-dot.observed{background:#5fc4aa}.minute-dot.estimated{background:#ac89ec}.minute-dot.not_observed{background:#c3d0d5}.analytics-person .settings-body{min-width:0}@media(max-width:600px){.analytics-controls{padding:16px;gap:12px}.analytics-controls label{flex-basis:100%}.analytics-minute-grid{grid-template-columns:repeat(30,minmax(0,1fr))}.analytics-chart header{flex-wrap:wrap;gap:12px}}
 .hour-heatmap{padding:16px 20px;overflow-x:auto}.heatmap-row,.heatmap-labels{display:grid;grid-template-columns:26px repeat(24,minmax(12px,1fr));gap:3px;min-width:450px;margin-bottom:3px}.heatmap-row span{aspect-ratio:1.2;border-radius:2px}.heatmap-row strong,.heatmap-labels span{font-size:10px;align-self:center;text-align:center;color:#abb8cb}

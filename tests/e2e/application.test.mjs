@@ -26,7 +26,7 @@ test(
         if (m.type() === "error") errors.push(m.text());
       });
       await startCoverage(page);
-      await goto(page, a.bootstrap());
+      await goto(page, a.origin);
       await page
         .getByRole("button", { name: "Открыть интеграции", exact: true })
         .waitFor();
@@ -34,7 +34,7 @@ test(
       await page.getByRole("button", { name: "Демо", exact: true }).click();
       await page.getByText("Алиса").first().waitFor({ state: "visible", timeout: 5000 });
       await page.getByRole("button", { name: "Реальные", exact: true }).click();
-      checks.push("bootstrap exchanges nonce and removes fragment");
+      checks.push("application opens directly without login");
 
       await page
         .getByRole("button", { name: "Открыть интеграции", exact: true })
@@ -59,7 +59,7 @@ test(
       );
       assert.equal(persons.length, 3);
       checks.push(
-        "reload preserves cookie; distinct Twitch/DA names stay separate until merge (auto-link covered in unit tests)",
+        "reload preserves data; distinct Twitch/DA names stay separate until merge (auto-link covered in unit tests)",
       );
 
       await page.getByRole("button", { name: "Люди", exact: true }).click();

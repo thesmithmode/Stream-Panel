@@ -81,7 +81,7 @@ test(
       const context = await browser.newContext(),
         page = await context.newPage();
       await startCoverage(page);
-      await goto(page, a.bootstrap());
+      await goto(page, a.origin);
       await page
         .getByRole("button", { name: "Открыть интеграции", exact: true })
         .click();
@@ -232,7 +232,7 @@ test(
   },
 );
 test(
-  "browser sessions, event filters, person links, platform recording and local login failure",
+  "browser sessions, event filters, person links and platform recording",
   { timeout: 30000 },
   async () => {
     const a = await application(),
@@ -243,10 +243,6 @@ test(
       page.setDefaultTimeout(5000);
       await startCoverage(page);
       await goto(page, a.origin);
-      await page
-        .getByRole("heading", { name: "Вход в Stream Panel" })
-        .waitFor();
-      await goto(page, a.bootstrap());
       await page
         .getByRole("button", { name: "Открыть интеграции", exact: true })
         .waitFor();

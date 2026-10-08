@@ -1,10 +1,8 @@
 import { demoApi, getDataMode, setDataMode, type DataMode } from "./demo-data";
 export { getDataMode, setDataMode, type DataMode };
 
-let csrf = "";
-export const setCsrf = (value: string) => (csrf = value);
 export async function api<T = any>(path: string, body?: unknown): Promise<T> {
-  if (getDataMode() === "demo" && !path.startsWith("auth/")) {
+  if (getDataMode() === "demo") {
     return (await demoApi(path, body)) as T;
   }
   const response = await fetch(`/api/v1/${path}`, {
@@ -12,7 +10,7 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
     headers:
       body === undefined
         ? {}
-        : { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+        : { "Content-Type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const data = await response.json();

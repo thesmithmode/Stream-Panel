@@ -111,91 +111,23 @@ test("concurrent secret persistence is serialized and public config never includ
     await rm(directory, { recursive: true, force: true });
   }
 });
-test("local API requires bootstrap; rejects cross-site reads, Host rebinding, CSRF and nonce reuse", async () => {
+test("local API opens without login and rejects cross-site writes and Host rebinding", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stream-panel-http-"));
   const application = await createApplication(directory, 47831, false);
   const headers = { host: "127.0.0.1:47831" };
   try {
-    const unauthorized = await application.app.inject({
-      method: "GET",
-      url: "/api/v1/persons",
-      headers,
-    });
-    assert.equal(unauthorized.statusCode, 401);
-    const key = new URLSearchParams(application.bootstrap().split("#")[1]).get(
-      "key",
-    )!;
-    const login = await application.app.inject({
-      method: "POST",
-      url: "/api/v1/bootstrap",
-      headers,
-      payload: { key },
-    });
-    assert.equal(login.statusCode, 200);
-    const cookie = String(login.headers["set-cookie"]).split(";")[0]!;
-    const csrf = login.json().csrf;
-    const reused = await application.app.inject({
-      method: "POST",
-      url: "/api/v1/bootstrap",
-      headers,
-      payload: { key },
-    });
-    assert.equal(reused.statusCode, 401);
-    const cross = await application.app.inject({
-      method: "GET",
-      url: "/api/v1/persons",
-      headers: { ...headers, cookie, origin: "https://evil.example" },
-    });
-    assert.equal(cross.statusCode, 403);
-    const rebinding = await application.app.inject({
-      method: "GET",
-      url: "/api/v1/persons",
-      headers: { host: "evil.example", cookie },
-    });
-    assert.equal(rebinding.statusCode, 403);
-    const csrfMissing = await application.app.inject({
-      method: "POST",
-      url: "/api/v1/sessions/start",
-      headers: { ...headers, cookie },
-      payload: {},
-    });
-    assert.equal(csrfMissing.statusCode, 403);
-    const authorized = await application.app.inject({
-      method: "POST",
-      url: "/api/v1/sessions/start",
-      headers: { ...headers, cookie, "x-csrf-token": csrf },
-      payload: {},
-    });
-    assert.equal(authorized.statusCode, 200);
+    assert.equal((await application.app.inject({method:"GET",url:"/api/v1/persons",headers})).statusCode,200);
+    assert.equal((await application.app.inject({method:"GET",url:"/api/v1/persons",headers:{host:"evil.example"}})).statusCode,403);
+    assert.equal((await application.app.inject({method:"POST",url:"/api/v1/sessions/start",headers:{...headers,origin:"https://evil.example"},payload:{}})).statusCode,403);
+    const authorized = await application.app.inject({method:"POST",url:"/api/v1/sessions/start",headers,payload:{}});
+    assert.equal(authorized.statusCode,200);
     const sessionId = authorized.json().id;
-    const duplicate = await application.app.inject({
-      method: "POST",
-      url: "/api/v1/sessions/start",
-      headers: { ...headers, cookie, "x-csrf-token": csrf },
-      payload: {},
-    });
-    assert.equal(duplicate.statusCode, 409, duplicate.body);
-    await application.db.call("ingest", {
-      ...normalizeTwitch(chatEnvelope, "channel")!,
-      occurredAtMs: Date.now(),
-      receivedAtMs: Date.now(),
-    });
-    const summary = await application.app.inject({
-      method: "GET",
-      url: `/api/v1/summary?session=${sessionId}`,
-      headers: { ...headers, cookie },
-    });
-    assert.equal(summary.json().messages, 1);
-    const config = await application.app.inject({
-      method: "GET",
-      url: "/api/v1/status",
-      headers: { ...headers, cookie },
-    });
-    assert.equal(config.json().config.daClientSecret, undefined);
-  } finally {
-    await application.app.close();
-    await rm(directory, { recursive: true, force: true });
-  }
+    assert.equal((await application.app.inject({method:"POST",url:"/api/v1/sessions/start",headers,payload:{}})).statusCode,409);
+    await application.db.call("ingest", {...normalizeTwitch(chatEnvelope, "channel")!,occurredAtMs:Date.now(),receivedAtMs:Date.now()});
+    assert.equal((await application.app.inject({url:`/api/v1/summary?session=${sessionId}`,headers})).json().messages,1);
+    assert.equal((await application.app.inject({url:"/api/v1/status",headers})).json().config.daClientSecret,undefined);
+    assert.equal((await application.app.inject({method:"POST",url:"/api/v1/bootstrap",headers,payload:{key:"anything"}})).statusCode,404);
+  } finally { await application.app.close(); await rm(directory,{recursive:true,force:true}); }
 });
 
 test("chat moderation redacts persisted text rather than hiding it only in UI", async () => {

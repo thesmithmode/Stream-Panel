@@ -9,7 +9,7 @@ if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error('Lin
 const target = resolve('artifacts/server');
 await rm(target,{recursive:true,force:true});await mkdir(target + '/bin',{recursive:true});
 await cp(process.execPath, target + '/bin/node');
-for (const path of ['dist','node_modules','apps/web/dist','package.json','scripts/provision-accounts.mjs','scripts/restore-backup.mjs']) {
+for (const path of ['dist','node_modules','apps/web/dist','package.json','scripts/restore-backup.mjs']) {
  await mkdir(target + '/' + path.split('/').slice(0,-1).join('/'),{recursive:true});
  await cp(path,target+'/'+path,{recursive:true,dereference:false,verbatimSymlinks:true});
 }

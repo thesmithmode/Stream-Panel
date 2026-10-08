@@ -6,7 +6,7 @@
 
 | Поведение | Где реализовано / проверено |
 | --- | --- |
-| Парольный вход, CSRF, отзыв и сохранение сессий, ограничения попыток, закрытые API | `auth.ts`, `hosted.ts`; auth/hosted tests, двухпрофильный browser E2E |
+| Прямой вход без пароля; изолированные профили Руслан/Гульназ; выбор сохраняется локально | `hosted.ts`, `profiles.ts`; hosted and browser tests |
 | Разделение Twitch/DA/YouTube, истории и записей Руслана и Гульназ | Profile DB proxy, отдельные workers/configs; profile isolation + hosted tests |
 | Атомарные записи, ревизии merge/undo/split, SQLite WAL + busy timeout | Core transactions, worker queue; concurrency/conflict tests |
 | Twitch и DA: подключение, refresh, reconnect, дедупликация и отмена поздних ответов | Provider tests + integration lifecycle/wire tests |

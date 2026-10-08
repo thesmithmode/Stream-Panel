@@ -53,12 +53,10 @@ test('migration rejects active or corrupt locks, bad configs and broken database
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
-test('local preparation requires a password, provisions once, preserves it and validates the backup key',async()=>{
+test('local preparation starts without credentials and validates the persistent backup key',async()=>{
  const root=await mkdtemp(join(tmpdir(),'sp-local-')),dir=join(root,'local'),old=join(root,'absent');
  try{
- await assert.rejects(prepareLocal(dir,old),/LOCAL_PASSWORD_REQUIRED/);
- await assert.rejects(prepareLocal(dir,old,'short'),/INVALID_PASSWORD/);
- await prepareLocal(dir,old,'local-password-for-tests');
+ await prepareLocal(dir,old);
  assert.match(await readFile(join(dir,'backup-key'),'utf8'),/^[a-f0-9]{64}$/);
  assert.equal((await stat(join(dir,'backup-key'))).mode&0o777,0o600);
  const key=await readFile(join(dir,'backup-key'));await prepareLocal(dir,old);assert.deepEqual(await readFile(join(dir,'backup-key')),key);
@@ -70,7 +68,7 @@ test('old schema is upgraded only in the copy and missing config is supported',a
  const root=await mkdtemp(join(tmpdir(),'sp-old-schema-')),source=join(root,'old'),dest=join(root,'new');await mkdir(source);
  const old=new Database(join(source,'data.sqlite'));old.exec(schemaV1);old.exec("INSERT INTO persons VALUES ('p','Old Viewer',0)");old.close();
  try{
- await prepareLocal(dest,source,'local-password-for-tests');
+ await prepareLocal(dest,source);
  const imported=new Database(join(dest,'data.sqlite'));assert.equal(imported.prepare('SELECT * FROM p_ruslan_persons').all().length,1);imported.close();
  const original=new Database(join(source,'data.sqlite'));assert.equal(original.pragma('user_version',{simple:true}),1);original.close();
  await assert.rejects(readFile(join(dest,'profiles/ruslan/secrets.json')),/ENOENT/);

@@ -14,8 +14,8 @@
 4. От root: `bash ops/bootstrap.sh PUBLIC_IPV4 DEPLOY_PUBLIC_KEY_FILE VERIFIED_CADDY_BINARY`. Скрипт откажется при существующих каталогах/пользователях/службах или занятых портах. Ничего не удаляет и не меняет firewall/прочие приложения. При сбое bootstrap проверить созданные объекты перед повторным запуском, не удалять каталоги вслепую.
 5. В GitHub environment `production` установить secrets: STREAM_PANEL_DEPLOY_HOST, STREAM_PANEL_DEPLOY_PORT, STREAM_PANEL_DEPLOY_KEY, STREAM_PANEL_DEPLOY_KNOWN_HOSTS. Последний — проверенный fingerprint из доверенного known_hosts; SSH не принимает новый ключ автоматически.
 6. После живых проверок connectivity/backup/restore/rollback включить repository variable `STREAM_PANEL_PRODUCTION_ENABLED=true`. Успешный Quality gate для текущего main активирует Deploy server; workflow_dispatch позволяет повторить тот же проверенный commit. Пропущенный/красный CI и устаревший commit не деплоятся.
-7. Создать аккаунты через `scripts/provision-accounts.mjs` из current release с DATA_DIR=/var/lib/stream-panel под пользователем stream-panel; JSON передать через stdin из закрытого файла. Файл затем удалить. Публичной регистрации нет; Гульназ может получить аккаунт сейчас и подключить свои сервисы позже.
-8. Проверить HTTPS, неверный пароль, два браузера, изоляцию, reboot и настоящий эфир каждого сервиса. Проверить конфигурацию OAuth redirects после выбора URL.
+7. Панель открывается напрямую без логина. Внизу слева переключатель Руслан/Гульназ; Руслан сохраняет текущие Twitch и DonationAlerts подключения, Гульназ имеет отдельные настройки для будущей привязки.
+8. Проверить HTTPS, переключение профиля и изоляцию, reboot и настоящий эфир каждого сервиса. Проверить конфигурацию OAuth redirects после выбора URL.
 
 Приложение живёт в /opt/stream-panel/releases/<sha>, current — атомарная ссылка. Секреты только /etc/stream-panel и /var/lib/stream-panel/profiles/<profile>/secrets.json. Данные только /var/lib/stream-panel/data.sqlite. Receiver /usr/local/sbin/stream-panel-receive — root-owned; deploy key ограничен единственным forced command и sudo без аргументов. Загруженный код никогда не исполняется как root.
 

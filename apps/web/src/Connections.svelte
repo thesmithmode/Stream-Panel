@@ -3,7 +3,6 @@
   import { statusLabel } from "./labels";
   let { status, onChange }: { status: any; onChange: () => Promise<void> } =
     $props();
-  let currentPassword = $state(""), newPassword = $state(""), passwordConfirmation = $state("");
   let twitchClient = $state(""),
     extended = $state(false),
     youtubeClient = $state(""), youtubeSecret = $state(""),
@@ -270,24 +269,6 @@
           window.open(result.url, "_blank", "noopener,noreferrer"); message = "Завершите вход в Google в открытой вкладке.";
         })}>Войти через YouTube</button>
       {/if}
-    </div>
-  </section>
-  <section class="panel settings wide">
-    <header><h2>Пароль панели</h2></header>
-    <div class="settings-body">
-      <form onsubmit={(event) => {event.preventDefault(); void run(async () => {
-        if (newPassword !== passwordConfirmation) throw new Error("Новые пароли не совпали");
-        try {await api("auth/password", {currentPassword, newPassword, confirmation:passwordConfirmation});}
-        catch(e) {throw new Error(({INVALID_CURRENT_PASSWORD:"Текущий пароль неверный", PASSWORD_MISMATCH:"Новые пароли не совпали"} as Record<string,string>)[(e as Error).message] ?? (e as Error).message);}
-        currentPassword = newPassword = passwordConfirmation = "";
-        window.location.reload();
-      });}}>
-        <label>Текущий пароль<input type="password" autocomplete="current-password" bind:value={currentPassword} required maxlength="256" /></label>
-        <label>Новый пароль<input type="password" autocomplete="new-password" bind:value={newPassword} required minlength="14" maxlength="256" /></label>
-        <label>Повторите новый пароль<input type="password" autocomplete="new-password" bind:value={passwordConfirmation} required minlength="14" maxlength="256" /></label>
-        <p class="small muted">От 14 до 256 символов. После смены войдите заново; история и подключения сохранятся.</p>
-        <button class="primary" disabled={busy}>Изменить пароль</button>
-      </form>
     </div>
   </section>
   <section class="panel settings wide">
