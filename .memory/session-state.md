@@ -1,6 +1,6 @@
 # Stream Panel: состояние 2026-10-08
 - Задача пользователя: сверить постановку/бэклог/ветки, выполнить все остатки, stable релиз и приватный HTTPS деплой RackNerd исключительно через main GitHub Actions, оставить актуальные dev/main.
-- Последнее уточнение: оба авторизованных аккаунта видят оба профиля; Aeza не трогать; выполнять последовательно маленькими шагами. Агенты остановлены.
+- Последнее уточнение: оба авторизованных аккаунта видят оба профиля; Aeza не трогать. Пользователь снова разрешил параллельную команду Luna для лёгких атомарных задач; root — тимлид, личный review и CI. Тесты только GitHub Actions.
 - Снимки: main 8c9f1c9, dev fad82ca. Рабочая feat/product-completion от dev сохраняет серверную авторизацию, удалённую из main.
 - Все ветки проверены; почти все интегрированы. fix/no-login-profile-switcher дерево совпадает с main; feat/da-redirect-host-env устарела для public HTTPS origin. Удаление веток после выпуска.
 - Незавершённый собственный код collector/core сохранён в stash с описанием Незавершённые этапы сборщиков и данных перед последовательной работой. Не применять весь stash без проверки по задачам.
@@ -18,3 +18,4 @@
 - Следующий атомарный фикс Twitch: offline5min/online1min, online event immediate/queued, generation latch защищает новый login от позднего poll, malformed stream data не offline. Regression добавлен, отправить в CI и проверить terminal status; предыдущий cardinality assertion уточнён для правильного немедленного старта нового login.
 - Twitch фикс подтверждён CI37838044285 remote a9cb1d371f471c18a326fde6e197e963f3740127: все unit/integration/e2e/operations/package tests success; terminal failure только coverage branches91.14 и Overview lines92. Следующий CI policy: даже проверочный .deb собирать только main, skipped packaging на side не должен пропускать обязательные tests/coverage.
 - На RackNerd штатный gh уже авторизован thesmithmode ADMIN repo/workflow. Read-only GitHub команды через него успешны. Перенос токена локально отклонён auto-review; запрос явного согласия остаётся pending. Токен не извлекался.
+- Wave Luna1: frankie_showman включён в общую политику исключений; regression сохраняет raw events и исключает только twin из messages/audience. Root исправил через worker неверное поле summary.events и strict tuple typing; статические проверки прошли, отправляется в CI.
