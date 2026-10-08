@@ -24,3 +24,4 @@
 - Schema6: отдельный profile-scoped platform_streams ledger, миграция сохраняет Twitch history/manual rows/FK; read APIs и legacy import обновлены. Root review и статические проверки прошли до следующей незавершённой задачи; запуск тестов только CI.
 - Длительности Person отображаются человекочитаемо с сохранением unknown; unit boundaries и E2E120min подготовлены, статические gates0errors. Полная lifetime attendance пока не реализована.
 - Помощь по присутствию открывается по клику, Escape/outside close и mobile viewport clamp; Root проверил cleanup и границы. E2E подготовлен, запуск только CI.
+- CI37845339070 unit/integration/ops success, E2E connections ожидал удалённую ручную кнопку. Обновлён автоматический platform fixture сценарий и фактический invalid-login check; подготовлен повторный CI.

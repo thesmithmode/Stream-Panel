@@ -232,7 +232,7 @@ test(
   },
 );
 test(
-  "browser sessions, event filters, person links, platform recording and local login failure",
+  "browser sessions, event filters, person links, automatic platform sessions and local login failure",
   { timeout: 30000 },
   async () => {
     const a = await application(),
@@ -246,24 +246,25 @@ test(
       await page
         .getByRole("heading", { name: "Вход в Stream Panel" })
         .waitFor();
+      await page.getByLabel("Логин", { exact: true }).fill("unknown-user");
+      await page.getByLabel("Пароль", { exact: true }).fill("invalid-password");
+      await page.getByRole("button", { name: "Войти", exact: true }).click();
+      await page.getByRole("alert").filter({ hasText: "Неверный логин или пароль" }).waitFor();
       await goto(page, a.bootstrap());
       await page
         .getByRole("button", { name: "Открыть интеграции", exact: true })
         .waitFor();
       await page.getByRole("button", { name: "Сессии", exact: true }).click();
       await page.getByText("Записей пока нет", { exact: true }).waitFor();
-      await page.getByRole("button", { name: "Перейти к записи" }).click();
       await page.getByRole("button", { name: "Люди", exact: true }).click();
       await page.getByText("Пока никого нет", { exact: true }).waitFor();
       const s = await seed(a);
       await reload(page);
-      await page
-        .getByRole("button", { name: "Эфир идёт", exact: true })
-        .waitFor();
-      assert.equal(
-        await page.getByRole("button", { name: "Эфир идёт" }).isDisabled(),
-        true,
-      );
+      assert.equal(await page.locator(".record-button").count(), 0);
+      assert.equal(await page.getByRole("button", { name: /запись/i }).count(), 0);
+      await page.getByRole("button", { name: "Сессии", exact: true }).click();
+      await page.getByText("Twitch", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "Обзор", exact: true }).click();
       await page.getByLabel("Фильтр событий").selectOption("donation");
       assert.equal(await page.locator(".event-row").count(), 1);
       await page.getByLabel("Фильтр событий").selectOption("chat.message");
