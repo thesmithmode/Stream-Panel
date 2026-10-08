@@ -94,3 +94,23 @@ test('an unreadable maintenance state fails closed instead of starting collector
   c.child.kill('SIGTERM');const result=await c.exit;assert.equal(result.code,0);assert.match(result.stderr,/Maintenance state unavailable; collectors remain stopped/);
  }finally{if(c){c.child.kill();await c.exit;}await rm(dir,{recursive:true,force:true});}
 });
+
+test('local preview imports legacy credentials/history, requires setup password and persists login across upgrades',{timeout:30000},async()=>{
+ const {mkdir,writeFile,readFile}=await import('node:fs/promises');const {StreamStore}=await import('../../dist/packages/core/src/store.js');
+ const root=await mkdtemp(join(tmpdir(),'sp-local-cli-')),legacy=join(root,'old'),dir=join(root,'new'),port=await freePort();await mkdir(legacy);
+ const store=new StreamStore(join(legacy,'data.sqlite'));store.startSession('owner','old-stream',Date.now()-60000,'platform',Date.now()-60000);store.close();
+ await writeFile(join(legacy,'secrets.json'),JSON.stringify({version:1,twitchClientId:'old-client',daClientId:'old-da',daClientSecret:'fixture'}));
+ const run=(password,browser='1')=>{const c=spawn(process.execPath,['dist/apps/daemon/src/local.js'],{env:{...process.env,STREAM_PANEL_DATA_DIR:dir,STREAM_PANEL_LEGACY_DIR:legacy,STREAM_PANEL_PORT:String(port),STREAM_PANEL_INITIAL_PASSWORD:password??'',STREAM_PANEL_NO_BROWSER:browser,...(browser==='0'?{PATH:join(root,'missing-bin')}:{})},stdio:['ignore','pipe','pipe']});let out='',err='';c.stdout.on('data',b=>out+=b);c.stderr.on('data',b=>err+=b);const exit=new Promise(r=>c.on('exit',code=>r({code,out,err})));return {c,exit,browserError:async()=>{const deadline=Date.now()+5000;while(!err.includes('Откройте адрес панели')){assert.ok(Date.now()<deadline,'missing desktop opener must show manual browser fallback');await new Promise(r=>setTimeout(r,10));}},ready:async()=>{const deadline=Date.now()+15000;while(!out.includes('server listening')){if(c.exitCode!==null)throw Error(err);if(Date.now()>deadline)throw Error('TIMEOUT');await new Promise(r=>setTimeout(r,10));}}};};
+ const children=[];
+ try{
+ const bad=run();children.push(bad);assert.match((await bad.exit).err,/LOCAL_PASSWORD_REQUIRED/);
+ const a=run('local-password-for-browser');children.push(a);await a.ready();
+ const login=await fetch(`http://127.0.0.1:${port}/api/v1/auth/login`,{method:'POST',headers:{Origin:`http://127.0.0.1:${port}`,'Content-Type':'application/json'},body:JSON.stringify({username:'ruslan',password:'local-password-for-browser'})});assert.equal(login.status,200);
+ const cookie=login.headers.get('set-cookie').split(';')[0];
+ const status=await (await fetch(`http://127.0.0.1:${port}/api/v1/status`,{headers:{Cookie:cookie}})).json();assert.equal(status.config.twitchClientId,'old-client');assert.equal(status.config.daClientId,'old-da');
+ assert.equal((await (await fetch(`http://127.0.0.1:${port}/api/v1/sessions`,{headers:{Cookie:cookie}})).json()).length,1);
+ assert.ok((await readFile(join(dir,'legacy-backup/data.sqlite'))).length>0);
+ a.c.kill('SIGTERM');assert.equal((await a.exit).code,0);
+ const b=run(undefined,'0');children.push(b);await b.ready();await b.browserError();b.c.kill('SIGTERM');assert.equal((await b.exit).code,0);
+ }finally{for(const c of children)c.c.kill();await Promise.all(children.map(c=>c.exit));await rm(root,{recursive:true,force:true});}
+});
