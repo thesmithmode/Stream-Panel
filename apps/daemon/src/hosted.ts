@@ -18,6 +18,9 @@ export async function createHostedApplication(dir: string, publicOrigin: string,
   const backup = backupOptions ? new BackupService(dir, backupOptions) : undefined;
   let lastBackupRequest = 0;
   const accounts = new AccountStore(join(dir, "data.sqlite"));
+  const selectedProfile = (request: FastifyRequest, fallback: Profile): Profile =>
+    request.headers["x-stream-panel-profile"] as Profile | undefined ?? fallback;
+  const oauthBindings = new Map<string, { profile: Profile; tokenHash: string; provider: string; expires: number }>();
   const runtimes = new Map<Profile, Awaited<ReturnType<typeof createApplication>>>();
   const app = Fastify({ logger: false, bodyLimit: 32768, trustProxy: ["127.0.0.1", "::1"],
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
@@ -31,7 +34,7 @@ export async function createHostedApplication(dir: string, publicOrigin: string,
         databasePath: join(dir, "data.sqlite"), profile, origin: publicOrigin, staticFiles: false,
         session: (request) => {
           const session = accounts.session(request.headers.cookie);
-          return session?.profile === profile ? { csrf: session.csrf, expires: Number.MAX_SAFE_INTEGER } : null;
+          return session && selectedProfile(request, session.profile) === profile ? { csrf: session.csrf, expires: Number.MAX_SAFE_INTEGER } : null;
         },
       });
       await runtime.app.ready();
@@ -47,6 +50,9 @@ export async function createHostedApplication(dir: string, publicOrigin: string,
       .header("Referrer-Policy", "no-referrer")
       .header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
     if (request.headers.host !== origin.host) return reply.code(403).send({ error: "INVALID_HOST" });
+    const requestedProfile = request.headers["x-stream-panel-profile"];
+    if (requestedProfile !== undefined && (typeof requestedProfile !== "string" || !profiles.includes(requestedProfile as Profile)))
+      return reply.code(400).send({ error: "INVALID_PROFILE" });
     if (request.url.startsWith("/api/") && existsSync(join(dir, "deploying")))
       return reply.header("Retry-After", "10").code(503).send({ error: "SERVER_UPDATING" });
     if (!["GET", "HEAD"].includes(request.method) && request.headers.origin !== publicOrigin)
@@ -91,13 +97,26 @@ export async function createHostedApplication(dir: string, publicOrigin: string,
   const forward = async (request: FastifyRequest, reply: FastifyReply) => {
     const user = accounts.session(request.headers.cookie);
     if (!user) return reply.code(401).send({ error: "LOGIN_REQUIRED" });
-    const runtime = runtimes.get(user.profile)!;
+    let profile = selectedProfile(request, user.profile);
+    const callback = new URL(request.url, publicOrigin);
+    if (callback.pathname.startsWith("/oauth/")) {
+      if (!/^\/oauth\/(youtube|donationalerts)\/callback$/.test(callback.pathname))
+        return reply.code(404).send({ error: "NOT_FOUND" });
+      const state = callback.searchParams.get("state") ?? "";
+      const binding = oauthBindings.get(state);
+      if (!binding || binding.expires <= Date.now() || callback.pathname !== `/oauth/${binding.provider}/callback`)
+        return reply.code(400).send({ error: "INVALID_OAUTH_STATE" });
+      if (binding.tokenHash !== user.tokenHash) return reply.code(403).send({ error: "INVALID_OAUTH_SESSION" });
+      profile = binding.profile;
+      oauthBindings.delete(state);
+    }
+    const runtime = runtimes.get(profile)!;
     let release = () => {};
     let queue: { tail: Promise<void>; waiting: number } | undefined;
     if (request.method !== "GET" && request.method !== "HEAD" || request.url.startsWith("/oauth/")) {
-      queue = queues.get(user.profile) ?? { tail: Promise.resolve(), waiting: 0 };
+      queue = queues.get(profile) ?? { tail: Promise.resolve(), waiting: 0 };
       if (queue.waiting >= 100) return reply.code(503).send({ error: "QUEUE_OVERFLOW" });
-      queues.set(user.profile, queue);
+      queues.set(profile, queue);
       queue.waiting++;
       const previous = queue.tail;
       queue.tail = new Promise<void>((resolve) => { release = resolve; });
@@ -107,13 +126,22 @@ export async function createHostedApplication(dir: string, publicOrigin: string,
       // Recheck after waiting: logout can revoke a queued request's session.
       if (!accounts.session(request.headers.cookie)) return reply.code(401).send({ error: "LOGIN_REQUIRED" });
       const headers = { ...request.headers };
+      headers["x-stream-panel-profile"] = profile;
       delete headers["content-length"];
       const result = await runtime.app.inject({ method: request.method as "GET" | "POST" | "HEAD" | "PUT" | "DELETE" | "PATCH" | "OPTIONS", url: request.url, headers,
         ...(request.body === undefined ? {} : { payload: JSON.stringify(request.body) }) });
+      if (result.statusCode === 200 && /^\/api\/v1\/(youtube|donationalerts)\/connect$/.test(callback.pathname)) {
+        const url = result.json().url;
+        if (typeof url === "string") {
+          const state = new URL(url).searchParams.get("state");
+          for (const [key, value] of oauthBindings) if (value.expires <= Date.now()) oauthBindings.delete(key);
+          if (state) oauthBindings.set(state, { profile, tokenHash: user.tokenHash, provider: callback.pathname.split("/")[3]!, expires: Date.now() + 600000 });
+        }
+      }
       const responseHeaders = { ...result.headers };
       delete responseHeaders["content-length"];
       const payload = request.url.split("?")[0] === "/api/v1/status" && result.statusCode === 200
-        ? JSON.stringify({ ...result.json(), backup: backup?.status ?? {state:"disabled"}, user: { profile: user.profile, username: user.username, displayName: user.displayName } }) : result.body;
+        ? JSON.stringify({ ...result.json(), backup: backup?.status ?? {state:"disabled"}, user: { profile, username: user.username, displayName: user.displayName } }) : result.body;
       reply.code(result.statusCode).headers(responseHeaders).send(payload);
     } finally { release(); if (queue) queue.waiting--; }
   };

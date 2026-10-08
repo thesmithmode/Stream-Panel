@@ -6,6 +6,46 @@ import { tmpdir } from "node:os";
 import { AccountStore } from "../src/auth.js";
 import { createHostedApplication } from "../src/hosted.js";
 
+test("authenticated clients select profiles per request without changing another client or OAuth destination", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sp-profile-requests-"));
+  const h = await createHostedApplication(dir, "https://panel.example.test", false);
+  const base = { host: "panel.example.test", origin: "https://panel.example.test" };
+  try {
+    await h.accounts.createUser("ruslan", "ruslan", "Руслан", "request-profile-password");
+    const login = async () => {
+      const response = await h.app.inject({ method: "POST", url: "/api/v1/auth/login", headers: base, payload: { username: "ruslan", password: "request-profile-password" } });
+      assert.equal(response.statusCode, 200);
+      return { ...base, cookie: String(response.headers["set-cookie"]).split(";")[0]!, "x-csrf-token": response.json().csrf };
+    };
+    const [a, b] = await Promise.all([login(), login()]);
+    const input = { source: "twitch", accountId: "channel", externalId: "same-event", type: "chat.message", actor: { externalId: "viewer", displayName: "Viewer" }, occurredAtMs: 100, receivedAtMs: 100, sourceTime: null, timeQuality: "provider", transport: "eventsub", payload: { text: "Руслан" } };
+    await h.runtimes.get("ruslan")!.db.call("ingest", input);
+    await h.runtimes.get("gulnaz")!.db.call("ingest", { ...input, payload: { text: "Гульназ" } });
+    const selected = { ...a, "x-stream-panel-profile": "gulnaz" };
+    const responses = await Promise.all([h.app.inject({ url: "/api/v1/events", headers: selected }), h.app.inject({ url: "/api/v1/events", headers: b })]);
+    assert.equal(responses[0]!.json()[0].payload.text, "Гульназ");
+    assert.equal(responses[1]!.json()[0].payload.text, "Руслан");
+    assert.equal((await h.app.inject({ url: "/api/v1/status", headers: selected })).json().user.profile, "gulnaz");
+    assert.equal((await h.app.inject({ url: "/api/v1/events", headers: { ...base, "x-stream-panel-profile": "gulnaz" } })).statusCode, 401);
+    assert.equal((await h.app.inject({ url: "/api/v1/events", headers: { ...a, "x-stream-panel-profile": "other" } })).statusCode, 400);
+    assert.equal((await h.app.inject({ method: "POST", url: "/api/v1/twitch/disconnect", headers: { ...selected, "x-csrf-token": "bad" }, payload: {} })).statusCode, 403);
+    const auth = await h.app.inject({ method: "POST", url: "/api/v1/donationalerts/connect", headers: selected, payload: { clientId: "test-client", clientSecret: "test-secret", utcOffsetMinutes: 0 } });
+    assert.equal(auth.statusCode, 200, auth.body);
+    const state = new URL(auth.json().url).searchParams.get("state")!;
+    let destination = "";
+    h.runtimes.get("gulnaz")!.da.finishAuth = async () => { destination = "gulnaz"; };
+    h.runtimes.get("ruslan")!.da.finishAuth = async () => { destination = "ruslan"; };
+    const callback = `/oauth/donationalerts/callback?code=test-code&state=${state}`;
+    assert.equal((await h.app.inject({ url: callback, headers: b })).statusCode, 403);
+    assert.equal((await h.app.inject({ url: callback, headers: a })).statusCode, 302);
+    assert.equal(destination, "gulnaz");
+    assert.equal((await h.app.inject({ url: callback, headers: a })).statusCode, 400);
+    assert.equal((await h.app.inject({ method: "POST", url: "/api/v1/auth/logout", headers: a, payload: {} })).statusCode, 200);
+    assert.equal((await h.app.inject({ url: "/api/v1/events", headers: selected })).statusCode, 401);
+    assert.equal((await h.app.inject({ url: "/api/v1/events", headers: b })).statusCode, 200);
+  } finally { await h.app.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
 test("hosted logins isolate two profiles and simultaneous writes; login, CSRF, origin and logout fail closed", async () => {
   const dir = await mkdtemp(join(tmpdir(), "sp-hosted-"));
   const accounts = new AccountStore(join(dir, "data.sqlite"));

@@ -9,4 +9,6 @@
 - RackNerd 23.95.166.119 read-only проверен: Ubuntu24.04, RAM3.4GiB/free~2GiB, диск16GiB free; Traefik Docker держит80/443, file-provider /root/traefik/config, network traefik-proxy172.21.0.0/16. Сервер не изменялся.
 - gh старая авторизация401; обычный device flow после одобрения потерял token exchange из-за network reset. Новый .NET device flow хранится только secrets/github-device.json, требует одобрения пользователя и безопасного обмена токена в gh --with-token.
 - Потребуются доступная копия Linux SQLite/config и Supabase service_role key для Storage. Запрошены у пользователя. Нельзя заменить историю fixtures.
-- Артефакты аудита docs/audit-branches.md, audit-product-requirements.md, audit-access-deploy.md, database-audit.md; полный последовательный план docs/execution-order.md. Правки приложения и деплой ещё не выполнены.
+- Артефакты аудита docs/audit-branches.md, audit-product-requirements.md, audit-access-deploy.md, database-audit.md; полный последовательный план docs/execution-order.md. Деплой ещё не выполнен.
+- Первый code fix: hosted X-Stream-Panel-Profile применяется отдельно к запросу после входа; OAuth state привязан к профилю и tokenHash инициатора. Новый regression сначала падал; после фикса 4/4 hosted/auth tests прошли, TypeScript/Svelte исходные проверки прошли.
+- На RackNerd штатный gh уже авторизован thesmithmode ADMIN repo/workflow. Read-only GitHub команды через него успешны. Перенос токена локально отклонён auto-review; запрос явного согласия остаётся pending. Токен не извлекался.
