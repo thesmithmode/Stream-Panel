@@ -34,7 +34,7 @@ const defaults: Config = {
   daRefreshToken: "",
   daUtcOffsetMinutes: null,
   chattersPollSeconds: 60,
-  excludedBotLogins: [],
+  excludedBotLogins: ["fullrandomname_twitch", "jeetbot", "streemelements", "streamelements"],
 };
 export function defaultDataDir(): string {
   return (
@@ -43,7 +43,7 @@ export function defaultDataDir(): string {
   );
 }
 export class Configuration {
-  value: Config = { ...defaults };
+  value: Config = { ...defaults, excludedBotLogins: [...defaults.excludedBotLogins] };
   private saving: Promise<void> = Promise.resolve();
   constructor(readonly dir: string) {}
   async load(): Promise<void> {
@@ -64,6 +64,7 @@ export class Configuration {
             .filter(Boolean)
             .slice(0, 200)
         : [];
+      this.value.excludedBotLogins = [...new Set([...defaults.excludedBotLogins,...this.value.excludedBotLogins])];
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }

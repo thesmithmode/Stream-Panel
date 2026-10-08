@@ -104,3 +104,13 @@ CREATE TABLE youtube_messages (
 CREATE INDEX youtube_messages_time ON youtube_messages(account_id, published_at_ms);
 PRAGMA user_version = 4;
 `;
+
+export const schemaV5 = `
+CREATE TABLE stream_samples (
+  session_id TEXT NOT NULL REFERENCES sessions(id), observed_at_ms INTEGER NOT NULL,
+  category_id TEXT NOT NULL, category_name TEXT NOT NULL, title TEXT NOT NULL,
+  twitch_viewers INTEGER, youtube_viewers INTEGER,
+  PRIMARY KEY(session_id, observed_at_ms)
+) WITHOUT ROWID;
+PRAGMA user_version = 5;
+`;

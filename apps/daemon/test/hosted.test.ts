@@ -26,6 +26,13 @@ test("hosted logins isolate two profiles and simultaneous writes; login, CSRF, o
     assert.equal((await h.app.inject({ method: "POST", url: "/api/v1/auth/login", headers: base, payload: { username: "ruslan", password: "bad" } })).statusCode, 401);
     assert.equal((await h.app.inject({ method: "POST", url: "/api/v1/auth/login", headers: { ...base, origin: "https://evil.test" }, payload: { username: "ruslan", password: "ruslan-long-password" } })).statusCode, 403);
     const [a, b] = await Promise.all([login("ruslan", "ruslan-long-password"), login("gulnaz", "gulnaz-long-password")]);
+    const period = "from=1&to=100000";
+    assert.equal((await h.app.inject({url:`/api/v1/analytics?${period}`,headers:a})).json().summary.entities,0);
+    for (const query of ["from=bad&to=100000",`${period}&timezone=Bad/Zone`,`${period}&source=unknown`,`${period}&chatWindowMinutes=0`]) {
+      const response=await h.app.inject({url:`/api/v1/analytics?${query}`,headers:a});
+      assert.equal(response.statusCode,400,response.body);
+      assert.match(response.json().error,/^INVALID_/);
+    }
     const input = { source: "twitch", accountId: "channel", externalId: "same-event", type: "chat.message", actor: { externalId: "viewer", displayName: "Viewer" }, occurredAtMs: 100, receivedAtMs: 100, sourceTime: null, timeQuality: "provider", transport: "eventsub", payload: { text: "A" } };
     const [ea, eb] = await Promise.all([h.runtimes.get("ruslan")!.db.call<any>("ingest", input), h.runtimes.get("gulnaz")!.db.call<any>("ingest", { ...input, payload: { text: "B" } })]);
     assert.notEqual(ea.personId, eb.personId);

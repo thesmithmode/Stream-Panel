@@ -71,7 +71,7 @@ export async function createApplication(
         ? detail.statusCode
         : undefined;
     const clientFailure =
-      /^(INVALID_|MISSING_|TWITCH_|DA_|UNSUPPORTED_CURRENCY$|SAME_PERSON$|EMPTY_PERSON$|ALREADY_UNDONE$|PLATFORM_SESSION_MANAGED_AUTOMATICALLY$)/.test(
+      /^(INVALID_|MISSING_|TWITCH_|DA_|ANALYTICS_|UNSUPPORTED_CURRENCY$|SAME_PERSON$|EMPTY_PERSON$|ALREADY_UNDONE$|PLATFORM_SESSION_MANAGED_AUTOMATICALLY$)/.test(
         safe,
       );
     reply
@@ -244,6 +244,15 @@ export async function createApplication(
       return { csrf };
     },
   );
+  app.get("/api/v1/analytics", async request => {
+    const q=object(request.query);
+    return db.call("analytics", {
+      fromMs:Number(q.from),toMs:Math.min(Number(q.to),Date.now()),source:string(q.source)||"all",category:string(q.category),
+      minSessions:q.minSessions===undefined?3:Number(q.minSessions),minMinutes:q.minMinutes===undefined?30:Number(q.minMinutes),minMessages:q.minMessages===undefined?5:Number(q.minMessages),
+      chatWindowMinutes:q.chatWindowMinutes===undefined?5:Number(q.chatWindowMinutes),coreRule:string(q.coreRule)||"either",timezone:string(q.timezone)||"Europe/Moscow",
+      excludedLogins:configuration.value.excludedBotLogins,ownerId:configuration.value.twitch?.userId??"",youtubeAccount:configuration.value.youtube?.userId??"",
+    });
+  });
   app.get("/api/v1/status", async (request) => ({
     youtube: youtube.status,
     twitch: twitch.status,

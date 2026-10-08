@@ -1,3 +1,4 @@
+import { audienceAnalytics, type AnalyticsOptions } from "./analytics.js";
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { openProfileDatabase } from "./profile-db.js";
@@ -10,7 +11,7 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { schemaV1, schemaV2, schemaV3, schemaV4 } from "./schema.js";
+import { schemaV1, schemaV2, schemaV3, schemaV4, schemaV5 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
 import { presenceMinutes, pollCoveredMinutes, type PresencePoll } from "./presence.js";
 
@@ -49,7 +50,7 @@ export class StreamStore {
       this.db.pragma("foreign_keys = ON");
       this.db.pragma("busy_timeout = 5000");
       const version = this.db.pragma("user_version", { simple: true });
-      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4)
+      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5)
         throw new Error("UNSUPPORTED_SCHEMA_VERSION");
       this.db.pragma("journal_mode = WAL");
       this.db.pragma("synchronous = FULL");
@@ -71,6 +72,8 @@ export class StreamStore {
       }
       if ((this.db.pragma("user_version", { simple: true }) as number) < 4)
         this.db.transaction(() => this.db.exec(schemaV4)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 5)
+        this.db.transaction(() => this.db.exec(schemaV5)).immediate();
       this.db.exec("CREATE TABLE IF NOT EXISTS sp_youtube_quota (day TEXT NOT NULL, profile TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(day,profile)) WITHOUT ROWID");
       // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
@@ -84,6 +87,19 @@ export class StreamStore {
   close(): void {
     this.db.close();
   }
+
+  streamSample(sessionId: string, at: number, categoryId: string, categoryName: string, title: string, twitchViewers: number | null): void {
+    assertTimestamp(at);
+    if ([categoryId,categoryName,title].some(s => s.length > 1000) || (twitchViewers !== null && (!Number.isSafeInteger(twitchViewers) || twitchViewers < 0))) throw new Error("INVALID_STREAM_SAMPLE");
+    this.db.prepare("INSERT INTO stream_samples VALUES (?,?,?,?,?,?,NULL) ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET category_id=excluded.category_id,category_name=excluded.category_name,title=excluded.title,twitch_viewers=excluded.twitch_viewers").run(sessionId,at,categoryId,categoryName,title,twitchViewers);
+  }
+  youtubeViewers(at: number, viewers: number | null): void {
+    assertTimestamp(at);
+    if (viewers !== null && (!Number.isSafeInteger(viewers) || viewers < 0)) throw new Error("INVALID_VIEWER_COUNT");
+    // Join only the latest contemporaneous Twitch sample; never borrow an old category.
+    this.db.prepare("UPDATE stream_samples SET youtube_viewers=? WHERE (session_id,observed_at_ms) IN (SELECT x.session_id,x.observed_at_ms FROM stream_samples x JOIN sessions s ON s.id=x.session_id WHERE s.ended_at_ms IS NULL AND x.observed_at_ms<=? AND x.observed_at_ms>=? ORDER BY x.observed_at_ms DESC LIMIT 1)").run(viewers,at,at-180000);
+  }
+  analytics(options: AnalyticsOptions) { return audienceAnalytics(this.db,options); }
 
   youtubeQuota(day: string, profile: string, cost = 1): boolean {
     if (!/^\d{2}\/\d{2}\/\d{4}$/.test(day) || !profile || !Number.isInteger(cost) || cost < 1 || cost > 4000) throw new Error("INVALID_QUOTA");
@@ -922,19 +938,21 @@ export class StreamStore {
         if (!identity) {
           const personId = randomUUID();
           identity = { id: randomUUID() };
-          insertPerson.run(personId, userId);
+          const name=poll.userNames?.[userId] || userId;
+          insertPerson.run(personId, name);
           insertIdentity.run(
             identity.id,
             accountId,
             userId,
-            userId,
-            candidateKey(userId),
+            name,
+            candidateKey(name),
             personId,
-            matchKey(userId),
+            matchKey(name),
           );
         }
         insertMember.run(id, identity.id);
       }
+      if (poll.userNames) this.updateChatterNames(accountId,Object.entries(poll.userNames).map(([user_id,user_name])=>({user_id,user_name})),poll.completedAtMs);
     }).immediate();
   }
 
@@ -1092,9 +1110,9 @@ export class StreamStore {
             OR i.match_key NOT IN (SELECT value FROM json_each(?))
           )
         ) AS messages,
-        (SELECT count(*) FROM events e WHERE ${inSession} AND e.type = 'donation') AS donations`,
+        (SELECT count(*) FROM events e LEFT JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))) AS donations`,
       )
-      .get(sid, sid, sid, sid, botJson, sid, sid) as {
+      .get(sid, sid, sid, sid, botJson, sid, sid, botJson) as {
       event_count: number;
       messages: number;
       donations: number;
@@ -1103,12 +1121,12 @@ export class StreamStore {
       .prepare(
         `SELECT json_extract(e.payload_json, '$.currency') AS currency,
                 json_extract(e.payload_json, '$.amountMinor') AS amount_minor
-         FROM events e
-         WHERE ${inSession} AND e.type = 'donation'
+         FROM events e LEFT JOIN identities i ON i.id=e.identity_id
+         WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))
            AND json_extract(e.payload_json, '$.currency') IS NOT NULL
            AND json_extract(e.payload_json, '$.amountMinor') IS NOT NULL`,
       )
-      .all(sid, sid) as { currency: string; amount_minor: string }[];
+      .all(sid, sid, botJson) as { currency: string; amount_minor: string }[];
     const totals: Record<string, string> = {};
     for (const row of donationRows) {
       totals[row.currency] = (
@@ -2154,7 +2172,7 @@ export class StreamStore {
       if (
         snapshot.pragma("integrity_check", { simple: true }) !== "ok" ||
         (snapshot.pragma("foreign_key_check") as unknown[]).length ||
-        (this.profile ? (snapshot.prepare("SELECT version FROM sp_profile_schema WHERE profile=?").get(this.profile) as {version:number} | undefined)?.version : snapshot.pragma("user_version", { simple: true })) !== 4
+        (this.profile ? (snapshot.prepare("SELECT version FROM sp_profile_schema WHERE profile=?").get(this.profile) as {version:number} | undefined)?.version : snapshot.pragma("user_version", { simple: true })) !== 5
       )
         throw new Error("BACKUP_VALIDATION_FAILED");
     } finally {

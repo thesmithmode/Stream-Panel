@@ -40,3 +40,28 @@ test('encrypted online backup restores both profiles and credentials, revokes se
   await writeFile(join(dir,'key'),'bad');await assert.rejects(backup.run(),/INVALID_BACKUP_KEY/);
  }finally{await backup.stop();a.close();b.close();auth.close();await rm(dir,{recursive:true,force:true});}
 });
+
+test('backup rejects unsafe remote settings, malformed secret metadata and remote verification failures; corrupt restore never leaves a partial directory',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-backup-errors-')),key=randomBytes(32),path=join(dir,'data.sqlite');
+ const auth=new AccountStore(path);const s=new StreamStore(path,'ruslan');
+ await writeFile(join(dir,'key'),key.toString('hex'));await writeFile(join(dir,'service'),'secret');
+ const options={keyFile:join(dir,'key'),serviceKeyFile:join(dir,'service'),url:'https://test.supabase.co'};
+ try {
+  const privateInfo:typeof fetch=async(input)=>Response.json(String(input).includes('/bucket/')?{public:false}:[]);
+  await assert.rejects(new BackupService(dir,{...options,bucket:'../other'},privateInfo).run(),/INVALID_BACKUP_BUCKET/);
+  await writeFile(join(dir,'service'),'');await assert.rejects(new BackupService(dir,options,privateInfo).run(),/MISSING_BACKUP_SERVICE_KEY/);await writeFile(join(dir,'service'),'secret');
+  const malformed:typeof fetch=async(input)=>Response.json(String(input).includes('/bucket/')?{public:false}:{});
+  await assert.rejects(new BackupService(dir,options,malformed).run(),/BACKUP_INVALID_LIST/);
+  await assert.rejects(new BackupService(dir,options,privateInfo).run(),/BACKUP_UPLOAD_NOT_VERIFIED/);
+  await writeFile(join(dir,'key'),key.toString('hex')+'invalid');
+  await assert.rejects(new BackupService(dir,{keyFile:join(dir,'key')}).run(),/INVALID_BACKUP_KEY/);
+  await writeFile(join(dir,'key'),key.toString('hex'));
+  await mkdir(join(dir,'profiles','ruslan'),{recursive:true});await writeFile(join(dir,'profiles','ruslan','secrets.json'),'{bad');
+  await assert.rejects(new BackupService(dir,{keyFile:join(dir,'key')}).run(),/BACKUP_FAILED/);
+  const meta=Buffer.from(JSON.stringify({version:999,profiles:{}})),prefix=Buffer.alloc(4);prefix.writeUInt32BE(meta.length);
+  await assert.rejects(restoreBackup(sealBackup(Buffer.concat([prefix,meta,Buffer.from('bad database')]),key),key,join(dir,'invalid-version')),/UNSUPPORTED_BACKUP/);
+  const validMeta=Buffer.from(JSON.stringify({version:1,profiles:{}}));prefix.writeUInt32BE(validMeta.length);
+  await assert.rejects(restoreBackup(sealBackup(Buffer.concat([prefix,validMeta,Buffer.from('bad database')]),key),key,join(dir,'bad-sqlite')));
+  assert.equal((await readdir(dir)).includes('bad-sqlite'),false);
+ } finally {s.close();auth.close();await rm(dir,{recursive:true,force:true});}
+});

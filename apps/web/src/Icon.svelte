@@ -1,6 +1,8 @@
 <script lang="ts">
   let { name, size = 20 }: { name: string; size?: number } = $props();
   const paths: Record<string, string> = {
+    analytics: "M3 21V3m0 18h18M7 16l4-6 4 3 5-8",
+    youtube: "M3 5h18v14H3Zm7 4 6 3-6 3Z",
     overview: "M3 10 12 3l9 7v11h-6v-7H9v7H3Z",
     sessions: "M5 21V10m7 11V3m7 18V7",
     people:

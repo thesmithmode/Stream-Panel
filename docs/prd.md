@@ -1,3 +1,5 @@
+> Исторический документ desktop v0.0.4. Актуальные серверная архитектура и условия выпуска: [readiness-checklist.md](readiness-checklist.md), [ops/server.md](ops/server.md), [api-contract.md](api-contract.md). Требования Windows/локального демона/sync двух БД ниже заменены серверным решением.
+
 # PRD — Stream Panel v1
 
 Статус 2026-10-06: работающая ранняя программа в `codex-init`; локальный daemon/UI проверен, сетевые адаптеры написаны, живой вход ещё не проверен. Этот PRD описывает целевую v1, а не объявляет все требования реализованными. Текущая готовность — в [validation.md](validation.md), backlog — в [implementation-plan.md](implementation-plan.md).

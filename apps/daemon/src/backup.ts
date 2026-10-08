@@ -31,13 +31,14 @@ export class BackupService {
   }
   private async perform() {
     const directory = join(this.dir, "backups"); await mkdir(directory, {recursive:true,mode:0o700});
-    const key = Buffer.from((await readFile(this.options.keyFile, "utf8")).trim(), "hex");
-    if (key.length !== 32) throw new Error("INVALID_BACKUP_KEY");
+    const encodedKey = (await readFile(this.options.keyFile, "utf8")).trim();
+    if (!/^[a-fA-F0-9]{64}$/.test(encodedKey)) throw new Error("INVALID_BACKUP_KEY");
+    const key = Buffer.from(encodedKey, "hex");
     if ((await stat(join(this.dir, "data.sqlite"))).size > 40 * 1024 * 1024) throw new Error("BACKUP_SIZE_LIMIT");
     const snapshot = join(directory, "snapshot.tmp.sqlite");
-    const db = new Database(join(this.dir, "data.sqlite"), {readonly:true});
-    try { await db.backup(snapshot); } finally { db.close(); }
     try {
+      const db = new Database(join(this.dir, "data.sqlite"), {readonly:true});
+      try { await db.backup(snapshot); } finally { db.close(); }
       const check = new Database(snapshot, {readonly:true});
       try { if (check.pragma("integrity_check", {simple:true}) !== "ok") throw new Error("BACKUP_INTEGRITY_FAILED"); } finally { check.close(); }
       const secrets: Record<string,unknown> = {};

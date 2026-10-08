@@ -49,7 +49,7 @@ export class YouTubeConnection {
     const granted = string(data.scope).split(" ");
     if (!scopes.every(s => granted.includes(s)) || !string(data.access_token) || !string(data.refresh_token)) throw new Error("YOUTUBE_SCOPES_REQUIRED");
     const tokens: Tokens = { access: string(data.access_token), refresh: string(data.refresh_token), expiresAt: this.now() + Number(data.expires_in) * 1000, userId: "", scopes: granted };
-    if (!Number.isFinite(tokens.expiresAt)) throw new Error("YOUTUBE_INVALID_TOKEN");
+    if (!Number.isFinite(tokens.expiresAt) || tokens.expiresAt <= this.now()) throw new Error("YOUTUBE_INVALID_TOKEN");
     const channels = await this.api("channels", { part: "snippet,statistics", mine: "true", maxResults: "50" }, tokens);
     if (generation !== this.generation) return;
     const items = Array.isArray(channels.items) ? channels.items : [];
@@ -72,8 +72,8 @@ export class YouTubeConnection {
     if (tokens.expiresAt <= this.now() + 60000) {
       const data = await this.token({ grant_type: "refresh_token", refresh_token: tokens.refresh });
       if (!valid()) return 300000;
-      if (!string(data.access_token) || !Number.isFinite(Number(data.expires_in))) throw new Error("YOUTUBE_INVALID_TOKEN");
-      tokens.access = string(data.access_token); tokens.expiresAt = this.now() + Number(data.expires_in) * 1000;
+      if (!string(data.access_token) || !Number.isFinite(Number(data.expires_in)) || Number(data.expires_in) <= 0) throw new Error("YOUTUBE_INVALID_TOKEN");
+      tokens.access = string(data.access_token); tokens.refresh = string(data.refresh_token) || tokens.refresh; tokens.expiresAt = this.now() + Number(data.expires_in) * 1000;
       await this.config.save();
     }
     const previous = await this.db.call<any>("youtubeData", tokens.userId);
@@ -94,6 +94,13 @@ export class YouTubeConnection {
       page = string(response.nextPageToken); if (!page) break;
     }
     await this.db.call("youtubeSnapshot", tokens.userId, "broadcasts", broadcasts, this.now());
+    if (broadcasts.length) {
+      const counts = await this.api("videos", {part:"liveStreamingDetails",id:broadcasts.slice(0,2).map(x => string(x.id)).join(",")}, tokens);
+      if (!valid()) return 300000;
+      const numbers = (Array.isArray(counts.items) ? counts.items : []).map((x:any) => x.liveStreamingDetails?.concurrentViewers);
+      const viewers = numbers.length === broadcasts.slice(0,2).length && numbers.every((x:any) => x !== undefined && Number.isSafeInteger(Number(x))) ? numbers.reduce((a:number,b:string) => a+Number(b),0) : null;
+      await this.db.call("youtubeViewers",this.now(),viewers);
+    }
     let interval = broadcasts.length ? 60000 : 300000;
     for (const broadcast of broadcasts.slice(0, 2)) {
       const chat = string(broadcast.snippet?.liveChatId); if (!chat) continue;
@@ -114,7 +121,7 @@ export class YouTubeConnection {
     return Math.min(interval, 3600000);
   }
   async start() {
-    if (this.running || !this.config.value.youtube) return;
+    if (this.running || this.timer || !this.config.value.youtube) return;
     const generation = this.generation;
     const tick = async () => {
       let delay = 300000;

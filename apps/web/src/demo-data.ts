@@ -305,6 +305,13 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
   const q = parseQuery(path);
   const isPost = body !== undefined;
 
+  if (p === "analytics") {
+    const from=Number(q.get("from")),to=Number(q.get("to")),start=Math.max(from,to-2*hour),source=q.get("source")||"all";
+    const rows=people.slice(0,3).map((p,i)=>({id:p.id,name:p.display_name,source:"twitch",messages:20-i*5,observedMinutes:60-i*10,estimatedChatMinutes:0,sessionIds:[sessionLiveId,sessionPastId],intervals:[{from:start,to:start+(60-i*10)*minute,session:sessionLiveId,kind:"observed"}],donations:{},core:2>=Number(q.get("minSessions")||3)})).filter(()=>source!=="youtube");
+    const timeline=Array.from({length:90},(_,i)=>({at:Math.floor(start/minute)*minute+i*minute,messages:i%4,observed:1+i%3,estimated:0,viewers:8+i%5,presenceKnown:i%13!==0}));
+    return {summary:{entities:rows.length,core:rows.filter(r=>r.core).length,streams:2,messages:rows.reduce((a,r)=>a+r.messages,0)},audience:rows,timeline,hours:[{day:"пн",hour:20,observed:120,observedKnownMinutes:60,estimated:0,messages:40,sampleMinutes:60}],categories:[{id:"demo-game",name:"Демо-игра",minutes:120,sessions:2,audience:rows.length,core:rows.filter(r=>r.core).length,messagesPerHour:30,observedMinutes:150,estimatedChatMinutes:0}]};
+  }
+
   if (p === "status") {
     return {
       twitch: {

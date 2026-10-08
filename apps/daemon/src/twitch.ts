@@ -392,7 +392,12 @@ export class TwitchConnection {
     if (!this.token.scopes.includes("user:read:chat"))
       throw new Error("MISSING_CHAT_SCOPE");
     await this.config.save();
+    if (generation !== this.authGeneration) throw new Error("TWITCH_AUTH_CANCELLED");
     this.status.account = string(body.login);
+    if (string(body.login) && !this.config.value.excludedBotLogins.includes(string(body.login))) {
+      this.config.value.excludedBotLogins.push(string(body.login)); await this.config.save();
+      if (generation !== this.authGeneration) throw new Error("TWITCH_AUTH_CANCELLED");
+    }
     await this.db.call(
       "ensureOwnerIdentity",
       this.token.userId,
@@ -637,6 +642,7 @@ export class TwitchConnection {
             "platform",
             Date.now(),
           );
+        if (this.sessionId && current()) await this.db.call("streamSample", this.sessionId, Date.now(), string(stream.game_id), string(stream.game_name), string(stream.title), Number.isSafeInteger(stream.viewer_count) ? Number(stream.viewer_count) : null);
       } else if (!manual && ++this.offlineCount >= 2) {
         const open = sessions.find(
           (s) => s.account_id === accountId && s.ended_at_ms === null,
@@ -675,8 +681,9 @@ export class TwitchConnection {
           // Cover the interval from the previous successful poll (not one minute bucket).
           const windowed = {
             ...poll,
+            userNames:Object.fromEntries(users.map(user=>[user.user_id,user.user_name])),
             startedAtMs:
-              this.lastSuccessfulPollAt !== null
+              this.lastSuccessfulPollAt !== null && poll.startedAtMs - this.lastSuccessfulPollAt <= 2 * clampChattersPollSeconds(this.config.value.chattersPollSeconds) * 1000
                 ? Math.min(this.lastSuccessfulPollAt, poll.startedAtMs)
                 : poll.startedAtMs,
           };
@@ -687,7 +694,8 @@ export class TwitchConnection {
           this.status.capabilities.presence = poll.status;
           if (poll.status === "complete")
             this.lastSuccessfulPollAt = poll.completedAtMs;
-          else
+          else {
+            this.lastSuccessfulPollAt = null;
             await this.db.call(
               "gap",
               "twitch",
@@ -695,7 +703,9 @@ export class TwitchConnection {
               poll.startedAtMs,
               poll.completedAtMs,
             );
+          }
         } catch (error) {
+          this.lastSuccessfulPollAt = null;
           this.status.capabilities.presence =
             error instanceof Error ? error.message : "chatters_error";
           // Isolate from EventSub — do not rethrow into start()/reconnect.

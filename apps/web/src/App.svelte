@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import Icon from "./Icon.svelte";
   import Overview from "./Overview.svelte";
+  import Analytics from "./Analytics.svelte";
   import YouTube from "./YouTube.svelte";
   import Connections from "./Connections.svelte";
   import People from "./People.svelte";
@@ -66,6 +67,7 @@
     overview: "Обзор эфира",
     sessions: "Сессии",
     people: "Люди",
+    analytics: "Аналитика аудитории",
     youtube: "YouTube",
     connections: "Интеграции",
   };
@@ -73,6 +75,7 @@
     overview: "История чата, донаты и наблюдения.",
     sessions: "История записей и полнота собранных данных.",
     people: "Активность людей и управляемые связи аккаунтов.",
+    analytics: "Ядро аудитории, категории и время эфиров. Наблюдения и оценки показаны отдельно.",
     youtube: "Статистика канала и чат эфиров своего профиля.",
     connections: "Twitch, DonationAlerts и YouTube — вход и статус сбора.",
   };
@@ -80,6 +83,7 @@
     ["overview", "Обзор"],
     ["sessions", "Сессии"],
     ["people", "Люди"],
+    ["analytics", "Аналитика"],
     ["youtube", "YouTube"],
     ["connections", "Интеграции"],
   ] as const;
@@ -281,8 +285,10 @@
           connect={() => navigate("connections")}
           onPerson={openPerson}
         />
+      {:else if tab === "analytics"}
+        <Analytics profile={user?.profile ?? "local"} mode={dataMode} onPerson={openPerson} />
       {:else if tab === "youtube"}
-        <YouTube />
+        <YouTube mode={dataMode} />
       {:else if tab === "connections"}<Connections
           {status}
           onChange={refresh}

@@ -52,3 +52,38 @@ test('YouTube OAuth binds state and PKCE; refresh, owner filtering, durable curs
   await assert.rejects(yt.finishAuth('code','a'.repeat(64)),/INVALID_YOUTUBE_STATE/);
  }finally{await yt.stop();await db.stop();await rm(dir,{recursive:true,force:true});}
 });
+
+test('YouTube cancellation at OAuth, refresh, channel, broadcast, messages and report awaits cannot resurrect credentials or append stale data',async()=>{
+ for(const phase of ['oauth-token','oauth-channel','refresh','channel','broadcast','messages','report']){
+  let resolve:((r:Response)=>void)|undefined,entered:()=>void=()=>{},gate=new Promise<void>(r=>entered=r),writes:any[]=[];
+  const config={value:{youtubeClientId:'id',youtubeClientSecret:'secret',youtube:{access:'old',refresh:'r',userId:'channel',scopes:scopes.split(' '),expiresAt:phase==='refresh'?0:Date.now()+3600000}},save:async()=>{}} as unknown as Configuration;
+  const data={snapshots:{channel:{updatedAt:phase==='channel'?0:Date.now()},report:{updatedAt:phase==='report'?0:Date.now()}},messages:[]};
+  const db={call:async(method:string,...args:any[])=>{if(method==='youtubeQuota')return true;if(method==='youtubeData')return data;writes.push([method,...args]);return null;}} as unknown as StoreClient;
+  const request:typeof fetch=async(input,init)=>{
+   const path=new URL(String(input)).pathname;
+   const delayed=phase==='oauth-token'&&path==='/token'||phase==='oauth-channel'&&path.endsWith('/channels')||phase==='refresh'&&path==='/token'||phase==='channel'&&path.endsWith('/channels')||phase==='broadcast'&&path.endsWith('/liveBroadcasts')||phase==='messages'&&path.endsWith('/messages')||phase==='report'&&path.endsWith('/reports');
+   const response=path==='/token'?{access_token:'fresh',refresh_token:'fresh-refresh',scope:scopes,expires_in:3600}:path.endsWith('/channels')?{items:[{id:'channel'}]}:path.endsWith('/liveBroadcasts')?{items:[{id:'live',snippet:{channelId:'channel',liveChatId:'chat'}}]}:path.endsWith('/messages')?{items:[{id:'stale'}],nextPageToken:'stale-cursor'}:{};
+   if(delayed){entered();return new Promise(r=>{resolve=()=>r(Response.json(response));});}return Response.json(response);
+  };
+  const yt=new YouTubeConnection(config,db,'https://panel.test/oauth/youtube/callback','ruslan',request);
+  let pending:Promise<unknown>;
+  if(phase.startsWith('oauth-')){const state=new URL((await yt.beginAuth('id','secret')).url).searchParams.get('state')!;pending=yt.finishAuth('code',state);}else pending=yt.collectOnce();
+  await gate;const before=writes.length;const stopped=yt.disconnect();resolve!(Response.json({}));await pending;await stopped;
+  assert.equal(config.value.youtube,undefined,phase);assert.equal(writes.length,before,phase);assert.equal(yt.status.state,'disconnected');
+ }
+});
+
+test('YouTube pagination and malformed optional API fields remain bounded and report a safe failure',async()=>{
+ const config={value:{youtubeClientId:'id',youtubeClientSecret:'s',youtube:{access:'a',refresh:'r',userId:'channel',scopes:[],expiresAt:Date.now()+3600000}},save:async()=>{}} as unknown as Configuration;
+ let pageCalls=0,mode='pages';const writes:any[]=[];
+ const db={call:async(method:string,...args:any[])=>{if(method==='youtubeQuota')return true;if(method==='youtubeData')return {snapshots:{},messages:[]};writes.push([method,...args]);return null;}} as unknown as StoreClient;
+ const request:typeof fetch=async(input)=>{
+  const url=new URL(String(input));if(mode==='network')throw new Error('network broken');
+  if(url.pathname.endsWith('/channels'))return Response.json({items:[{id:'channel'}]});
+  if(url.pathname.endsWith('/liveBroadcasts')){pageCalls++;return Response.json(mode==='missing'?{}:{nextPageToken:pageCalls===1?'next':'',items:[{id:'no-chat',snippet:{channelId:'channel'}}]});}
+  return Response.json({});
+ };
+ const yt=new YouTubeConnection(config,db,'https://panel.test/oauth/youtube/callback','ruslan',request);
+ try{assert.equal(await yt.collectOnce(),60000);assert.equal(pageCalls,2);mode='missing';assert.equal(await yt.collectOnce(),300000);mode='network';await yt.start();assert.equal(yt.status.detail,'YOUTUBE_CONNECTION_FAILED');}
+ finally{await yt.stop();}
+});

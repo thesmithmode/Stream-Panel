@@ -2,6 +2,7 @@ import { parentPort, workerData } from "node:worker_threads";
 import { StreamStore } from "../../../packages/core/src/store.js";
 const store = new StreamStore(String(workerData.path), workerData.profile);
 const allowed = new Set([
+  "analytics", "streamSample", "youtubeViewers",
   "youtubeQuota", "youtubeSnapshot", "youtubeMessages", "youtubeData",
   "ingest",
   "sessions",

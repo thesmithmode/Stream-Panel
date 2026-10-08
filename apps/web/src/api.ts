@@ -48,6 +48,7 @@ export interface Event {
   };
 }
 export interface Person {
+  is_bot?: number;
   id: string;
   display_name: string;
   revision: number;

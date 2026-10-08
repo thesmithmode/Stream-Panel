@@ -1,3 +1,5 @@
+> Исторический документ desktop v0.0.4. Актуальные серверная архитектура и условия выпуска: [readiness-checklist.md](readiness-checklist.md), [ops/server.md](ops/server.md), [api-contract.md](api-contract.md). Требования Windows/локального демона/sync двух БД ниже заменены серверным решением.
+
 # Следующие задачи
 
 2026-10-07: рабочая ранняя программа — ветка **`codex-init-grok`** (от `dev`). Ветка `codex-init` — предшественник; в `main`/`dev` изменения этой ветки не объединены. PRD остаётся целью v1; таблица показывает оставшуюся работу. P1 «Сопоставления» (durable reject / owner rules) сознательно отложен до после live validation.

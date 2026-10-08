@@ -1,3 +1,5 @@
+> Исторический документ desktop v0.0.4. Актуальные серверная архитектура и условия выпуска: [readiness-checklist.md](readiness-checklist.md), [ops/server.md](ops/server.md), [api-contract.md](api-contract.md). Требования Windows/локального демона/sync двух БД ниже заменены серверным решением.
+
 # TDD и автоматическая проверка
 
 Требование владельца от 2026-10-06: [user-requirements.md](user-requirements.md). Проверки относятся к согласованной аналитической v1 из [PRD](prd.md); они не расширяют продукт до полного набора виджетов Stream Tools.

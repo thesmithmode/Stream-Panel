@@ -24,7 +24,8 @@ try {
 let closing = false, collectorsStarted = false;
 const startCollectors = async () => {
   if (collectorsStarted || closing) return;
-  try { await access(join(dir, "deploying")); return; } catch { /* no maintenance marker */ }
+  try { await access(join(dir, "deploying")); return; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") { console.error("Maintenance state unavailable; collectors remain stopped"); return; } }
   collectorsStarted = true;
   void hosted.backup?.run().catch(() => console.error("Backup failed; see protected status"));
   for (const runtime of hosted.runtimes.values()) {

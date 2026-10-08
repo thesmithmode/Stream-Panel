@@ -1,12 +1,17 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { api, getDataMode } from "./api";
-  let data = $state<any>(null), error = $state("");
+  let {mode = "real"}: {mode?:string} = $props();
+  let data = $state<any>(null), error = $state(""), mounted = $state(false);
+  let requestId = 0;
+  $effect(() => {mode; if (mounted) untrack(() => void refresh());});
   async function refresh() {
-    if (getDataMode() === "demo") { data = { snapshots: {}, messages: [] }; return; }
-    try { data = await api("youtube/data"); error = ""; } catch (e) { error = (e as Error).message; }
+    const id = ++requestId;
+    if (getDataMode() === "demo") { data = { snapshots: {}, messages: [] }; error = ""; return; }
+    try { const result = await api("youtube/data"); if (id === requestId) { data = result; error = ""; } }
+    catch (e) { if (id === requestId) { error = (e as Error).message; data = null; } }
   }
-  onMount(() => { void refresh(); const timer = setInterval(() => void refresh(), 60000); return () => clearInterval(timer); });
+  onMount(() => { mounted = true; const timer = setInterval(() => void refresh(), 60000); return () => { requestId++; clearInterval(timer); }; });
   const channel = $derived(data?.snapshots?.channel?.data);
   const report = $derived(data?.snapshots?.report?.data);
 </script>
