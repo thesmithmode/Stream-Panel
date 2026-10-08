@@ -74,6 +74,24 @@ test("two browser accounts see only their own data; logout in demo revokes the r
       await page.setViewportSize({width:390,height:844});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
       await page.setViewportSize({width:1280,height:800});
+      if(profile==='ruslan') {
+        await page.getByRole('button',{name:'Интеграции',exact:true}).click();
+        await page.getByLabel('Текущий пароль',{exact:true}).fill('wrong');
+        await page.getByLabel('Новый пароль',{exact:true}).fill('replacement-browser-password');
+        await page.getByLabel('Повторите новый пароль',{exact:true}).fill('mismatch-browser-password');
+        await page.getByRole('button',{name:'Изменить пароль',exact:true}).click();
+        await page.getByText('Новые пароли не совпали',{exact:true}).waitFor();
+        await page.getByLabel('Повторите новый пароль',{exact:true}).fill('replacement-browser-password');
+        await page.getByRole('button',{name:'Изменить пароль',exact:true}).click();
+        await page.getByText('Текущий пароль неверный',{exact:true}).waitFor();
+        await page.getByLabel('Текущий пароль',{exact:true}).fill('ruslan-browser-password');
+        await saveCoverage(page);
+        await page.getByRole('button',{name:'Изменить пароль',exact:true}).click();
+        await page.getByRole('heading',{name:'Вход в Stream Panel',exact:true}).waitFor();
+        await page.getByLabel('Пароль',{exact:true}).fill('replacement-browser-password');
+        await page.getByRole('button',{name:'Войти',exact:true}).click();
+        await page.getByText('Private ruslan',{exact:true}).waitFor();
+      }
       await page.getByRole("button", { name: "Демо", exact: true }).click();
       await page.getByRole("button", { name: "Выйти", exact: true }).click();
       await page.getByRole("heading", { name: "Вход в Stream Panel" }).waitFor();

@@ -91,3 +91,23 @@ test("hosted server exposes safe errors, enforces maintenance, backs up privatel
   }finally{await h.app.close();await rm(dir,{recursive:true,force:true});}
   await assert.rejects(createHostedApplication(dir,"http://public.example.test",false),/INVALID_PUBLIC_ORIGIN/);
 });
+
+test('password change requires a session, CSRF, matching confirmation and current password; new password revokes old sessions only',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-password-api-')),auth=new AccountStore(join(dir,'data.sqlite'));
+ await auth.createUser('ruslan','ruslan','Руслан','original-password');await auth.createUser('gulnaz','gulnaz','Гульназ','gulnaz-password');auth.close();
+ const h=await createHostedApplication(dir,'http://127.0.0.1:47831',false),base={host:'127.0.0.1:47831',origin:'http://127.0.0.1:47831'};
+ const login=async(username:string,password:string)=>{const r=await h.app.inject({method:'POST',url:'/api/v1/auth/login',headers:base,payload:{username,password}});return {r,headers:{...base,cookie:String(r.headers['set-cookie']).split(';')[0]!,'x-csrf-token':r.json().csrf}};};
+ const payload={currentPassword:'original-password',newPassword:'replacement-password',confirmation:'replacement-password'};
+ const change=(headers:any,body=payload)=>h.app.inject({method:'POST',url:'/api/v1/auth/password',headers,payload:body});
+ try{
+ assert.equal((await change(base)).statusCode,401);
+ const a=await login('ruslan','original-password'),g=await login('gulnaz','gulnaz-password');
+ assert.equal((await change({...a.headers,'x-csrf-token':'bad'})).statusCode,403);
+ assert.equal((await change(a.headers,{...payload,confirmation:'different-password'})).json().error,'PASSWORD_MISMATCH');
+ assert.equal((await change(a.headers,{...payload,currentPassword:'wrong'})).json().error,'INVALID_CURRENT_PASSWORD');
+ assert.equal((await change(a.headers)).statusCode,200);
+ assert.equal((await h.app.inject({url:'/api/v1/auth/me',headers:a.headers})).statusCode,401);
+ assert.equal((await h.app.inject({url:'/api/v1/auth/me',headers:g.headers})).statusCode,200);
+ assert.equal((await login('ruslan','original-password')).r.statusCode,401);assert.equal((await login('ruslan','replacement-password')).r.statusCode,200);
+ }finally{await h.app.close();await rm(dir,{recursive:true,force:true});}
+});

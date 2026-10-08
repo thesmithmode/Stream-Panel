@@ -36,7 +36,7 @@ test('Deb upgrade preserves user history and credentials; relocated runtime, log
  delete env.STREAM_PANEL_DATA_DIR;delete env.STREAM_PANEL_PUBLIC_ORIGIN;delete env.STREAM_PANEL_LEGACY_DIR;
  const start=()=>{let out='',err='';const c=spawn(launcher,[],{env,stdio:['ignore','pipe','pipe']});c.stdout.on('data',b=>out+=b);c.stderr.on('data',b=>err+=b);const exit=new Promise(r=>c.on('exit',code=>r({code,err})));return {c,exit,ready:async()=>{const until=Date.now()+15000;while(!out.includes('server listening')){assert.equal(c.exitCode,null,err);assert.ok(Date.now()<until,err);await new Promise(r=>setTimeout(r,20));}}};};
  child=start();await child.ready();const origin=`http://127.0.0.1:${port}`;
- const login=async()=>{const result=await fetch(origin+'/api/v1/auth/login',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({username:'ruslan',password:'package-test-password'})});assert.equal(result.status,200);return result.headers.get('set-cookie').split(';')[0];};
+ const login=async(password='package-test-password')=>{const result=await fetch(origin+'/api/v1/auth/login',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({username:'ruslan',password})});assert.equal(result.status,200);return result.headers.get('set-cookie').split(';')[0];};
  let cookie=await login();assert.equal((await fetch(origin+'/')).status,200);
  let status=await(await fetch(origin+'/api/v1/status',{headers:{Cookie:cookie}})).json();assert.equal(status.config.daClientId,'fixture-da');
  assert.equal((await(await fetch(origin+'/api/v1/sessions',{headers:{Cookie:cookie}})).json()).length,1);
@@ -44,6 +44,9 @@ test('Deb upgrade preserves user history and credentials; relocated runtime, log
  assert.deepEqual(await readFile(join(legacy,'data.sqlite')),original);assert.deepEqual(JSON.parse(await readFile(join(data,'stream-panel-local/profiles/ruslan/secrets.json'))),config);
  delete env.STREAM_PANEL_INITIAL_PASSWORD;child=start();await child.ready();cookie=await login();assert.equal((await(await fetch(origin+'/api/v1/sessions',{headers:{Cookie:cookie}})).json()).length,1);
  child.c.kill('SIGTERM');assert.equal((await child.exit).code,0);
+ assert.throws(()=>run(launcher,['--reset-password'],{env,input:'first-password\nsecond-password\n'}),/Пароли не совпали/);
+ run(launcher,['--reset-password'],{env,input:'replacement-package-password\nreplacement-package-password\n'});
+ child=start();await child.ready();await login('replacement-package-password');child.c.kill('SIGTERM');assert.equal((await child.exit).code,0);
  const listing=run('dpkg-deb',['-c',file],{maxBuffer:20*1024*1024});assert.doesNotMatch(listing,/secrets\.json|data\.sqlite|backup-key|\/home\//);
  }finally{if(child){child.c.kill();await child.exit;}await rm(dir,{recursive:true,force:true});}
 });

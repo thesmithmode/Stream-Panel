@@ -44,6 +44,17 @@ export class AccountStore {
     const hash = (await hashPassword(password, salt)).toString("hex");
     this.db.prepare("INSERT INTO sp_users VALUES (?, ?, ?, ?, ?)").run(profile, username, displayName, salt, hash);
   }
+  async resetPassword(profile: string, password: string): Promise<void> {
+    if (!profiles.includes(profile as Profile)) throw new Error("INVALID_PROFILE");
+    if (password.length < 14 || password.length > 256) throw new Error("INVALID_PASSWORD");
+    if (!this.db.prepare("SELECT 1 FROM sp_users WHERE profile=?").get(profile)) throw new Error("USER_NOT_FOUND");
+    const salt = randomBytes(32).toString("hex"), hash = (await hashPassword(password, salt)).toString("hex");
+    this.db.transaction(() => {
+      this.db.prepare("UPDATE sp_users SET salt=?,password_hash=? WHERE profile=?").run(salt, hash, profile);
+      this.db.prepare("DELETE FROM sp_auth_sessions WHERE profile=?").run(profile);
+    }).immediate();
+    this.attempts.clear();
+  }
   async login(username: string, password: string, ip: string) {
     const key = `${ip}:${username.toLowerCase()}`;
     const ipKey = `ip:${ip}`;
