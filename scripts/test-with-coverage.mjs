@@ -14,12 +14,16 @@ if(!directories[segment])throw new Error("INVALID_TEST_SEGMENT");
 await rm("coverage", { recursive: true, force: true });
 await mkdir("coverage/raw", { recursive: true });
 const files = [];
-for (const dir of directories[segment])
+for (const dir of directories[segment]) {
+  const before = files.length;
   for (const file of await readdir(dir))
     if (/\.test\.(m?js)$/.test(file)) files.push(join(dir, file));
+  if (files.length === before) throw new Error(`NO_TESTS_IN_DIRECTORY: ${dir}`);
+}
 const webUnit = [];
 for (const file of (segment==="unit"||segment==="all")?await readdir("apps/web/src"):[])
   if (/\.test\.ts$/.test(file)) webUnit.push(join("apps/web/src", file));
+if ((segment === "unit" || segment === "all") && !webUnit.length) throw new Error("NO_WEB_UNIT_TESTS");
 const exitMain = await run(
   process.execPath,
   ["--test", "--test-concurrency=2", ...files],
