@@ -56,6 +56,7 @@ export class YouTubeConnection {
     if (items.length !== 1 || channels.nextPageToken || !string(object(items[0]).id)) throw new Error("YOUTUBE_SELECT_ONE_CHANNEL");
     tokens.userId = string(object(items[0]).id);
     this.config.value.youtube = tokens;
+    this.config.value.youtubeAccountId = tokens.userId;
     await this.db.call("youtubeSnapshot", tokens.userId, "channel", items[0], this.now());
     await this.config.save();
     void this.start();
@@ -97,8 +98,13 @@ export class YouTubeConnection {
     if (broadcasts.length) {
       const counts = await this.api("videos", {part:"liveStreamingDetails",id:broadcasts.slice(0,2).map(x => string(x.id)).join(",")}, tokens);
       if (!valid()) return 300000;
-      const numbers = (Array.isArray(counts.items) ? counts.items : []).map((x:any) => x.liveStreamingDetails?.concurrentViewers);
-      const viewers = numbers.length === broadcasts.slice(0,2).length && numbers.every((x:any) => x !== undefined && Number.isSafeInteger(Number(x))) ? numbers.reduce((a:number,b:string) => a+Number(b),0) : null;
+      const ids=broadcasts.slice(0,2).map(x=>string(x.id));
+      const items=Array.isArray(counts.items)?counts.items:[];
+      const numbers=ids.map(id=>{const item=items.find((x:any)=>x.id===id);return item?.liveStreamingDetails?.concurrentViewers;});
+      const complete=items.length===ids.length && new Set(items.map((x:any)=>x.id)).size===ids.length && ids.every(Boolean);
+      const validCounts=numbers.every((x:any)=>/^[0-9]+$/.test(String(x))&&Number.isSafeInteger(Number(x)));
+      const sum=numbers.reduce((a:number,b:any)=>a+Number(b),0);
+      const viewers=complete&&validCounts&&Number.isSafeInteger(sum)?sum:null;
       await this.db.call("youtubeViewers",this.now(),viewers);
     }
     let interval = broadcasts.length ? 60000 : 300000;

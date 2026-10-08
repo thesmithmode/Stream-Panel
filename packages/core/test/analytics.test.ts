@@ -145,3 +145,73 @@ test('YouTube messages around a category switch in one minute are split correctl
         assert.equal(s.analytics({ ...opts, source: 'youtube', category: 'talk' }).summary.messages, 2);
     } finally { s.close(); }
 });
+
+test('renamed bot identities and former channel owners remain excluded without current OAuth tokens', () => {
+ const s=new StreamStore(':memory:');
+ try {
+  const sid=s.startSession('channel','excluded',base,'platform',base);
+  s.ensureOwnerIdentity('channel','channel','OwnerOld',base);
+  s.recordPoll(sid,'channel',{startedAtMs:base,completedAtMs:base+minute,status:'complete',userIds:['channel','robot','person'],userNames:{channel:'OwnerNew',robot:'jeetbot',person:'Human'}});
+  s.updateChatterNames('channel',[{user_id:'robot',user_name:'RobotRenamed'}],base+2*minute);
+  const result=s.analytics({fromMs:base,toMs:end});
+  assert.deepEqual(result.audience.map(e=>e.name),['Human']);
+  assert.equal(s.summary().chatters,1);
+  assert.equal(s.persons().filter(p=>!p.is_bot).length,1);
+  assert.equal(s.personsTop('observed_minutes',sid).length,1);
+ } finally {s.close();}
+});
+
+test('empty and missing poll minutes are explicit and category averages use successful coverage only',()=>{
+ const s=new StreamStore(':memory:');
+ try {
+  const sid=s.startSession('channel','coverage',base,'platform',base);
+  s.streamSample(sid,base,'game','Game','',12);
+  s.recordPoll(sid,'channel',{startedAtMs:base,completedAtMs:base+minute,status:'complete',userIds:['human']});
+  s.recordPoll(sid,'channel',{startedAtMs:base+2*minute,completedAtMs:base+3*minute,status:'complete',userIds:[]});
+  s.endSession(sid,base+10*minute,'observed');
+  const result=s.analytics(opts),cat=result.categories[0] as any;
+  assert.equal(result.timeline.length,10);
+  assert.equal(result.timeline[4]?.presenceKnown,false);
+  assert.equal(cat.observedKnownMinutes,4);
+  assert.equal(cat.observedPerKnownMinute,.5);
+  assert.equal(cat.coverageRatio,.4);
+ } finally {s.close();}
+});
+
+test('YouTube bot renames and chat owner flag never turn excluded authors into audience',()=>{
+ const s=new StreamStore(':memory:');
+ try {
+  s.startSession('channel','yt-exclusions',base,'platform',base);
+  s.youtubeMessages('yt-owner','chat',[
+   {id:'a',snippet:{type:'textMessageEvent',publishedAt:new Date(base+minute).toISOString()},authorDetails:{channelId:'bot-id',displayName:'jeetbot'}},
+   {id:'b',snippet:{type:'textMessageEvent',publishedAt:new Date(base+2*minute).toISOString()},authorDetails:{channelId:'bot-id',displayName:'NewName'}},
+   {id:'c',snippet:{type:'textMessageEvent',publishedAt:new Date(base+minute).toISOString()},authorDetails:{channelId:'other-owner',displayName:'Owner',isChatOwner:true}},
+  ]);
+  assert.equal(s.analytics({...opts,fromMs:base+2*minute}).summary.entities,0);
+  assert.equal(s.analytics(opts).summary.entities,0);
+ }finally{s.close();}
+});
+
+test('inference crossing the selected period is clipped without counting messages outside that period',()=>{
+ const s=new StreamStore(':memory:');
+ try {
+  const sid=s.startSession('channel','boundary',base,'platform',base);s.streamSample(sid,base,'game','Game','',null);
+  s.youtubeMessages('yt-owner','chat',[{id:'before',snippet:{type:'textMessageEvent',publishedAt:new Date(base+minute).toISOString()},authorDetails:{channelId:'human',displayName:'Human'}}]);
+  const result=s.analytics({...opts,fromMs:base+2*minute});
+  assert.equal(result.audience[0]?.estimatedChatMinutes,4);
+  assert.equal(result.summary.messages,0);
+ }finally{s.close();}
+});
+
+test('asynchronous YouTube counts retain their actual sample minute rather than rewriting a past Twitch minute',()=>{
+ const s=new StreamStore(':memory:');
+ try {
+  const sid=s.startSession('channel','async-count',base,'platform',base);s.streamSample(sid,base,'game','Game','',12);
+  s.youtubeViewers(base+minute,4);
+  const result=s.analytics({...opts,source:'youtube'});
+  assert.equal(result.timeline.find(x=>x.at===base)?.viewers,null);
+  assert.equal(result.timeline.find(x=>x.at===base+minute)?.viewers,4);
+  s.youtubeViewers(base+4*minute+1,5);
+  assert.equal(s.analytics({...opts,source:'youtube'}).timeline.find(x=>x.at===base+4*minute)?.viewers,null);
+ }finally{s.close();}
+});

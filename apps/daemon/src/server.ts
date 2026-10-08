@@ -250,7 +250,7 @@ export async function createApplication(
       fromMs:Number(q.from),toMs:Math.min(Number(q.to),Date.now()),source:string(q.source)||"all",category:string(q.category),
       minSessions:q.minSessions===undefined?3:Number(q.minSessions),minMinutes:q.minMinutes===undefined?30:Number(q.minMinutes),minMessages:q.minMessages===undefined?5:Number(q.minMessages),
       chatWindowMinutes:q.chatWindowMinutes===undefined?5:Number(q.chatWindowMinutes),coreRule:string(q.coreRule)||"either",timezone:string(q.timezone)||"Europe/Moscow",
-      excludedLogins:configuration.value.excludedBotLogins,ownerId:configuration.value.twitch?.userId??"",youtubeAccount:configuration.value.youtube?.userId??"",
+      excludedLogins:configuration.value.excludedBotLogins,ownerId:configuration.value.twitch?.userId??"",youtubeAccount:configuration.value.youtube?.userId??configuration.value.youtubeAccountId??"",
     });
   });
   app.get("/api/v1/status", async (request) => ({
@@ -412,7 +412,7 @@ export async function createApplication(
     return youtube.beginAuth(string(b.clientId), string(b.clientSecret));
   });
   app.post("/api/v1/youtube/disconnect", async () => { await youtube.disconnect(); return {ok:true}; });
-  app.get("/api/v1/youtube/data", async () => db.call("youtubeData", configuration.value.youtube?.userId ?? ""));
+  app.get("/api/v1/youtube/data", async () => db.call("youtubeData", configuration.value.youtube?.userId ?? configuration.value.youtubeAccountId ?? ""));
   app.get("/oauth/youtube/callback", async (request, reply) => {
     try { const q = object(request.query); await youtube.finishAuth(string(q.code), string(q.state)); return reply.redirect(origin + "/"); }
     catch { return reply.code(400).type("text/plain").send("YouTube: вход не завершён. Проверьте права и redirect URI; вернитесь в панель."); }

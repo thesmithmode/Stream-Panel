@@ -63,3 +63,34 @@ test('deployment maintenance delays startup backup until promotion; remote confi
     c.child.kill('SIGTERM');const exit=await c.exit;assert.equal(exit.code,0);assert.match(exit.stderr,/Backup failed; see protected status/);assert.doesNotMatch(exit.stderr,/invalid.example.test|fixture/);
   } finally {if(c){c.child.kill();await c.exit;}await rm(dir,{recursive:true,force:true});}
 });
+
+test('server starts both existing profile collectors and retains password accounts after clean shutdown',{timeout:15000},async()=>{
+ const {AccountStore}=await import('../../dist/apps/daemon/src/auth.js');
+ const dir=await mkdtemp(join(tmpdir(),'sp-server-profiles-')),port=await freePort();let c;
+ try {
+  const accounts=new AccountStore(join(dir,'data.sqlite'));
+  try {for(const profile of ['ruslan','gulnaz'])await accounts.createUser(profile,profile,profile,'profile-fixture-password');}finally{accounts.close();}
+  c=start(dir,port);await c.ready();assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status,200);
+  c.child.kill('SIGTERM');assert.equal((await c.exit).code,0);
+  const reopened=new AccountStore(join(dir,'data.sqlite'));try{assert.equal(reopened.users().length,2);}finally{reopened.close();}
+ }finally{if(c){c.child.kill();await c.exit;}await rm(dir,{recursive:true,force:true});}
+});
+
+test('startup backup failure with no remote settings remains private and leaves health available',{timeout:10000},async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-server-backup-failure-')),port=await freePort();let c;
+ try {
+  c=start(dir,port,{STREAM_PANEL_BACKUP_KEY_FILE:join(dir,'missing-private-key')});await c.ready();
+  assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status,200);
+  c.child.kill('SIGTERM');const result=await c.exit;assert.equal(result.code,0);assert.match(result.stderr,/Backup failed; see protected status/);assert.doesNotMatch(result.stderr,/missing-private-key/);
+ }finally{if(c){c.child.kill();await c.exit;}await rm(dir,{recursive:true,force:true});}
+});
+
+test('an unreadable maintenance state fails closed instead of starting collectors',{timeout:10000},async()=>{
+ const {symlink}=await import('node:fs/promises');
+ const dir=await mkdtemp(join(tmpdir(),'sp-server-maintenance-error-')),port=await freePort();let c;
+ try {
+  await symlink('deploying',join(dir,'deploying'));
+  c=start(dir,port);await c.ready();assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status,200);
+  c.child.kill('SIGTERM');const result=await c.exit;assert.equal(result.code,0);assert.match(result.stderr,/Maintenance state unavailable; collectors remain stopped/);
+ }finally{if(c){c.child.kill();await c.exit;}await rm(dir,{recursive:true,force:true});}
+});

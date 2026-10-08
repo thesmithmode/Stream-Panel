@@ -97,7 +97,7 @@ export class StreamStore {
     assertTimestamp(at);
     if (viewers !== null && (!Number.isSafeInteger(viewers) || viewers < 0)) throw new Error("INVALID_VIEWER_COUNT");
     // Join only the latest contemporaneous Twitch sample; never borrow an old category.
-    this.db.prepare("UPDATE stream_samples SET youtube_viewers=? WHERE (session_id,observed_at_ms) IN (SELECT x.session_id,x.observed_at_ms FROM stream_samples x JOIN sessions s ON s.id=x.session_id WHERE s.ended_at_ms IS NULL AND x.observed_at_ms<=? AND x.observed_at_ms>=? ORDER BY x.observed_at_ms DESC LIMIT 1)").run(viewers,at,at-180000);
+    this.db.prepare("INSERT INTO stream_samples SELECT x.session_id,?,x.category_id,x.category_name,x.title,NULL,? FROM stream_samples x JOIN sessions s ON s.id=x.session_id WHERE s.ended_at_ms IS NULL AND x.twitch_viewers IS NOT NULL AND x.observed_at_ms<=? AND x.observed_at_ms>=? ORDER BY x.observed_at_ms DESC LIMIT 1 ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET youtube_viewers=excluded.youtube_viewers").run(at,viewers,at,at-180000);
   }
   analytics(options: AnalyticsOptions) { return audienceAnalytics(this.db,options); }
 
@@ -990,7 +990,7 @@ export class StreamStore {
     search = "",
     excludedBotLogins: readonly string[] = [],
   ): Record<string, unknown>[] {
-    const excluded = botExclusionSet(excludedBotLogins);
+    const excluded = this.analyticsExclusions(excludedBotLogins);
     const botJson = JSON.stringify([...excluded]);
     const term = search;
     const key = candidateKey(search);
@@ -1086,7 +1086,7 @@ export class StreamStore {
     sessionId?: string,
     excludedBotLogins: readonly string[] = [],
   ): Record<string, unknown> {
-    const excluded = botExclusionSet(excludedBotLogins);
+    const excluded = this.analyticsExclusions(excludedBotLogins);
     const botKeys = [...excluded];
     const botJson = JSON.stringify(botKeys);
     const sid = sessionId ?? null;
@@ -1508,8 +1508,19 @@ export class StreamStore {
     return { observedMinutes: observed.size, firstObservedMs, lastObservedMs };
   }
 
+  private analyticsExclusions(excludedBotLogins: readonly string[] = []): ReadonlySet<string> {
+    const keys=new Set(botExclusionSet(["fullrandomname_twitch",...excludedBotLogins]));
+    const json=JSON.stringify([...keys]);
+    const rows=this.db.prepare(`SELECT DISTINCT linked.match_key FROM identities linked WHERE EXISTS(
+      SELECT 1 FROM identities i WHERE i.person_id=linked.person_id AND (
+        i.match_key IN(SELECT value FROM json_each(?)) OR (i.source='twitch' AND i.external_id=i.account_id) OR
+        EXISTS(SELECT 1 FROM identity_aliases a WHERE a.identity_id=i.id AND ltrim(a.candidate_key,'@#') IN(SELECT value FROM json_each(?)))
+      ))`).all(json,json) as {match_key:string}[];
+    for(const row of rows)keys.add(row.match_key);
+    return keys;
+  }
   private botJson(excludedBotLogins: readonly string[] = []): string {
-    return JSON.stringify([...botExclusionSet(excludedBotLogins)]);
+    return JSON.stringify([...this.analyticsExclusions(excludedBotLogins)]);
   }
 
   private notBotClause(alias = "i"): string {

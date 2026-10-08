@@ -1,19 +1,26 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import { api, date, money, getDataMode } from "./api";
+  import { api, date, money } from "./api";
   import TrendChart from "./TrendChart.svelte";
   let { profile = "local", mode = "real", onPerson }: {profile?:string;mode?:string;onPerson:(id:string)=>void} = $props();
   const localInput=(at:number)=>{const d=new Date(at);return new Date(at-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
   let from=$state(localInput(Date.now()-30*86400000)),to=$state(localInput(Date.now())),source=$state("all"),category=$state("");
   let minSessions=$state(3),minMinutes=$state(30),minMessages=$state(5),coreRule=$state("either"),chatWindowMinutes=$state(5),timezone=$state("Europe/Moscow");
-  let coreOnly=$state(false),search=$state(""),sort=$state("observedMinutes"),metric=$state("observed"),data=$state<any>(null),error=$state(""),busy=$state(false),selected=$state<any>(null),day=$state("");
+  let coreOnly=$state(false),search=$state(""),sort=$state("observedMinutes"),metric=$state("observed"),heatMetric=$state("observed"),autoRefresh=$state(false),data=$state<any>(null),error=$state(""),busy=$state(false),selected=$state<any>(null),day=$state("");
   let requestId=0, mounted=$state(false);
   $effect(()=>{mode;if(mounted)untrack(()=>void refresh());});
   const visible=$derived((data?.audience??[]).filter((e:any)=>(!coreOnly||e.core)&&e.name.toLowerCase().includes(search.toLowerCase())).sort((a:any,b:any)=>sort==="sessions"?b.sessionIds.length-a.sessionIds.length:(b[sort]??0)-(a[sort]??0)));
   const weekdays=["пн","вт","ср","чт","пт","сб","вс"];
   const hourCells=$derived(new Map((data?.hours??[]).map((h:any)=>[`${h.day}:${h.hour}`,h])) as Map<string,any>);
-  const hourMax=$derived(Math.max(1,...(data?.hours??[]).filter((h:any)=>h.observedKnownMinutes).map((h:any)=>h.observed/h.observedKnownMinutes)));
-  function hourTitle(day:string,hour:number){const cell=hourCells.get(`${day}:${hour}`);return `${day} ${hour}:00 — ${cell?.observedKnownMinutes?(cell.observed/cell.observedKnownMinutes).toFixed(1)+" наблюдаемых в среднем":"нет опросов"}`;}
+  function heatValue(cell:any):number|null {
+    if(!cell)return null;
+    if(heatMetric==="viewers")return cell.viewerSamples?cell.viewersTotal/cell.viewerSamples:null;
+    if(heatMetric==="messages")return cell.sampleMinutes?cell.messages*60/cell.sampleMinutes:null;
+    if(heatMetric==="estimated")return cell.sampleMinutes?cell.estimated/cell.sampleMinutes:null;
+    return cell.observedKnownMinutes?cell.observed/cell.observedKnownMinutes:null;
+  }
+  const hourMax=$derived(Math.max(1,...(data?.hours??[]).map((h:any)=>heatValue(h)??0)));
+  function hourTitle(day:string,hour:number){const value=heatValue(hourCells.get(`${day}:${hour}`));return `${day} ${hour}:00 — ${value===null?"нет данных":value.toFixed(1)}`;}
   const categoryOptions=$derived(data?.availableCategories??data?.categories??[]);
   const detailMinutes=$derived.by(()=>{
     if(!selected||!day)return [];
@@ -38,7 +45,7 @@
   }
   onMount(()=>{
     try{const saved=JSON.parse(localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved){minSessions=saved.minSessions??3;minMinutes=saved.minMinutes??30;minMessages=saved.minMessages??5;coreRule=saved.coreRule??"either";chatWindowMinutes=saved.chatWindowMinutes??5;timezone=saved.timezone??"Europe/Moscow";}}catch{/* private browser may deny storage */}
-    mounted=true;return ()=>{requestId++;};
+    mounted=true;const timer=setInterval(()=>{if(autoRefresh&&!busy&&!selected){to=localInput(Date.now());void refresh();}},60000);return ()=>{requestId++;clearInterval(timer);};
   });
 </script>
 <section class="panel analytics-filter">
@@ -56,6 +63,7 @@
       <label>Правило ядра<select bind:value={coreRule}><option value="either">Часто + долго или много сообщений</option><option value="both">Часто + долго + много сообщений</option><option value="frequency">Только частота возвращений</option></select></label>
       <label>Окно активности YouTube, мин<input type="number" min="1" max="30" bind:value={chatWindowMinutes} /></label>
     </div></details>
+    <label class="check"><input type="checkbox" bind:checked={autoRefresh} /> Обновлять каждую минуту</label>
     <button class="primary" type="submit" disabled={busy}>{busy?"Считаем…":"Применить"}</button>
   </form>
   <p class="small muted">Даты — в часовом поясе браузера. Ядро требует заданного числа эфиров и выбранного правила. Владельцы каналов и боты исключены из персональных расчётов; исходные события сохранены.</p>
@@ -67,20 +75,21 @@
     <div class="metric"><div><span>Ядро аудитории</span><strong>{data.summary.core}</strong><small>По выбранным порогам</small></div></div>
     <div class="metric"><div><span>Эфиры / сообщения</span><strong>{data.summary.streams} / {data.summary.messages}</strong></div></div>
   </section>
+  {#if data.youtubeReport}<section class="panel"><header><h2>Агрегатный отчёт YouTube: все видео канала</h2></header><p class="small muted">Период отчёта платформы: {data.youtubeReport.data.start} — {data.youtubeReport.data.end}; обновлён {date(data.youtubeReport.updatedAt)}. Данные с задержкой, охватывают весь канал и не фильтруются по категории Twitch. Это минуты просмотра из YouTube Analytics; персональные исключения к этому агрегату неприменимы.</p><div class="table-wrap"><table class="analytics-table"><thead><tr>{#each data.youtubeReport.data.columnHeaders??[] as column}<th>{({day:"Дата",views:"Просмотры",estimatedMinutesWatched:"Минуты просмотра",subscribersGained:"Новые подписчики",subscribersLost:"Отписки"} as Record<string,string>)[column.name]??column.name}</th>{/each}</tr></thead><tbody>{#each data.youtubeReport.data.rows??[] as row}<tr>{#each row as value}<td>{value}</td>{/each}</tr>{/each}</tbody></table></div></section>{/if}
   <section class="panel analytics-chart"><header><h2>Активность по времени</h2><label>Метрика графика<select bind:value={metric}><option value="observed">Наблюдаемые участники Twitch</option><option value="estimated">Оценка активности YouTube</option><option value="messages">Сообщения</option><option value="viewers">Счётчик зрителей площадки</option></select></label></header>
     <TrendChart points={data.timeline} {metric} />
     <p class="small muted">Twitch — присутствие в опросах чата. YouTube — окно после сообщения, оценка, а не время просмотра. Серые отметки — неизвестные данные. Счётчик площадки агрегатный, персональные исключения к нему неприменимы.</p>
   </section>
-  <section class="panel"><header><h2>Что стримить: категории</h2></header><div class="table-wrap"><table class="analytics-table"><thead><tr><th>Категория</th><th>Эфиры</th><th>Минуты эфира</th><th>Аудитория / ядро</th><th>Сообщений/ч</th><th>Наблюдаемых/мин эфира</th><th>Наблюдаемые / оценочные минуты</th></tr></thead><tbody>{#each data.categories as c}<tr><td>{c.name}</td><td>{c.sessions}</td><td>{Math.round(c.minutes)}</td><td>{c.audience} / {c.core}</td><td>{c.messagesPerHour.toFixed(1)}</td><td>{(c.observedPerMinute??0).toFixed(1)}</td><td>{Math.round(c.observedMinutes)} / {Math.round(c.estimatedChatMinutes)}</td></tr>{/each}</tbody></table></div><p class="small muted">Категории берутся только из Twitch. Неизвестная старая категория не восстанавливается догадкой. Сравнение показывает связи, а не причину роста аудитории.</p></section>
-  <section class="panel"><header><h2>Когда стримить: дни и часы</h2></header>
+  <section class="panel"><header><h2>Что стримить: категории</h2></header><div class="table-wrap"><table class="analytics-table"><thead><tr><th>Категория</th><th>Эфиры</th><th>Минуты эфира</th><th>Аудитория / ядро</th><th>Сообщений/ч</th><th>Наблюдаемых/мин с данными</th><th>Полнота опросов</th><th>Наблюдаемые / оценочные минуты</th></tr></thead><tbody>{#each data.categories as c}<tr><td>{c.name}</td><td>{c.sessions}</td><td>{Math.round(c.minutes)}</td><td>{c.audience} / {c.core}</td><td>{c.messagesPerHour.toFixed(1)}</td><td>{c.observedPerKnownMinute==null?"нет данных":c.observedPerKnownMinute.toFixed(1)}</td><td>{c.coverageRatio==null?"нет данных":Math.round(c.coverageRatio*100)+"%"}</td><td>{Math.round(c.observedMinutes)} / {Math.round(c.estimatedChatMinutes)}</td></tr>{/each}</tbody></table></div><p class="small muted">Категории берутся только из Twitch. Неизвестная старая категория не восстанавливается догадкой. Сравнение показывает связи, а не причину роста аудитории.</p></section>
+  <section class="panel"><header><h2>Когда стримить: дни и часы</h2><label>Метрика карты<select bind:value={heatMetric}><option value="observed">Наблюдения Twitch</option><option value="estimated">Оценка активности YouTube</option><option value="messages">Сообщений в час эфира</option><option value="viewers">Счётчик зрителей площадки</option></select></label></header>
     <div class="hour-heatmap" aria-label="Карта активности по дням и часам">
       <div class="heatmap-labels"><span></span>{#each Array.from({length:24},(_,i)=>i) as hour}<span>{hour}</span>{/each}</div>
-      {#each weekdays as weekday}<div class="heatmap-row"><strong>{weekday}</strong>{#each Array.from({length:24},(_,i)=>i) as hour}<span title={hourTitle(weekday,hour)} style:background={hourCells.get(`${weekday}:${hour}`)?.observedKnownMinutes?`rgba(95,196,170,${.15+.85*hourCells.get(`${weekday}:${hour}`).observed/hourCells.get(`${weekday}:${hour}`).observedKnownMinutes/hourMax})`:"#3b4350"}></span>{/each}</div>{/each}
-    </div><p class="small muted">Яркость — среднее число наблюдаемых участников Twitch среди минут с успешными опросами. Серый — нет данных; это не нулевая аудитория.</p><div class="table-wrap"><table class="analytics-table"><thead><tr><th>День / час ({timezone})</th><th>Среднее наблюдаемых участников</th><th>Сообщения</th><th>Минут с опросами</th></tr></thead><tbody>{#each data.hours as h}<tr><td>{h.day} · {h.hour}:00</td><td>{h.observedKnownMinutes?(h.observed/h.observedKnownMinutes).toFixed(1):"нет данных"}</td><td>{h.messages}</td><td>{h.observedKnownMinutes}</td></tr>{/each}</tbody></table></div></section>
+      {#each weekdays as weekday}<div class="heatmap-row"><strong>{weekday}</strong>{#each Array.from({length:24},(_,i)=>i) as hour}<span title={hourTitle(weekday,hour)} style:background={heatValue(hourCells.get(`${weekday}:${hour}`))!==null?`rgba(95,196,170,${.15+.85*(heatValue(hourCells.get(`${weekday}:${hour}`))??0)/hourMax})`:"#3b4350"}></span>{/each}</div>{/each}
+    </div><p class="small muted">Яркость соответствует выбранной метрике. Наблюдения Twitch усредняются по минутам с полными опросами; оценка YouTube и сообщения — по записанным минутам эфира. Серый — нет данных.</p><div class="table-wrap"><table class="analytics-table"><thead><tr><th>День / час ({timezone})</th><th>Выбранная метрика</th><th>Сообщения</th><th>Минут с опросами</th></tr></thead><tbody>{#each data.hours as h}<tr><td>{h.day} · {h.hour}:00</td><td>{heatValue(h)===null?"нет данных":heatValue(h)!.toFixed(1)}</td><td>{h.messages}</td><td>{h.observedKnownMinutes}</td></tr>{/each}</tbody></table></div></section>
   {#if data.streamComparison?.length}<section class="panel"><header><h2>Возвращения по эфирам</h2></header><div class="table-wrap"><table class="analytics-table"><thead><tr><th>Эфир</th><th>Категории</th><th>Аудитория</th><th>Ядро</th><th>Вернулись / впервые в периоде</th><th>Сообщения</th></tr></thead><tbody>{#each data.streamComparison as stream}<tr><td><button class="text-button" onclick={()=>{from=localInput(stream.startedAt);to=localInput(stream.endedAt);void refresh();}}>{date(stream.startedAt)}</button></td><td>{stream.categories.join(" → ")}</td><td>{stream.audience}</td><td>{stream.core}</td><td>{stream.returning} / {stream.newInPeriod}</td><td>{stream.messages}</td></tr>{/each}</tbody></table></div><p class="small muted">Возвращения считаются по аккаунтам среди более ранних эфиров в выбранном периоде. Нажмите дату, чтобы рассмотреть один эфир.</p></section>{/if}
   <section class="panel"><header><h2>Состав аудитории</h2><span>{visible.length} профилей</span></header>
     <div class="analytics-controls"><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label>Сортировка<select bind:value={sort}><option value="observedMinutes">Наблюдаемые минуты</option><option value="estimatedChatMinutes">Оценка активности YouTube</option><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option></select></label><label class="check"><input type="checkbox" bind:checked={coreOnly} /> Только ядро</label></div>
-    <div class="table-wrap"><table class="analytics-table"><thead><tr><th>Участник</th><th>Площадка</th><th>Эфиры</th><th>Минуты наблюдений</th><th>Оценка YouTube, мин</th><th>Сообщения</th><th>Сегменты активности</th></tr></thead><tbody>{#each visible.slice(0,200) as e}<tr><td><button class="text-button" onclick={()=>selectEntity(e)}>{e.name}</button>{#if e.core}<span class="core-badge">Ядро</span>{/if}</td><td>{e.source==="youtube"?"YouTube":"Twitch / DA"}</td><td>{e.sessionIds.length}</td><td>{e.observedMinutes}</td><td>{e.estimatedChatMinutes}</td><td>{e.messages}</td><td>{e.visits}</td></tr>{/each}</tbody></table></div>
+    <div class="table-wrap"><table class="analytics-table"><thead><tr><th>Участник</th><th>Площадка</th><th>Эфиры / доля</th><th>Минуты наблюдений / на эфир</th><th>Оценка YouTube, мин</th><th>Сообщения</th><th>Сегменты активности</th></tr></thead><tbody>{#each visible.slice(0,200) as e}<tr><td><button class="text-button" onclick={()=>selectEntity(e)}>{e.name}</button>{#if e.core}<span class="core-badge">Ядро</span>{/if}</td><td>{e.source==="youtube"?"YouTube":"Twitch / DA"}</td><td>{e.sessionIds.length} / {Math.round((e.sessionRatio??0)*100)}%</td><td>{e.observedMinutes} / {(e.observedMinutesPerSession??0).toFixed(1)}</td><td>{e.estimatedChatMinutes}</td><td>{e.messages}</td><td>{e.visits}</td></tr>{/each}</tbody></table></div>
     {#if !visible.length}<p class="muted analytics-empty">Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.</p>{/if}
     {#if visible.length>200}<p class="small muted">Показаны первые 200; используйте поиск или меньший период.</p>{/if}
   </section>

@@ -12,6 +12,7 @@ export interface Tokens {
 export interface Config {
   version: 1;
   youtubeClientId?: string;
+  youtubeAccountId?: string;
   youtubeClientSecret?: string;
   youtube?: Tokens;
   twitchClientId: string;
@@ -54,6 +55,7 @@ export class Configuration {
       ) as Config;
       if (saved.version !== 1) throw new Error("UNSUPPORTED_CONFIG");
       this.value = { ...defaults, ...saved };
+      this.value.youtubeAccountId = this.value.youtube?.userId ?? this.value.youtubeAccountId ?? "";
       this.value.chattersPollSeconds = clampChattersPollSeconds(
         this.value.chattersPollSeconds,
       );
