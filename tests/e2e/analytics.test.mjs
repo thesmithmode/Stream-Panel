@@ -70,6 +70,10 @@ test('analytics browser shows core, categories, scoped accounts, minute evidence
      for(const tab of ['Обзор','Сессии','Люди','Аналитика','YouTube','Интеграции']){
       await page.getByRole('button',{name:tab,exact:true}).click();await page.locator('main h1').waitFor();
       if(tab==='Аналитика')await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
+      if(tab==='Аналитика'){
+       await page.getByText('Настроить отображение',{exact:true}).click();
+       await page.evaluate(()=>window.scrollTo(0,0));
+      }
       await assertUiLayout(page);
      }
     }
