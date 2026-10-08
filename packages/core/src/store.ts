@@ -895,19 +895,22 @@ export class StreamStore {
 
   endSession(id: string, atMs: number, quality = "observed"): void {
     assertTimestamp(atMs);
-    this.db.transaction(() => {
-      const ended = this.db
-        .prepare(
-          "UPDATE sessions SET ended_at_ms = ?, end_quality = ? WHERE id = ? AND ended_at_ms IS NULL AND started_at_ms <= ?",
-        )
-        .run(atMs, quality, id, atMs);
-      if (ended.changes) this.db.prepare("UPDATE platform_streams SET ended_at_ms=(SELECT ended_at_ms FROM sessions WHERE id=?) WHERE session_id=? AND ended_at_ms IS NULL").run(id, id);
-      this.db
-        .prepare(
-          `DELETE FROM event_sessions WHERE session_id = ? AND event_id IN (SELECT id FROM events WHERE occurred_at_ms >= ?)`,
-        )
-        .run(id, atMs);
-    }).immediate();
+    this.db.transaction(() => this.endSessionInTransaction(id, atMs, quality)).immediate();
+  }
+
+  private endSessionInTransaction(id: string, atMs: number, quality: string): void {
+    const ended = this.db
+      .prepare(
+        "UPDATE sessions SET ended_at_ms = ?, end_quality = ? WHERE id = ? AND ended_at_ms IS NULL AND started_at_ms <= ?",
+      )
+      .run(atMs, quality, id, atMs);
+    if (!ended.changes) return;
+    this.db.prepare("UPDATE platform_streams SET ended_at_ms=(SELECT ended_at_ms FROM sessions WHERE id=?) WHERE session_id=? AND ended_at_ms IS NULL").run(id, id);
+    this.db
+      .prepare(
+        `DELETE FROM event_sessions WHERE session_id = ? AND event_id IN (SELECT id FROM events WHERE occurred_at_ms >= ?)`,
+      )
+      .run(id, atMs);
   }
 
   sessions(): Record<string, unknown>[] {
@@ -924,6 +927,50 @@ export class StreamStore {
       SELECT * FROM platform_streams WHERE session_id=?
       ORDER BY platform,account_id,external_id
     `).all(sessionId) as Record<string, unknown>[];
+  }
+
+  platformMissing(platform: "twitch" | "youtube", accountId: string, presentIds: string[], observedAtMs: number): void {
+    if (
+      (platform !== "twitch" && platform !== "youtube") ||
+      typeof accountId !== "string" || !accountId.trim() || accountId.length > 256 ||
+      !Array.isArray(presentIds) || presentIds.length > 1000 ||
+      presentIds.some(id => typeof id !== "string" || !id.trim() || id.length > 256) ||
+      new Set(presentIds).size !== presentIds.length
+    ) throw new Error("INVALID_PLATFORM_MISSING");
+    assertTimestamp(observedAtMs);
+    const present = new Set(presentIds);
+    this.db.transaction(() => {
+      const open = this.db.prepare(`
+        SELECT external_id,session_id,started_at_ms,last_observed_at_ms,offline_checks,first_missing_at_ms
+        FROM platform_streams WHERE platform=? AND account_id=? AND ended_at_ms IS NULL
+      `).all(platform, accountId) as {external_id:string;session_id:string;started_at_ms:number;last_observed_at_ms:number;offline_checks:number;first_missing_at_ms:number|null}[];
+      const affected = new Set<string>();
+      for (const link of open) {
+        if (present.has(link.external_id) || observedAtMs <= link.last_observed_at_ms) continue;
+        const firstMissingAtMs = link.first_missing_at_ms ?? observedAtMs;
+        const checks = link.offline_checks + 1;
+        this.db.prepare(`
+          UPDATE platform_streams SET last_observed_at_ms=?,offline_checks=?,first_missing_at_ms=?
+          WHERE platform=? AND account_id=? AND external_id=? AND ended_at_ms IS NULL AND last_observed_at_ms<?
+        `).run(observedAtMs, checks, firstMissingAtMs, platform, accountId, link.external_id, observedAtMs);
+        if (checks >= 2) {
+          this.db.prepare(`
+            UPDATE platform_streams SET ended_at_ms=?
+            WHERE platform=? AND account_id=? AND external_id=? AND ended_at_ms IS NULL
+          `).run(firstMissingAtMs, platform, accountId, link.external_id);
+          affected.add(link.session_id);
+        }
+      }
+      for (const sessionId of affected) {
+        const state = this.db.prepare(`
+          SELECT MAX(ended_at_ms) AS ended_at_ms,
+            SUM(CASE WHEN ended_at_ms IS NULL THEN 1 ELSE 0 END) AS open_links
+          FROM platform_streams WHERE session_id=?
+        `).get(sessionId) as {ended_at_ms:number|null;open_links:number};
+        if (state.open_links === 0 && state.ended_at_ms !== null)
+          this.endSessionInTransaction(sessionId, state.ended_at_ms, "estimated");
+      }
+    }).immediate();
   }
 
   attachPlatformStream(
