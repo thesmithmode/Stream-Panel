@@ -30,3 +30,4 @@
 - Auto analytics: ручное Apply и knobs убраны, дефолты алгоритма сохранены; debounce/stale guard/unmount, stale selection disable; E2E точные queries/clock. Root исправил scope audience assertion.
 - CI37850422864 terminal failure: backup validation оставаласьschema5 (unit/HTTP/E2E общийкорень); local-login иduration exactbutton expectations поправлены. Помощь/profile/recovery E2Esuccess; packaging skip. Нельзявыпускать.
 - Receiver health проверяет exact validated bind-host из root-owned file, defaultloopback; bridge иошибочныеадреса покрытыoperations tests. Bootstrap пишетfileбезnewline.
+- CI backup rootcause fixed: CURRENT_SCHEMA_VERSION6 используетсяsupported/online validation, migration6 сохраняетliteral6 дляfuture migrations. Regression профильный/обычный online snapshot; statictypes0error.

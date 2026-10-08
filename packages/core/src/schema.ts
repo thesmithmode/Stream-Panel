@@ -1,4 +1,6 @@
 // Migration 1. All times are UTC epoch milliseconds; names are never unique identifiers.
+export const CURRENT_SCHEMA_VERSION = 6;
+
 export const schemaV1 = `
 CREATE TABLE persons (
   id TEXT PRIMARY KEY,

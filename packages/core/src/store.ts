@@ -11,7 +11,7 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6 } from "./schema.js";
+import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
 import { presenceMinutes, pollCoveredMinutes, type PresencePoll } from "./presence.js";
 
@@ -50,7 +50,7 @@ export class StreamStore {
       this.db.pragma("foreign_keys = ON");
       this.db.pragma("busy_timeout = 5000");
       const version = this.db.pragma("user_version", { simple: true });
-      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6)
+      if (typeof version !== "number" || !Number.isInteger(version) || version < 0 || version > CURRENT_SCHEMA_VERSION)
         throw new Error("UNSUPPORTED_SCHEMA_VERSION");
       this.db.pragma("journal_mode = WAL");
       this.db.pragma("synchronous = FULL");
@@ -2286,7 +2286,7 @@ export class StreamStore {
       if (
         snapshot.pragma("integrity_check", { simple: true }) !== "ok" ||
         (snapshot.pragma("foreign_key_check") as unknown[]).length ||
-        (this.profile ? (snapshot.prepare("SELECT version FROM sp_profile_schema WHERE profile=?").get(this.profile) as {version:number} | undefined)?.version : snapshot.pragma("user_version", { simple: true })) !== 5
+        (this.profile ? (snapshot.prepare("SELECT version FROM sp_profile_schema WHERE profile=?").get(this.profile) as {version:number} | undefined)?.version : snapshot.pragma("user_version", { simple: true })) !== CURRENT_SCHEMA_VERSION
       )
         throw new Error("BACKUP_VALIDATION_FAILED");
     } finally {
