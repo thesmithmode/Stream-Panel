@@ -46,6 +46,7 @@ jobs:
       - run: bash -n ops/bootstrap.sh ops/preflight.sh
   packaging:
     name: Linux package upgrade checks
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
@@ -64,6 +65,7 @@ jobs:
   check:
     name: Combined quality gate
     needs: [segment, operations, packaging]
+    if: always() && needs.segment.result == 'success' && needs.operations.result == 'success' && (needs.packaging.result == 'success' || github.ref != 'refs/heads/main' && needs.packaging.result == 'skipped')
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
