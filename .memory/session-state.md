@@ -9,4 +9,4 @@
 - RackNerd 23.95.166.119 read-only проверен: Ubuntu24.04, RAM3.4GiB/free~2GiB, диск16GiB free; Traefik Docker держит80/443, file-provider /root/traefik/config, network traefik-proxy172.21.0.0/16. Сервер не изменялся.
 - gh старая авторизация401; обычный device flow после одобрения потерял token exchange из-за network reset. Новый .NET device flow хранится только secrets/github-device.json, требует одобрения пользователя и безопасного обмена токена в gh --with-token.
 - Потребуются доступная копия Linux SQLite/config и Supabase service_role key для Storage. Запрошены у пользователя. Нельзя заменить историю fixtures.
-- Артефакты аудита docs/audit-branches.md, audit-product-requirements.md, audit-access-deploy.md, database-audit.md. Правки приложения и деплой ещё не выполнены.
+- Артефакты аудита docs/audit-branches.md, audit-product-requirements.md, audit-access-deploy.md, database-audit.md; полный последовательный план docs/execution-order.md. Правки приложения и деплой ещё не выполнены.
