@@ -58,7 +58,7 @@ test('analytics keeps owners/bots out, unions linked identities, splits categori
 test('analytics validates bounds and timezone, unknown categories remain unknown, overlapping inference is not double counted', () => {
     const s = new StreamStore(':memory:');
     try {
-        for (const changes of [{ toMs: base }, { fromMs: -1 }, { toMs: base + 91 * 86400000 }, { source: 'bad' }, { coreRule: 'bad' }, { minSessions: -1 }, { chatWindowMinutes: 31 }])
+        for (const changes of [{ toMs: base }, { fromMs: -1 }, { toMs: base + 366 * 86400000 }, { source: 'bad' }, { coreRule: 'bad' }, { minSessions: -1 }, { chatWindowMinutes: 31 }])
             assert.throws(() => s.analytics({ ...opts, ...changes } as any), /INVALID_ANALYTICS_FILTER/);
         assert.throws(() => s.analytics({ ...opts, timezone: 'bad/timezone' }), /INVALID_TIMEZONE/);
         const sid = s.startSession('channel', 'unknown', base, 'platform', base);

@@ -42,7 +42,7 @@
     });
   });
   function selectEntity(e:any){selected=e;day=localInput(e.intervals.at(-1)?.from??new Date(to).getTime()).slice(0,10);}
-  function preset(days:number){from=localInput(Date.now()-days*86400000);to=localInput(Date.now());}
+  function preset(days:number|'all'){const now=Date.now();from=localInput(days==='all'?0:now-days*86400000);to=localInput(now);}
   async function refresh(){
     const id=++requestId;busy=true;error="";
     const fromMs=new Date(from).getTime(),toMs=new Date(to).getTime();
@@ -61,7 +61,7 @@
   });
 </script>
 <section class="panel analytics-filter">
-  <header><h2>Настройки аналитики</h2><div class="actions"><button class="outline small" onclick={()=>preset(7)}>7 дней</button><button class="outline small" onclick={()=>preset(30)}>30 дней</button><button class="outline small" onclick={()=>preset(90)}>90 дней</button></div></header>
+  <header><h2>Настройки аналитики</h2><div class="actions"><button class="outline small" onclick={()=>preset(7)}>7 дней</button><button class="outline small" onclick={()=>preset(30)}>30 дней</button><button class="outline small" onclick={()=>preset(90)}>90 дней</button><button class="outline small" onclick={()=>preset(180)}>180 дней</button><button class="outline small" onclick={()=>preset(365)}>365 дней</button><button class="outline small" onclick={()=>preset('all')}>Все время</button></div></header>
   <div class="analytics-controls">
     <label>Начало периода<input type="datetime-local" bind:value={from} required /></label>
     <label>Конец периода<input type="datetime-local" bind:value={to} required /></label>

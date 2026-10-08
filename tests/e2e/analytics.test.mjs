@@ -45,7 +45,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    const currentPeriod=async(values)=>page.evaluate(inputs=>Object.fromEntries(inputs.map(([key,value])=>[key,String(new Date(value).getTime())])),values);
    const presetPeriod=async(days)=>page.evaluate(span=>{
     const localInput=at=>{const d=new Date(at);return new Date(at-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
-    return {from:String(new Date(localInput(Date.now()-span*86400000)).getTime()),to:String(new Date(localInput(Date.now())).getTime())};
+    return {from:String(new Date(localInput(span==='all'?0:Date.now()-span*86400000)).getTime()),to:String(new Date(localInput(Date.now())).getTime())};
    },days);
    await goto(page,origin);await page.getByLabel('Логин',{exact:true}).fill(profile);await page.getByLabel('Пароль',{exact:true}).fill(`${profile}-analytics-password`);await page.getByRole('button',{name:'Войти',exact:true}).click();
    await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});await page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).waitFor();await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
@@ -125,12 +125,18 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await page.getByRole('button',{name:'7 дней',exact:true}).click();await advanceAutoFilter(weekFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    const quarterRange=await presetPeriod(90),quarterFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...quarterRange});
    await page.getByRole('button',{name:'90 дней',exact:true}).click();await advanceAutoFilter(quarterFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
+   for(const days of [180,365]){
+    const range=await presetPeriod(days),filter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...range});
+    await page.getByRole('button',{name:`${days} дней`,exact:true}).click();await advanceAutoFilter(filter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
+   }
+   const allRange=await presetPeriod('all'),allFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...allRange});
+   await page.getByRole('button',{name:'Все время',exact:true}).click();await advanceAutoFilter(allFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    const emptyRange=await currentPeriod([['from','2000-01-01T00:00'],['to','2000-01-02T00:00']]);
    const emptyFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...emptyRange});
    await page.getByLabel('Начало периода').fill('2000-01-01T00:00');await page.getByLabel('Конец периода').fill('2000-01-02T00:00');await advanceAutoFilter(emptyFilter);await page.getByText('Пока нет точек для графика',{exact:true}).waitFor();
-   const invalidRange=await currentPeriod([['from','2000-01-01T00:00'],['to','2001-01-01T00:00']]);
+   const invalidRange=await currentPeriod([['from','2000-01-01T00:00'],['to','2002-01-01T00:00']]);
    const invalidFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...invalidRange},400);
-   await page.getByLabel('Начало периода').fill('2000-01-01T00:00');await page.getByLabel('Конец периода').fill('2001-01-01T00:00');await advanceAutoFilter(invalidFilter);await page.getByRole('alert').filter({hasText:'INVALID_ANALYTICS_FILTER'}).waitFor();
+   await page.getByLabel('Начало периода').fill('2000-01-01T00:00');await page.getByLabel('Конец периода').fill('2002-01-01T00:00');await advanceAutoFilter(invalidFilter);await page.getByRole('alert').filter({hasText:'INVALID_ANALYTICS_FILTER'}).waitFor();
    const monthRange=await presetPeriod(30),presetFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...monthRange});
    await page.getByRole('button',{name:'30 дней',exact:true}).click();await advanceAutoFilter(presetFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);await page.setViewportSize({width:1280,height:800});

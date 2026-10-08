@@ -32,3 +32,4 @@
 - Receiver health проверяет exact validated bind-host из root-owned file, defaultloopback; bridge иошибочныеадреса покрытыoperations tests. Bootstrap пишетfileбезnewline.
 - CI backup rootcause fixed: CURRENT_SCHEMA_VERSION6 используетсяsupported/online validation, migration6 сохраняетliteral6 дляfuture migrations. Regression профильный/обычный online snapshot; statictypes0error.
 - Positive observe создаёт standaloneYT безfakeTwitch, coalescesTwitch/YT вbothorders, restart/closedidempotence, manualhistory protection, allconfirmedTwitchlinksbackfill. RootreviewcorrectedMINstart/recordingpreservation andYTinitiatedbackfill; CI next.
+- Периоды180/365/all добавлены; from0allhistory,365inclusive,366reject; safetycapsсохранены. Boundary/all sparsefixture иE2Epresetsподготовлены; staticgates0errors.
