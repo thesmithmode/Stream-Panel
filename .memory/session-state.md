@@ -1,0 +1,12 @@
+# Stream Panel: состояние 2026-10-08
+- Задача пользователя: сверить постановку/бэклог/ветки, выполнить все остатки, stable релиз и приватный HTTPS деплой RackNerd исключительно через main GitHub Actions, оставить актуальные dev/main.
+- Последнее уточнение: оба авторизованных аккаунта видят оба профиля; Aeza не трогать; выполнять последовательно маленькими шагами. Агенты остановлены.
+- Снимки: main 8c9f1c9, dev fad82ca. Рабочая feat/product-completion от dev сохраняет серверную авторизацию, удалённую из main.
+- Все ветки проверены; почти все интегрированы. fix/no-login-profile-switcher дерево совпадает с main; feat/da-redirect-host-env устарела для public HTTPS origin. Удаление веток после выпуска.
+- Незавершённый собственный код collector/core сохранён в stash с описанием Незавершённые этапы сборщиков и данных перед последовательной работой. Не применять весь stash без проверки по задачам.
+- Supabase eyverhyrhibwyiipgozn доступен по точному ID: 1/1/1/0/0 legacy rows; Storage пуст; нет настоящей истории. Экспорт secrets/supabase-legacy-export.json игнорируется Git.
+- RLS пяти legacy таблиц включён миграцией protect_legacy_stream_panel_exports; anon/authenticated права отозваны, service_role SELECT сохранён; counts проверены неизменными. SQL ops/supabase-privacy.sql.
+- RackNerd 23.95.166.119 read-only проверен: Ubuntu24.04, RAM3.4GiB/free~2GiB, диск16GiB free; Traefik Docker держит80/443, file-provider /root/traefik/config, network traefik-proxy172.21.0.0/16. Сервер не изменялся.
+- gh старая авторизация401; обычный device flow после одобрения потерял token exchange из-за network reset. Новый .NET device flow хранится только secrets/github-device.json, требует одобрения пользователя и безопасного обмена токена в gh --with-token.
+- Потребуются доступная копия Linux SQLite/config и Supabase service_role key для Storage. Запрошены у пользователя. Нельзя заменить историю fixtures.
+- Артефакты аудита docs/audit-branches.md, audit-product-requirements.md, audit-access-deploy.md, database-audit.md. Правки приложения и деплой ещё не выполнены.
