@@ -38,19 +38,19 @@
     personId = $state(""),
     busy = $state(false),
     dataMode = $state<DataMode>(getDataMode());
-  let username = $state(""), password = $state(""), user = $state<any>(null);
+  let username = $state("ruslan"), password = $state(""), user = $state<any>(null);
   let epoch = 0;
-  const authMessage = (code: string) => ({ INVALID_LOGIN: "Неверный логин или пароль", LOGIN_RATE_LIMIT: "Слишком много попыток. Попробуйте позже.", LOGIN_REQUIRED: "Войдите в свой профиль", LOCAL_LOGIN_REQUIRED: "Войдите в свой профиль" }[code] ?? code);
+  const authMessage = (code: string) => ({ INVALID_LOGIN: "Неверный логин или пароль", LOGIN_RATE_LIMIT: "Слишком много попыток. Попробуйте позже.", LOGIN_REQUIRED: "Войдите в свой профиль", LOCAL_LOGIN_REQUIRED: "Войдите в свой профиль", INVALID_HOST: "Откройте панель по адресу из терминала (для локальной установки — http://127.0.0.1:47831)", INVALID_ORIGIN: "Откройте панель по адресу из терминала", TimeoutError: "Сервер не ответил. Проверьте, что терминал Stream Panel открыт.", "Failed to fetch": "Не удалось связаться с панелью. Проверьте, что её терминал открыт." }[code] ?? code);
   async function login() {
     busy = true; error = "";
     try {
-      const response = await fetch("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
+      const response = await fetch("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: username.trim(), password }), signal: AbortSignal.timeout(15000) });
       const result = await response.json();
       password = "";
       if (!response.ok) throw new Error(result.error);
       epoch++; setCsrf(result.csrf); user = result.user;
       await refresh(); authorized = true;
-    } catch (e) { error = authMessage((e as Error).message); }
+    } catch (e) { error = authMessage((e as Error).name === "TimeoutError" ? "TimeoutError" : (e as Error).message); }
     finally { busy = false; }
   }
   async function logout() {
@@ -249,6 +249,7 @@
           <label>Пароль<input type="password" autocomplete="current-password" bind:value={password} required maxlength="256" /></label>
           <button class="primary" disabled={busy}>{busy ? "Входим…" : "Войти"}</button>
         </form>
+        <p class="small muted">Забыли пароль локальной панели? Остановите её и выполните <code>stream-panel --reset-password</code> в терминале.</p>
         {#if error}<p role="alert" class="small notice error">{error}</p>{/if}
       </section>{:else}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}

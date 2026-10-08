@@ -82,6 +82,23 @@ export async function createHostedApplication(dir: string, publicOrigin: string,
     reply.clearCookie("sp_session", { path: "/", secure: origin.protocol === "https:", httpOnly: true, sameSite: "lax" });
     return { ok: true };
   });
+  app.post("/api/v1/auth/password", { schema: { body: {
+    type: "object", additionalProperties: false, required: ["currentPassword", "newPassword", "confirmation"],
+    properties: { currentPassword: {type:"string",minLength:1,maxLength:256}, newPassword: {type:"string",minLength:14,maxLength:256}, confirmation: {type:"string",minLength:14,maxLength:256} },
+  } } }, async (request, reply) => {
+    const user = accounts.session(request.headers.cookie);
+    if (!user) return reply.code(401).send({error:"LOGIN_REQUIRED"});
+    if (!accounts.validCsrf(user, request.headers["x-csrf-token"])) return reply.code(403).send({error:"CSRF_REQUIRED"});
+    const body = request.body as {currentPassword:string;newPassword:string;confirmation:string};
+    if (body.newPassword !== body.confirmation) return reply.code(400).send({error:"PASSWORD_MISMATCH"});
+    const verified = await accounts.login(user.username, body.currentPassword, request.ip);
+    if (!verified) return reply.code(401).send({error:"INVALID_CURRENT_PASSWORD"});
+    accounts.logout(verified.token);
+    await backup?.run();
+    await accounts.resetPassword(user.profile, body.newPassword);
+    reply.clearCookie("sp_session", {path:"/", secure:origin.protocol === "https:", httpOnly:true, sameSite:"lax"});
+    return {ok:true};
+  });
   app.get("/healthz", async (_request, reply) => {
     try {
       await Promise.all([...runtimes.values()].map((r) => r.db.call("sessions")));

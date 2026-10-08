@@ -3,19 +3,31 @@ set -euo pipefail
 app_root="${STREAM_PANEL_INSTALL_ROOT:-/opt/stream-panel-local}"
 local_dir="${STREAM_PANEL_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/stream-panel-local}"
 lock_dir="${XDG_RUNTIME_DIR:-$HOME/.cache}"
+reset_password=false
+if [[ "${1:-}" == '--reset-password' ]]; then reset_password=true;
+elif [[ $# -gt 0 ]]; then echo 'Использование: stream-panel [--reset-password]' >&2; exit 1; fi
 mkdir -p "$lock_dir"
 exec 9>"$lock_dir/stream-panel-local.lock"
 if ! flock -n 9; then
+  if $reset_password; then echo 'Сначала остановите панель (Ctrl+C в её терминале).' >&2; exit 1; fi
   xdg-open "http://127.0.0.1:${STREAM_PANEL_PORT:-47831}" >/dev/null 2>&1 || true
   exit 0
 fi
-if [[ ! -f "$local_dir/local-ready" ]]; then
+if $reset_password || [[ ! -f "$local_dir/local-ready" ]]; then
   if [[ -z "${STREAM_PANEL_INITIAL_PASSWORD:-}" ]]; then
     echo 'Локальный вход: ruslan. Задайте пароль панели (минимум 14 символов).'
     read -r -s -p 'Пароль: ' stream_panel_password
     echo
+    read -r -s -p 'Повторите пароль: ' stream_panel_confirmation
+    echo
+    if [[ "$stream_panel_password" != "$stream_panel_confirmation" ]]; then echo 'Пароли не совпали. Пароль не сохранён.' >&2; exit 1; fi
+    if [[ ${#stream_panel_password} -lt 14 || ${#stream_panel_password} -gt 256 ]]; then echo 'Пароль должен содержать от 14 до 256 символов.' >&2; exit 1; fi
     export STREAM_PANEL_INITIAL_PASSWORD="$stream_panel_password"
   fi
 fi
 cd "$app_root"
+if $reset_password; then
+  export STREAM_PANEL_RESET_PASSWORD=1
+  exec "$app_root/bin/node" dist/apps/daemon/src/password.js
+fi
 exec "$app_root/bin/node" dist/apps/daemon/src/local.js

@@ -114,3 +114,13 @@ test('local preview imports legacy credentials/history, requires setup password 
  const b=run(undefined,'0');children.push(b);await b.ready();await b.browserError();b.c.kill('SIGTERM');assert.equal((await b.exit).code,0);
  }finally{for(const c of children)c.c.kill();await Promise.all(children.map(c=>c.exit));await rm(root,{recursive:true,force:true});}
 });
+
+test('local password recovery command preserves history and allows login with replacement password',{timeout:15000},async()=>{
+ const {writeFile}=await import('node:fs/promises'),{AccountStore}=await import('../../dist/apps/daemon/src/auth.js'),{StreamStore}=await import('../../dist/packages/core/src/store.js');
+ const dir=await mkdtemp(join(tmpdir(),'sp-password-cli-'));const accounts=new AccountStore(join(dir,'data.sqlite'));await accounts.createUser('ruslan','ruslan','Руслан','original-password');accounts.close();const store=new StreamStore(join(dir,'data.sqlite'),'ruslan');store.startSession('owner','stream',1,'platform',1);store.close();await writeFile(join(dir,'backup-key'),'b'.repeat(64));
+ try{
+ const child=spawn(process.execPath,['dist/apps/daemon/src/password.js'],{env:{...process.env,STREAM_PANEL_DATA_DIR:dir,STREAM_PANEL_RESET_PASSWORD:'1',STREAM_PANEL_INITIAL_PASSWORD:'replacement-password'},stdio:['ignore','pipe','pipe']});let out='',err='';child.stdout.on('data',b=>out+=b);child.stderr.on('data',b=>err+=b);const code=await new Promise(r=>child.on('exit',r));assert.equal(code,0,err);assert.match(out,/Пароль ruslan изменён/);
+ const a=new AccountStore(join(dir,'data.sqlite'));try{assert.ok(await a.login('ruslan','replacement-password','ip'));assert.equal(await a.login('ruslan','original-password','ip'),null);}finally{a.close();}
+ const s=new StreamStore(join(dir,'data.sqlite'),'ruslan');try{assert.equal(s.sessions().length,1);}finally{s.close();}
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
