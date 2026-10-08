@@ -51,6 +51,16 @@
 
 ## UI / аналитика
 
+Отдельный раздел «Аналитика» нужен для выбора содержания и времени эфиров:
+
+- Категории и их изменения получать только из Twitch; YouTube относится к одновременному эфиру по времени, совпадение имён не склеивает аккаунты.
+- Фильтры периода, площадки, категории и часового пояса; графики активности, карта дней/часов, сравнение эфиров и возвращений, поиск и сортировки участников.
+- Ядро: настраиваемое число эфиров, минуты активности и сообщения; правила «часто + долго или общается», «все критерии» и «только частота». Показывать долю посещённых эфиров и среднее наблюдение на эфир.
+- Персональная минутная сетка, интервалы наблюдений и оценки по сообщениям; отдельные состояния отсутствия в полном опросе и неизвестности.
+- Исключать владельцев каналов, `fullrandomname_twitch`, `jeetbot`, `streemelements` и `streamelements` из персональных расчётов; дополнительные исключения настраиваются. Исходная история сохраняется. Из агрегатного счётчика API невозможно достоверно вычесть конкретного человека.
+- Twitch chatters — наблюдения в чате, не доказанный просмотр. YouTube окно после сообщения — настраиваемая оценка активности, не доказанная длительность просмотра или вход/выход. YouTube Analytics watch time — агрегатный отчёт платформы для всех видео канала, отдельно от персональных оценок и Twitch-фильтров. История YouTube доступна после отключения OAuth.
+- Сравнение категорий сопровождается полнотой опросов; пробелы не трактуются как нулевая аудитория. Автообновление включается пользователем.
+
 - Ориентир: широкий набор экранов в духе аналитики Stream Tools («скорее все», топ-3 экрана пользователь не выделял).
 - Приоритизация экранов — на этапе MVP (см. PRD).
 
@@ -78,7 +88,7 @@
 - Person auto-link (**KEEP**): identical Twitch↔DA nick (unique `matchKey`) → immediate auto-link into one Person + owner bind on Twitch login. Ambiguous names stay suggestions only. Not suggestions-only for unique nick.
 - Manual merge **required** for different nicks («донатер X = зритель Y»): merges all past **and** future donations/activity into one Person; undo/split unchanged.
 - Twitch definitive auth failure HTTP **400/401** → clear tokens + `TWITCH_REAUTH_REQUIRED`; UI must show **explicit** reauth («Войди снова»), not a silent/connected look. Do **not** advance-warn about ~30-day public refresh expiry (useless beforehand).
-- YouTube / Stream Tools analytics video: **out of scope** (Twitch + DA only).
+- Старое ограничение Twitch + DA заменено требованием Twitch + DA + YouTube от 2026-10-07.
 - Bot filter in analytics (configurable + well-known); Litestream path documented; Streamer.bot stub only until P3.
 - Durable rejection of merge candidates and scoped owner rules with TTL stay **P1** (not implemented in this readiness tick): needs schema + API + UI + coverage; offline suggestions + manual merge are enough to start live validation. See tech-spec Implementation decisions §16.
 

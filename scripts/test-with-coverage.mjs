@@ -8,19 +8,17 @@ export async function run(command, args, env = process.env) {
     child.on("exit", (code) => resolve(code ?? 1));
   });
 }
+const segment=process.argv[2] ?? "all";
+const directories={unit:["dist/packages/core/test"],integration:["dist/apps/daemon/test","tests/integration"],e2e:["tests/e2e"],all:["dist/packages/core/test","dist/apps/daemon/test","tests/e2e","tests/integration"]};
+if(!directories[segment])throw new Error("INVALID_TEST_SEGMENT");
 await rm("coverage", { recursive: true, force: true });
 await mkdir("coverage/raw", { recursive: true });
 const files = [];
-for (const dir of [
-  "dist/packages/core/test",
-  "dist/apps/daemon/test",
-  "tests/e2e",
-  "tests/integration",
-])
+for (const dir of directories[segment])
   for (const file of await readdir(dir))
     if (/\.test\.(m?js)$/.test(file)) files.push(join(dir, file));
 const webUnit = [];
-for (const file of await readdir("apps/web/src"))
+for (const file of (segment==="unit"||segment==="all")?await readdir("apps/web/src"):[])
   if (/\.test\.ts$/.test(file)) webUnit.push(join("apps/web/src", file));
 const exitMain = await run(
   process.execPath,
@@ -52,5 +50,5 @@ const report = await run(process.execPath, [
   "node_modules/c8/bin/c8.js",
   "report",
 ]);
-const gate = await run(process.execPath, ["scripts/coverage-gate.mjs"]);
+const gate = segment==="all" ? await run(process.execPath, ["scripts/coverage-gate.mjs"]) : 0;
 process.exitCode = exit || report || gate;

@@ -7,29 +7,25 @@ async function inventory(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) await inventory(path);
-    else if (/\.(ts|svelte)$/.test(path) && !path.endsWith(".d.ts"))
+    else if (/\.(ts|svelte)$/.test(path) && !path.endsWith(".d.ts") && !path.endsWith(".test.ts"))
       expected.push(resolve(path));
   }
 }
 for (const dir of ["packages/core/src", "apps/daemon/src", "apps/web/src"])
   await inventory(dir);
-const raw = JSON.parse(
-  await readFile("coverage/node/coverage-final.json", "utf8"),
-);
 const map = lib.createCoverageMap({});
-for (const [path, data] of Object.entries(raw))
-  if (expected.includes(resolve(path)))
-    map.addFileCoverage({ ...data, path: resolve(path) });
-for (const file of await readdir("coverage/browser").catch((e) => {
-  if (e.code === "ENOENT") return [];
-  throw e;
-})) {
-  for (const [path, data] of Object.entries(
-    JSON.parse(await readFile(`coverage/browser/${file}`, "utf8")),
-  ))
-    if (expected.includes(resolve(path)))
-      map.addFileCoverage({ ...data, path: resolve(path) });
+async function collect(directory) {
+  for(const entry of await readdir(directory,{withFileTypes:true})) {
+    const path=join(directory,entry.name);
+    if(entry.isDirectory())await collect(path);
+    else if(entry.name==="coverage-final.json"||directory.endsWith("browser")&&entry.name.endsWith(".json")) {
+      const raw=JSON.parse(await readFile(path,"utf8"));
+      for(const [source,data] of Object.entries(raw)) if(expected.includes(resolve(source)))map.addFileCoverage({...data,path:resolve(source)});
+    }
+  }
 }
+if(process.argv[2]==="segments")await collect("coverage/segments");
+else {await collect("coverage/node");try{await collect("coverage/browser");}catch(e){if(e.code!=="ENOENT")throw e;}}
 const violations = failures(map, expected);
 const summary = map.getCoverageSummary();
 console.log("Combined Node + browser coverage:", summary.data);

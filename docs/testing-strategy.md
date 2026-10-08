@@ -51,6 +51,8 @@ Test runner ограничен двумя одновременно исполн�
 
 ## CI
 
-`.github/workflows/core.yml` запускается на push без фильтра веток, на pull request без фильтра целевой ветки и вручную. Матрица — Ubuntu/Windows, `fail-fast: false`; установка по lockfile, Chromium, `pnpm check`. При падении теста, сборки, typecheck, отсутствии coverage-файла или нарушении порога задача завершается ошибкой. Отчёты сохраняются как artifacts на 7 дней, в том числе при падении.
+`.github/workflows/ci.yml` запускает Quality gate на push всех веток, всех pull request и вручную. Linux server runtime проверяется тремя независимыми сегментами `unit`, `integration`, `e2e`; `fail-fast: false`. Отдельная задача проверяет deployment receiver и shell syntax. Каждый сегмент выполняет production build и сохраняет Node/browser coverage, E2E устанавливает Chromium, unit включает Svelte diagnostics.
 
-Это конфигурация веток, содержащих данный workflow. Старые ветки до включения изменений используют прежнюю версию workflow GitHub. Обязательный статус при merge дополнительно требует branch protection/ruleset владельца репозитория; наличие workflow само по себе не запрещает административное объединение.
+`node scripts/test-with-coverage.mjs SEGMENT` запускает сегмент с покрытием. Combined quality gate зависит от успеха всех сегментов и operations, объединяет artifacts и применяет общий порог ≥90% строк/ветвлений/функций плюс ≥90% строк каждого runtime-файла. Проценты отдельных групп не подменяют объединённый результат. Собственные `.test.ts` относятся к тестовому инструментарию, а не runtime. Локальный `pnpm check` выполняет те же сценарии вместе.
+
+Старые ветки до включения workflow используют прежний CI. Обязательный статус при merge дополнительно требует branch protection/ruleset владельца репозитория. Deploy server принимает только полностью успешный Quality gate текущего main.
