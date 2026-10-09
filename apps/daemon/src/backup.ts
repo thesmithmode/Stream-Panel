@@ -4,6 +4,7 @@ import { gzipSync, gunzipSync } from "node:zlib";
 import { mkdir, readFile, writeFile, readdir, rm, stat, lstat, rename, open } from "node:fs/promises";
 import {constants} from "node:fs";
 import { join,resolve } from "node:path";
+import { CURRENT_SCHEMA_VERSION } from "../../../packages/core/src/schema.js";
 const magic = Buffer.from("SPBK1");
 const maxSize = 48 * 1024 * 1024;
 const maxPayloadSize = 64 * 1024 * 1024;
@@ -11,6 +12,16 @@ const profiles = ["ruslan", "gulnaz"] as const;
 const backupFilename=/^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/;
 type BackupChannelStatus = { state: string; lastSuccessAt: number; filename: string; error: string };
 type BackupStatus = { state: string; lastSuccessAt: number; filename: string; error: string; local: BackupChannelStatus; cloud: BackupChannelStatus };
+function validateSnapshot(db: Database.Database): void {
+  if (db.pragma("integrity_check", {simple:true}) !== "ok" ||
+      (db.pragma("foreign_key_check") as unknown[]).length)
+    throw new Error("BACKUP_INTEGRITY_FAILED");
+  const versions = [db.pragma("user_version", {simple:true})];
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sp_profile_schema'").get())
+    versions.push(...(db.prepare("SELECT version FROM sp_profile_schema").all() as {version:number}[]).map(row=>row.version));
+  if (versions.some(version => !Number.isInteger(version) || Number(version)<0 || Number(version)>CURRENT_SCHEMA_VERSION))
+    throw new Error("UNSUPPORTED_SCHEMA_VERSION");
+}
 export function sealBackup(payload: Buffer, key: Buffer): Buffer {
   if (key.length !== 32) throw new Error("INVALID_BACKUP_KEY");
   if (payload.length > maxPayloadSize) throw new Error("BACKUP_SIZE_LIMIT");
@@ -85,7 +96,7 @@ export class BackupService {
       const db = new Database(join(this.dir, "data.sqlite"), {readonly:true});
       try { await db.backup(snapshot); } finally { db.close(); }
       const check = new Database(snapshot, {readonly:true});
-      try { if (check.pragma("integrity_check", {simple:true}) !== "ok") throw new Error("BACKUP_INTEGRITY_FAILED"); } finally { check.close(); }
+      try { validateSnapshot(check); } finally { check.close(); }
       const secrets: Record<string,unknown> = {};
       for (const profile of profiles) {
         try { secrets[profile] = JSON.parse(await readFile(join(this.dir,"profiles",profile,"secrets.json"), "utf8")); }
@@ -133,7 +144,10 @@ export class BackupService {
         };
         return {filename, cloudError};
       }
-    } finally { await rm(snapshot, {force:true}); }
+    } finally {
+      for (const path of [snapshot, snapshot + "-wal", snapshot + "-shm"])
+        await rm(path, {force:true});
+    }
   }
   private async upload(filename: string, blob: Buffer) {
     const url = new URL(this.options.url!);
@@ -169,7 +183,7 @@ export async function restoreBackup(blob: Buffer, key: Buffer, destination: stri
     const database = join(destination,"data.sqlite");
     await writeFile(database, payload.subarray(4+length), {mode:0o600,flag:"wx"});
     const db = new Database(database, {readonly:true});
-    try { if (db.pragma("integrity_check",{simple:true}) !== "ok" || (db.pragma("foreign_key_check") as unknown[]).length) throw new Error("BACKUP_INTEGRITY_FAILED"); } finally { db.close(); }
+    try { validateSnapshot(db); } finally { db.close(); }
     for (const profile of profiles) if (metadata.profiles[profile]) {
       const dir = join(destination,"profiles",profile); await mkdir(dir,{recursive:true,mode:0o700});
       await writeFile(join(dir,"secrets.json"),JSON.stringify(metadata.profiles[profile]),{mode:0o600,flag:"wx"});
