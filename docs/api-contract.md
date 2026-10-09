@@ -83,3 +83,10 @@ Twitch категория привязана ко времени, включая
 - GET /persons/:id/notes → записи {id,person_id,body,created_at_ms,updated_at_ms,revision}. POST того же пути {body} создаёт отдельную запись. POST /persons/:id/notes/:noteId/update {body,revision}; POST .../delete {revision}. body 1–10000 символов; createdAt не меняется, updatedAt не уменьшается. Несовпадение revision — 409 NOTE_CONFLICT.
 - GET /persons/:id/metadata → {revision,tags,manualCore}. POST того же пути {revision,tags,manualCore}; максимум 50 тегов по 64 символа, пустые запрещены, пробелы по краям убираются, повторы удаляются. manualCore = null/true/false. Изменение атомарно повышает Person revision; устаревшая revision — 409 REVISION_CONFLICT.
 - Все записи требуют парольную/локальную fixture-сессию, CSRF и Origin. Данные изолированы по выбранному профилю. Заметки и теги учитывают активные цепочки merge без потери исходного владельца. Ручное ядро применяется к целевой карточке; raw events и подтверждение attendance не изменяет.
+
+
+## Исправления и ручные донаты — schema11
+
+GET /donations?person=<id>&offset=0&limit=50&includeDeleted=false возвращает items/total/offset/limit; limit 1–100. GET /donations/:id и /donations/:id/audit возвращают текущую запись и историю исправлений. POST /donations принимает personId, amount (точная десятичная строка до двух знаков), currency, occurredAtMs, message, sourceName. Ручное создание требует известной даты. POST /donations/:id/update принимает те же поля плюс revision; неизвестная исходная дата может оставаться null. POST /donations/:id/delete и /restore принимают только revision. Конфликт возвращает 409; все мутации защищены auth/CSRF/Origin и строгой схемой.
+
+Исходные события неизменны. Поправки, tombstone и аудит сохраняются отдельно; отчёты читают effective_events. Повторный импорт не возвращает удалённый донат. Переназначение одного доната не меняет остальные донаты одноимённого автора. DonationAlerts anonymous без actor получают отдельную сущность Аноним в пределах account/profile; одноимённый Twitch не связывается автоматически. Валюты RUB/USD/EUR/BYN/KZT/UAH/BRL/TRY не суммируются между собой.

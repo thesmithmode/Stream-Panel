@@ -1,5 +1,5 @@
 // Migration 1. All times are UTC epoch milliseconds; names are never unique identifiers.
-export const CURRENT_SCHEMA_VERSION = 10;
+export const CURRENT_SCHEMA_VERSION = 11;
 
 export const schemaV1 = `
 CREATE TABLE persons (
@@ -213,4 +213,29 @@ CREATE TABLE split_guards (
  expected_json TEXT NOT NULL CHECK(json_valid(expected_json)), undone_at_ms INTEGER
 ) STRICT;
 PRAGMA user_version = 10;
+`;
+
+export const schemaV11 = `
+CREATE TABLE donation_corrections (
+ event_id TEXT PRIMARY KEY REFERENCES events(id), identity_id TEXT REFERENCES identities(id),
+ occurred_at_ms INTEGER, payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
+ deleted INTEGER NOT NULL CHECK(deleted IN(0,1)), revision INTEGER NOT NULL CHECK(revision>=1), updated_at_ms INTEGER NOT NULL
+) STRICT;
+CREATE TABLE donation_audit (
+ id TEXT PRIMARY KEY,event_id TEXT NOT NULL REFERENCES events(id),revision INTEGER NOT NULL,kind TEXT NOT NULL,
+ before_json TEXT NOT NULL CHECK(json_valid(before_json)),after_json TEXT NOT NULL CHECK(json_valid(after_json)),created_at_ms INTEGER NOT NULL,
+ UNIQUE(event_id,revision)
+) STRICT;
+CREATE INDEX donation_audit_event ON donation_audit(event_id,revision);
+CREATE TABLE anonymous_donors (account_id TEXT PRIMARY KEY,identity_id TEXT NOT NULL REFERENCES identities(id)) STRICT;
+INSERT OR IGNORE INTO persons(id,display_name,revision) SELECT DISTINCT 'anonymous:person:'||account_id,'Аноним',1 FROM events WHERE source='donationalerts' AND type='donation' AND identity_id IS NULL;
+INSERT OR IGNORE INTO identities(id,source,account_id,external_id,display_name,candidate_key,person_id,match_key)
+ SELECT DISTINCT 'anonymous:identity:'||account_id,'donationalerts',account_id,'anonymous:donor','Аноним','','anonymous:person:'||account_id,'anonymous:'||account_id FROM events WHERE source='donationalerts' AND type='donation' AND identity_id IS NULL;
+INSERT INTO anonymous_donors SELECT DISTINCT account_id,'anonymous:identity:'||account_id FROM events WHERE source='donationalerts' AND type='donation' AND identity_id IS NULL;
+CREATE VIEW effective_events AS SELECT e.id,e.source,e.account_id,e.external_id,e.type,coalesce(c.identity_id,e.identity_id,a.identity_id) AS identity_id,
+ CASE WHEN c.event_id IS NULL THEN e.occurred_at_ms ELSE c.occurred_at_ms END AS occurred_at_ms,
+ e.received_at_ms,e.source_time,CASE WHEN c.event_id IS NULL THEN e.time_quality WHEN c.occurred_at_ms IS NULL THEN 'unknown' ELSE 'configured' END AS time_quality,
+ e.transport,coalesce(c.payload_json,e.payload_json) AS payload_json
+ FROM events e LEFT JOIN donation_corrections c ON c.event_id=e.id LEFT JOIN anonymous_donors a ON a.account_id=e.account_id AND e.source='donationalerts' AND e.type='donation' WHERE coalesce(c.deleted,0)=0;
+PRAGMA user_version = 11;
 `;

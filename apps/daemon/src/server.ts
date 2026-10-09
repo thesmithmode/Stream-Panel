@@ -100,7 +100,13 @@ export async function createApplication(
     properties,
     required,
   });
+  const donationFields={personId:{type:"string",minLength:1,maxLength:512},amount:{type:"string",minLength:1,maxLength:50,pattern:"^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$"},currency:{type:"string",enum:["RUB","USD","EUR","BYN","KZT","UAH","BRL","TRY"]},occurredAtMs:{type:["integer","null"],minimum:0},message:{type:"string",maxLength:10000},sourceName:{type:"string",minLength:1,maxLength:200}};
+  const donationRequired=["personId","amount","currency","occurredAtMs","message","sourceName"];
   const schemaBodies: Record<string, Record<string, unknown>> = {
+    "/api/v1/donations":body({...donationFields,occurredAtMs:{type:"integer",minimum:0}},donationRequired),
+    "/api/v1/donations/:id/update":body({...donationFields,revision},[...donationRequired,"revision"]),
+    "/api/v1/donations/:id/delete":body({revision},["revision"]),
+    "/api/v1/donations/:id/restore":body({revision},["revision"]),
     "/api/v1/persons/:id/metadata": body({tags:{type:"array",maxItems:50,items:{type:"string",minLength:1,maxLength:64}},manualCore:{type:["boolean","null"]},revision},["tags","manualCore","revision"]),
     "/api/v1/persons/:id/notes": body({body:{type:"string",minLength:1,maxLength:10000}},["body"]),
     "/api/v1/persons/:id/notes/:noteId/update": body({body:{type:"string",minLength:1,maxLength:10000},revision},["body","revision"]),
@@ -420,6 +426,18 @@ export async function createApplication(
   });
   app.get("/api/v1/splits",async()=>db.call("splits"));
   app.post("/api/v1/splits/:id/undo",async request=>{await db.call("undoSplit",string(object(request.params).id),Date.now());return {ok:true};});
+  const donationInput=(b:Record<string,unknown>)=>({personId:string(b.personId),amount:string(b.amount),currency:string(b.currency),occurredAtMs:b.occurredAtMs===null?null:Number(b.occurredAtMs),message:string(b.message),sourceName:string(b.sourceName)});
+  app.get("/api/v1/donations",async request=>{
+    const q=object(request.query);
+    if(q.includeDeleted!==undefined && !["true","false"].includes(string(q.includeDeleted)))throw new Error("INVALID_DONATION_PAGE");
+    return db.call("donations",q.person===undefined?undefined:string(q.person),q.offset===undefined?0:Number(q.offset),q.limit===undefined?50:Number(q.limit),q.includeDeleted==="true");
+  });
+  app.get("/api/v1/donations/:id",async request=>db.call("donation",string(object(request.params).id)));
+  app.get("/api/v1/donations/:id/audit",async request=>db.call("donationAudit",string(object(request.params).id)));
+  app.post("/api/v1/donations",async request=>db.call("createDonation",donationInput(object(request.body)),Date.now()));
+  app.post("/api/v1/donations/:id/update",async request=>{const b=object(request.body);return db.call("updateDonation",string(object(request.params).id),donationInput(b),Number(b.revision),Date.now());});
+  app.post("/api/v1/donations/:id/restore",async request=>db.call("restoreDonation",string(object(request.params).id),Number(object(request.body).revision),Date.now()));
+  app.post("/api/v1/donations/:id/delete",async request=>{await db.call("deleteDonation",string(object(request.params).id),Number(object(request.body).revision),Date.now());return {ok:true};});
   app.get("/api/v1/merges", async () => db.call("merges"));
   app.post("/api/v1/merges/:id/undo", async (request) => {
     await db.call("undoMerge", string(object(request.params).id), Date.now());

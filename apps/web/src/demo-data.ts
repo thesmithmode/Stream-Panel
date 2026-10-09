@@ -470,6 +470,11 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
     ];
   }
 
+  if (p === "donations") {
+    if(isPost)throw new Error("Изменения донатов доступны после подключения к серверу");
+    return {items:[],total:0,offset:0,limit:10};
+  }
+  if(p.startsWith("donations/"))throw new Error("Изменения донатов доступны после подключения к серверу");
   if (p === "merges" || p === "splits") return [];
 
   if (p === "presence") {

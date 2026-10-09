@@ -21,6 +21,7 @@ const allowed = new Set([
   "person",
   "personNotes", "createPersonNote", "updatePersonNote", "deletePersonNote",
   "personMetadata", "setPersonMetadata",
+  "donation", "donations", "createDonation", "updateDonation", "deleteDonation", "restoreDonation", "donationAudit",
   "events",
   "summary",
   "grid",

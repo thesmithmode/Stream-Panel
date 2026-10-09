@@ -1,0 +1,51 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {application} from '../helpers/application.mjs';
+import {launchBrowser} from '../helpers/browser.mjs';
+import {startCoverage,saveCoverage,goto} from '../helpers/browser-coverage.mjs';
+
+test('manual donations, conflicts, delete/restore, audit and one anonymous reassignment work on mobile',{timeout:90000},async()=>{
+ const app=await application();let browser;
+ try{
+  const now=Date.now();
+  for(const [id,name] of [['viewer','Viewer'],['recipient','Recipient']])await app.db.call('youtubeMessages','channel','chat',[{id,snippet:{type:'textMessageEvent',publishedAt:new Date(now).toISOString()},authorDetails:{channelId:id,displayName:name}}]);
+  for(const [id,text] of [['one','Anonymous one'],['two','Anonymous two']])await app.db.call('ingest',{source:'donationalerts',accountId:'da',externalId:id,type:'donation',actor:null,occurredAtMs:now,receivedAtMs:now,sourceTime:null,timeQuality:'provider',transport:'rest',payload:{amountMinor:'10000',currency:'RUB',text,actorName:''}});
+  const viewer='youtube:viewer',recipient='youtube:recipient',anon=(await app.db.call('persons')).find(p=>p.display_name==='Аноним').id;
+  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(10000);
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));await startCoverage(page);await goto(page,app.bootstrap());
+  const open=async name=>{await page.getByRole('button',{name:'Люди',exact:true}).click();await page.locator('.person-row').filter({hasText:name}).click();};
+  await open('Viewer');const section=page.getByRole('region',{name:'Донаты человека'});
+  await section.getByRole('button',{name:'Добавить донат',exact:true}).click();
+  await section.getByLabel('Сумма',{exact:true}).fill('12,34');await section.getByLabel('Дата и время доната').fill('2026-10-09T12:30');
+  await section.getByLabel('Источник доната').fill('Cash');await section.getByLabel('Сообщение доната').fill('Manual create');
+  await section.getByRole('button',{name:'Добавить донат',exact:true}).click();
+  let row=section.locator('article').filter({hasText:'Manual create'});await row.waitFor();
+  const created=(await app.db.call('donations',viewer)).items[0];assert.equal(created.amountMinor,'1234');
+  await row.getByRole('button',{name:'Редактировать донат',exact:true}).click();
+  await section.getByLabel('Сумма',{exact:true}).fill('1.25');await section.getByLabel('Валюта',{exact:true}).selectOption('USD');
+  await section.getByLabel('Сообщение доната').fill('Manual corrected');await section.getByLabel('Источник доната').fill('Transfer');
+  await section.getByRole('button',{name:'Сохранить донат',exact:true}).click();
+  row=section.locator('article').filter({hasText:'Manual corrected'});await row.waitFor();assert.equal((await app.db.call('donation',created.id)).amountMinor,'125');
+  await row.getByRole('button',{name:'Редактировать донат',exact:true}).click();await section.getByLabel('Сообщение доната').fill('Unsent draft');
+  await app.db.call('updateDonation',created.id,{personId:viewer,amount:'2.00',currency:'USD',occurredAtMs:created.occurredAtMs,message:'Other tab',sourceName:'Transfer'},1,now+1000);
+  const conflict=page.waitForResponse(r=>r.url().endsWith('/update')&&r.status()===409);
+  await section.getByRole('button',{name:'Сохранить донат',exact:true}).click();await conflict;
+  await section.getByRole('alert').filter({hasText:'другом окне'}).waitFor();assert.equal(await section.getByLabel('Сообщение доната').inputValue(),'Unsent draft');
+  await section.getByRole('button',{name:'Загрузить актуальный донат'}).click();
+  await page.waitForFunction(()=>document.querySelector('section[aria-label="Донаты человека"] textarea')?.value==='Other tab');
+  await section.getByRole('button',{name:'Отмена',exact:true}).click();
+  row=section.locator('article').filter({hasText:'Other tab'});await row.getByRole('button',{name:'Удалить донат',exact:true}).click();await row.waitFor({state:'detached'});
+  assert.equal((await app.db.call('donation',created.id)).deleted,true);
+  await section.getByLabel('Показать удалённые донаты').check();row=section.locator('article').filter({hasText:'Other tab'});
+  await row.getByRole('button',{name:'Восстановить донат',exact:true}).click();await row.getByRole('button',{name:'Редактировать донат',exact:true}).waitFor();
+  await row.getByText('История исправлений',{exact:true}).click();await row.getByText('Восстановление',{exact:false}).waitFor();
+  assert.equal((await app.db.call('donationAudit',created.id)).length,5);assert.equal((await app.db.call('personStats',viewer)).donationTotals.USD,'200');
+  await open('Аноним');row=section.locator('article').filter({hasText:'Anonymous one'});await row.getByRole('button',{name:'Редактировать донат',exact:true}).click();
+  await section.getByLabel('Получатель',{exact:true}).selectOption(recipient);await section.getByRole('button',{name:'Сохранить донат',exact:true}).click();await row.waitFor({state:'detached'});
+  assert.equal((await app.db.call('personStats',anon)).donationCount,1);assert.equal((await app.db.call('personStats',recipient)).donationCount,1);
+  await section.locator('article').filter({hasText:'Anonymous two'}).waitFor();
+  await open('Recipient');row=section.locator('article').filter({hasText:'Anonymous one'});await row.getByText('История исправлений',{exact:true}).click();await row.getByText('Исходный донатер: Аноним',{exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
+  assert.deepEqual(errors,[]);await saveCoverage(page);
+ }finally{await browser?.close();await app.close();}
+});

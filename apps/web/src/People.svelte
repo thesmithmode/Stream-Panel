@@ -14,6 +14,7 @@
   import Icon from "./Icon.svelte";
   import Help from "./Help.svelte";
   import PersonNotes from "./PersonNotes.svelte";
+  import PersonDonations from "./PersonDonations.svelte";
   import PersonMetadata from "./PersonMetadata.svelte";
   let {
     people,
@@ -346,6 +347,7 @@
         >
         {#key detail.id}
           <PersonMetadata personId={detail.id} onChange={()=>refreshPerson(detail.id)} />
+          <PersonDonations personId={detail.id} {people} onChange={()=>detail?refreshPerson(detail.id):Promise.resolve()} />
           <PersonNotes personId={detail.id} />
         {/key}
         <h3>Связанные аккаунты <Help id="person-identities-help" label="О связях аккаунтов" text="Здесь собраны аккаунты одного человека. Совпадение имени служит подсказкой для проверки. YouTube связывается вручную; выбранный аккаунт можно разъединить, сохранив события." /></h3>

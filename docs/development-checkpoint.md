@@ -133,3 +133,12 @@ Store tests split/YouTube: 11/11; новый защищённый HTTP test и S
 
 
 CI 6eb63b6: unit/integration/operations зелёные, 15 из 16 E2E прошли. Новый split/undo browser test остановился в setup на UNKNOWN_OPERATION: personRevision не является разрешённым worker operation. Fixture теперь читает revision через существующий person, список worker разрешений не расширялся ради теста. Сам мобильный split/undo scenario сохранён.
+
+
+## Ручные донаты, аноним и исправления — schema11
+
+Добавлены атомарные create/update/delete/restore, оптимистические ревизии, отдельный аудит и неизменные raw events. effective_events применяет исправления к Person/summary/analytics/events; удаление не допускает повторного импорта, восстановление создаёт следующую ревизию. Один анонимный донат можно переназначить без переноса остальных. Суммы хранятся точными minor-unit строками, неизвестные даты остаются неизвестными. Базы двух профилей изолированы, restart/integrity/FK/raw provenance проверяются регрессиями.
+
+Карточка человека содержит мобильную форму суммы/валюты/даты/сообщения/источника/получателя, список с пагинацией, удалённые записи, восстановление и историю изменённых полей. При конфликте черновик сохранён, актуальная запись загружается явно. Добавлен браузерный сценарий ручного CRUD/conflict/restore/одного анонимного переназначения; его результат требует CI этого коммита. Локально core build, production web build и Svelte check прошли, 0 errors/warnings; web unit 20/20.
+
+CI f1a7a9f: unit/integration/E2E/operations зелёные (включая мобильный split/undo). Combined gate красный: lines 99,34%, functions 95,24%, branches 92,71%. Порог 95% сохранён. Main/release/deploy не выполнялись. Приватный Supabase bucket создан, реальный серверный ключ/upload/restore и исходная Linux-история пока не подтверждены.

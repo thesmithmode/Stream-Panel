@@ -348,3 +348,26 @@ test('split history and guarded undo are available only through protected API',a
   assert.equal((await f.a.app.inject({method:'POST',url,headers:f.headers,payload:{}})).statusCode,400);
  }finally{await f.close();}
 });
+
+test('donation API enforces auth, CSRF, strict exact-money payloads and optimistic revisions',async()=>{
+ const f=await fixture();
+ try{
+  const now=Date.now();await f.a.db.call('youtubeMessages','channel','chat',[{id:'viewer',snippet:{type:'textMessageEvent',publishedAt:new Date(now).toISOString()},authorDetails:{channelId:'author',displayName:'Author'}}]);
+  const input={personId:'youtube:author',amount:'12.34',currency:'RUB',occurredAtMs:now,message:'Manual donation',sourceName:'Cash'};
+  const post=(url:string,payload:Record<string,unknown>)=>f.a.app.inject({method:'POST',url,headers:f.headers,payload});
+  assert.equal((await f.a.app.inject({method:'POST',url:'/api/v1/donations',headers:{host:f.headers.host},payload:input})).statusCode,401);
+  assert.equal((await f.a.app.inject({method:'POST',url:'/api/v1/donations',headers:{...f.headers,'x-csrf-token':'wrong'},payload:input})).statusCode,403);
+  for(const body of [{...input,amount:12.34},{...input,amount:'1e3'},{...input,amount:'12.345'},{...input,currency:'XXX'},{...input,occurredAtMs:null},{...input,extra:true}])assert.equal((await post('/api/v1/donations',body)).statusCode,400);
+  const made=await post('/api/v1/donations',input);assert.equal(made.statusCode,200);assert.equal(made.json().amountMinor,'1234');
+  const id=encodeURIComponent(made.json().id);
+  const updated=await post(`/api/v1/donations/${id}/update`,{...input,amount:'5.00',revision:0});assert.equal(updated.statusCode,200);assert.equal(updated.json().revision,1);
+  assert.equal((await post(`/api/v1/donations/${id}/delete`,{revision:0})).statusCode,409);
+  assert.equal((await post(`/api/v1/donations/${id}/delete`,{revision:1})).statusCode,200);
+  assert.equal((await f.a.app.inject({url:'/api/v1/donations?person=youtube%3Aauthor',headers:f.headers})).json().total,0);
+  assert.equal((await f.a.app.inject({url:'/api/v1/donations?person=youtube%3Aauthor&includeDeleted=true',headers:f.headers})).json().total,1);
+  assert.equal((await post(`/api/v1/donations/${id}/restore`,{revision:2})).json().revision,3);
+  assert.equal((await f.a.app.inject({url:`/api/v1/donations/${id}/audit`,headers:f.headers})).json().length,4);
+  assert.equal((await f.a.app.inject({url:'/api/v1/donations?limit=101',headers:f.headers})).statusCode,400);
+  assert.equal((await f.a.app.inject({url:'/api/v1/donations?includeDeleted=yes',headers:f.headers})).statusCode,400);
+ }finally{await f.close();}
+});

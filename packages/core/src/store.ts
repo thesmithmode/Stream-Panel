@@ -1,3 +1,4 @@
+import {DonationLedger,type DonationInput} from "./donations.js";
 import { audienceAnalytics, unionSpans, type AnalyticsOptions } from "./analytics.js";
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
@@ -11,7 +12,7 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10 } from "./schema.js";
+import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
 import { presenceMinutes, pollCoveredMinutes, type PresencePoll } from "./presence.js";
 
@@ -84,6 +85,8 @@ export class StreamStore {
         this.db.transaction(() => this.db.exec(schemaV9)).immediate();
       if ((this.db.pragma("user_version", { simple: true }) as number) < 10)
         this.db.transaction(() => this.db.exec(schemaV10)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 11)
+        this.db.transaction(() => this.db.exec(schemaV11)).immediate();
       this.db.exec("CREATE TABLE IF NOT EXISTS sp_youtube_quota (day TEXT NOT NULL, profile TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(day,profile)) WITHOUT ROWID");
       // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
@@ -97,6 +100,14 @@ export class StreamStore {
   close(): void {
     this.db.close();
   }
+
+  donation(id:string) {return new DonationLedger(this.db).donation(id);}
+  donations(personId?:string,offset=0,limit=50,includeDeleted=false) {return new DonationLedger(this.db).list(personId,offset,limit,includeDeleted);}
+  createDonation(input:DonationInput,atMs:number) {return new DonationLedger(this.db).create(input,atMs);}
+  updateDonation(id:string,input:DonationInput,revision:number,atMs:number) {return new DonationLedger(this.db).update(id,input,revision,atMs);}
+  deleteDonation(id:string,revision:number,atMs:number):void {new DonationLedger(this.db).remove(id,revision,atMs);}
+  restoreDonation(id:string,revision:number,atMs:number) {return new DonationLedger(this.db).restore(id,revision,atMs);}
+  donationAudit(id:string) {return new DonationLedger(this.db).auditHistory(id);}
 
   streamSample(sessionId: string, at: number, categoryId: string, categoryName: string, title: string, twitchViewers: number | null): void {
     assertTimestamp(at);
@@ -203,6 +214,7 @@ export class StreamStore {
           personId: identity?.person_id ?? null,
         };
       }
+      if(event.source==='donationalerts' && event.type==='donation' && (!event.actor || ["аноним","anonymous","anon"].includes(matchKey(event.actor.displayName))))new DonationLedger(this.db).ensureAnonymous(event.accountId);
       let identity: IdentityRow | null = null;
       let newIdentity = false;
       let autoLinked = false;
@@ -607,7 +619,7 @@ export class StreamStore {
       .prepare(
         `SELECT account_id, match_key
          FROM identities
-         WHERE source = 'donationalerts' AND match_key != ''
+         WHERE source = 'donationalerts' AND match_key != '' AND external_id!='anonymous:donor'
          GROUP BY account_id, match_key
          HAVING COUNT(*) > 1`,
       )
@@ -812,6 +824,11 @@ export class StreamStore {
   ): { personId: string; how: string } | null {
     const key = matchKey(displayName);
     if (!key) return null;
+    if(["аноним","anonymous","anon"].includes(key)){
+      if(source!=="donationalerts")return null;
+      const anonymous=this.db.prepare('SELECT i.person_id FROM anonymous_donors a JOIN identities i ON i.id=a.identity_id WHERE a.account_id=?').get(accountId) as {person_id:string}|undefined;
+      return anonymous?{personId:anonymous.person_id,how:"anonymous_label"}:null;
+    }
     const other = source === "twitch" ? "donationalerts" : "twitch";
     const rows = this.db
       .prepare(
@@ -991,7 +1008,7 @@ export class StreamStore {
       `).run(accountId, streamId, id, startedAtMs, nowMs);
       const events = this.db
         .prepare(
-          "SELECT id, account_id, occurred_at_ms FROM events WHERE (account_id = ? OR source='donationalerts' OR ?='manual') AND occurred_at_ms >= ?",
+          "SELECT id, account_id, occurred_at_ms FROM effective_events WHERE (account_id = ? OR source='donationalerts' OR ?='manual') AND occurred_at_ms >= ?",
         )
         .all(accountId, kind, startedAtMs) as {
         id: string;
@@ -1019,7 +1036,7 @@ export class StreamStore {
     this.db.prepare("UPDATE platform_streams SET ended_at_ms=(SELECT ended_at_ms FROM sessions WHERE id=?) WHERE session_id=? AND ended_at_ms IS NULL").run(id, id);
     this.db
       .prepare(
-        `DELETE FROM event_sessions WHERE session_id = ? AND event_id IN (SELECT id FROM events WHERE occurred_at_ms >= ?)`,
+        `DELETE FROM event_sessions WHERE session_id = ? AND event_id IN (SELECT id FROM effective_events WHERE occurred_at_ms >= ?)`,
       )
       .run(id, atMs);
   }
@@ -1031,7 +1048,7 @@ export class StreamStore {
       if(!session)throw new Error("SESSION_NOT_FOUND");
       if(session.kind!=="manual" || this.db.prepare("SELECT 1 FROM platform_streams WHERE session_id=?").get(id))throw new Error("PLATFORM_SESSION_MANAGED_AUTOMATICALLY");
       if(this.db.prepare("SELECT 1 FROM session_tombstones WHERE session_id=?").get(id))return;
-      const events=this.db.prepare("SELECT e.id,e.source,e.account_id,e.occurred_at_ms FROM events e JOIN event_sessions es ON es.event_id=e.id WHERE es.session_id=?").all(id) as {id:string;source:string;account_id:string;occurred_at_ms:number|null}[];
+      const events=this.db.prepare("SELECT e.id,e.source,e.account_id,e.occurred_at_ms FROM effective_events e JOIN event_sessions es ON es.event_id=e.id WHERE es.session_id=?").all(id) as {id:string;source:string;account_id:string;occurred_at_ms:number|null}[];
       this.endSessionInTransaction(id,Math.max(atMs,session.started_at_ms),"manual");
       this.db.prepare("INSERT INTO session_tombstones VALUES (?,?,?)").run(id,atMs,JSON.stringify(events.map(event=>event.id)));
       this.db.prepare("DELETE FROM event_sessions WHERE session_id=?").run(id);
@@ -1280,7 +1297,7 @@ export class StreamStore {
     // This schema currently has Twitch and donation-alert events; YouTube chat is stored separately.
     this.db.prepare(`
       INSERT OR IGNORE INTO event_sessions(event_id,session_id)
-      SELECT e.id,? FROM events e JOIN sessions s ON s.id=?
+      SELECT e.id,? FROM effective_events e JOIN sessions s ON s.id=?
       WHERE e.occurred_at_ms IS NOT NULL
         AND e.occurred_at_ms>=s.recording_started_at_ms AND e.occurred_at_ms<=?
         AND ((e.source='twitch' AND EXISTS (
@@ -1458,7 +1475,7 @@ export class StreamStore {
         LEFT JOIN (
           SELECT i.person_id, count(e.id) AS event_count
           FROM identities i
-          LEFT JOIN events e ON e.identity_id = i.id
+          LEFT JOIN effective_events e ON e.identity_id = i.id
           GROUP BY i.person_id
         ) ec ON ec.person_id = p.id
         WHERE (EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id) OR EXISTS(SELECT 1 FROM youtube_identities y WHERE y.person_id=p.id) OR (NOT EXISTS(SELECT 1 FROM person_merges m WHERE m.source_person_id=p.id AND m.undone_at_ms IS NULL) AND (EXISTS(SELECT 1 FROM person_notes n WHERE n.person_id=p.id) OR EXISTS(SELECT 1 FROM person_tags t WHERE t.person_id=p.id) OR EXISTS(SELECT 1 FROM person_preferences pref WHERE pref.person_id=p.id))))
@@ -1507,7 +1524,7 @@ export class StreamStore {
       throw new Error("INVALID_EVENT_WINDOW");
     const events: Record<string,unknown>[] = this.db
       .prepare(
-        `SELECT e.*, i.display_name, i.person_id FROM events e LEFT JOIN identities i ON i.id=e.identity_id
+        `SELECT e.*, i.display_name, i.person_id FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id
       WHERE (? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?)) AND (? IS NULL OR i.person_id=?)
       AND (? IS NULL OR e.occurred_at_ms>=?) AND (? IS NULL OR e.occurred_at_ms<?)
       ORDER BY coalesce(e.occurred_at_ms,e.received_at_ms) DESC, e.id DESC LIMIT 200`,
@@ -1561,8 +1578,8 @@ export class StreamStore {
     const counts = this.db
       .prepare(
         `SELECT
-        (SELECT count(*) FROM events e WHERE ${inSession}) AS event_count,
-        (SELECT count(*) FROM events e
+        (SELECT count(*) FROM effective_events e WHERE ${inSession}) AS event_count,
+        (SELECT count(*) FROM effective_events e
           LEFT JOIN identities i ON i.id = e.identity_id
           WHERE ${inSession}
           AND e.type = 'chat.message'
@@ -1575,7 +1592,7 @@ export class StreamStore {
             OR i.match_key NOT IN (SELECT value FROM json_each(?))
           )
         ) AS messages,
-        (SELECT count(*) FROM events e LEFT JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))) AS donations`,
+        (SELECT count(*) FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))) AS donations`,
       )
       .get(sid, sid, sid, sid, botJson, sid, sid, botJson) as {
       event_count: number;
@@ -1586,7 +1603,7 @@ export class StreamStore {
       .prepare(
         `SELECT json_extract(e.payload_json, '$.currency') AS currency,
                 json_extract(e.payload_json, '$.amountMinor') AS amount_minor
-         FROM events e LEFT JOIN identities i ON i.id=e.identity_id
+         FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id
          WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))
            AND json_extract(e.payload_json, '$.currency') IS NOT NULL
            AND json_extract(e.payload_json, '$.amountMinor') IS NOT NULL`,
@@ -1621,12 +1638,12 @@ export class StreamStore {
     const unique = this.db
       .prepare(
         `SELECT
-          (SELECT count(DISTINCT i.person_id) FROM events e
+          (SELECT count(DISTINCT i.person_id) FROM effective_events e
             JOIN identities i ON i.id = e.identity_id
             WHERE ${inSession}
               AND i.match_key NOT IN (SELECT value FROM json_each(?))
           ) AS unique_persons_events,
-          (SELECT count(DISTINCT i.id) FROM events e
+          (SELECT count(DISTINCT i.id) FROM effective_events e
             JOIN identities i ON i.id = e.identity_id
             WHERE ${inSession}
               AND i.match_key NOT IN (SELECT value FROM json_each(?))
@@ -2055,7 +2072,7 @@ export class StreamStore {
     const messageCount = youtube.messageCount + (
       this.db
         .prepare(
-          `SELECT count(*) AS n FROM events e
+          `SELECT count(*) AS n FROM effective_events e
            JOIN identities i ON i.id = e.identity_id
            WHERE i.person_id = ? AND ${inSession}
              AND e.type = 'chat.message'
@@ -2071,7 +2088,7 @@ export class StreamStore {
       .prepare(
         `SELECT json_extract(e.payload_json, '$.currency') AS currency,
                 json_extract(e.payload_json, '$.amountMinor') AS amount_minor
-         FROM events e
+         FROM effective_events e
          JOIN identities i ON i.id = e.identity_id
          WHERE i.person_id = ? AND ${inSession} AND e.type = 'donation' AND ${this.notBotClause('i')}
            AND json_extract(e.payload_json, '$.currency') IS NOT NULL
@@ -2090,7 +2107,7 @@ export class StreamStore {
         `SELECT
            min(coalesce(e.occurred_at_ms, e.received_at_ms)) AS first_event_ms,
            max(coalesce(e.occurred_at_ms, e.received_at_ms)) AS last_event_ms
-         FROM events e
+         FROM effective_events e
          JOIN identities i ON i.id = e.identity_id
          WHERE i.person_id = ? AND ${inSession}`,
       )
@@ -2135,7 +2152,7 @@ export class StreamStore {
       started_at_ms: number;
       ended_at_ms: number | null;
     }[];
-    const followedAtMs = (this.db.prepare("SELECT min(e.occurred_at_ms) AS at FROM events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id=? AND e.type='follow'").get(personId) as {at:number|null}).at;
+    const followedAtMs = (this.db.prepare("SELECT min(e.occurred_at_ms) AS at FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id=? AND e.type='follow'").get(personId) as {at:number|null}).at;
     let observedBeforeFollowMinutes = 0;
     let observedSum = 0;
     let observedSessions = 0;
@@ -2196,7 +2213,7 @@ export class StreamStore {
       followedAtMs,
       watchingSinceMs: excludedPerson?null:(this.db.prepare(`SELECT min(at) AS at FROM (
         SELECT min(p.completed_at_ms) AS at FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id WHERE i.person_id=? AND p.status='complete'
-        UNION ALL SELECT min(e.occurred_at_ms) AS at FROM events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id=? AND e.type='chat.message' AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id)
+        UNION ALL SELECT min(e.occurred_at_ms) AS at FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id=? AND e.type='chat.message' AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id)
         UNION ALL SELECT ? AS at
       )`).get(personId,personId,youtube.firstSeenMs) as {at:number|null}).at,
       observedBeforeFollowMinutes: followedAtMs === null ? null : observedBeforeFollowMinutes,
@@ -2314,7 +2331,7 @@ export class StreamStore {
              )`
         : `e.type = 'donation'`;
     const rows = sortBy === "messages" ? this.db.prepare(`WITH message_counts AS (
-      SELECT i.person_id,count(*) AS n FROM events e JOIN identities i ON i.id=e.identity_id
+      SELECT i.person_id,count(*) AS n FROM effective_events e JOIN identities i ON i.id=e.identity_id
       WHERE ${inSession} AND ${typeFilter} AND ${this.notBotClause("i")} GROUP BY i.person_id
       UNION ALL
       SELECT y.person_id,count(*) AS n FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id
@@ -2332,7 +2349,7 @@ export class StreamStore {
            count(e.id) AS metric_count
          FROM persons p
          JOIN identities i ON i.person_id = p.id
-         JOIN events e ON e.identity_id = i.id
+         JOIN effective_events e ON e.identity_id = i.id
          WHERE ${inSession} AND ${typeFilter}
            AND ${this.notBotClause("i")}
          GROUP BY p.id
@@ -2346,7 +2363,7 @@ export class StreamStore {
         .prepare(
           `SELECT json_extract(e.payload_json, '$.currency') AS currency,
                   json_extract(e.payload_json, '$.amountMinor') AS amount_minor
-           FROM events e
+           FROM effective_events e
            JOIN identities i ON i.id = e.identity_id
            WHERE i.person_id = ? AND ${inSession} AND e.type = 'donation'
              AND json_extract(e.payload_json, '$.currency') IS NOT NULL
@@ -2365,7 +2382,7 @@ export class StreamStore {
           : (
               this.db
                 .prepare(
-                  `SELECT count(*) AS n FROM events e
+                  `SELECT count(*) AS n FROM effective_events e
                    JOIN identities i ON i.id = e.identity_id
                    WHERE i.person_id = ? AND ${inSession}
                      AND e.type = 'chat.message'
@@ -2477,7 +2494,7 @@ export class StreamStore {
     const msgRows = this.db
       .prepare(
         `SELECT i.person_id AS id, max(p.display_name) AS display_name, count(*) AS messages
-         FROM events e
+         FROM effective_events e
          JOIN identities i ON i.id = e.identity_id
          JOIN persons p ON p.id = i.person_id
          WHERE ${inSession} AND e.type = 'chat.message'
@@ -2550,7 +2567,7 @@ export class StreamStore {
            EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND i.source='donationalerts') AS has_da
          FROM persons p
          WHERE EXISTS(
-           SELECT 1 FROM events e
+           SELECT 1 FROM effective_events e
            JOIN identities i ON i.id = e.identity_id
            WHERE i.person_id = p.id AND e.type = 'donation' AND ${inSession} AND ${this.notBotClause("i")}
          )`,
@@ -2581,7 +2598,7 @@ export class StreamStore {
          JOIN persons p ON p.id = i.person_id
          WHERE ${this.notBotClause("i")} AND (
            EXISTS(
-             SELECT 1 FROM events e WHERE e.identity_id = i.id AND ${inSession}
+             SELECT 1 FROM effective_events e WHERE e.identity_id = i.id AND ${inSession}
            ) OR EXISTS(
              SELECT 1 FROM presence_members m
              JOIN presence_polls poll ON poll.id = m.poll_id
@@ -2594,7 +2611,7 @@ export class StreamStore {
       const prior = this.db
         .prepare(
           `SELECT 1 AS ok WHERE EXISTS(
-             SELECT 1 FROM events e
+             SELECT 1 FROM effective_events e
              JOIN identities i ON i.id = e.identity_id
              WHERE i.person_id = ? AND e.id NOT IN (
                SELECT event_id FROM event_sessions WHERE session_id = ?
@@ -2656,7 +2673,7 @@ export class StreamStore {
         .prepare(
           `SELECT max(ts) AS last_ms FROM (
              SELECT coalesce(e.occurred_at_ms, e.received_at_ms) AS ts
-             FROM events e JOIN identities i ON i.id = e.identity_id
+             FROM effective_events e JOIN identities i ON i.id = e.identity_id
              WHERE i.person_id = ? AND e.id NOT IN (
                SELECT event_id FROM event_sessions WHERE session_id = ?
              )
