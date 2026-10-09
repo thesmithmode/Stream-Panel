@@ -101,6 +101,9 @@ export async function createApplication(
     required,
   });
   const schemaBodies: Record<string, Record<string, unknown>> = {
+    "/api/v1/persons/:id/notes": body({body:{type:"string",minLength:1,maxLength:10000}},["body"]),
+    "/api/v1/persons/:id/notes/:noteId/update": body({body:{type:"string",minLength:1,maxLength:10000},revision},["body","revision"]),
+    "/api/v1/persons/:id/notes/:noteId/delete": body({revision},["revision"]),
     "/api/v1/sessions/start": body(),
     "/api/v1/sessions/:id/stop": body(),
     "/api/v1/persons/:id/rename": body(
@@ -340,6 +343,17 @@ export async function createApplication(
   app.get("/api/v1/persons/:id", async (request) =>
     db.call("person", string(object(request.params).id)),
   );
+  app.get("/api/v1/persons/:id/notes", async request => db.call("personNotes",string(object(request.params).id)));
+  app.post("/api/v1/persons/:id/notes", async request => db.call("createPersonNote",string(object(request.params).id),string(object(request.body).body)));
+  app.post("/api/v1/persons/:id/notes/:noteId/update", async request => {
+    const p=object(request.params), b=object(request.body);
+    return db.call("updatePersonNote",string(p.id),string(p.noteId),string(b.body),Number(b.revision));
+  });
+  app.post("/api/v1/persons/:id/notes/:noteId/delete", async request => {
+    const p=object(request.params);
+    await db.call("deletePersonNote",string(p.id),string(p.noteId),Number(object(request.body).revision));
+    return {ok:true};
+  });
   app.get("/api/v1/persons/:id/stats", async (request) => {
     const id = string(object(request.params).id);
     const session = string(object(request.query).session) || undefined;

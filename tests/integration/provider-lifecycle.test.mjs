@@ -291,7 +291,8 @@ test("Twitch lifecycle: full subscriptions, safe handoff, transient gap, offline
     f.sockets[0].push(welcome);
     await flush();
     assert.equal(c.status.state, "connected");
-    assert.equal(subs.length, 12);
+    assert.equal(subs.length, 13);
+    assert.equal(subs.find((x) => x.type === "channel.update").version, "2");
     assert.equal(subs.find((x) => x.type === "channel.follow").version, "2");
     f.sockets[0].push({
       metadata: { message_type: "session_reconnect" },
@@ -310,7 +311,7 @@ test("Twitch lifecycle: full subscriptions, safe handoff, transient gap, offline
     f.sockets[1].push(welcome);
     await flush();
     assert.equal(f.sockets[0].closed, true);
-    assert.equal(subs.length, 12, "handoff must not duplicate subscriptions");
+    assert.equal(subs.length, 13, "handoff must not duplicate subscriptions");
     f.sockets[1].push("invalid json");
     await flush();
     assert.equal(c.status.state, "degraded");
@@ -1018,4 +1019,20 @@ test("DA automatic history waits for a logical stream; explicit history import r
     f.setSessions([]);
     await c.scanHistory(true); assert.equal(historyRequests, 2);
   } finally { await c.stop(); }
+});
+
+test("Twitch channel.update v2 preserves category and title changes as timestamped raw events", async t => {
+ const f=fixture(t); const c=new TwitchConnection(f.config,f.db,twitchRequest(f),f.socket);
+ try {
+  await c.start();f.sockets[0].push(welcome);await flush();
+  const updated=f.calls.filter(row=>row.method==='ingest');
+  f.sockets[0].push(notification('channel.update',{broadcaster_user_id:'owner',title:'Second title',category_id:'wow',category_name:'World of Warcraft'}));
+  await flush();
+  const events=f.calls.filter(row=>row.method==='ingest');
+  assert.equal(events.length,updated.length+1);
+  assert.equal(events.at(-1).args[0].type,'channel.update');
+  assert.equal(events.at(-1).args[0].payload.categoryId,'wow');
+  assert.equal(events.at(-1).args[0].payload.categoryName,'World of Warcraft');
+  assert.equal(events.at(-1).args[0].payload.title,'Second title');
+ }finally{await c.stop();}
 });

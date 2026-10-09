@@ -55,6 +55,7 @@ export function normalizeTwitch(
     "channel.chat.message": "chat.message",
     "channel.cheer": "bits",
     "channel.follow": "follow",
+    "channel.update": "channel.update",
     "channel.subscribe": "subscription",
     "channel.subscription.gift": "subscription.gift",
     "channel.subscription.message": "subscription.message",
@@ -104,6 +105,7 @@ export function normalizeTwitch(
       originChannelId: string(event.source_broadcaster_user_id) || accountId,
       bits: event.bits ?? null,
       subscriptionType: type,
+      ...(mapped === "channel.update" ? {categoryId:string(event.category_id),categoryName:string(event.category_name),title:string(event.title)} : {}),
       targetMessageId: string(event.message_id),
       targetUserId: string(event.target_user_id),
       timeBasis:
@@ -559,6 +561,7 @@ export class TwitchConnection {
             "user:read:chat",
           ] as [string, string, Record<string, string>, string],
       ),
+      ["channel.update", "2", { broadcaster_user_id: id }, null],
       ["stream.online", "1", { broadcaster_user_id: id }, null],
       ["stream.offline", "1", { broadcaster_user_id: id }, null],
       ["channel.raid", "1", { to_broadcaster_user_id: id }, null],

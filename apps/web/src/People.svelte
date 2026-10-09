@@ -12,6 +12,7 @@
   import { formatDuration } from "./duration";
   import EventList from "./EventList.svelte";
   import Icon from "./Icon.svelte";
+  import PersonNotes from "./PersonNotes.svelte";
   let {
     people,
     sessions,
@@ -121,24 +122,28 @@
   }
   async function loadStats(id: string) {
     const q = sessionFilter ? `?session=${sessionFilter}` : "";
-    stats = await api<PersonStats>(`persons/${id}/stats${q}`);
+    const value = await api<PersonStats>(`persons/${id}/stats${q}`);
+    if (selectedId === id) stats = value;
   }
   async function select(id: string) {
     selectedId = id;
     error = "";
     stats = null;
+    detail = null;
     try {
-      detail = await api(`persons/${id}`);
+      const [person, matches] = await Promise.all([api(`persons/${id}`),api<string[]>(`persons/${id}/candidates`)]);
+      if (selectedId !== id) return;
+      detail = person;
       name = detail.display_name;
       selectedIdentities = [];
       target = "";
       grid = [];
       gridLoaded = false;
       minute = null;
-      candidates = await api(`persons/${id}/candidates`);
+      candidates = matches;
       await loadStats(id);
     } catch (e) {
-      error = (e as Error).message;
+      if (selectedId === id) error = (e as Error).message;
     }
   }
   async function operation(action: () => Promise<void>) {
@@ -327,6 +332,7 @@
             >
           </div></label
         >
+        {#key detail.id}<PersonNotes personId={detail.id} />{/key}
         <h3>Зрители и донатеры</h3>
         <p class="small muted">
           Person — связка. Twitch login = один зритель; одно имя DA = один

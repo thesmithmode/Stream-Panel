@@ -373,6 +373,11 @@ export class StreamStore {
         );
       if (event.occurredAtMs !== null)
         this.assignEvent(eventKey(event), event.accountId, event.occurredAtMs);
+      if (event.source === "twitch" && event.type === "channel.update" && event.occurredAtMs !== null) {
+        const categoryId = event.payload.categoryId, categoryName = event.payload.categoryName, title = event.payload.title;
+        if ([categoryId, categoryName, title].some(value => typeof value !== "string" || value.length > 1000)) throw new Error("INVALID_CHANNEL_UPDATE");
+        this.db.prepare("INSERT INTO stream_samples(session_id,observed_at_ms,category_id,category_name,title,twitch_viewers,youtube_viewers) SELECT session_id,?,?,?,?,NULL,NULL FROM event_sessions WHERE event_id=? ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET category_id=excluded.category_id,category_name=excluded.category_name,title=excluded.title").run(event.occurredAtMs,categoryId,categoryName,title,eventKey(event));
+      }
       // Membership changes invalidate outstanding undo revisions, including arrival of a new identity.
       // Auto-link already bumped revision when attaching to an existing person.
       if (identity && newIdentity && !autoLinked)
@@ -385,6 +390,53 @@ export class StreamStore {
         personId: identity?.person_id ?? null,
       };
     }).immediate();
+  }
+
+  personNotes(personId: string): unknown[] {
+    this.personRevision(personId);
+    return this.db.prepare(`WITH RECURSIVE owners(id) AS (SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT n.* FROM person_notes n JOIN owners o ON n.person_id=o.id ORDER BY n.created_at_ms DESC,n.id`).all(personId);
+  }
+
+  createPersonNote(personId: string, body: string, nowMs = Date.now()): unknown {
+    assertTimestamp(nowMs);
+    const text = this.noteText(body);
+    return this.db.transaction(() => {
+      this.personRevision(personId);
+      const id = randomUUID();
+      this.db.prepare("INSERT INTO person_notes VALUES (?,?,?,?,?,0)").run(id,personId,text,nowMs,nowMs);
+      return this.db.prepare("SELECT * FROM person_notes WHERE id=?").get(id);
+    })();
+  }
+
+  updatePersonNote(personId: string, id: string, body: string, revision: number, nowMs = Date.now()): unknown {
+    assertTimestamp(nowMs);
+    const text = this.noteText(body);
+    return this.db.transaction(() => {
+      const note = this.requirePersonNote(personId,id,revision);
+      this.db.prepare("UPDATE person_notes SET body=?,updated_at_ms=?,revision=revision+1 WHERE id=?").run(text,Math.max(nowMs,note.updated_at_ms),id);
+      return this.db.prepare("SELECT * FROM person_notes WHERE id=?").get(id);
+    })();
+  }
+
+  deletePersonNote(personId: string, id: string, revision: number): void {
+    this.db.transaction(() => {
+      this.requirePersonNote(personId,id,revision);
+      this.db.prepare("DELETE FROM person_notes WHERE id=?").run(id);
+    })();
+  }
+
+  private noteText(body: string): string {
+    if (typeof body !== "string" || !body.trim() || body.length > 10000) throw new Error("INVALID_NOTE_BODY");
+    return body.trim();
+  }
+
+  private requirePersonNote(personId: string, id: string, revision: number): {updated_at_ms:number} {
+    this.personRevision(personId);
+    if (!Number.isSafeInteger(revision) || revision < 0) throw new Error("INVALID_NOTE_REVISION");
+    const note = this.db.prepare(`WITH RECURSIVE owners(id) AS (SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT n.revision,n.updated_at_ms FROM person_notes n JOIN owners o ON n.person_id=o.id WHERE n.id=?`).get(personId,id) as {revision:number;updated_at_ms:number} | undefined;
+    if (!note) throw new Error("NOTE_NOT_FOUND");
+    if (note.revision !== revision) throw new Error("NOTE_CONFLICT");
+    return note;
   }
 
   personRevision(id: string): number {
@@ -836,10 +888,10 @@ export class StreamStore {
     ).source;
     const session = this.db
       .prepare(
-        `SELECT id FROM sessions WHERE (account_id = ? OR kind = 'manual' OR ? = 'donationalerts')
-      AND started_at_ms <= ? AND (ended_at_ms IS NULL OR ended_at_ms > ?) ORDER BY started_at_ms DESC LIMIT 1`,
+        `SELECT id FROM sessions WHERE (account_id = ? OR kind = 'manual' OR ? = 'donationalerts' OR EXISTS(SELECT 1 FROM platform_streams p WHERE p.session_id=sessions.id AND p.account_id=? AND p.platform=? AND p.started_at_ms<=? AND (p.ended_at_ms IS NULL OR p.ended_at_ms>?)))
+      AND started_at_ms <= ? AND (ended_at_ms IS NULL OR ended_at_ms > ?) ORDER BY kind='platform' DESC, started_at_ms DESC LIMIT 1`,
       )
-      .get(accountId, source, atMs, atMs) as { id: string } | undefined;
+      .get(accountId, source, accountId, source, atMs, atMs, atMs, atMs) as { id: string } | undefined;
     if (session)
       this.db
         .prepare("INSERT OR REPLACE INTO event_sessions VALUES (?, ?)")

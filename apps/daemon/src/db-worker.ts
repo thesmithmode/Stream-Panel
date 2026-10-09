@@ -17,6 +17,7 @@ const allowed = new Set([
   "updateChatterNames",
   "persons",
   "person",
+  "personNotes", "createPersonNote", "updatePersonNote", "deletePersonNote",
   "events",
   "summary",
   "grid",

@@ -310,6 +310,10 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
   const p = basePath(path);
   const q = parseQuery(path);
   const isPost = body !== undefined;
+  if (/^persons\/[^/]+\/notes(?:\/[^/]+\/(?:update|delete))?$/.test(p)) {
+    if (isPost) throw new Error("Заметки доступны после подключения к серверу");
+    return [];
+  }
 
   if (p === "analytics") {
     const from=Number(q.get("from")),to=Number(q.get("to")),start=Math.max(from,to-2*hour),source=q.get("source")||"all";
