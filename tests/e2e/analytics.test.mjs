@@ -134,9 +134,12 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    const emptyRange=await currentPeriod([['from','2000-01-01T00:00'],['to','2000-01-02T00:00']]);
    const emptyFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...emptyRange});
    await page.getByLabel('Начало периода').fill('2000-01-01T00:00');await page.getByLabel('Конец периода').fill('2000-01-02T00:00');await advanceAutoFilter(emptyFilter);await page.getByText('Пока нет точек для графика',{exact:true}).waitFor();
-   const invalidRange=await currentPeriod([['from','2000-01-01T00:00'],['to','2002-01-01T00:00']]);
+   const multiYearRange=await currentPeriod([['from','2000-01-01T00:00'],['to','2002-01-01T00:00']]);
+   const multiYearFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...multiYearRange});
+   await page.getByLabel('Начало периода').fill('2000-01-01T00:00');await page.getByLabel('Конец периода').fill('2002-01-01T00:00');await advanceAutoFilter(multiYearFilter);await page.getByText('Пока нет точек для графика',{exact:true}).waitFor();
+   const invalidRange=await currentPeriod([['from','2002-01-01T00:00'],['to','2000-01-01T00:00']]);
    const invalidFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...invalidRange},400);
-   await page.getByLabel('Начало периода').fill('2000-01-01T00:00');await page.getByLabel('Конец периода').fill('2002-01-01T00:00');await advanceAutoFilter(invalidFilter);await page.getByRole('alert').filter({hasText:'INVALID_ANALYTICS_FILTER'}).waitFor();
+   await page.getByLabel('Начало периода').fill('2002-01-01T00:00');await page.getByLabel('Конец периода').fill('2000-01-01T00:00');await advanceAutoFilter(invalidFilter);await page.getByRole('alert').filter({hasText:'INVALID_ANALYTICS_FILTER'}).waitFor();
    const monthRange=await presetPeriod(30),presetFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...monthRange});
    await page.getByRole('button',{name:'30 дней',exact:true}).click();await advanceAutoFilter(presetFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);await page.setViewportSize({width:1280,height:800});

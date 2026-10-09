@@ -1246,6 +1246,29 @@ export class StreamStore {
             AND (m.ended_at_ms IS NULL OR m.ended_at_ms>e.occurred_at_ms)
         )
     `).run(sessionId, sessionId, observedAtMs);
+    // EventSub can arrive before Helix discovers the stream. Category facts
+    // may precede recording coverage, but must belong to a confirmed Twitch
+    // broadcast. Do not fabricate viewers or take events from another session.
+    this.db.prepare(`
+      INSERT INTO stream_samples(session_id,observed_at_ms,category_id,category_name,title,twitch_viewers,youtube_viewers)
+      SELECT ?,e.occurred_at_ms,json_extract(e.payload_json,'$.categoryId'),
+        json_extract(e.payload_json,'$.categoryName'),json_extract(e.payload_json,'$.title'),NULL,NULL
+      FROM platform_streams ps JOIN events e ON e.account_id=ps.account_id
+        AND e.source='twitch' AND e.type='channel.update'
+      WHERE ps.session_id=? AND ps.platform='twitch' AND e.occurred_at_ms<=?
+        AND e.occurred_at_ms>=ps.started_at_ms
+        AND (ps.ended_at_ms IS NULL OR e.occurred_at_ms<ps.ended_at_ms)
+        AND NOT EXISTS (SELECT 1 FROM event_sessions es WHERE es.event_id=e.id AND es.session_id<>?)
+        AND json_type(e.payload_json,'$.categoryId')='text'
+        AND json_type(e.payload_json,'$.categoryName')='text'
+        AND json_type(e.payload_json,'$.title')='text'
+        AND length(json_extract(e.payload_json,'$.categoryId'))<=1000
+        AND length(json_extract(e.payload_json,'$.categoryName'))<=1000
+        AND length(json_extract(e.payload_json,'$.title'))<=1000
+      ORDER BY e.occurred_at_ms,e.received_at_ms,e.id
+      ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET
+        category_id=excluded.category_id,category_name=excluded.category_name,title=excluded.title
+    `).run(sessionId,sessionId,observedAtMs,sessionId);
   }
 
   private validPlatformStreamUrl(platform: "twitch" | "youtube", value: string): boolean {
