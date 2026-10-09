@@ -149,3 +149,18 @@ test('stream summary includes every platform participant, deduplicates linked pe
   assert.equal(s.summary(session).messages,4);assert.equal(s.summary(other).messages,1);assert.equal(s.summary().messages,5);
  }finally{s.close();}
 });
+
+
+test('linked Twitch and YouTube category durations retain their signal kind instead of inheriting the Person source',()=>{
+ const s=new StreamStore(':memory:');try{
+  const sid=s.observePlatformStream('youtube','channel','video',at,at,null,'Stream')!;
+  s.observePlatformStream('twitch','owner','stream',at,at,null,'Stream');const tw=twitch(s);
+  s.youtubeMessages('channel','chat',[message('yt-kind','author','YouTube',at+minute)]);
+  s.merge('youtube:author',tw,s.personRevision('youtube:author'),s.personRevision(tw),at+minute);
+  s.endSession(sid,at+3*minute);
+  const data=s.analytics({fromMs:at,toMs:at+3*minute,youtubeAccount:'channel'});
+  assert.equal(data.categories.reduce((n,c)=>n+c.observedMinutes,0),0);
+  assert.equal(data.categories.reduce((n,c)=>n+c.estimatedChatMinutes,0),2);
+  assert.equal(data.audience[0]!.observedMinutes,0);assert.equal(data.audience[0]!.estimatedChatMinutes,2);
+ }finally{s.close();}
+});

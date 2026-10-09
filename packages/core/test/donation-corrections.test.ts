@@ -115,3 +115,41 @@ test('explicit Person creation stays visible without fabricated identities or at
  }finally{s.close();}
  const again=new StreamStore(path,'ruslan'),other=new StreamStore(path,'gulnaz');try{assert.ok(again.persons().some(p=>p.id===id));assert.equal(other.persons().length,0);assert.throws(()=>other.person(id),/PERSON_NOT_FOUND/);}finally{again.close();other.close();await rm(dir,{recursive:true,force:true});}
 });
+
+test('repeated corrections move only one donation and invalidate Person membership guards only when assignment changes',()=>{
+ const s=new StreamStore(':memory:');try{
+  const event=tip('single'),id=eventKey(event),anon=s.ingest(event).personId!;s.ingest(tip('untouched'));
+  const first=String(s.createPerson('First').id),second=String(s.createPerson('Second').id);
+  const input={personId:first,amount:'100',currency:'RUB',occurredAtMs:at,message:'',sourceName:'DonationAlerts'};
+  s.updateDonation(id,input,0,at+1);const revision=s.personRevision(first);
+  s.updateDonation(id,{...input,amount:'101'},1,at+2);assert.equal(s.personRevision(first),revision);
+  const secondRevision=s.personRevision(second);s.updateDonation(id,{...input,personId:second},2,at+3);
+  assert.equal(s.personRevision(first),revision+1);assert.equal(s.personRevision(second),secondRevision+1);
+  assert.equal(s.personStats(first).donationCount,0);assert.equal(s.personStats(second).donationCount,1);assert.equal(s.personStats(anon).donationCount,1);
+  assert.equal((s.person(second).identities as any[]).length,1);assert.equal(s.donation(id).originalActorName,'Аноним');assert.equal(s.donationAudit(id).length,3);
+  assert.equal(s.donations().total,2);assert.equal(s.donations(undefined,1,1).items.length,1);
+ }finally{s.close();}
+});
+
+test('editing donation time moves its stream attribution, and unknown time removes attribution without losing history',()=>{
+ const s=new StreamStore(':memory:');try{
+  const first=s.observePlatformStream('youtube','channel','one',at,at,null,'First')!;s.endSession(first,at+5*60000);
+  const second=s.observePlatformStream('youtube','channel','two',at+10*60000,at+10*60000,null,'Second')!;s.endSession(second,at+15*60000);
+  const person=String(s.createPerson('Offline donor').id),input={personId:person,amount:'1',currency:'RUB',occurredAtMs:at+60000,message:'',sourceName:'Cash'};
+  const donation=s.createDonation(input,at+20*60000);assert.equal(s.summary(first).donations,1);assert.equal(s.summary(second).donations,0);
+  s.updateDonation(donation.id,{...input,occurredAtMs:at+11*60000},0,at+21*60000);assert.equal(s.summary(first).donations,0);assert.equal(s.summary(second).donations,1);
+  s.deleteDonation(donation.id,1,at+22*60000);assert.equal(s.summary(second).donations,0);s.restoreDonation(donation.id,2,at+23*60000);assert.equal(s.summary(second).donations,1);
+  s.updateDonation(donation.id,{...input,occurredAtMs:null},3,at+24*60000);assert.equal(s.summary(second).donations,0);assert.equal(s.summary().donations,1);assert.equal(s.personStats(person).watchingSinceMs,null);
+ }finally{s.close();}
+});
+
+test('legacy donations with missing optional fields retain unknown amounts, currencies, messages and timestamps',()=>{
+ const s=new StreamStore(':memory:');try{
+  for(const account of ['da','manual']){
+   const event={...tip(`legacy-${account}`),accountId:account,actor:null,occurredAtMs:null,timeQuality:'unknown' as const,payload:{}};s.ingest(event);
+   const item=s.donation(eventKey(event));assert.equal(item.amountMinor,'');assert.equal(item.currency,'');assert.equal(item.message,'');assert.equal(item.originalActorName,'');assert.equal(item.occurredAtMs,null);
+   assert.equal(item.sourceName,account==='manual'?'Manual':'DonationAlerts');
+  }
+  assert.equal(s.donations().total,2);assert.equal(s.summary().donations,2);assert.deepEqual(s.summary().totals,{});
+ }finally{s.close();}
+});

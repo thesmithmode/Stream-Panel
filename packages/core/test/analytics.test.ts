@@ -256,6 +256,8 @@ test('regular audience uses attendance share, excludes donation-only profiles an
   assert.equal(result.summary.regulars,3);assert.equal(result.summary.attendees,5);assert.equal(result.summary.regularShare,.5);
   assert.equal(result.audience.find(e=>e.name==='Two thirds')!.attendanceRatio,2/3);
   assert.equal(result.audience.find(e=>e.name==='Donor only')!.regular,false);
+  assert.equal(result.streamComparison[0]!.audience,5);assert.equal(result.streamComparison[0]!.newInPeriod,5);
+  assert.equal(result.categories[0]!.audience,5);
   const first=result.timeline.find(p=>p.at===base)!;
   assert.equal(first.observed,3);assert.equal(first.regularObserved,2);
   assert.equal(first.estimated,2);assert.equal(first.regularEstimated,1);

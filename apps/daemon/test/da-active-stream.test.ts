@@ -66,3 +66,22 @@ test('DA realtime skips donations predating the active stream and deduplicates c
   assert.deepEqual((await db.call<any[]>('events')).map(e=>e.external_id),['11']);
  }finally{await connection.stop();await db.stop();await rm(dir,{recursive:true,force:true});}
 });
+
+
+test('explicit DA history import continues past three known pages and discovers older unseen donations',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-da-history-pages-'));const config=new Configuration(dir);await config.load();config.value.daAccessToken='fixture';config.value.daUtcOffsetMinutes=0;
+ const db=new StoreClient(join(dir,'data.sqlite'),'ruslan');await db.ready;
+ let late=false;const pages:number[]=[];const socket=new EventEmitter() as any;socket.close=()=>socket.emit('close');socket.send=()=>{};
+ const request:typeof fetch=async input=>{
+  const url=String(input);if(url.endsWith('/user/oauth'))return Response.json({data:{id:7,name:'Owner',socket_connection_token:'fixture'}});
+  const page=Number(new URL(url).searchParams.get('page'));pages.push(page);
+  const data=page<4||late?[{id:page,amount:'1',currency:'RUB',username:'Donor',message:'history',created_at:'2026-01-01 12:00:00'}]:[];
+  return Response.json({data,links:{next:page===4?null:'next'}});
+ };
+ const connection=new DonationAlertsConnection(config,db,request,(()=>socket) as SocketFactory);
+ try{
+  await connection.start();await connection.scanHistory();assert.deepEqual(pages,[1,2,3,4]);assert.equal((await db.call<any>('summary')).donations,3);
+  late=true;pages.length=0;await connection.scanHistory();assert.deepEqual(pages,[1,2,3,4]);assert.equal((await db.call<any>('summary')).donations,4);
+  await connection.scanHistory();assert.equal((await db.call<any>('summary')).donations,4);
+ }finally{await connection.stop();await db.stop();await rm(dir,{recursive:true,force:true});}
+});

@@ -158,3 +158,15 @@ CI bab2594: unit/integration/operations прошли; 16 из 17 E2E прошл�
 Store/API/UI позволяют создать Person без вымышленного аккаунта или событий, с независимыми одноимёнными карточками. Null preference сохраняет обычную автоматическую классификацию ядра и делает явную карточку видимой до первых данных. Заметки и донаты доступны сразу. Проверены persistence/restart/profile isolation/no attendance; HTTP auth/CSRF/body validation и exact-money tests 17/17. После исправления доната карточка сразу перечитывает KPI.
 
 CI 62ec7ee: unit/integration прошли; donation mobile scenario прошёл. E2E нового обзора дошёл до смены профиля, но его setup использовал однопрофильный локальный сервер, который не маршрутизирует profile header. Setup заменён настоящим hosted server с парольным аккаунтом и двумя профильными Store; проверка не ослаблена. Help scenario перенесён в детали стрима и обращается к актуальной подписи помощи. Operations упал на ECR `Rate exceeded` до bootstrap runtime. Скрипт последовательно пробует официальный Canonical ECR, официальный Google Docker Hub cache и исходный Ubuntu registry, сохраняя весь container bootstrap test; если недоступны все, CI остаётся красным. Bash syntax и 10 Python deploy checks проходят. Полный новый CI ещё требуется.
+
+
+## Посещение, вид сигнала и полный явный импорт DA
+
+Сравнение стримов и category audience больше не считают donation-only Person посетителем. При ручном объединении Twitch/YouTube длительности категорий разделяются по kind каждого интервала, а не по первому source Person: YouTube chat proxy не превращается в Twitch observed time. 24 выбранные аналитические/YouTube регрессии проходят.
+
+Явный импорт DonationAlerts проходит известные страницы до конца пагинации; три подряд известные страницы останавливают только автоматический опрос текущего эфира. Ручной запрос во время автоматического scan ожидает его окончания, вместо ложного успеха без импорта. Новая регрессия сначала импортирует три записи, затем находит старую четвёртую после трёх известных страниц; повторный импорт не дублирует. DA suite 3/3.
+
+CI 8325f9b: все unit/integration/E2E/operations прошли, включая hosted mobile overview isolation, donation CRUD/assignment/manual Person и bootstrap container с fallback registry. Combined gate красный: lines 99,36%, functions 94,97%, branches 92,76%. Порог 95% и проверки каждой строки файла сохранены. Релиз/main/deploy не выполнялись.
+
+
+Дополнительно проверяются повторное исправление/переназначение одного доната с инвалидированием membership guards, перенос даты между подтверждёнными стримами и сохранение неизвестных полей старой записи. Обновление суммы того же получателя не меняет членство; перенос получателя повышает обе Person revisions. Неизвестная дата снимает stream attribution, но оставляет общую историю. После DA scan serialization новый integration/operations-local прогон 118/118 успешен.

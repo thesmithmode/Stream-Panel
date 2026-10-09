@@ -175,7 +175,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             const e = entity(tip.person_id, name, 'twitch');
             e.donations[tip.currency] = (BigInt(e.donations[tip.currency] ?? '0') + BigInt(tip.amount)).toString();
             e.sessionIds.add(tip.session_id);
-            addMessages(tip.session_id, tip.at, 0, tip.person_id);
+
         }
     }
     if (source !== 'twitch' && options.youtubeAccount) {
@@ -267,18 +267,18 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         c.minutes += (segment.to - segment.from) / 60000;
         c.sessions.add(segment.session);
         for (const e of entities.values()) {
-            let duration = 0;
+            let observed = 0, estimated = 0;
             for (const span of e.intervals)
-                if (span.session === segment.session)
-                    duration += Math.max(0, Math.min(span.to, segment.to) - Math.max(span.from, segment.from)) / 60000;
-            if (duration) {
+                if (span.session === segment.session) {
+                    const duration=Math.max(0, Math.min(span.to, segment.to) - Math.max(span.from, segment.from)) / 60000;
+                    if(span.kind==='observed')observed+=duration;else estimated+=duration;
+                }
+            if (observed+estimated) {
                 c.audience.add(e.id);
                 if (e.core)
                     c.core.add(e.id);
-                if (e.source === 'twitch')
-                    c.observedMinutes += duration;
-                else
-                    c.estimatedChatMinutes += duration;
+                c.observedMinutes += observed;
+                c.estimatedChatMinutes += estimated;
             }
         }
     }
@@ -333,7 +333,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     const attendees=audience.filter(e=>e.attendanceSessionIds.length>0),regulars=audience.filter(e=>e.core).length;
     const seen = new Set<string>();
     const streamComparison = sessions.filter(s => selected.some(segment => segment.session === s.id)).map(s => {
-        const visitors = audience.filter(e => e.sessionIds.includes(s.id)), newInPeriod = visitors.filter(e => !seen.has(e.id)).length;
+        const visitors = audience.filter(e => e.attendanceSessionIds.includes(s.id)), newInPeriod = visitors.filter(e => !seen.has(e.id)).length;
         for (const e of visitors)
             seen.add(e.id);
         return { id: s.id, startedAt: s.started_at_ms, endedAt: s.ended_at_ms ?? to, title: samples.find(x => x.session_id === s.id)?.title ?? "", audience: visitors.length, core: visitors.filter(e => e.core).length, newInPeriod, returning: visitors.length - newInPeriod, messages: sessionMessages.get(s.id) ?? 0, categories: [...new Set(selected.filter(segment => segment.session === s.id).map(segment => segment.name))] };

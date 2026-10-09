@@ -102,7 +102,7 @@ export class DonationAlertsConnection {
   private socket: WebSocket | null = null;
   private retry: NodeJS.Timeout | null = null;
   private history: NodeJS.Timeout | null = null;
-  private scanning = false;
+  private scanTask:Promise<void>|null = null;
   private recipient = "";
   private generation = 0;
   private httpTail = Promise.resolve();
@@ -382,8 +382,13 @@ export class DonationAlertsConnection {
     });
   }
   async scanHistory(automatic = false): Promise<void> {
-    if (this.scanning || this.stopped) return;
-    this.scanning = true;
+    while(this.scanTask){if(automatic)return;await this.scanTask;}
+    if(this.stopped)return;
+    const task=this.scanHistoryNow(automatic);this.scanTask=task;
+    try{await task;}finally{if(this.scanTask===task)this.scanTask=null;}
+  }
+  private async scanHistoryNow(automatic:boolean): Promise<void> {
+    if (this.stopped) return;
     const generation = this.generation;
     this.status.capabilities.history = "Импорт…";
     try {
@@ -433,7 +438,7 @@ export class DonationAlertsConnection {
           break;
         }
         if (!string(links.next)) throw new Error("DA_PAGINATION_UNKNOWN");
-        if (knownStreak >= stopAfterKnownPages) {
+        if (automatic && knownStreak >= stopAfterKnownPages) {
           complete = true;
           break;
         }
@@ -448,8 +453,6 @@ export class DonationAlertsConnection {
     } catch (error) {
       this.status.capabilities.history = "Ошибка импорта";
       throw error;
-    } finally {
-      this.scanning = false;
     }
   }
   private report(error: unknown): void {
