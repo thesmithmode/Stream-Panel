@@ -11,7 +11,7 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8 } from "./schema.js";
+import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
 import { presenceMinutes, pollCoveredMinutes, type PresencePoll } from "./presence.js";
 
@@ -80,6 +80,8 @@ export class StreamStore {
         this.db.transaction(() => this.db.exec(schemaV7)).immediate();
       if ((this.db.pragma("user_version", { simple: true }) as number) < 8)
         this.db.transaction(() => this.db.exec(schemaV8)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 9)
+        this.db.transaction(() => this.db.exec(schemaV9)).immediate();
       this.db.exec("CREATE TABLE IF NOT EXISTS sp_youtube_quota (day TEXT NOT NULL, profile TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(day,profile)) WITHOUT ROWID");
       // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
@@ -935,7 +937,7 @@ export class StreamStore {
     const session = this.db
       .prepare(
         `SELECT id FROM sessions WHERE (account_id = ? OR kind = 'manual' OR ? = 'donationalerts' OR EXISTS(SELECT 1 FROM platform_streams p WHERE p.session_id=sessions.id AND p.account_id=? AND p.platform=? AND p.started_at_ms<=? AND (p.ended_at_ms IS NULL OR p.ended_at_ms>?)))
-      AND started_at_ms <= ? AND (ended_at_ms IS NULL OR ended_at_ms > ?) ORDER BY kind='platform' DESC, started_at_ms DESC LIMIT 1`,
+      AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id) AND started_at_ms <= ? AND (ended_at_ms IS NULL OR ended_at_ms > ?) ORDER BY kind='platform' DESC, started_at_ms DESC LIMIT 1`,
       )
       .get(accountId, source, accountId, source, atMs, atMs, atMs, atMs) as { id: string } | undefined;
     if (session)
@@ -1020,6 +1022,28 @@ export class StreamStore {
       .run(id, atMs);
   }
 
+  deleteManualSession(id: string, atMs: number): void {
+    assertTimestamp(atMs);
+    this.db.transaction(()=>{
+      const session=this.db.prepare("SELECT kind,started_at_ms FROM sessions WHERE id=?").get(id) as {kind:string;started_at_ms:number}|undefined;
+      if(!session)throw new Error("SESSION_NOT_FOUND");
+      if(session.kind!=="manual" || this.db.prepare("SELECT 1 FROM platform_streams WHERE session_id=?").get(id))throw new Error("PLATFORM_SESSION_MANAGED_AUTOMATICALLY");
+      if(this.db.prepare("SELECT 1 FROM session_tombstones WHERE session_id=?").get(id))return;
+      const events=this.db.prepare("SELECT e.id,e.source,e.account_id,e.occurred_at_ms FROM events e JOIN event_sessions es ON es.event_id=e.id WHERE es.session_id=?").all(id) as {id:string;source:string;account_id:string;occurred_at_ms:number|null}[];
+      this.endSessionInTransaction(id,Math.max(atMs,session.started_at_ms),"manual");
+      this.db.prepare("INSERT INTO session_tombstones VALUES (?,?,?)").run(id,atMs,JSON.stringify(events.map(event=>event.id)));
+      this.db.prepare("DELETE FROM event_sessions WHERE session_id=?").run(id);
+      for(const event of events){
+        if(event.occurred_at_ms===null)continue;
+        const candidates=this.db.prepare(`SELECT DISTINCT ps.session_id FROM platform_streams ps JOIN sessions s ON s.id=ps.session_id
+          WHERE s.kind='platform' AND ps.started_at_ms<=?
+           AND (ps.ended_at_ms IS NULL OR ps.ended_at_ms>?) AND (s.ended_at_ms IS NULL OR s.ended_at_ms>?)
+           AND (?='donationalerts' OR (ps.platform=? AND ps.account_id=?)) LIMIT 2`).all(event.occurred_at_ms,event.occurred_at_ms,event.occurred_at_ms,event.source,event.source,event.account_id) as {session_id:string}[];
+        if(candidates.length===1)this.db.prepare("INSERT INTO event_sessions VALUES (?,?)").run(event.id,candidates[0]!.session_id);
+      }
+    }).immediate();
+  }
+
   sessions(): Record<string, unknown>[] {
     const rows = this.db
       .prepare(
@@ -1028,7 +1052,7 @@ export class StreamStore {
           (SELECT title FROM platform_streams p WHERE p.session_id=s.id AND trim(title)<>'' ORDER BY last_observed_at_ms DESC,platform,account_id,external_id LIMIT 1) AS primaryTitle,
           (SELECT json_group_array(platform) FROM (SELECT DISTINCT platform FROM platform_streams p WHERE p.session_id=s.id ORDER BY platform)) AS platforms_json,
           (SELECT json_group_array(json_object('platform',platform,'url',url)) FROM (SELECT DISTINCT platform,url FROM platform_streams p WHERE p.session_id=s.id AND url IS NOT NULL ORDER BY platform,url)) AS urls_json
-        FROM sessions s ORDER BY started_at_ms DESC,s.id DESC LIMIT 100`,
+        FROM sessions s WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) ORDER BY started_at_ms DESC,s.id DESC LIMIT 100`,
       )
       .all() as Record<string, unknown>[];
     return rows.map(({platforms_json, urls_json, ...row}) => ({
@@ -1263,7 +1287,7 @@ export class StreamStore {
         )) OR e.source='donationalerts')
         AND NOT EXISTS (SELECT 1 FROM event_sessions es WHERE es.event_id=e.id)
         AND NOT EXISTS (
-          SELECT 1 FROM sessions m WHERE m.kind='manual' AND m.started_at_ms<=e.occurred_at_ms
+          SELECT 1 FROM sessions m WHERE m.kind='manual' AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=m.id) AND m.started_at_ms<=e.occurred_at_ms
             AND (m.ended_at_ms IS NULL OR m.ended_at_ms>e.occurred_at_ms)
         )
     `).run(sessionId, sessionId, observedAtMs);

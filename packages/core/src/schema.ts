@@ -1,5 +1,5 @@
 // Migration 1. All times are UTC epoch milliseconds; names are never unique identifiers.
-export const CURRENT_SCHEMA_VERSION = 8;
+export const CURRENT_SCHEMA_VERSION = 9;
 
 export const schemaV1 = `
 CREATE TABLE persons (
@@ -195,4 +195,12 @@ INSERT INTO youtube_identity_aliases
  WHERE json_type(m.payload_json,'$.authorDetails.displayName')='text'
  GROUP BY i.id,json_extract(m.payload_json,'$.authorDetails.displayName');
 PRAGMA user_version = 8;
+`;
+
+export const schemaV9 = `
+CREATE TABLE session_tombstones (
+ session_id TEXT PRIMARY KEY REFERENCES sessions(id), deleted_at_ms INTEGER NOT NULL,
+ before_event_ids_json TEXT NOT NULL CHECK(json_valid(before_event_ids_json))
+) STRICT;
+PRAGMA user_version = 9;
 `;

@@ -66,6 +66,11 @@ test("stream history shows only confirmed Twitch and YouTube links from the plat
     const manualRow = page.locator(`tbody tr[data-session-id="${manualId}"]`);
     assert.equal(await manualRow.locator(".platform-labels").textContent(), "Источник неизвестен");
     assert.equal(await manualRow.getByRole("link").count(), 0);
+    assert.equal(await bothRow.getByRole("button",{name:"Удалить",exact:true}).count(),0);
+    await manualRow.getByRole("button",{name:"Удалить",exact:true}).click();
+    await manualRow.waitFor({state:"detached"});
+    assert.equal((await a.db.call("sessions")).some(s=>s.id===manualId),false);
+    assert.equal((await a.db.call("sessions")).some(s=>s.id===bothId),true);
     assert.deepEqual(errors, []);
     await saveCoverage(page);
     await context.close();

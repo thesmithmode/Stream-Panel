@@ -107,6 +107,7 @@ export async function createApplication(
     "/api/v1/persons/:id/notes/:noteId/delete": body({revision},["revision"]),
     "/api/v1/sessions/start": body(),
     "/api/v1/sessions/:id/stop": body(),
+    "/api/v1/sessions/:id/delete": body(),
     "/api/v1/persons/:id/rename": body(
       { name: { type: "string", minLength: 1, maxLength: 200 } },
       ["name"],
@@ -294,6 +295,10 @@ export async function createApplication(
       throw new Error("PLATFORM_SESSION_MANAGED_AUTOMATICALLY");
     await db.call("endSession", id, Date.now(), "manual");
     return { ok: true };
+  });
+  app.post("/api/v1/sessions/:id/delete",async request=>{
+    await db.call("deleteManualSession",string(object(request.params).id),Date.now());
+    return {ok:true};
   });
   app.get("/api/v1/summary", async (request) =>
     db.call(

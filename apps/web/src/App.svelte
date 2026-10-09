@@ -302,7 +302,6 @@
           initialId={personId}
           onChange={refresh}
         />
-        <YouTube mode={dataMode} />
       {:else if tab === "sessions"}<section class="panel">
           <header>
             <h2>История стримов</h2>
@@ -347,7 +346,8 @@
                               sessionFilter = session.id;
                               navigate("overview");
                             })}>Открыть</button
-                        ></td
+                          >{#if session.kind === "manual"}<button class="outline small" onclick={()=>action(async()=>{await api(`sessions/${session.id}/delete`,{});if(sessionFilter===session.id)sessionFilter="";await refresh();})}>Удалить</button>{/if}
+                        </td
                       ></tr
                     >{/each}</tbody
                 >

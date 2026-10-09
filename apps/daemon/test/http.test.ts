@@ -310,3 +310,24 @@ test("person stats, tops and insights endpoints return shaped aggregates", async
     await f.close();
   }
 });
+
+
+test("manual stream deletion requires authentication, CSRF and strict payload, and preserves automatic streams",async()=>{
+ const f=await fixture();
+ try{
+  const now=Date.now(),manual=await f.a.db.call<string>('startSession','local','mistake',now,'manual',now);
+  const url=`/api/v1/sessions/${manual}/delete`;
+  const inject=(headers:Record<string,string>,payload:unknown={})=>f.a.app.inject({method:'POST',url,headers,payload});
+  assert.equal((await inject({host:f.headers.host})).statusCode,401);
+  assert.equal((await inject({...f.headers,'x-csrf-token':'wrong'})).statusCode,403);
+  assert.equal((await inject(f.headers,{unexpected:true})).statusCode,400);
+  assert.equal((await f.a.db.call<any[]>('sessions')).length,1);
+  assert.equal((await inject(f.headers)).statusCode,200);
+  assert.equal((await inject(f.headers)).statusCode,200);
+  assert.equal((await f.a.db.call<any[]>('sessions')).length,0);
+  const real=await f.a.db.call<string>('observePlatformStream','twitch','channel','real',now,now,null,'Actual stream');
+  const denied=await f.a.app.inject({method:'POST',url:`/api/v1/sessions/${real}/delete`,headers:f.headers,payload:{}});
+  assert.equal(denied.statusCode,400);assert.equal(denied.json().error,'PLATFORM_SESSION_MANAGED_AUTOMATICALLY');
+  assert.equal((await f.a.db.call<any[]>('sessions')).length,1);
+ }finally{await f.close();}
+});

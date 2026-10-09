@@ -14,6 +14,7 @@ const allowed = new Set([
   "activeLogicalStream",
   "startSession",
   "endSession",
+  "deleteManualSession",
   "recordPoll",
   "updateChatterNames",
   "persons",
