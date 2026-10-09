@@ -155,6 +155,24 @@ export async function createHostedApplication(
       reply.code(result.statusCode).headers(responseHeaders).send(payload);
     } finally { release(); if (queue) queue.waiting--; }
   };
+  const canReadBackups=(request:FastifyRequest,reply:FastifyReply)=>{
+    if(!accounts.session(request.headers.cookie)){reply.code(401).send({error:"LOGIN_REQUIRED"});return false;}
+    if(request.headers["sec-fetch-site"]==="cross-site" || (request.headers.origin!==undefined&&request.headers.origin!==publicOrigin)){reply.code(403).send({error:"INVALID_ORIGIN"});return false;}
+    if(!backup){reply.code(503).send({error:"BACKUP_NOT_CONFIGURED"});return false;}
+    return true;
+  };
+  app.get("/api/v1/backups",async(request,reply)=>{
+    if(!canReadBackups(request,reply))return;
+    return backup!.files();
+  });
+  app.get("/api/v1/backups/:filename",async(request,reply)=>{
+    if(!canReadBackups(request,reply))return;
+    const filename=(request.params as {filename:string}).filename;
+    try {
+      const blob=await backup!.file(filename);
+      return reply.type("application/octet-stream").header("Content-Disposition",`attachment; filename="${filename}"`).send(blob);
+    }catch(error){if((error as Error).message==="BACKUP_NOT_FOUND")return reply.code(404).send({error:"BACKUP_NOT_FOUND"});throw error;}
+  });
   app.post("/api/v1/backup", async (request, reply) => {
     const user = accounts.session(request.headers.cookie);
     if (!user) return reply.code(401).send({error:"LOGIN_REQUIRED"});

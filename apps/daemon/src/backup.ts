@@ -1,12 +1,14 @@
 import Database from "better-sqlite3";
 import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
-import { mkdir, readFile, writeFile, readdir, rm, stat, rename } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile, readdir, rm, stat, lstat, rename, open } from "node:fs/promises";
+import {constants} from "node:fs";
+import { join,resolve } from "node:path";
 const magic = Buffer.from("SPBK1");
 const maxSize = 48 * 1024 * 1024;
 const maxPayloadSize = 64 * 1024 * 1024;
 const profiles = ["ruslan", "gulnaz"] as const;
+const backupFilename=/^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/;
 type BackupChannelStatus = { state: string; lastSuccessAt: number; filename: string; error: string };
 type BackupStatus = { state: string; lastSuccessAt: number; filename: string; error: string; local: BackupChannelStatus; cloud: BackupChannelStatus };
 export function sealBackup(payload: Buffer, key: Buffer): Buffer {
@@ -44,6 +46,33 @@ export class BackupService {
       throw new Error(code);
     }).finally(() => { this.active = undefined; });
     return this.active;
+  }
+  async files() {
+    const directory=resolve(this.dir,"backups");
+    let entries;
+    try {entries=await readdir(directory,{withFileTypes:true});}
+    catch(error){if((error as NodeJS.ErrnoException).code==="ENOENT")return {directory,files:[],local:this.status.local,cloud:this.status.cloud};throw error;}
+    const files=[];
+    for(const entry of entries.filter(e=>e.isFile()&&backupFilename.test(e.name)).sort((a,b)=>b.name.localeCompare(a.name))){
+      try {
+        const info=await lstat(join(directory,entry.name));
+        if(info.isFile()&&info.size>=33&&info.size<=maxSize)files.push({filename:entry.name,size:info.size,createdAt:info.mtimeMs});
+      }catch(error){if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error;}
+    }
+    return {directory,files,local:this.status.local,cloud:this.status.cloud};
+  }
+  async file(filename:string):Promise<Buffer> {
+    if(!backupFilename.test(filename))throw new Error("BACKUP_NOT_FOUND");
+    try {
+      const handle=await open(join(this.dir,"backups",filename),constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+      try {
+        const info=await handle.stat();
+        if(!info.isFile()||info.size<33||info.size>maxSize)throw new Error("BACKUP_NOT_FOUND");
+        const blob=await handle.readFile();
+        if(blob.length>maxSize||!blob.subarray(0,5).equals(magic))throw new Error("BACKUP_NOT_FOUND");
+        return blob;
+      }finally{await handle.close();}
+    }catch(error){if(["ENOENT","ELOOP","ENOTDIR"].includes((error as NodeJS.ErrnoException).code??""))throw new Error("BACKUP_NOT_FOUND");throw error;}
   }
   private async perform() {
     const directory = join(this.dir, "backups"); await mkdir(directory, {recursive:true,mode:0o700});

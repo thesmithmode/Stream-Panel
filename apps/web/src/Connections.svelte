@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "./api";
   import { statusLabel } from "./labels";
+  import BackupFiles from './BackupFiles.svelte';
   let { status, onChange }: { status: any; onChange: () => Promise<void> } =
     $props();
   let twitchClient = $state(""),
@@ -280,9 +281,10 @@
         onclick={() =>
           run(async () => {
             const result = await api("backup", {});
-            message = `Резервная копия: ${result.filename}`;
+            message = result.cloudError ? 'Локальная копия сохранена. Облачная загрузка не удалась.' : `Резервная копия: ${result.filename}`;
           })}>Создать резервную копию</button
       >
+      {#if status.backup}<BackupFiles status={status.backup} />{/if}
       {#if status.gaps?.length}<h3>Пробелы сбора</h3>
         {#each status.gaps as gap}<div class="capability">
             <span>{gap.source}: {gap.reason}</span><span
