@@ -53,7 +53,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     const { fromMs: from, toMs: to } = options, source = options.source ?? 'all', category = options.category ?? '', timezone = options.timezone ?? 'Europe/Moscow';
     const regularThresholdPercent=options.regularThresholdPercent??50;
     const minSessions = options.minSessions ?? 3, minMinutes = options.minMinutes ?? 30, minMessages = options.minMessages ?? 5, window = options.chatWindowMinutes ?? 5, rule = options.coreRule ?? 'either';
-    if (!Number.isFinite(regularThresholdPercent) || regularThresholdPercent<0 || regularThresholdPercent>100 || !Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to <= from || (from !== 0 && to - from > 365 * 86400000) || !['all', 'twitch', 'youtube'].includes(source) || !['either', 'both', 'frequency'].includes(rule) || category.length > 256 || [minSessions, minMinutes, minMessages, window].some(n => !Number.isInteger(n) || n < 0) || minSessions > 1000 || minMinutes > 129600 || minMessages > 1000000 || window < 1 || window > 30)
+    if (!Number.isFinite(regularThresholdPercent) || regularThresholdPercent<0 || regularThresholdPercent>100 || !Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to <= from || to > 8640000000000000 || !['all', 'twitch', 'youtube'].includes(source) || !['either', 'both', 'frequency'].includes(rule) || category.length > 256 || [minSessions, minMinutes, minMessages, window].some(n => !Number.isInteger(n) || n < 0) || minSessions > 1000 || minMinutes > 129600 || minMessages > 1000000 || window < 1 || window > 30)
         throw new Error('INVALID_ANALYTICS_FILTER');
     let clock: Intl.DateTimeFormat;
     try {
