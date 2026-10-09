@@ -61,6 +61,7 @@ test('person metadata migrations and records are isolated per profile',async()=>
     {profile:'gulnaz',version:7},{profile:'ruslan',version:7},
    ]);
    for(const profile of ['ruslan','gulnaz']) {
+    db.prepare(`INSERT INTO p_${profile}_persons(id,display_name) VALUES (?,?)`).run('person-1',profile);
     db.prepare(`INSERT INTO p_${profile}_person_notes(id,person_id,body,created_at_ms,updated_at_ms) VALUES (?,?,?,?,?)`).run(`${profile}-note`,'person-1',profile,1,2);
     db.prepare(`INSERT INTO p_${profile}_person_tags(person_id,label) VALUES (?,?)`).run('person-1',profile);
     assert.equal((db.prepare(`SELECT body FROM p_${profile}_person_notes WHERE id=?`).get(`${profile}-note`) as {body:string}).body,profile);
@@ -68,7 +69,7 @@ test('person metadata migrations and records are isolated per profile',async()=>
    }
    assert.equal((db.prepare('SELECT count(*) AS n FROM p_ruslan_person_notes').get() as {n:number}).n,1);
    assert.equal((db.prepare('SELECT count(*) AS n FROM p_gulnaz_person_notes').get() as {n:number}).n,1);
-   assert.equal((db.prepare('SELECT count(*) AS n FROM person_notes').get() as {n:number}).n,0);
+   assert.equal((db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='person_notes'").get() as {n:number}).n,0);
   } finally {db.close();}
  } finally {await rm(dir,{recursive:true,force:true});}
 });

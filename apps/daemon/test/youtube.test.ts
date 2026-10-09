@@ -85,7 +85,7 @@ test('YouTube pagination and malformed optional API fields remain bounded and re
  const request:typeof fetch=async(input)=>{
   const url=new URL(String(input));if(mode==='network')throw new Error('network broken');
   if(url.pathname.endsWith('/channels'))return Response.json({items:[{id:'channel'}]});
-  if(url.pathname.endsWith('/liveBroadcasts')){pageCalls++;return Response.json(mode==='missing'?{}:{nextPageToken:pageCalls===1?'next':'',items:[{id:'no-chat',snippet:{channelId:'channel'}}]});}
+  if(url.pathname.endsWith('/liveBroadcasts')){pageCalls++;return Response.json(mode==='missing'?{}:{nextPageToken:pageCalls===1?'next':'',items:[{id:pageCalls===1?'no-chat':'second-no-chat',snippet:{channelId:'channel'}}]});}
   return Response.json({});
  };
  const yt=new YouTubeConnection(config,db,'https://panel.test/oauth/youtube/callback','ruslan',request);

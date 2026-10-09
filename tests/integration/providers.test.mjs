@@ -121,7 +121,7 @@ test(
           c.status.capabilities["channel.chat.message"] ===
           "authorization_revoked",
       );
-      assert.equal((await f.db.call("sessions"))[0].stream_id, "live-stream");
+      assert.equal((await f.db.call("sessions"))[0].stream_id, "twitch:live-stream");
     } finally {
       await c.stop();
       await p.close();

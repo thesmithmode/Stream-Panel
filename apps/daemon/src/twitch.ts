@@ -656,7 +656,7 @@ export class TwitchConnection {
           ? await this.db.call<Record<string, unknown>[]>("platformStreams", String(active.id))
           : [];
         if (!current()) return;
-        this.platformLive = false;
+        this.platformLive = links.some(link => link.platform === "twitch" && link.account_id === accountId && link.ended_at_ms === null);
         this.sessionId = links.some(link => link.platform === "twitch" &&
           link.account_id === accountId && link.ended_at_ms === null)
           ? String(active!.id) : null;

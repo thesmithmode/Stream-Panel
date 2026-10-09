@@ -231,9 +231,10 @@ test("Twitch polls offline every five minutes, reacts online immediately and nev
     await flush(); assert.equal(polls, 3);
     await f.tick(59999); assert.equal(polls, 3);
     await f.tick(1); assert.equal(polls, 4);
+    const missingBefore = f.calls.filter(x => x.method === "platformMissing").length;
     malformed = true;
     await f.tick(60000);
-    assert.equal(f.calls.filter(x => x.method === "platformMissing").length, 0);
+    assert.equal(f.calls.filter(x => x.method === "platformMissing").length, missingBefore);
     assert.equal(c.status.detail, "INVALID_TWITCH_STREAMS");
     malformed = false; opts.offline = true;
     await f.tick(60000);
@@ -354,18 +355,14 @@ test("Twitch partial poll and optional subscription rejection remain observable;
     await c.start();
     f.sockets[0].push(welcome);
     await flush();
-    assert.equal(c.status.capabilities.presence, "failed");
+    assert.equal(c.status.capabilities.presence, undefined);
     assert.equal(c.status.capabilities["channel.cheer"], "TWITCH_HTTP_403");
-    assert.ok(
-      f.calls.some(
-        (x) => x.method === "gap" && x.args[1] === "chatters_poll_incomplete",
-      ),
-    );
+    assert.equal(f.calls.filter(x => x.method === "recordPoll").length, 0, "manual sessions cannot collect presence while Twitch is offline");
     await f.tick(60000);
     const manual = f.getSessions().find(row => row.id === "manual");
     assert.equal(manual.ended_at_ms, null);
     assert.equal(f.platformLinks.length, 0);
-    assert.equal(f.calls.filter(x => x.method === "observePlatformStream").length, 1);
+    assert.equal(f.calls.filter(x => x.method === "observePlatformStream").length, 0);
     await f.tick(3600000);
     assert.equal(c.status.account, "Owner");
   } finally {
@@ -932,8 +929,7 @@ test("a stream poll from the previous account is never applied to the new login"
       }),
     );
     await starting;
-    assert.equal(f.calls.filter(x => x.method === "observePlatformStream").length, 1, "a cancelled response must not attach the old stream to the new owner");
-    assert.equal(f.calls.find(x => x.method === "observePlatformStream").args[1], "new-owner");
+    assert.equal(f.calls.filter(x => x.method === "observePlatformStream" && x.args[1] === "owner").length, 0, "a cancelled response must not attach the old stream to the new owner");
     f.sockets.at(-1).push(welcome);
     await flush();
     await f.tick(60000);

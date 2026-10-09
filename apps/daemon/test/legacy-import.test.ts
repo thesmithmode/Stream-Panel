@@ -29,7 +29,7 @@ test('legacy import keeps every table, WAL events and credentials, leaves source
  await writeFile(join(source,'secrets.json'),JSON.stringify(secrets));
  try{
  const result=await migrateLegacy(source,dest);assert.equal(result.tables.persons,1);
- for(const n of Object.values(result.tables))assert.equal(n,1);
+ for(const [table,n] of Object.entries(result.tables))assert.equal(n,(old.prepare(`SELECT count(*) AS n FROM ${table}`).get() as {n:number}).n);
  const migrated=new Database(join(dest,'data.sqlite'));
  try{
  for(const table of Object.keys(result.tables))assert.deepEqual(migrated.prepare(`SELECT * FROM p_ruslan_${table}`).all(),old.prepare(`SELECT * FROM ${table}`).all());
