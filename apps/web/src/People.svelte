@@ -203,11 +203,6 @@
       .then((v) => (merges = v))
       .catch((e) => (error = e.message));
   });
-  function formatOffset(ms: number | null) {
-    if (ms === null) return "—";
-    const min = Math.round(ms / 60000);
-    return `${min.toLocaleString("ru-RU")} мин`;
-  }
 </script>
 
 <div class="people-grid">
@@ -294,31 +289,27 @@
             >
           </div>
           <div class="kpi">
-            <span>Набл. минуты (сессия)</span><strong
-              >{formatDuration(stats.observedMinutesThisSession)}</strong
+            <span>{sessionFilter ? "Время в этом стриме" : "Всего наблюдаемого времени"}</span><strong
+              >{formatDuration(sessionFilter ? stats.observedMinutesThisSession : stats.totalObservedMinutes)}</strong
             >
           </div>
           <div class="kpi">
-            <span>Сред. набл. мин / сессия</span><strong
+            <span>Среднее за посещённый стрим</span><strong
               >{formatDuration(stats.avgObservedMinutes)}</strong
             >
           </div>
           <div class="kpi">
-            <span>Первое / последнее событие</span><strong class="kpi-dates"
-              >{date(stats.firstEventMs)} → {date(stats.lastEventMs)}</strong
-            >
+            <span>Посещаемость</span><strong>{stats.attendanceRatio == null ? "—" : `${Math.round(stats.attendanceRatio * 100)}%`}</strong>
+            <small>{stats.sessionsWithObservation} из {stats.recordedStreams} стримов</small>
           </div>
           <div class="kpi">
-            <span>Первое / последнее наблюдение</span><strong class="kpi-dates"
-              >{date(stats.firstObservedMs)} → {date(
-                stats.lastObservedMs,
-              )}</strong
-            >
+            <span>Первое наблюдение</span><strong>{date(stats.watchingSinceMs)}</strong>
           </div>
           <div class="kpi">
-            <span>Сред. сдвиг до первого наблюдения</span><strong
-              >{formatOffset(stats.avgFirstObservedOffsetMs)}</strong
-            >
+            <span>Подписан с</span><strong>{date(stats.followedAtMs)}</strong>
+          </div>
+          <div class="kpi">
+            <span>Время до подписки</span><strong>{formatDuration(stats.observedBeforeFollowMinutes)}</strong>
           </div>
         </div>{/if}
       <div class="settings-body">

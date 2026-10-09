@@ -1909,13 +1909,15 @@ export class StreamStore {
     const sessions = this.db
       .prepare(
         `SELECT id, started_at_ms, ended_at_ms FROM sessions
-         ORDER BY started_at_ms DESC LIMIT 50`,
+         WHERE kind='platform' ORDER BY started_at_ms DESC`,
       )
       .all() as {
       id: string;
       started_at_ms: number;
       ended_at_ms: number | null;
     }[];
+    const followedAtMs = (this.db.prepare("SELECT min(e.occurred_at_ms) AS at FROM events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id=? AND e.type='follow'").get(personId) as {at:number|null}).at;
+    let observedBeforeFollowMinutes = 0;
     let observedSum = 0;
     let observedSessions = 0;
     let offsetSum = 0;
@@ -1932,6 +1934,9 @@ export class StreamStore {
         fromMs,
         toMs,
       );
+      if (followedAtMs !== null && followedAtMs > fromMs) {
+        observedBeforeFollowMinutes += this.observedMinutesForPerson(session.id, personId, fromMs, Math.min(toMs, followedAtMs)).observedMinutes;
+      }
       if (obs.observedMinutes > 0) {
         observedSum += obs.observedMinutes;
         observedSessions += 1;
@@ -1962,6 +1967,12 @@ export class StreamStore {
           ? Math.round(offsetSum / offsetSessions)
           : null,
       sessionsWithObservation: observedSessions,
+      totalObservedMinutes: observedSum,
+      recordedStreams: sessions.length,
+      attendanceRatio: sessions.length ? observedSessions / sessions.length : null,
+      followedAtMs,
+      watchingSinceMs: (this.db.prepare("SELECT min(p.completed_at_ms) AS at FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id WHERE i.person_id=? AND p.status='complete'").get(personId) as {at:number|null}).at,
+      observedBeforeFollowMinutes: followedAtMs === null ? null : observedBeforeFollowMinutes,
     };
   }
 

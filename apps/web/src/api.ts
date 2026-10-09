@@ -108,6 +108,12 @@ export interface PersonStats {
   avgObservedMinutes: number | null;
   avgFirstObservedOffsetMs: number | null;
   sessionsWithObservation: number;
+  totalObservedMinutes: number;
+  recordedStreams: number;
+  attendanceRatio: number | null;
+  followedAtMs: number | null;
+  watchingSinceMs: number | null;
+  observedBeforeFollowMinutes: number | null;
 }
 export interface PersonTop {
   id: string;

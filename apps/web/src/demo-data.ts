@@ -264,6 +264,12 @@ function personStats(personId: string) {
     avgObservedMinutes: 36,
     avgFirstObservedOffsetMs: 4 * minute,
     sessionsWithObservation: 2,
+    totalObservedMinutes: 72,
+    recordedStreams: 3,
+    attendanceRatio: 2 / 3,
+    followedAtMs: null,
+    watchingSinceMs: now - 80 * minute,
+    observedBeforeFollowMinutes: null,
   };
 }
 

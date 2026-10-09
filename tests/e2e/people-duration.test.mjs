@@ -52,6 +52,10 @@ test("People duration cards render the session and average observations as hours
     await page.getByRole("button", { name: "Люди", exact: true }).click();
     const personRow = page.locator(".person-row").filter({ hasText: "Duration Viewer" });
     await personRow.waitFor();
+    await personRow.click();
+    await page.getByLabel("Показатели человека").waitFor();
+    assert.equal(await page.getByText("Всего наблюдаемого времени", {exact:true}).locator("..").locator("strong").textContent(), "2 ч");
+    assert.equal(await page.getByText("Посещаемость", {exact:true}).locator("..").locator("strong").textContent(), "100%");
     await page.getByLabel("Период аналитики").selectOption(sessionId);
     await personRow.click();
     await page.getByLabel("Показатели человека").waitFor();
@@ -76,10 +80,10 @@ test("People duration cards render the session and average observations as hours
         card.querySelector("strong")?.textContent?.trim(),
       ])),
     );
-    assert.equal(rendered["Набл. минуты (сессия)"], formatDuration(stats.observedMinutesThisSession));
-    assert.equal(rendered["Сред. набл. мин / сессия"], formatDuration(stats.avgObservedMinutes));
-    assert.equal(rendered["Набл. минуты (сессия)"], "2 ч");
-    assert.equal(rendered["Сред. набл. мин / сессия"], "2 ч");
+    assert.equal(rendered["Время в этом стриме"], formatDuration(stats.observedMinutesThisSession));
+    assert.equal(rendered["Среднее за посещённый стрим"], formatDuration(stats.avgObservedMinutes));
+    assert.equal(rendered["Время в этом стриме"], "2 ч");
+    assert.equal(rendered["Среднее за посещённый стрим"], "2 ч");
 
     await saveCoverage(page);
     await context.close();
