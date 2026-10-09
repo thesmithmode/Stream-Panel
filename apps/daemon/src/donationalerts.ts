@@ -355,16 +355,16 @@ export class DonationAlertsConnection {
           if (donation) {
             const active = await this.db.call<{id:string;started_at_ms:number} | null>("activeLogicalStream");
             if (!active || this.stopped || generation !== this.generation) return;
-            await this.db.call(
-              "ingest",
+            const result = await this.db.call(
+              "ingestLiveDonation",
               normalizeDonation(
                 donation,
                 this.recipient,
                 "centrifugo",
                 this.config.value.daUtcOffsetMinutes,
-              ),
+              ), active.id, true,
             );
-            this.status.lastEventAt = Date.now();
+            if(result)this.status.lastEventAt = Date.now();
           }
         }
       })().catch((error) => this.report(error));
@@ -413,8 +413,10 @@ export class DonationAlertsConnection {
               if (this.stopped || generation !== this.generation || !current || current.id !== active!.id) return;
               if (event.occurredAtMs === null || event.occurredAtMs < current.started_at_ms) continue;
             }
-            const result = await this.db.call<{ inserted: boolean }>("ingest", event);
-            if (result.inserted) pageAllKnown = false;
+            const result = automatic
+              ? await this.db.call<{inserted:boolean}|null>("ingestLiveDonation",event,active!.id)
+              : await this.db.call<{inserted:boolean}>("ingest",event);
+            if (result?.inserted) pageAllKnown = false;
           } catch (error) {
             pageAllKnown = false;
             console.error(

@@ -1260,6 +1260,16 @@ export class StreamStore {
     } catch { return false; }
   }
 
+  ingestLiveDonation(event: EventInput, expectedSessionId: string, allowUnknownTime = false): ReturnType<StreamStore['ingest']>|null {
+    if(event.source!=="donationalerts" || event.type!=="donation")throw new Error("INVALID_LIVE_DONATION");
+    return this.db.transaction(()=>{
+      const active=this.activeLogicalStream() as {id:string;started_at_ms:number}|null;
+      if(!active || active.id!==expectedSessionId || event.receivedAtMs<active.started_at_ms)return null;
+      if(event.occurredAtMs===null ? !allowUnknownTime : event.occurredAtMs<active.started_at_ms)return null;
+      return this.ingest(event);
+    }).immediate();
+  }
+
   activeLogicalStream(): Record<string, unknown> | null {
     return (this.db.prepare(`
       SELECT s.* FROM sessions s

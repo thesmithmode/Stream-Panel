@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { setImmediate } from 'node:timers/promises';
+import {setTimeout as delay} from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Configuration } from '../src/config.js';
@@ -46,4 +47,22 @@ test('DA automatic collection imports only current-stream donations; explicit of
   assert.equal(events.find(event=>event.external_id==='3').occurred_at_ms,null);
   assert.equal((await db.call<any>('summary',sessionId)).donations,1);
  } finally {await connection.stop();await db.stop();await rm(dir,{recursive:true,force:true});}
+});
+
+test('DA realtime skips donations predating the active stream and deduplicates current donations',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-da-realtime-'));const config=new Configuration(dir);await config.load();config.value.daAccessToken='fixture';config.value.daUtcOffsetMinutes=0;
+ const db=new StoreClient(join(dir,'data.sqlite'),'ruslan');await db.ready;
+ const socket=new EventEmitter() as any;socket.close=()=>socket.emit('close');socket.send=()=>{};
+ const now=Date.now(),stamp=(at:number)=>new Date(at).toISOString().slice(0,19).replace('T',' ');
+ const donation=(id:number,at:number)=>({data:{id,amount:'1.00',currency:'RUB',username:'Viewer',message:'test',created_at:stamp(at)}});
+ const request:typeof fetch=async input=>String(input).endsWith('/user/oauth')?Response.json({data:{id:7,name:'Owner',socket_connection_token:'fixture'}}):Response.json({data:[],links:{next:null}});
+ const connection=new DonationAlertsConnection(config,db,request,(()=>socket) as SocketFactory);
+ try {
+  await connection.start();await db.call('observePlatformStream','youtube','yt','video',now-60000,now,null,'Live');
+  socket.emit('message',JSON.stringify(donation(10,now-120000)));
+  socket.emit('message',JSON.stringify(donation(11,now)));
+  socket.emit('message',JSON.stringify(donation(11,now)));
+  for(let n=0;n<100 && !(await db.call<any[]>('events')).some(e=>e.external_id==='11');n++)await delay(10);
+  assert.deepEqual((await db.call<any[]>('events')).map(e=>e.external_id),['11']);
+ }finally{await connection.stop();await db.stop();await rm(dir,{recursive:true,force:true});}
 });
