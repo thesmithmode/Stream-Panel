@@ -311,8 +311,11 @@
           </div>
           <div class="kpi">
             <span>Посещаемость</span><strong>{stats.attendanceRatio == null ? "—" : `${Math.round(stats.attendanceRatio * 100)}%`}</strong>
-            <small>{stats.sessionsWithObservation} из {stats.recordedStreams} стримов</small>
+            <small>{stats.sessionsWithAttendance ?? stats.sessionsWithObservation} из {stats.recordedStreams} стримов</small>
           </div>
+          {#if stats.estimatedChatMinutes != null && stats.estimatedChatMinutes > 0}
+          <div class="kpi"><span>Оценка активности YouTube</span><strong>{formatDuration(stats.estimatedChatMinutes)}</strong></div>
+          {/if}
           <div class="kpi">
             <span>Первое наблюдение</span><strong>{date(stats.watchingSinceMs)}</strong>
           </div>

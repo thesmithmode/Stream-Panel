@@ -26,6 +26,7 @@ type Entity = {
     id: string;
     name: string;
     source: 'twitch' | 'youtube';
+    sources: ('twitch' | 'youtube')[];
     messages: number;
     observedMinutes: number;
     estimatedChatMinutes: number;
@@ -39,7 +40,7 @@ type Entity = {
     manualCore: boolean|null;
 };
 export function unionSpans(spans: Span[]): Span[] {
-    const sorted = spans.filter(x => x.to > x.from).sort((a, b) => a.session.localeCompare(b.session) || a.from - b.from || a.to - b.to), out: Span[] = [];
+    const sorted = spans.filter(x => x.to > x.from).sort((a, b) => a.session.localeCompare(b.session) || a.kind.localeCompare(b.kind) || a.from - b.from || a.to - b.to), out: Span[] = [];
     for (const span of sorted) {
         const last = out.at(-1);
         if (last && last.session === span.session && last.kind === span.kind && span.from <= last.to)
@@ -67,16 +68,16 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     if (sessions.length > 1000)
         throw new Error('ANALYTICS_RANGE_TOO_LARGE');
     const sessionIds = JSON.stringify(sessions.map(s => s.id));
-    const visible = `SELECT p.id,p.display_name FROM persons p WHERE NOT EXISTS(SELECT 1 FROM identities ib WHERE ib.person_id=p.id AND (ib.match_key IN(SELECT value FROM json_each(?)) OR EXISTS(SELECT 1 FROM identity_aliases a WHERE a.identity_id=ib.id AND ltrim(a.candidate_key,'@#') IN(SELECT value FROM json_each(?))) OR (ib.source='twitch' AND (ib.external_id=? OR ib.external_id=ib.account_id))))`;
-    const people = db.prepare(visible).all(botJson, botJson, options.ownerId ?? '') as {
+    const visible = `SELECT p.id,p.display_name FROM persons p WHERE NOT EXISTS(SELECT 1 FROM identities ib WHERE ib.person_id=p.id AND (ib.match_key IN(SELECT value FROM json_each(?)) OR EXISTS(SELECT 1 FROM identity_aliases a WHERE a.identity_id=ib.id AND ltrim(a.candidate_key,'@#') IN(SELECT value FROM json_each(?))) OR (ib.source='twitch' AND (ib.external_id=? OR ib.external_id=ib.account_id)))) AND NOT EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))))`;
+    const people = db.prepare(visible).all(botJson, botJson, options.ownerId ?? '', botJson,botJson) as {
         id: string;
         display_name: string;
     }[];
     const entities = new Map<string, Entity>();
     const entity = (id: string, name: string, platform: 'twitch' | 'youtube') => { let e = entities.get(id); if (!e) {
-        e = { id, name, source: platform, messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, sessionIds: new Set(), attendanceSessionIds: new Set(), regular: false, intervals: [], donations: {}, core: false, tags:[], manualCore:null };
+        e = { id, name, source: platform, sources:[platform], messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, sessionIds: new Set(), attendanceSessionIds: new Set(), regular: false, intervals: [], donations: {}, core: false, tags:[], manualCore:null };
         entities.set(id, e);
-    } return e; };
+    } else if(!e.sources.includes(platform)) e.sources.push(platform); return e; };
     const allowed = new Map(people.map(p => [p.id, p.display_name]));
     const samples = db.prepare('SELECT * FROM stream_samples WHERE session_id IN(SELECT value FROM json_each(?)) ORDER BY observed_at_ms').all(sessionIds) as any[];
     const segments: {
@@ -178,9 +179,10 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         }
     }
     if (source !== 'twitch' && options.youtubeAccount) {
+        const personLinks=new Map((db.prepare('SELECT external_id,person_id FROM youtube_identities WHERE account_id=?').all(options.youtubeAccount) as {external_id:string;person_id:string}[]).map(row=>[row.external_id,row.person_id]));
         const excludedAuthors = new Set((db.prepare(`SELECT DISTINCT author_id FROM youtube_messages WHERE account_id=? AND (json_extract(payload_json,'$.authorDetails.isChatOwner')=1 OR lower(ltrim(trim(json_extract(payload_json,'$.authorDetails.displayName')),'@#')) IN(SELECT value FROM json_each(?)))`).all(options.youtubeAccount,botJson) as {author_id:string}[]).map(row=>row.author_id));
         const chats = db.prepare(`WITH scoped AS (
-    SELECT *, (SELECT s.id FROM sessions s WHERE s.started_at_ms<=m.published_at_ms AND coalesce(s.ended_at_ms,?)>m.published_at_ms ORDER BY s.started_at_ms DESC LIMIT 1) AS sid
+    SELECT *, (SELECT ps.session_id FROM platform_streams ps JOIN sessions s ON s.id=ps.session_id WHERE ps.platform='youtube' AND ps.account_id=m.account_id AND ps.started_at_ms<=m.published_at_ms AND coalesce(ps.ended_at_ms,s.ended_at_ms,?)>m.published_at_ms ORDER BY ps.started_at_ms DESC LIMIT 1) AS sid
     FROM youtube_messages m WHERE account_id=? AND author_id!=? AND author_id!='' AND published_at_ms>=? AND published_at_ms<? AND json_extract(payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
   ), categorized AS (
     SELECT *, (SELECT c.category_id FROM stream_samples c WHERE c.session_id=scoped.sid AND c.observed_at_ms<=scoped.published_at_ms ORDER BY c.observed_at_ms DESC LIMIT 1) AS cat FROM scoped
@@ -190,14 +192,16 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         for (const chat of chats) {
             if (excludedAuthors.has(chat.author_id) || isExcludedBot(chat.name ?? '', excluded) || !chat.sid)
                 continue;
-            const e = entity(`youtube:${chat.author_id}`, chat.name || chat.author_id, 'youtube');
+            const personId=personLinks.get(chat.author_id);
+            if(!personId||!allowed.has(personId))continue;
+            const e = entity(personId, allowed.get(personId)!, 'youtube');
             const spans=clip({ from: chat.at, to: Math.min(to, chat.last_at + window * 60000), session: chat.sid, kind: 'chat_proxy' });
             if (chat.n && contains(chat.sid,chat.message_at)) {
                 e.messages += chat.n;
                 e.sessionIds.add(chat.sid);
                 e.attendanceSessionIds.add(chat.sid);
                 minute(chat.message_at).messages += chat.n;
-                addMessages(chat.sid, chat.message_at, chat.n, `youtube:${chat.author_id}`);
+                addMessages(chat.sid, chat.message_at, chat.n, e.id);
             }
             e.intervals.push(...spans);
         }
@@ -220,19 +224,21 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             if(span.kind==='observed')e.observedMinutes+=duration;else e.estimatedChatMinutes+=duration;
             e.sessionIds.add(span.session);
         }
-        const long=e.observedMinutes+e.estimatedChatMinutes>=minMinutes,chatty=e.messages>=minMessages;
+        const activityMinutes=unionSpans(e.intervals.map(span=>({...span,kind:'observed' as const}))).reduce((sum,span)=>sum+(span.to-span.from)/60000,0);
+        const long=activityMinutes>=minMinutes,chatty=e.messages>=minMessages;
         const automatic=e.attendanceSessionIds.size>=minSessions && e.attendanceSessionIds.size>0 && e.attendanceSessionIds.size/selectedStreamCount*100>regularThresholdPercent && (rule==='frequency'||(rule==='both'?long&&chatty:long||chatty));
         const override=preferences.get(e.id);
         e.manualCore=override==null?null:override===1;
         e.core=e.manualCore??automatic;
         e.regular=e.core; // Compatibility fields refer to the same audience core.
-        const signalMinutes=new Set<number>();
+        const signalMinutes=new Set<string>();
         for (const span of e.intervals) {
             for (let at = Math.floor(span.from / 60000) * 60000; at < span.to; at += 60000) {
                 if (++expanded > 2000000)
                     throw new Error('ANALYTICS_RANGE_TOO_LARGE');
-                if(signalMinutes.has(at))continue;
-                signalMinutes.add(at);
+                const signalKey=`${span.kind}:${at}`;
+                if(signalMinutes.has(signalKey))continue;
+                signalMinutes.add(signalKey);
                 const point = minute(at);
                 if (span.kind === 'observed'){point.observed++;if(e.regular)point.regularObserved++;}
                 else {point.estimated++;if(e.regular)point.regularEstimated++;}

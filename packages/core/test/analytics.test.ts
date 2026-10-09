@@ -3,12 +3,17 @@ import assert from 'node:assert/strict';
 import { StreamStore } from '../src/store.js';
 import { unionSpans } from '../src/analytics.js';
 const minute = 60000, base = Date.UTC(2026, 9, 1, 12), end = base + 20 * minute;
+function recordedStream(s:StreamStore, account:string, external:string, start:number, mode:'platform', observed:number) {
+ const sid=s.startSession(account,external,start,mode,observed);
+ s.observePlatformStream('youtube','yt-owner',`video-${external}`,start,observed,null,'Confirmed YouTube stream');
+ return sid;
+}
 const opts = { fromMs: base, toMs: end, ownerId: 'owner', youtubeAccount: 'yt-owner', minSessions: 2, minMinutes: 2, minMessages: 2 };
 test('analytics keeps owners/bots out, unions linked identities, splits categories, detects returns and distinguishes YouTube inference', () => {
     const s = new StreamStore(':memory:');
     const input = (id: string, actor: string, name: string, at: number, account = 'channel') => ({ source: 'twitch' as const, accountId: account, externalId: id, type: 'chat.message', actor: { externalId: actor, displayName: name }, occurredAtMs: at, receivedAtMs: at, timeQuality: 'provider' as const, sourceTime: null, transport: 'eventsub' as const, payload: { text: id } });
     try {
-        const first = s.startSession('channel', 'one', base, 'platform', base);
+        const first = recordedStream(s,'channel', 'one', base, 'platform', base);
         s.streamSample(first, base, 'game', 'Game', 'First game', 12);
         s.streamSample(first, base + 5 * minute, 'talk', 'Talk', 'Switched', 15);
         const a = s.ingest(input('1', 'regular', 'Regular', base + minute));
@@ -23,7 +28,7 @@ test('analytics keeps owners/bots out, unions linked identities, splits categori
         s.youtubeMessages('yt-owner', 'chat', [{ id: 'yt1', snippet: { type: 'textMessageEvent', publishedAt: new Date(base + minute).toISOString(), displayMessage: 'hello' }, authorDetails: { channelId: 'yt-regular', displayName: 'YouTubeRegular' } }, { id: 'yt-self', snippet: { type: 'textMessageEvent', publishedAt: new Date(base + minute).toISOString() }, authorDetails: { channelId: 'yt-owner', displayName: 'Me' } }, { id: 'yt-bot', snippet: { type: 'textMessageEvent', publishedAt: new Date(base + minute).toISOString() }, authorDetails: { channelId: 'yt-bot', displayName: 'streamelements' } }]);
         s.youtubeViewers(base, 4);
         s.endSession(first, base + 10 * minute, 'observed');
-        const second = s.startSession('channel', 'two', base + 10 * minute, 'platform', base + 10 * minute);
+        const second = recordedStream(s,'channel', 'two', base + 10 * minute, 'platform', base + 10 * minute);
         s.streamSample(second, base + 10 * minute, 'game', 'Game', 'Game again', 10);
         s.recordPoll(second, 'channel', { startedAtMs: base + 10 * minute, completedAtMs: base + 11 * minute, status: 'complete', userIds: ['regular'] });
         s.ingest(input('3', 'regular', 'Regular', base + 11 * minute));
@@ -61,7 +66,7 @@ test('analytics validates bounds and timezone, unknown categories remain unknown
         for (const changes of [{ toMs: base }, { fromMs: -1 }, { toMs: 8640000000000001 }, { toMs: Number.MAX_SAFE_INTEGER + 1 }, { source: 'bad' }, { coreRule: 'bad' }, { minSessions: -1 }, { chatWindowMinutes: 31 }])
             assert.throws(() => s.analytics({ ...opts, ...changes } as any), /INVALID_ANALYTICS_FILTER/);
         assert.throws(() => s.analytics({ ...opts, timezone: 'bad/timezone' }), /INVALID_TIMEZONE/);
-        const sid = s.startSession('channel', 'unknown', base, 'platform', base);
+        const sid = recordedStream(s,'channel', 'unknown', base, 'platform', base);
         s.streamSample(sid, base + minute, 'game', 'Game', '', null);
         const spans = unionSpans([{ from: 0, to: 10, session: 's', kind: 'chat_proxy' }, { from: 2, to: 4, session: 's', kind: 'chat_proxy' }, { from: 10, to: 12, session: 's', kind: 'chat_proxy' }, { from: 3, to: 3, session: 's', kind: 'chat_proxy' }]);
         assert.equal(spans.length, 1);
@@ -79,13 +84,13 @@ test('empty/default analytics is safe; too many sessions or expanded minutes req
     const s = new StreamStore(':memory:');
     try {
         assert.equal(s.analytics({ fromMs: base, toMs: end }).summary.entities, 0);
-        const sid = s.startSession('channel', 'named', base, 'platform', base);
+        const sid = recordedStream(s,'channel', 'named', base, 'platform', base);
         s.recordPoll(sid, 'channel', { startedAtMs: base, completedAtMs: base + minute, status: 'complete', userIds: ['numeric-human', 'numeric-bot'], userNames: { 'numeric-human': 'NamedHuman', 'numeric-bot': 'jeetbot' } });
         assert.equal(s.analytics(opts).audience.length, 1);
         assert.equal(s.analytics(opts).audience[0]?.name, 'NamedHuman');
         s.endSession(sid, base + 2 * minute, 'observed');
         for (let n = 0; n < 1000; n++) {
-            const id = s.startSession('channel', `bounded-${n}`, base, 'platform', base);
+            const id = recordedStream(s,'channel', `bounded-${n}`, base, 'platform', base);
             s.endSession(id, base + minute, 'observed');
         }
         assert.throws(() => s.analytics(opts), /ANALYTICS_RANGE_TOO_LARGE/);
@@ -109,7 +114,7 @@ test('excluded owner donations stay in raw history but never inflate summary or 
     assert.throws(() => daDonorExternalId('  '), /INVALID_DA_DONOR_NAME/);
     const s = new StreamStore(':memory:');
     try {
-        s.startSession('channel', 'donations', base, 'platform', base);
+        recordedStream(s,'channel', 'donations', base, 'platform', base);
         for (const [n, name] of ['fullrandomname_twitch', 'RealDonor'].entries())
             s.ingest({ source: 'donationalerts', accountId: 'da', externalId: String(n), type: 'donation', actor: { externalId: daDonorExternalId(name), displayName: name }, occurredAtMs: base + minute, receivedAtMs: base + minute, sourceTime: null, timeQuality: 'configured', transport: 'rest', payload: { amountMinor: '500', currency: 'RUB' } });
         const summary = s.summary(undefined, ['fullrandomname_twitch']);
@@ -129,7 +134,7 @@ test('excluded owner donations stay in raw history but never inflate summary or 
 test('YouTube messages around a category switch in one minute are split correctly and later messages extend the inference window', () => {
     const s = new StreamStore(':memory:');
     try {
-        const sid = s.startSession('channel', 'mid-minute', base, 'platform', base);
+        const sid = recordedStream(s,'channel', 'mid-minute', base, 'platform', base);
         s.streamSample(sid, base, 'game', 'Game', '', null);
         s.streamSample(sid, base + 30000, 'talk', 'Talk', '', null);
         s.youtubeMessages('yt-owner', 'chat', [10000, 40000, 50000].map((offset, n) => ({
@@ -149,7 +154,7 @@ test('YouTube messages around a category switch in one minute are split correctl
 test('renamed bot identities and former channel owners remain excluded without current OAuth tokens', () => {
  const s=new StreamStore(':memory:');
  try {
-  const sid=s.startSession('channel','excluded',base,'platform',base);
+  const sid=recordedStream(s,'channel','excluded',base,'platform',base);
   s.ensureOwnerIdentity('channel','channel','OwnerOld',base);
   s.recordPoll(sid,'channel',{startedAtMs:base,completedAtMs:base+minute,status:'complete',userIds:['channel','robot','person'],userNames:{channel:'OwnerNew',robot:'jeetbot',person:'Human'}});
   s.updateChatterNames('channel',[{user_id:'robot',user_name:'RobotRenamed'}],base+2*minute);
@@ -164,7 +169,7 @@ test('renamed bot identities and former channel owners remain excluded without c
 test('empty and missing poll minutes are explicit and category averages use successful coverage only',()=>{
  const s=new StreamStore(':memory:');
  try {
-  const sid=s.startSession('channel','coverage',base,'platform',base);
+  const sid=recordedStream(s,'channel','coverage',base,'platform',base);
   s.streamSample(sid,base,'game','Game','',12);
   s.recordPoll(sid,'channel',{startedAtMs:base,completedAtMs:base+minute,status:'complete',userIds:['human']});
   s.recordPoll(sid,'channel',{startedAtMs:base+2*minute,completedAtMs:base+3*minute,status:'complete',userIds:[]});
@@ -181,7 +186,7 @@ test('empty and missing poll minutes are explicit and category averages use succ
 test('YouTube bot renames and chat owner flag never turn excluded authors into audience',()=>{
  const s=new StreamStore(':memory:');
  try {
-  s.startSession('channel','yt-exclusions',base,'platform',base);
+  recordedStream(s,'channel','yt-exclusions',base,'platform',base);
   s.youtubeMessages('yt-owner','chat',[
    {id:'a',snippet:{type:'textMessageEvent',publishedAt:new Date(base+minute).toISOString()},authorDetails:{channelId:'bot-id',displayName:'jeetbot'}},
    {id:'b',snippet:{type:'textMessageEvent',publishedAt:new Date(base+2*minute).toISOString()},authorDetails:{channelId:'bot-id',displayName:'NewName'}},
@@ -195,7 +200,7 @@ test('YouTube bot renames and chat owner flag never turn excluded authors into a
 test('inference crossing the selected period is clipped without counting messages outside that period',()=>{
  const s=new StreamStore(':memory:');
  try {
-  const sid=s.startSession('channel','boundary',base,'platform',base);s.streamSample(sid,base,'game','Game','',null);
+  const sid=recordedStream(s,'channel','boundary',base,'platform',base);s.streamSample(sid,base,'game','Game','',null);
   s.youtubeMessages('yt-owner','chat',[{id:'before',snippet:{type:'textMessageEvent',publishedAt:new Date(base+minute).toISOString()},authorDetails:{channelId:'human',displayName:'Human'}}]);
   const result=s.analytics({...opts,fromMs:base+2*minute});
   assert.equal(result.audience[0]?.estimatedChatMinutes,4);
@@ -206,7 +211,7 @@ test('inference crossing the selected period is clipped without counting message
 test('asynchronous YouTube counts retain their actual sample minute rather than rewriting a past Twitch minute',()=>{
  const s=new StreamStore(':memory:');
  try {
-  const sid=s.startSession('channel','async-count',base,'platform',base);s.streamSample(sid,base,'game','Game','',12);
+  const sid=recordedStream(s,'channel','async-count',base,'platform',base);s.streamSample(sid,base,'game','Game','',12);
   s.youtubeViewers(base+minute,4);
   const result=s.analytics({...opts,source:'youtube'});
   assert.equal(result.timeline.find(x=>x.at===base)?.viewers,null);
@@ -219,7 +224,7 @@ test('asynchronous YouTube counts retain their actual sample minute rather than 
 test('unnamed categories and YouTube authors stay readable, while chat outside recorded streams is excluded',()=>{
  const s=new StreamStore(':memory:');
  try {
-  const sid=s.startSession('channel','unnamed',base,'platform',base);
+  const sid=recordedStream(s,'channel','unnamed',base,'platform',base);
   s.streamSample(sid,base,'game','','',null);
   s.streamSample(sid,base+minute,'talk','','',null);
   s.streamSample(sid,base+3*minute,'future','Future','',null);
@@ -238,7 +243,7 @@ test('regular audience uses attendance share, excludes donation-only profiles an
  const s=new StreamStore(':memory:');
  try {
   for(let n=0;n<3;n++){
-   const start=base+n*5*minute,sid=s.startSession('channel',`regular-share-${n}`,start,'platform',start);
+   const start=base+n*5*minute,sid=recordedStream(s,'channel',`regular-share-${n}`,start,'platform',start);
    s.streamSample(sid,start,'game','Game','',10);
    const ids=['regular',...(n<2?['two-thirds']:[]),...(n===0?['once']:[]),'owner','bot'];
    s.recordPoll(sid,'channel',{startedAtMs:start,completedAtMs:start+minute,status:'complete',userIds:ids,userNames:{regular:'Regular','two-thirds':'Two thirds',once:'Once',owner:'Owner',bot:'jeetbot'}});
@@ -267,7 +272,7 @@ test('regular audience uses attendance share, excludes donation-only profiles an
 test('switching away and back within one minute never counts a regular attendee twice in that bar',()=>{
  const s=new StreamStore(':memory:');
  try {
-  const sid=s.startSession('channel','minute-return',base,'platform',base);
+  const sid=recordedStream(s,'channel','minute-return',base,'platform',base);
   s.streamSample(sid,base,'game','Game','',2);s.streamSample(sid,base+10000,'talk','Talk','',2);s.streamSample(sid,base+20000,'game','Game','',2);
   s.recordPoll(sid,'channel',{startedAtMs:base,completedAtMs:base+minute,status:'complete',userIds:['human']});
   s.youtubeMessages('yt-owner','chat',[{id:'minute-return',snippet:{type:'textMessageEvent',publishedAt:new Date(base+5000).toISOString()},authorDetails:{channelId:'yt-human',displayName:'Human'}}]);

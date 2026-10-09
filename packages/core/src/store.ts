@@ -1,4 +1,4 @@
-import { audienceAnalytics, type AnalyticsOptions } from "./analytics.js";
+import { audienceAnalytics, unionSpans, type AnalyticsOptions } from "./analytics.js";
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { openProfileDatabase } from "./profile-db.js";
@@ -11,7 +11,7 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7 } from "./schema.js";
+import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
 import { presenceMinutes, pollCoveredMinutes, type PresencePoll } from "./presence.js";
 
@@ -78,6 +78,8 @@ export class StreamStore {
         this.db.transaction(() => this.db.exec(schemaV6)).immediate();
       if ((this.db.pragma("user_version", { simple: true }) as number) < 7)
         this.db.transaction(() => this.db.exec(schemaV7)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 8)
+        this.db.transaction(() => this.db.exec(schemaV8)).immediate();
       this.db.exec("CREATE TABLE IF NOT EXISTS sp_youtube_quota (day TEXT NOT NULL, profile TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(day,profile)) WITHOUT ROWID");
       // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
@@ -135,9 +137,26 @@ export class StreamStore {
         if (!m.id || !Number.isFinite(time)) continue;
         if (m.snippet.type === "messageDeletedEvent") this.db.prepare("DELETE FROM youtube_messages WHERE account_id=? AND id=?").run(account, m.snippet.messageDeletedDetails?.deletedMessageId ?? "");
         if (m.snippet.type === "userBannedEvent") this.db.prepare("DELETE FROM youtube_messages WHERE account_id=? AND author_id=?").run(account, m.snippet.userBannedDetails?.bannedUserDetails?.channelId ?? "");
-        insert.run(m.id, account, chat, m.authorDetails?.channelId ?? "", time, JSON.stringify(m));
+        if (insert.run(m.id, account, chat, m.authorDetails?.channelId ?? "", time, JSON.stringify(m)).changes)
+          this.ensureYoutubeIdentity(account,m.authorDetails,time);
       }
     }).immediate();
+  }
+  private ensureYoutubeIdentity(account: string, author: any, at: number): void {
+    const externalId = author?.channelId;
+    if (typeof externalId !== "string" || !/^[A-Za-z0-9_-]{1,256}$/.test(externalId)) return;
+    const name = typeof author.displayName === "string" && author.displayName.trim()
+      ? author.displayName.trim().slice(0,200) : externalId;
+    let identity = this.db.prepare("SELECT id,person_id FROM youtube_identities WHERE account_id=? AND external_id=?").get(account,externalId) as {id:string;person_id:string}|undefined;
+    if (!identity) {
+      const prior = this.db.prepare("SELECT person_id FROM youtube_identities WHERE external_id=? ORDER BY id LIMIT 1").get(externalId) as {person_id:string}|undefined;
+      const personId = prior?.person_id ?? `youtube:${externalId}`;
+      this.db.prepare("INSERT OR IGNORE INTO persons VALUES (?,?,0)").run(personId,name);
+      identity = {id:`youtube:${account}:${externalId}`,person_id:personId};
+      this.db.prepare("INSERT INTO youtube_identities VALUES (?,?,?,?,?,?,?)").run(identity.id,account,externalId,name,matchKey(name),personId,Number(author.isChatOwner===true));
+      this.db.prepare("UPDATE persons SET revision=revision+1 WHERE id=?").run(personId);
+    } else this.db.prepare("UPDATE youtube_identities SET display_name=?,match_key=?,is_owner=MAX(is_owner,?) WHERE id=?").run(name,matchKey(name),Number(author.isChatOwner===true),identity.id);
+    this.db.prepare("INSERT INTO youtube_identity_aliases VALUES (?,?,?,?,?) ON CONFLICT(identity_id,name) DO UPDATE SET first_seen_ms=MIN(first_seen_ms,excluded.first_seen_ms),last_seen_ms=MAX(last_seen_ms,excluded.last_seen_ms)").run(identity.id,name,matchKey(name),at,at);
   }
   youtubeData(account: string) {
     const snapshots = this.db.prepare("SELECT key,payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=?").all(account) as {key:string;payload_json:string;updated_at_ms:number}[];
@@ -475,9 +494,9 @@ export class StreamStore {
   private memberships(personIds: string[]): Membership[] {
     return this.db
       .prepare(
-        `SELECT id, person_id AS personId FROM identities WHERE person_id IN (${personIds.map(() => "?").join(",")}) ORDER BY id`,
+        `SELECT id, person_id AS personId FROM identities WHERE person_id IN (${personIds.map(() => "?").join(",")}) UNION ALL SELECT id,person_id AS personId FROM youtube_identities WHERE person_id IN (${personIds.map(() => "?").join(",")}) ORDER BY id`,
       )
-      .all(...personIds) as Membership[];
+      .all(...personIds,...personIds) as Membership[];
   }
 
   merge(
@@ -504,6 +523,7 @@ export class StreamStore {
       this.db
         .prepare("UPDATE identities SET person_id = ? WHERE person_id = ?")
         .run(targetId, sourceId);
+      this.db.prepare("UPDATE youtube_identities SET person_id=? WHERE person_id=?").run(targetId,sourceId);
       this.db
         .prepare(
           "UPDATE persons SET revision = revision + 1 WHERE id IN (?, ?)",
@@ -556,6 +576,7 @@ export class StreamStore {
         this.db
           .prepare("UPDATE identities SET person_id = ? WHERE id = ?")
           .run(member.personId, member.id);
+        this.db.prepare("UPDATE youtube_identities SET person_id=? WHERE id=?").run(member.personId,member.id);
       }
       this.db
         .prepare(
@@ -877,9 +898,9 @@ export class StreamStore {
     return (
       this.db
         .prepare(
-          "SELECT DISTINCT i.person_id FROM identities i LEFT JOIN identity_aliases a ON a.identity_id = i.id WHERE i.candidate_key = ? OR a.candidate_key = ? ORDER BY i.person_id",
+          "SELECT DISTINCT i.person_id FROM identities i LEFT JOIN identity_aliases a ON a.identity_id = i.id WHERE i.candidate_key = ? OR a.candidate_key = ? UNION SELECT DISTINCT y.person_id FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.match_key=? OR a.match_key=? ORDER BY person_id",
         )
-        .all(candidateKey(name), candidateKey(name)) as { person_id: string }[]
+        .all(candidateKey(name), candidateKey(name), matchKey(name), matchKey(name)) as { person_id: string }[]
     ).map((row) => row.person_id);
   }
 
@@ -1401,12 +1422,12 @@ export class StreamStore {
     return this.db
       .prepare(
         `SELECT p.id, p.display_name, p.revision,
-          coalesce(ec.event_count, 0) AS event_count,
-          (SELECT group_concat(DISTINCT i2.source) FROM identities i2 WHERE i2.person_id=p.id) AS sources,
+          coalesce(ec.event_count, 0) + (SELECT count(*) FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE y.person_id=p.id) AS event_count,
+          (SELECT group_concat(DISTINCT source) FROM (SELECT source FROM identities WHERE person_id=p.id UNION ALL SELECT 'youtube' AS source FROM youtube_identities WHERE person_id=p.id)) AS sources,
           CASE WHEN EXISTS(
             SELECT 1 FROM identities ib
             WHERE ib.person_id=p.id AND ib.match_key IN (SELECT value FROM json_each(?))
-          ) THEN 1 ELSE 0 END AS is_bot
+          ) OR EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?)))) THEN 1 ELSE 0 END AS is_bot
         FROM persons p
         LEFT JOIN (
           SELECT i.person_id, count(e.id) AS event_count
@@ -1414,19 +1435,19 @@ export class StreamStore {
           LEFT JOIN events e ON e.identity_id = i.id
           GROUP BY i.person_id
         ) ec ON ec.person_id = p.id
-        WHERE EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id)
+        WHERE (EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id) OR EXISTS(SELECT 1 FROM youtube_identities y WHERE y.person_id=p.id))
           AND (
             ? = '' OR instr(lower(p.display_name), lower(?)) > 0
             OR EXISTS(
               SELECT 1 FROM identities i
               LEFT JOIN identity_aliases a ON a.identity_id=i.id
               WHERE i.person_id=p.id AND instr(a.candidate_key, ?) > 0
-            )
+            ) OR EXISTS(SELECT 1 FROM youtube_identities y JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND instr(a.match_key,?)>0)
           )
         ORDER BY event_count DESC, p.display_name
         LIMIT 500`,
       )
-      .all(botJson, term, term, key) as Record<string, unknown>[];
+      .all(botJson, botJson, botJson, term, term, key, key) as Record<string, unknown>[];
   }
 
   person(id: string): Record<string, unknown> {
@@ -1437,13 +1458,13 @@ export class StreamStore {
     return {
       ...row,
       identities: this.db
-        .prepare("SELECT * FROM identities WHERE person_id=?")
-        .all(id),
+        .prepare("SELECT * FROM identities WHERE person_id=? UNION ALL SELECT id,'youtube' AS source,account_id,external_id,display_name,match_key AS candidate_key,person_id,match_key FROM youtube_identities WHERE person_id=?")
+        .all(id,id),
       aliases: this.db
         .prepare(
-          "SELECT a.* FROM identity_aliases a JOIN identities i ON i.id=a.identity_id WHERE i.person_id=?",
+          "SELECT a.* FROM identity_aliases a JOIN identities i ON i.id=a.identity_id WHERE i.person_id=? UNION ALL SELECT a.identity_id,a.name,a.match_key AS candidate_key,a.first_seen_ms,a.last_seen_ms FROM youtube_identity_aliases a JOIN youtube_identities y ON y.id=a.identity_id WHERE y.person_id=?",
         )
-        .all(id),
+        .all(id,id),
       events: this.events(undefined, id),
     };
   }
@@ -1458,7 +1479,7 @@ export class StreamStore {
     if (toMs !== undefined) assertTimestamp(toMs);
     if (fromMs !== undefined && toMs !== undefined && toMs <= fromMs)
       throw new Error("INVALID_EVENT_WINDOW");
-    return this.db
+    const events: Record<string,unknown>[] = this.db
       .prepare(
         `SELECT e.*, i.display_name, i.person_id FROM events e LEFT JOIN identities i ON i.id=e.identity_id
       WHERE (? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?)) AND (? IS NULL OR i.person_id=?)
@@ -1483,6 +1504,21 @@ export class StreamStore {
           payload_json: undefined,
         };
       });
+    const yt = this.db.prepare(`SELECT m.*,y.person_id,y.display_name,
+      (SELECT s.id FROM sessions s JOIN platform_streams ps ON ps.session_id=s.id
+       WHERE ps.platform='youtube' AND ps.account_id=m.account_id
+       AND m.published_at_ms>=ps.started_at_ms AND (ps.ended_at_ms IS NULL OR m.published_at_ms<ps.ended_at_ms)
+       ORDER BY s.started_at_ms DESC LIMIT 1) AS session_id
+      FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id
+      WHERE (? IS NULL OR y.person_id=?) AND (? IS NULL OR m.published_at_ms>=?) AND (? IS NULL OR m.published_at_ms<?)
+      AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
+      AND (? IS NULL OR session_id=?)
+      ORDER BY m.published_at_ms DESC,m.id DESC LIMIT 200`).all(personId??null,personId??null,fromMs??null,fromMs??null,toMs??null,toMs??null,sessionId??null,sessionId??null) as any[];
+    return [...events,...yt.filter(row=>!sessionId||row.session_id===sessionId).map(row=>({
+      id:`youtube:${row.account_id}:${row.id}`,type:'chat.message',source:'youtube',account_id:row.account_id,
+      display_name:row.display_name,person_id:row.person_id,session_id:row.session_id,occurred_at_ms:row.published_at_ms,received_at_ms:row.published_at_ms,
+      time_quality:'provider',payload:{text:JSON.parse(row.payload_json).snippet.displayMessage??'',originChannelId:row.account_id},
+    }))].sort((a,b)=>Number(b.occurred_at_ms??b.received_at_ms)-Number(a.occurred_at_ms??a.received_at_ms)||String(b.id).localeCompare(String(a.id))).slice(0,200);
   }
 
   summary(
@@ -1763,9 +1799,9 @@ export class StreamStore {
     return this.db.transaction(() => {
       const all = this.db
         .prepare(
-          `SELECT id, person_id AS personId FROM identities WHERE id IN (${ids.map(() => "?").join(",")}) ORDER BY id`,
+          `SELECT id, person_id AS personId FROM identities WHERE id IN (${ids.map(() => "?").join(",")}) UNION ALL SELECT id,person_id AS personId FROM youtube_identities WHERE id IN (${ids.map(() => "?").join(",")}) ORDER BY id`,
         )
-        .all(...ids) as Membership[];
+        .all(...ids,...ids) as Membership[];
       if (
         all.length !== ids.length ||
         new Set(all.map((row) => row.personId)).size !== 1
@@ -1778,10 +1814,12 @@ export class StreamStore {
       this.db
         .prepare("INSERT INTO persons VALUES (?, ?, 1)")
         .run(target, name.trim());
-      for (const identity of all)
+      for (const identity of all) {
         this.db
           .prepare("UPDATE identities SET person_id=? WHERE id=?")
           .run(target, identity.id);
+        this.db.prepare("UPDATE youtube_identities SET person_id=? WHERE id=?").run(target,identity.id);
+      }
       this.db
         .prepare("UPDATE persons SET revision=revision+1 WHERE id=?")
         .run(source);
@@ -1929,6 +1967,21 @@ export class StreamStore {
   private notBotClause(alias = "i"): string {
     return `${alias}.match_key NOT IN (SELECT value FROM json_each(?))`;
   }
+  private youtubePersonActivity(personId: string, sessionId?: string, botJson = this.botJson()) {
+    const excluded = this.db.prepare(`SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=? AND (y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))) LIMIT 1`).get(personId,botJson,botJson);
+    if (excluded) return {messageCount:0,estimatedChatMinutes:0,sessionIds:new Set<string>(),firstSeenMs:null};
+    const now = Date.now();
+    const rows = this.db.prepare(`SELECT m.id,m.published_at_ms FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE y.person_id=? AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(personId) as {id:string;published_at_ms:number}[];
+    const matched = this.db.prepare(`SELECT DISTINCT m.id,m.published_at_ms,s.id AS session_id,s.started_at_ms,coalesce(s.ended_at_ms,?) AS ended_at_ms
+      FROM youtube_identities y JOIN youtube_messages m ON m.account_id=y.account_id AND m.author_id=y.external_id
+      JOIN platform_streams ps ON ps.platform='youtube' AND ps.account_id=m.account_id AND m.published_at_ms>=ps.started_at_ms AND (ps.ended_at_ms IS NULL OR m.published_at_ms<ps.ended_at_ms)
+      JOIN sessions s ON s.id=ps.session_id
+      WHERE y.person_id=? AND (? IS NULL OR s.id=?) AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(now,personId,sessionId??null,sessionId??null) as {id:string;published_at_ms:number;session_id:string;started_at_ms:number;ended_at_ms:number}[];
+    const spans = unionSpans(matched.map(row=>({session:row.session_id,kind:'chat_proxy' as const,from:Math.max(row.started_at_ms,row.published_at_ms),to:Math.min(row.ended_at_ms,row.published_at_ms+5*60000)})));
+    return {messageCount:sessionId?new Set(matched.map(row=>row.id)).size:rows.length,
+      estimatedChatMinutes:spans.reduce((total,span)=>total+(span.to-span.from)/60000,0),
+      sessionIds:new Set(matched.map(row=>row.session_id)),firstSeenMs:rows.length?rows.reduce((first,row)=>Math.min(first,row.published_at_ms),Infinity):null};
+  }
 
   personStats(
     personId: string,
@@ -1943,7 +1996,8 @@ export class StreamStore {
     const sid = sessionId ?? null;
     const inSession =
       "(? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?))";
-    const messageCount = (
+    const youtube = this.youtubePersonActivity(personId,sessionId,botJson);
+    const messageCount = youtube.messageCount + (
       this.db
         .prepare(
           `SELECT count(*) AS n FROM events e
@@ -2030,6 +2084,7 @@ export class StreamStore {
     let observedBeforeFollowMinutes = 0;
     let observedSum = 0;
     let observedSessions = 0;
+    const attended = new Set(youtube.sessionIds);
     let offsetSum = 0;
     let offsetSessions = 0;
     for (const session of sessions) {
@@ -2048,6 +2103,7 @@ export class StreamStore {
         observedBeforeFollowMinutes += this.observedMinutesForPerson(session.id, personId, fromMs, Math.min(toMs, followedAtMs)).observedMinutes;
       }
       if (obs.observedMinutes > 0) {
+        attended.add(session.id);
         observedSum += obs.observedMinutes;
         observedSessions += 1;
         if (obs.firstObservedMs !== null) {
@@ -2077,9 +2133,11 @@ export class StreamStore {
           ? Math.round(offsetSum / offsetSessions)
           : null,
       sessionsWithObservation: observedSessions,
+      sessionsWithAttendance: attended.size,
+      estimatedChatMinutes: youtube.estimatedChatMinutes,
       totalObservedMinutes: observedSum,
       recordedStreams: sessions.length,
-      attendanceRatio: sessions.length ? observedSessions / sessions.length : null,
+      attendanceRatio: sessions.length ? attended.size / sessions.length : null,
       followedAtMs,
       watchingSinceMs: (this.db.prepare("SELECT min(p.completed_at_ms) AS at FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id WHERE i.person_id=? AND p.status='complete'").get(personId) as {at:number|null}).at,
       observedBeforeFollowMinutes: followedAtMs === null ? null : observedBeforeFollowMinutes,

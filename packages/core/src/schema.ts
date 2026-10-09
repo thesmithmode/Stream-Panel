@@ -1,5 +1,5 @@
 // Migration 1. All times are UTC epoch milliseconds; names are never unique identifiers.
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 
 export const schemaV1 = `
 CREATE TABLE persons (
@@ -160,4 +160,39 @@ CREATE TABLE person_preferences (
   manual_core INTEGER CHECK(manual_core IN (0, 1))
 ) STRICT;
 PRAGMA user_version = 7;
+`;
+
+// YouTube membership is separate from legacy identity constraints, but shares Person.
+export const schemaV8 = `
+CREATE TABLE youtube_identities (
+ id TEXT PRIMARY KEY, account_id TEXT NOT NULL, external_id TEXT NOT NULL,
+ display_name TEXT NOT NULL, match_key TEXT NOT NULL,
+ person_id TEXT NOT NULL REFERENCES persons(id), is_owner INTEGER NOT NULL DEFAULT 0,
+ UNIQUE(account_id,external_id)
+) STRICT;
+CREATE INDEX youtube_identities_person ON youtube_identities(person_id);
+CREATE TABLE youtube_identity_aliases (
+ identity_id TEXT NOT NULL REFERENCES youtube_identities(id), name TEXT NOT NULL,
+ match_key TEXT NOT NULL, first_seen_ms INTEGER NOT NULL, last_seen_ms INTEGER NOT NULL,
+ PRIMARY KEY(identity_id,name)
+) WITHOUT ROWID;
+INSERT OR IGNORE INTO persons(id,display_name,revision)
+ SELECT 'youtube:'||author_id,coalesce(max(nullif(json_extract(payload_json,'$.authorDetails.displayName'),'')),author_id),1
+ FROM youtube_messages WHERE author_id<>'' AND length(author_id)<=256 AND author_id NOT GLOB '*[^A-Za-z0-9_-]*'
+ GROUP BY author_id;
+INSERT INTO youtube_identities(id,account_id,external_id,display_name,match_key,person_id,is_owner)
+ SELECT 'youtube:'||account_id||':'||author_id,account_id,author_id,
+ coalesce(max(nullif(json_extract(payload_json,'$.authorDetails.displayName'),'')),author_id),
+ lower(ltrim(trim(coalesce(max(nullif(json_extract(payload_json,'$.authorDetails.displayName'),'')),author_id)),'@#')),
+ 'youtube:'||author_id,max(coalesce(json_extract(payload_json,'$.authorDetails.isChatOwner'),0)=1)
+ FROM youtube_messages WHERE author_id<>'' AND length(author_id)<=256 AND author_id NOT GLOB '*[^A-Za-z0-9_-]*'
+ GROUP BY account_id,author_id;
+INSERT INTO youtube_identity_aliases
+ SELECT i.id,json_extract(m.payload_json,'$.authorDetails.displayName'),
+ lower(ltrim(trim(json_extract(m.payload_json,'$.authorDetails.displayName')),'@#')),
+ min(m.published_at_ms),max(m.published_at_ms)
+ FROM youtube_messages m JOIN youtube_identities i ON i.account_id=m.account_id AND i.external_id=m.author_id
+ WHERE json_type(m.payload_json,'$.authorDetails.displayName')='text'
+ GROUP BY i.id,json_extract(m.payload_json,'$.authorDetails.displayName');
+PRAGMA user_version = 8;
 `;

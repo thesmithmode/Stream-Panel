@@ -5,7 +5,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {StreamStore} from '../src/store.js';
-import {schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6} from '../src/schema.js';
+import {schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,CURRENT_SCHEMA_VERSION} from '../src/schema.js';
 
 function makeV6(path:string) {
  const db=new Database(path);
@@ -24,7 +24,7 @@ test('v6 upgrade adds person metadata tables and preserves data across reopen',a
   let db=new Database(path);
   try {
    db.pragma('foreign_keys=ON');
-   assert.equal(db.pragma('user_version',{simple:true}),7);
+   assert.equal(db.pragma('user_version',{simple:true}),CURRENT_SCHEMA_VERSION);
    db.prepare('INSERT INTO person_notes(id,person_id,body,created_at_ms,updated_at_ms) VALUES (?,?,?,?,?)').run('note-1','person-1','A note',10,11);
    db.prepare('INSERT INTO person_tags(person_id,label) VALUES (?,?)').run('person-1','regular');
    db.prepare('INSERT INTO person_preferences(person_id,manual_core) VALUES (?,?)').run('person-1',1);
@@ -58,7 +58,7 @@ test('person metadata migrations and records are isolated per profile',async()=>
   try {
    db.pragma('foreign_keys=ON');
    assert.deepEqual(db.prepare('SELECT profile,version FROM sp_profile_schema ORDER BY profile').all(),[
-    {profile:'gulnaz',version:7},{profile:'ruslan',version:7},
+    {profile:'gulnaz',version:CURRENT_SCHEMA_VERSION},{profile:'ruslan',version:CURRENT_SCHEMA_VERSION},
    ]);
    for(const profile of ['ruslan','gulnaz']) {
     db.prepare(`INSERT INTO p_${profile}_persons(id,display_name) VALUES (?,?)`).run('person-1',profile);
@@ -72,4 +72,28 @@ test('person metadata migrations and records are isolated per profile',async()=>
    assert.equal((db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='person_notes'").get() as {n:number}).n,0);
   } finally {db.close();}
  } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+
+test('legacy YouTube authors migrate into isolated Person memberships and retain aliases after restart',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-youtube-person-upgrade-')),path=join(dir,'data.sqlite');
+ try {
+  makeV6(path);
+  const db=new Database(path);
+  for(const [id,name,owner] of [['old','StreamElements',false],['new','NewName',false],['owner','Channel',true]] as const) {
+   const payload={id,snippet:{type:'textMessageEvent',publishedAt:new Date(1000).toISOString()},authorDetails:{channelId:owner?'owner':'author',displayName:name,isChatOwner:owner}};
+   db.prepare('INSERT INTO youtube_messages VALUES (?,?,?,?,?,?)').run(id,'channel','chat',payload.authorDetails.channelId,1000,JSON.stringify(payload));
+  }
+  db.close();
+  for(let reopen=0;reopen<2;reopen++){
+   const store=new StreamStore(path);
+   try{
+    assert.equal(store.persons().filter(p=>String(p.sources).includes('youtube')).length,2);
+    assert.equal((store.person('youtube:author').aliases as any[]).length,2);
+    assert.equal(store.persons().find(p=>p.id==='youtube:author')!.is_bot,1);
+    assert.equal(store.personStats('youtube:owner').messageCount,0);
+    assert.equal(store.youtubeData('channel').messages.length,3);
+   }finally{store.close();}
+  }
+ }finally{await rm(dir,{recursive:true,force:true});}
 });
