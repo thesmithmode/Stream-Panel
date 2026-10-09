@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { rm, mkdir, readdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
+import {randomUUID} from 'node:crypto';
 export async function run(command, args, env = process.env) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: "inherit", env });
@@ -12,7 +13,9 @@ const segment=process.argv[2] ?? "all";
 const directories={unit:["dist/packages/core/test"],integration:["dist/apps/daemon/test","tests/integration"],e2e:["tests/e2e"],all:["dist/packages/core/test","dist/apps/daemon/test","tests/e2e","tests/integration"]};
 if(!directories[segment])throw new Error("INVALID_TEST_SEGMENT");
 await rm("coverage", { recursive: true, force: true });
-await mkdir("coverage/raw", { recursive: true });
+const runDirectory=join("coverage",`run-${randomUUID()}`);
+const rawDirectory=resolve(runDirectory,"raw");
+await mkdir(rawDirectory, { recursive: true });
 const files = [];
 for (const dir of directories[segment]) {
   const before = files.length;
@@ -29,7 +32,8 @@ const exitMain = await run(
   ["--test", "--test-concurrency=2", ...files],
   {
     ...process.env,
-    NODE_V8_COVERAGE: resolve("coverage/raw"),
+    NODE_V8_COVERAGE: rawDirectory,
+    STREAM_PANEL_BROWSER_COVERAGE_DIR: resolve(runDirectory,"browser"),
     STREAM_PANEL_COVERAGE: "1",
   },
 );
@@ -44,7 +48,8 @@ const exitWeb = webUnit.length
       ],
       {
         ...process.env,
-        NODE_V8_COVERAGE: resolve("coverage/raw"),
+        NODE_V8_COVERAGE: rawDirectory,
+        STREAM_PANEL_BROWSER_COVERAGE_DIR: resolve(runDirectory,"browser"),
         STREAM_PANEL_COVERAGE: "1",
       },
     )
@@ -53,6 +58,8 @@ const exit = exitMain || exitWeb;
 const report = await run(process.execPath, [
   "node_modules/c8/bin/c8.js",
   "report",
+  "--temp-directory",rawDirectory,
+  "--reports-dir",resolve(runDirectory,"node"),
 ]);
-const gate = segment==="all" ? await run(process.execPath, ["scripts/coverage-gate.mjs"]) : 0;
+const gate = segment==="all" ? await run(process.execPath, ["scripts/coverage-gate.mjs",runDirectory]) : 0;
 process.exitCode = exit || report || gate;
