@@ -1007,8 +1007,14 @@ export class StreamStore {
     observedAtMs: number,
     url: string | null,
     title: string,
+    confirmedPresentIds?: string[],
   ): string | null {
     this.validatePlatformStreamInput(platform, accountId, externalId, startedAtMs, observedAtMs, url, title);
+    if (confirmedPresentIds !== undefined && (!Array.isArray(confirmedPresentIds) ||
+      confirmedPresentIds.length > 1000 || new Set(confirmedPresentIds).size !== confirmedPresentIds.length ||
+      !confirmedPresentIds.includes(externalId) ||
+      confirmedPresentIds.some(id=>typeof id!=="string" || !id.trim() || id.length>256)))
+      throw new Error("INVALID_PLATFORM_STREAM");
     return this.db.transaction(() => {
       const existing = this.db.prepare(`
         SELECT session_id,ended_at_ms,last_observed_at_ms,first_missing_at_ms
@@ -1018,6 +1024,10 @@ export class StreamStore {
 
       let sessionId = existing?.session_id;
       if (sessionId === undefined) {
+        // YouTube supports concurrent broadcasts. A new ID alone cannot prove
+        // another broadcast ended; only a complete confirmed set can do that.
+        const confirmed = confirmedPresentIds ?? (platform === "twitch" ? [externalId] : undefined);
+        if (confirmed && !this.supersedeProviderLinks(platform, accountId, externalId, startedAtMs, observedAtMs, confirmed)) return null;
         const active = this.db.prepare(`
           SELECT s.id,s.started_at_ms FROM sessions s
           WHERE s.kind='platform' AND s.ended_at_ms IS NULL
@@ -1041,6 +1051,39 @@ export class StreamStore {
       this.backfillPlatformEvents(sessionId, observedAtMs);
       return sessionId;
     }).immediate();
+  }
+
+  private supersedeProviderLinks(
+    platform: "twitch" | "youtube", accountId: string, externalId: string,
+    startedAtMs: number, observedAtMs: number,
+    confirmedPresentIds: string[],
+  ): boolean {
+    const oldLinks = this.db.prepare(`
+      SELECT external_id,session_id,started_at_ms,last_observed_at_ms
+      FROM platform_streams
+      WHERE platform=? AND account_id=? AND external_id<>? AND ended_at_ms IS NULL
+        AND external_id NOT IN (SELECT value FROM json_each(?))
+    `).all(platform, accountId, externalId, JSON.stringify(confirmedPresentIds)) as {external_id:string;session_id:string;started_at_ms:number;last_observed_at_ms:number}[];
+    if (oldLinks.some(link => observedAtMs <= link.last_observed_at_ms)) return false;
+    const affected = new Set<string>();
+    for (const link of oldLinks) {
+      const endAtMs = Math.max(startedAtMs, link.started_at_ms, link.last_observed_at_ms);
+      this.db.prepare(`
+        UPDATE platform_streams SET ended_at_ms=?
+        WHERE platform=? AND account_id=? AND external_id=? AND ended_at_ms IS NULL
+      `).run(endAtMs, platform, accountId, link.external_id);
+      affected.add(link.session_id);
+    }
+    for (const oldSessionId of affected) {
+      const state = this.db.prepare(`
+        SELECT MAX(ended_at_ms) AS ended_at_ms,
+          SUM(CASE WHEN ended_at_ms IS NULL THEN 1 ELSE 0 END) AS open_links
+        FROM platform_streams WHERE session_id=?
+      `).get(oldSessionId) as {ended_at_ms:number|null;open_links:number};
+      if (state.open_links === 0 && state.ended_at_ms !== null)
+        this.endSessionInTransaction(oldSessionId, state.ended_at_ms, "estimated");
+    }
+    return true;
   }
 
   private validatePlatformStreamInput(
