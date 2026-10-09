@@ -103,6 +103,7 @@ export async function createApplication(
   const donationFields={personId:{type:"string",minLength:1,maxLength:512},amount:{type:"string",minLength:1,maxLength:50,pattern:"^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$"},currency:{type:"string",enum:["RUB","USD","EUR","BYN","KZT","UAH","BRL","TRY"]},occurredAtMs:{type:["integer","null"],minimum:0},message:{type:"string",maxLength:10000},sourceName:{type:"string",minLength:1,maxLength:200}};
   const donationRequired=["personId","amount","currency","occurredAtMs","message","sourceName"];
   const schemaBodies: Record<string, Record<string, unknown>> = {
+    "/api/v1/persons":body({name:{type:"string",minLength:1,maxLength:200}},["name"]),
     "/api/v1/donations":body({...donationFields,occurredAtMs:{type:"integer",minimum:0}},donationRequired),
     "/api/v1/donations/:id/update":body({...donationFields,revision},[...donationRequired,"revision"]),
     "/api/v1/donations/:id/delete":body({revision},["revision"]),
@@ -353,6 +354,7 @@ export async function createApplication(
       configuration.value.excludedBotLogins,
     ),
   );
+  app.post("/api/v1/persons",async request=>db.call("createPerson",string(object(request.body).name)));
   app.get("/api/v1/persons/:id", async (request) =>
     db.call("person", string(object(request.params).id)),
   );

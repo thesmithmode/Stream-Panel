@@ -46,6 +46,8 @@ test('manual donations, conflicts, delete/restore, audit and one anonymous reass
   await section.locator('article').filter({hasText:'Anonymous two'}).waitFor();
   await open('Recipient');row=section.locator('article').filter({hasText:'Anonymous one'});await row.getByText('История исправлений',{exact:true}).click();await row.getByText('Исходный донатер: Аноним',{exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
+  await page.getByRole('button',{name:'Добавить человека',exact:true}).click();await page.getByLabel('Имя человека',{exact:true}).fill('Manual donor');await page.getByRole('button',{name:'Создать человека',exact:true}).click();await page.getByRole('heading',{name:'Manual donor',exact:true}).waitFor();
+  assert.ok((await app.db.call('persons')).some(p=>p.display_name==='Manual donor'));
   assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });

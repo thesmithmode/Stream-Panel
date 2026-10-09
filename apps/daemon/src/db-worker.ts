@@ -17,7 +17,7 @@ const allowed = new Set([
   "deleteManualSession",
   "recordPoll",
   "updateChatterNames",
-  "persons",
+  "persons", "createPerson",
   "person",
   "personNotes", "createPersonNote", "updatePersonNote", "deletePersonNote",
   "personMetadata", "setPersonMetadata",

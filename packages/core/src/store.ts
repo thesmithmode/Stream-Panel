@@ -427,6 +427,17 @@ export class StreamStore {
     }).immediate();
   }
 
+  createPerson(name:string): Record<string,unknown> {
+    if(typeof name!=="string"||!name.trim()||name.length>200)throw new Error("INVALID_NAME");
+    return this.db.transaction(()=>{
+      const id=randomUUID();this.db.prepare("INSERT INTO persons(id,display_name) VALUES (?,?)").run(id,name.trim());
+      // An explicit card remains visible before its first identity/event arrives.
+      // Null keeps the normal automatic core criteria; no viewing fact is invented.
+      this.db.prepare("INSERT INTO person_preferences(person_id,manual_core) VALUES (?,NULL)").run(id);
+      return this.person(id);
+    }).immediate();
+  }
+
   personMetadata(personId: string): {revision:number;tags:string[];manualCore:boolean|null} {
     const revision = this.personRevision(personId);
     const tags = this.db.prepare(`WITH RECURSIVE owners(id) AS (SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT t.label FROM person_tags t JOIN owners o ON t.person_id=o.id ORDER BY t.label`).all(personId) as {label:string}[];

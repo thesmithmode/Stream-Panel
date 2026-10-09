@@ -1,10 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {application} from '../helpers/application.mjs';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import net from 'node:net';
+import {createHostedApplication} from '../../dist/apps/daemon/src/hosted.js';
 import {launchBrowser} from '../helpers/browser.mjs';
 import {startCoverage,saveCoverage,goto} from '../helpers/browser-coverage.mjs';
 test('channel overview filters whole history while stream details and profile data remain separate on mobile',{timeout:60000},async()=>{
- const app=await application();let browser;
+ const dir=await mkdtemp(join(tmpdir(),'sp-channel-hosted-'));
+ const port=await new Promise(resolve=>{const s=net.createServer();s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p));});});
+ const origin=`http://127.0.0.1:${port}`,host=await createHostedApplication(dir,origin,false);
+ await host.accounts.createUser('ruslan','ruslan','Руслан','overview-fixture-password');await host.app.listen({host:'127.0.0.1',port});
+ const app={db:host.runtimes.get('ruslan').db,close:async()=>{await host.app.close();await rm(dir,{recursive:true,force:true});}};let browser;
  try{
   const now=Date.now(),streams=[];
   for(const [id,days] of [['old',60],['recent',3]]){
@@ -12,7 +20,8 @@ test('channel overview filters whole history while stream details and profile da
    await app.db.call('ingest',{source:'twitch',accountId:'channel',externalId:id,type:'chat.message',actor:{externalId:'viewer',displayName:'Overview Viewer'},occurredAtMs:start+60000,receivedAtMs:now,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:id}});
    await app.db.call('endSession',sid,start+3600000,'observed');
   }
-  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(10000);const errors=[];page.on('pageerror',e=>errors.push(e.message));await startCoverage(page);await goto(page,app.bootstrap());
+  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(10000);const errors=[];page.on('pageerror',e=>errors.push(e.message));await startCoverage(page);await goto(page,origin);
+  await page.getByLabel('Логин',{exact:true}).fill('ruslan');await page.getByLabel('Пароль',{exact:true}).fill('overview-fixture-password');await page.getByRole('button',{name:'Войти',exact:true}).click();
   await page.getByRole('heading',{name:'Обзор канала',exact:true}).waitFor();
   const stats=page.getByRole('region',{name:'Статистика канала за период'});
   const count=label=>stats.getByText(label,{exact:true}).locator('..').locator('strong');

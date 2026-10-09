@@ -101,3 +101,17 @@ test('corrections preserve raw SQLite bytes, provenance and independent profiles
   }finally{a.close();b.close();}
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+
+test('explicit Person creation stays visible without fabricated identities or attendance and can receive manual donations',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-person-create-')),path=join(dir,'db.sqlite');
+ const s=new StreamStore(path,'ruslan');let id='';try{
+  const p=s.createPerson('  New person  ');id=String(p.id);assert.equal(p.display_name,'New person');assert.deepEqual(p.identities,[]);
+  assert.ok(s.persons().some(p=>p.id===id));assert.equal(s.personStats(id).watchingSinceMs,null);assert.equal(s.personStats(id).sessionsWithAttendance,0);
+  assert.equal(s.personMetadata(id).manualCore,null);assert.equal(s.personNotes(id).length,0);
+  s.createDonation({personId:id,amount:'10',currency:'RUB',occurredAtMs:at,message:'Offline support',sourceName:'Cash'},at);
+  assert.equal(s.personStats(id).donationCount,1);assert.equal(s.personStats(id).watchingSinceMs,null);
+  assert.notEqual(s.createPerson('New person').id,id);for(const name of ['', '  ', 'a'.repeat(201)])assert.throws(()=>s.createPerson(name),/INVALID_NAME/);
+ }finally{s.close();}
+ const again=new StreamStore(path,'ruslan'),other=new StreamStore(path,'gulnaz');try{assert.ok(again.persons().some(p=>p.id===id));assert.equal(other.persons().length,0);assert.throws(()=>other.person(id),/PERSON_NOT_FOUND/);}finally{again.close();other.close();await rm(dir,{recursive:true,force:true});}
+});

@@ -29,6 +29,8 @@
     initialId?: string;
     onChange: () => Promise<void>;
   } = $props();
+  let createOpen=$state(false),newPersonName=$state("");
+  async function createPerson(){await operation(async()=>{const person=await api<{id:string}>("persons",{name:newPersonName});createOpen=false;newPersonName="";await select(person.id);});}
   let search = $state(""),
     selectedId = $state(""),
     detail = $state<any>(null),
@@ -130,7 +132,7 @@
   }
   async function refreshPerson(id:string) {
     const person=await api(`persons/${id}`);
-    if(selectedId===id)detail=person;
+    if(selectedId===id){detail=person;await loadStats(id);}
     await onChange();
   }
   async function select(id: string) {
@@ -224,8 +226,9 @@
   <section class="panel">
     <header>
       <h2>Люди</h2>
-      <span class="muted small">{people.length}</span>
+      <button class="outline small" disabled={busy} onclick={()=>createOpen=!createOpen}>Добавить человека</button>
     </header>
+    {#if createOpen}<form class="new-person" onsubmit={e=>{e.preventDefault();void createPerson();}}><label>Имя человека<input bind:value={newPersonName} required maxlength="200" disabled={busy}/></label><button class="primary" disabled={busy}>Создать человека</button><button type="button" class="outline" disabled={busy} onclick={()=>createOpen=false}>Отмена</button></form>{/if}
     <div class="tops-tabs" role="tablist" aria-label="Сортировка людей">
       {#each [
         ["default", "Все"],
@@ -463,3 +466,5 @@
       </div>{/each}
   </section>{/if}
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
+
+<style>.new-person{display:grid;gap:.7rem;padding:1rem;}.new-person label{display:grid;gap:.4rem;}.new-person input{min-width:0;max-width:100%;box-sizing:border-box;}</style>

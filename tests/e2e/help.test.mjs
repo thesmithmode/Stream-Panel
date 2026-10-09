@@ -19,18 +19,19 @@ test("presence help popover supports click, Escape, outside click, and mobile vi
     await page.getByRole("button", { name: "Открыть интеграции", exact: true }).waitFor();
     await seed(a);
     await reload(page);
+    await page.getByRole("button",{name:"Стримы",exact:true}).click();await page.getByRole("button",{name:"Открыть",exact:true}).click();
 
-    const trigger = page.getByRole("button", { name: "Подробнее о присутствии в чате" });
-    const popover = page.getByRole("dialog", { name: "Подробнее о присутствии в чате" });
+    const trigger = page.getByRole("button", { name: "Об аудитории стрима" });
+    const popover = page.getByRole("dialog", { name: "Об аудитории стрима" });
     await trigger.click();
     await assertPopover(trigger, popover, true);
-    assert.match(await popover.textContent(), /не подтверждает просмотр видео/);
+    assert.match(await popover.textContent(), /не подтверждение просмотра видео/);
     await page.keyboard.press("Escape");
     await assertPopover(trigger, popover, false);
 
     await trigger.click();
     await popover.waitFor();
-    await page.getByRole("heading", { name: "Присутствие в чате", exact: true }).click();
+    await page.getByRole("heading", { name: "Стрим", exact: true }).click();
     await assertPopover(trigger, popover, false);
 
     await page.setViewportSize({ width: 390, height: 844 });

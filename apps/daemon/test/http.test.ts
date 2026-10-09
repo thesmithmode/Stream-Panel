@@ -371,3 +371,16 @@ test('donation API enforces auth, CSRF, strict exact-money payloads and optimist
   assert.equal((await f.a.app.inject({url:'/api/v1/donations?includeDeleted=yes',headers:f.headers})).statusCode,400);
  }finally{await f.close();}
 });
+
+
+test('manual Person creation is protected, strict and does not invent attendance or link same names',async()=>{
+ const f=await fixture();try{
+  const post=(headers:Record<string,string>,payload:Record<string,unknown>)=>f.a.app.inject({method:'POST',url:'/api/v1/persons',headers,payload});
+  assert.equal((await post({host:f.headers.host},{name:'Manual person'})).statusCode,401);
+  assert.equal((await post({...f.headers,'x-csrf-token':'wrong'},{name:'Manual person'})).statusCode,403);
+  for(const payload of [{name:1},{name:''},{name:'   '},{name:'x',extra:true},{name:'x'.repeat(201)}])assert.equal((await post(f.headers,payload)).statusCode,400);
+  const person=(await post(f.headers,{name:' Manual person '})).json();assert.equal(person.display_name,'Manual person');assert.deepEqual(person.identities,[]);
+  assert.notEqual((await post(f.headers,{name:'Manual person'})).json().id,person.id);
+  const stats=(await f.a.app.inject({url:`/api/v1/persons/${person.id}/stats`,headers:f.headers})).json();assert.equal(stats.messageCount,0);assert.equal(stats.watchingSinceMs,null);assert.equal(stats.donationCount,0);
+ }finally{await f.close();}
+});
