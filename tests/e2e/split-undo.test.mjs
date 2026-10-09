@@ -10,7 +10,7 @@ test('YouTube memberships split and undo through the common Person card on mobil
   const at=Date.now();
   for(const id of ['one','two'])await app.db.call('youtubeMessages','channel','chat',[{id,snippet:{type:'textMessageEvent',publishedAt:new Date(at).toISOString(),displayMessage:id},authorDetails:{channelId:id,displayName:id}}]);
   const source='youtube:one',other='youtube:two';
-  await app.db.call('merge',other,source,await app.db.call('personRevision',other),await app.db.call('personRevision',source),at);
+  await app.db.call('merge',other,source,(await app.db.call('person',other)).revision,(await app.db.call('person',source)).revision,at);
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(10000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));await startCoverage(page);await goto(page,app.bootstrap());
   await page.getByRole('button',{name:'Люди',exact:true}).click();await page.locator('.person-row').filter({hasText:'one'}).click();
