@@ -1036,3 +1036,46 @@ test("Twitch channel.update v2 preserves category and title changes as timestamp
   assert.equal(events.at(-1).args[0].payload.title,'Second title');
  }finally{await c.stop();}
 });
+
+test('failed Twitch presence polls retain missing intervals and recover without bridging them', async t => {
+  const f=fixture(t), original=twitchRequest(f);
+  let fail=false;
+  const request=async(url,init)=>new URL(url).pathname.endsWith('/chatters')&&fail
+    ? response({message:'unavailable'},503) : original(url,init);
+  const c=new TwitchConnection(f.config,f.db,request,f.socket);
+  try {
+    await c.start();
+    f.sockets[0].push({...welcome,payload:{session:{id:'wire',keepalive_timeout_seconds:3600}}});
+    await flush();
+    const successful=f.calls.find(x=>x.method==='recordPoll').args[2];
+    fail=true;await f.tick(60000);
+    assert.equal(c.status.capabilities.presence,'failed');
+    let gaps=f.calls.filter(x=>x.method==='gap'&&x.args[1]==='chatters_poll_failed');
+    assert.equal(gaps.length,1);
+    assert.equal(gaps[0].args[2],successful.completedAtMs);
+    assert.equal(gaps[0].args[3],Date.now());
+    await f.tick(60000);
+    gaps=f.calls.filter(x=>x.method==='gap'&&x.args[1]==='chatters_poll_failed');
+    assert.equal(gaps.length,2);
+    assert.ok(gaps[1].args[2]>gaps[0].args[3]);
+    fail=false;await f.tick(60000);
+    assert.equal(c.status.capabilities.presence,'complete');
+    const recovered=f.calls.filter(x=>x.method==='recordPoll').at(-1).args[2];
+    assert.equal(recovered.startedAtMs,recovered.completedAtMs,'recovery does not invent observation through the outage');
+    assert.equal(f.calls.filter(x=>x.method==='gap'&&x.args[1]==='chatters_poll_failed').length,2);
+  } finally {await c.stop();}
+});
+
+test('a failed presence request after Twitch stop cannot append a stale gap',async t=>{
+  const f=fixture(t),original=twitchRequest(f);
+  let rejectPoll;
+  const pending=new Promise((_,reject)=>{rejectPoll=reject;});
+  const request=(url,init)=>new URL(url).pathname.endsWith('/chatters')?pending:original(url,init);
+  const c=new TwitchConnection(f.config,f.db,request,f.socket);
+  try {
+    await c.start();await flush();
+    await c.stop();rejectPoll(new Error('old request failed'));await flush();
+    assert.equal(f.calls.some(x=>x.method==='gap'),false);
+    assert.equal(c.status.capabilities.presence,undefined);
+  }finally{await c.stop();}
+});

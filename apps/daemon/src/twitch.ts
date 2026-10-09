@@ -670,6 +670,8 @@ export class TwitchConnection {
         this.platformLive && this.sessionId &&
         this.token.scopes.includes("moderator:read:chatters")
       ) {
+        const attemptedAtMs = this.now();
+        const unobservedFromMs = this.lastSuccessfulPollAt ?? attemptedAtMs;
         try {
           const users: { user_id: string; user_name: string }[] = [];
           const sessionId = this.sessionId;
@@ -707,8 +709,8 @@ export class TwitchConnection {
             await this.db.call(
               "gap",
               "twitch",
-              "chatters_poll_incomplete",
-              poll.startedAtMs,
+              poll.status === "failed" ? "chatters_poll_failed" : "chatters_poll_incomplete",
+              windowed.startedAtMs,
               poll.completedAtMs,
             );
           }
@@ -717,6 +719,8 @@ export class TwitchConnection {
           this.lastSuccessfulPollAt = null;
           this.status.capabilities.presence =
             error instanceof Error ? error.message : "chatters_error";
+          await this.db.call("gap", "twitch", "chatters_poll_failed",
+            unobservedFromMs, Math.max(attemptedAtMs, this.now()));
           // Isolate from EventSub — do not rethrow into start()/reconnect.
         }
       }

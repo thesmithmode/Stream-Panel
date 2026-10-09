@@ -2,6 +2,7 @@
   import { api } from "./api";
   import { statusLabel } from "./labels";
   import BackupFiles from './BackupFiles.svelte';
+  import CollectionGaps from './CollectionGaps.svelte';
   let { status, onChange }: { status: any; onChange: () => Promise<void> } =
     $props();
   let twitchClient = $state(""),
@@ -285,12 +286,7 @@
           })}>Создать резервную копию</button
       >
       {#if status.backup}<BackupFiles status={status.backup} />{/if}
-      {#if status.gaps?.length}<h3>Пробелы сбора</h3>
-        {#each status.gaps as gap}<div class="capability">
-            <span>{gap.source}: {gap.reason}</span><span
-              >{new Date(gap.started_at_ms).toLocaleString("ru-RU")}</span
-            >
-          </div>{/each}{/if}
+      <CollectionGaps gaps={status.gaps ?? []} />
     </div>
   </section>
 </div>
