@@ -1952,11 +1952,16 @@ export class StreamStore {
   private analyticsExclusions(excludedBotLogins: readonly string[] = []): ReadonlySet<string> {
     const keys=new Set(botExclusionSet(["fullrandomname_twitch",...excludedBotLogins]));
     const json=JSON.stringify([...keys]);
-    const rows=this.db.prepare(`SELECT DISTINCT linked.match_key FROM identities linked WHERE EXISTS(
-      SELECT 1 FROM identities i WHERE i.person_id=linked.person_id AND (
-        i.match_key IN(SELECT value FROM json_each(?)) OR (i.source='twitch' AND i.external_id=i.account_id) OR
-        EXISTS(SELECT 1 FROM identity_aliases a WHERE a.identity_id=i.id AND ltrim(a.candidate_key,'@#') IN(SELECT value FROM json_each(?)))
-      ))`).all(json,json) as {match_key:string}[];
+    const rows=this.db.prepare(`WITH excluded_people AS (
+      SELECT i.person_id FROM identities i WHERE i.match_key IN(SELECT value FROM json_each(?))
+       OR (i.source='twitch' AND i.external_id=i.account_id)
+       OR EXISTS(SELECT 1 FROM identity_aliases a WHERE a.identity_id=i.id AND ltrim(a.candidate_key,'@#') IN(SELECT value FROM json_each(?)))
+      UNION
+      SELECT y.person_id FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id
+       WHERE y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))
+    ) SELECT DISTINCT match_key FROM identities WHERE person_id IN(SELECT person_id FROM excluded_people)
+      UNION SELECT DISTINCT match_key FROM youtube_identities WHERE person_id IN(SELECT person_id FROM excluded_people)
+    `).all(json,json,json,json) as {match_key:string}[];
     for(const row of rows)keys.add(row.match_key);
     return keys;
   }
@@ -2159,8 +2164,7 @@ export class StreamStore {
       "(? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?))";
     if (sortBy === "observed_minutes") {
       if (!sessionId) {
-        // All-time: sum observed minutes across recent sessions is expensive;
-        // rank by distinct complete polls instead as a proxy, then attach minutes for top candidates.
+        // Rank exact lifetime minutes across all confirmed observations.
         const rows = this.db
           .prepare(
             `SELECT p.id, p.display_name, p.revision,
@@ -2172,18 +2176,16 @@ export class StreamStore {
              JOIN presence_polls poll ON poll.id = m.poll_id AND poll.status='complete'
              WHERE ${this.notBotClause("i")}
              GROUP BY p.id
-             ORDER BY poll_count DESC, p.display_name
-             LIMIT ?`,
+             ORDER BY poll_count DESC, p.display_name`,
           )
-          .all(botJson, capped) as Record<string, unknown>[];
+          .all(botJson) as Record<string, unknown>[];
         return rows.map((row) => {
           const sessions = this.db
             .prepare(
               `SELECT DISTINCT poll.session_id AS id FROM presence_polls poll
                JOIN presence_members m ON m.poll_id = poll.id
                JOIN identities i ON i.id = m.identity_id
-               WHERE i.person_id = ? AND poll.status='complete'
-               LIMIT 20`,
+               WHERE i.person_id = ? AND poll.status='complete'`,
             )
             .all(row.id) as { id: string }[];
           let minutes = 0;
@@ -2210,7 +2212,7 @@ export class StreamStore {
             donationTotals: {},
             observedMinutes: minutes,
           };
-        }).sort((a, b) => (b.observedMinutes as number) - (a.observedMinutes as number));
+        }).sort((a, b) => (b.observedMinutes as number) - (a.observedMinutes as number)).slice(0,capped);
       }
       const window = this.sessionMinuteWindow(sessionId);
       const candidates = this.db
@@ -2257,7 +2259,19 @@ export class StreamStore {
                OR json_extract(e.payload_json, '$.originChannelId') = e.account_id
              )`
         : `e.type = 'donation'`;
-    const rows = this.db
+    const rows = sortBy === "messages" ? this.db.prepare(`WITH message_counts AS (
+      SELECT i.person_id,count(*) AS n FROM events e JOIN identities i ON i.id=e.identity_id
+      WHERE ${inSession} AND ${typeFilter} AND ${this.notBotClause("i")} GROUP BY i.person_id
+      UNION ALL
+      SELECT y.person_id,count(*) AS n FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id
+      WHERE json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
+       AND (? IS NULL OR EXISTS(SELECT 1 FROM platform_streams ps JOIN sessions ss ON ss.id=ps.session_id WHERE ps.platform='youtube' AND ps.account_id=m.account_id AND ps.session_id=? AND ps.started_at_ms<=m.published_at_ms AND coalesce(ps.ended_at_ms,ss.ended_at_ms,?)>m.published_at_ms))
+       AND NOT EXISTS(SELECT 1 FROM youtube_identities z LEFT JOIN youtube_identity_aliases a ON a.identity_id=z.id WHERE z.person_id=y.person_id AND (z.is_owner=1 OR z.external_id=z.account_id OR z.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))))
+      GROUP BY y.person_id
+    ) SELECT p.id,p.display_name,p.revision,sum(c.n) AS metric_count,
+      (SELECT group_concat(DISTINCT source) FROM (SELECT source FROM identities WHERE person_id=p.id UNION ALL SELECT 'youtube' AS source FROM youtube_identities WHERE person_id=p.id)) AS sources
+      FROM persons p JOIN message_counts c ON c.person_id=p.id GROUP BY p.id ORDER BY metric_count DESC,p.display_name LIMIT ?
+    `).all(sid,sid,botJson,sid,sid,Date.now(),botJson,botJson,capped) as Record<string,unknown>[] : this.db
       .prepare(
         `SELECT p.id, p.display_name, p.revision,
            (SELECT group_concat(DISTINCT i2.source) FROM identities i2 WHERE i2.person_id=p.id) AS sources,

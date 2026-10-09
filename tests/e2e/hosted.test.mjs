@@ -49,7 +49,8 @@ test("two browser accounts see only their own data; logout in demo revokes the r
       await page.getByText(`Private ${profile}`, { exact: true }).waitFor();
       assert.equal(await page.getByText(`Private ${profile === "ruslan" ? "gulnaz" : "ruslan"}`, { exact: true }).count(), 0);
       assert.equal(await page.title(), "Stream Panel");
-      await page.getByRole("button", {name:"YouTube",exact:true}).click();
+      await page.getByRole("button", {name:"Интеграции",exact:true}).click();
+      assert.equal(await page.getByRole("button",{name:"YouTube",exact:true}).count(),0);
       await page.getByRole("heading",{name:`YouTube Own ${profile}`}).waitFor();
       await page.getByText(`YouTube private ${profile}`,{exact:false}).waitFor();
       assert.equal(await page.getByText(`YouTube private ${profile === "ruslan" ? "gulnaz" : "ruslan"}`,{exact:false}).count(),0);
@@ -59,7 +60,7 @@ test("two browser accounts see only their own data; logout in demo revokes the r
       await page.getByRole("button", {name:"Реальные",exact:true}).click();
       await page.getByRole("heading",{name:`YouTube Own ${profile}`}).waitFor();
       await page.route('**/api/v1/youtube/data',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'WORKER_UNAVAILABLE'})}));
-      await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.getByRole('button',{name:'YouTube',exact:true}).click();
+      await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.getByRole('button',{name:'Интеграции',exact:true}).click();
       await page.getByRole('alert').filter({hasText:'WORKER_UNAVAILABLE'}).waitFor();
       assert.equal(await page.getByText(`YouTube private ${profile}`,{exact:false}).count(),0);
       await page.unroute('**/api/v1/youtube/data');
@@ -67,10 +68,10 @@ test("two browser accounts see only their own data; logout in demo revokes the r
       await db.call('youtubeSnapshot','channel','channel',{snippet:{title:`Own ${profile}`},statistics:{hiddenSubscriberCount:true}});
       await db.call('youtubeSnapshot','channel','report',{});
       await db.call('youtubeMessages','channel','chat',[{id:'minimal',snippet:{publishedAt:'2026-10-07T12:00:01Z',type:'textMessageEvent'},authorDetails:{}}]);
-      await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.getByRole('button',{name:'YouTube',exact:true}).click();
+      await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.getByRole('button',{name:'Интеграции',exact:true}).click();
       await page.getByText('Подписчики: скрыты · Просмотры канала: нет данных',{exact:true}).waitFor();
       await db.call('youtubeSnapshot','channel','channel',{snippet:{title:`Own ${profile}`}});
-      await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.getByRole('button',{name:'YouTube',exact:true}).click();
+      await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.getByRole('button',{name:'Интеграции',exact:true}).click();
       await page.getByText('Подписчики: нет данных · Просмотры канала: нет данных',{exact:true}).waitFor();
       await page.setViewportSize({width:390,height:844});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);

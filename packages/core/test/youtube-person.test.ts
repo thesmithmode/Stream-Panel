@@ -76,3 +76,29 @@ test('YouTube owner flags, channel IDs and former bot aliases exclude personal a
   assert.equal(s.youtubeData('channel').messages.length,4);
  }finally{s.close();}
 });
+
+test('common message ranking includes standalone YouTube authors and sums manually linked memberships',()=>{
+ const s=new StreamStore(':memory:');try{
+  const session=s.observePlatformStream('youtube','channel','video',at,at,null,'YouTube')!;
+  const tw=twitch(s);
+  s.youtubeMessages('channel','chat',[message('a','author','Author'),message('b','author','Author',at+minute),message('c','other','Other',at+minute)]);
+  assert.equal(s.personsTop('messages',session)[0]!.id,'youtube:author');
+  assert.equal(s.personsTop('messages',session)[0]!.messageCount,2);
+  s.merge('youtube:author',tw,s.personRevision('youtube:author'),s.personRevision(tw),at+minute);
+  const top=s.personsTop('messages');assert.equal(top[0]!.id,tw);assert.equal(top[0]!.messageCount,3);
+  assert.equal(top[0]!.sources,'twitch,youtube');
+ }finally{s.close();}
+});
+
+test('lifetime observed ranking includes streams beyond the former twenty-stream cap',()=>{
+ const s=new StreamStore(':memory:');try{
+  const person=twitch(s);
+  for(let n=0;n<25;n++){
+   const start=at+n*10*minute,session=s.observePlatformStream('twitch','owner',`video-${n}`,start,start,null,'Stream')!;
+   s.recordPoll(session,'owner',{startedAtMs:start,completedAtMs:start+minute,status:'complete',userIds:['viewer']});
+   s.endSession(session,start+minute);
+  }
+  const row=s.personsTop('observed_minutes')[0]!;
+  assert.equal(row.id,person);assert.equal(row.observedMinutes,25);
+ }finally{s.close();}
+});

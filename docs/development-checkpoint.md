@@ -97,3 +97,12 @@ YouTube-авторы получают отдельные Person и провер�
 Миграция старых сообщений сохраняет авторов и aliases после перезапуска. Проверены отдельные Person, одинаковые ники, merge/split/undo, связанные метаданные, неподтверждённый эфир и исключения. Локально: 215/215 Node tests до последней дополнительной миграционной проверки; сама migration suite 3/3, Svelte 0 errors/warnings. Browser E2E текущего изменения ещё должен подтвердить CI. Локальный Chromium завершается до открытия страницы; это не считается браузерной проверкой.
 
 CI 55733e2: unit/integration/E2E/operations успешны; lines 99,33%, functions 95,17%, branches 92,37%. Общий gate красный, main/release/deploy не разрешены текущим качеством. Общий Person ещё требует согласования personsTop, всех summary агрегатов, undo split/unlink, индивидуальных исправлений донатов и проверки полного интерфейса. Не считать весь пункт готовым по наличию schema8.
+
+
+## Общие рейтинги, навигация и все YouTube-чаты
+
+Рейтинг сообщений включает standalone YouTube и сумму ручных связей; рейтинг lifetime-наблюдений больше не обрезает данные 20 стримами и сортирует рассчитанные минуты, а не число опросов. Исключения распространяются между связанными Twitch/DA/YouTube identities. YouTube убран из отдельного пункта меню: подключённый канал и его отчёт находятся в Интеграциях, аудитория — в общих Людях/Аналитике. Сохранены браузерные проверки изоляции, demo/real и ошибок загрузки, изменён только маршрут интерфейса.
+
+Collector больше не отбрасывает чат третьего и следующих активных broadcasts. Регрессия проверяет четыре чата, сообщения и сохранённые cursors, один logical stream. Cancellation/lifecycle suite 15/15; итоговый общий Node прогон 219/219. Svelte 0 errors/warnings. CI 57785e7: все test segments и operations зелёные, combined gate красный: lines 99,33%, functions 94,97%, branches 92,46%. Следующий коммит требует своей проверки CI.
+
+Живой Supabase connector возвращает пустой общий список projects, но прямой get_project подтвердил Stream Panel (eyverhyrhibwyiipgozn), отдельную организацию bjcagaqyxgkembnufwvv и ACTIVE_HEALTHY. До настройки storage был пуст: buckets/objects/policies = 0. Создан private stream-panel-backups bucket: public=false, лимит 48 MiB, application/octet-stream. Публичные политики не добавлялись. Серверный ключ и успешные live upload/list/rotation/download/restore пока не подтверждены. Street Food не открывался.

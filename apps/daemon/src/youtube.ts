@@ -173,7 +173,7 @@ export class YouTubeConnection {
     await this.db.call("platformMissing", "youtube", tokens.userId, videoIds, observedAt);
     if (!valid()) return 300000;
     let interval = broadcasts.length ? 60000 : 300000;
-    for (const broadcast of broadcasts.slice(0, 2)) {
+    for (const broadcast of broadcasts) {
       const chat = string(broadcast.snippet?.liveChatId); if (!chat) continue;
       const cursor = string(previous.snapshots[`cursor:${chat}`]?.data);
       const response = await this.api("liveChat/messages", { part: "id,snippet,authorDetails", liveChatId: chat, maxResults: "2000", ...(cursor ? { pageToken: cursor } : {}) }, tokens);

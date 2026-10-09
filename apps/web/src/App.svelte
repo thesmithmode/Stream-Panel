@@ -82,7 +82,6 @@
     sessions: "Стримы",
     people: "Люди",
     analytics: "Аналитика аудитории",
-    youtube: "YouTube",
     connections: "Интеграции",
   };
   const descriptions: Record<string, string> = {
@@ -90,7 +89,6 @@
     sessions: "История стримов и полнота собранных данных.",
     people: "Активность людей и управляемые связи аккаунтов.",
     analytics: "Ядро аудитории, категории и время эфиров. Наблюдения и оценки показаны отдельно.",
-    youtube: "Статистика канала и чат эфиров своего профиля.",
     connections: "Twitch, DonationAlerts и YouTube — вход и статус сбора.",
   };
   const nav = [
@@ -98,7 +96,6 @@
     ["sessions", "Стримы"],
     ["people", "Люди"],
     ["analytics", "Аналитика"],
-    ["youtube", "YouTube"],
     ["connections", "Интеграции"],
   ] as const;
   async function refresh() {
@@ -293,12 +290,11 @@
         />
       {:else if tab === "analytics"}
         <Analytics profile={user?.profile ?? "local"} mode={dataMode} onPerson={openPerson} />
-      {:else if tab === "youtube"}
-        <YouTube mode={dataMode} />
       {:else if tab === "connections"}<Connections
           {status}
           onChange={refresh}
         />
+        <YouTube mode={dataMode} />
       {:else if tab === "people"}<People
           {people}
           {sessions}
@@ -306,6 +302,7 @@
           initialId={personId}
           onChange={refresh}
         />
+        <YouTube mode={dataMode} />
       {:else if tab === "sessions"}<section class="panel">
           <header>
             <h2>История стримов</h2>

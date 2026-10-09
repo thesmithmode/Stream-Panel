@@ -140,3 +140,30 @@ test('malformed or capped broadcast discovery fails before snapshots or missing 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+
+test('every confirmed concurrent YouTube broadcast collects its chat and durable cursor',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-youtube-all-chats-')),db=new StoreClient(join(dir,'data.sqlite'),'ruslan');
+ const now=Date.parse('2026-10-07T12:00:00Z'),ids=['video_AAAAAA','video_BBBBBB','video_CCCCCC','video_DDDDDD'];
+ const config={value:{youtube:{access:'access',refresh:'refresh',userId:'channel',scopes,expiresAt:now+3600000}},save:async()=>{}} as unknown as Configuration;
+ const requested:string[]=[];
+ const request:typeof fetch=async input=>{
+  const url=new URL(String(input));
+  if(url.pathname.endsWith('/liveBroadcasts'))return Response.json({items:ids.map(id=>({id,snippet:{channelId:'channel',liveChatId:`chat-${id}`,title:id}}))});
+  if(url.pathname.endsWith('/videos'))return Response.json({items:ids.map(id=>({id,liveStreamingDetails:{actualStartTime:new Date(now-60000).toISOString(),concurrentViewers:'2'}}))});
+  if(url.pathname.endsWith('/liveChat/messages')){
+   const chat=url.searchParams.get('liveChatId')!;requested.push(chat);
+   return Response.json({items:[{id:`message-${chat}`,snippet:{type:'textMessageEvent',publishedAt:new Date(now).toISOString(),displayMessage:chat},authorDetails:{channelId:`author-${chat}`,displayName:chat}}],nextPageToken:`cursor-${chat}`,pollingIntervalMillis:60000});
+  }
+  return Response.json({});
+ };
+ const yt=new YouTubeConnection(config,db,'https://panel.test/oauth/youtube/callback','ruslan',request,()=>now);
+ try{
+  await db.ready;await db.call('youtubeSnapshot','channel','channel',{id:'channel'},now);await db.call('youtubeSnapshot','channel','report',{},now);
+  assert.equal(await yt.collectOnce(),60000);assert.deepEqual(requested,ids.map(id=>`chat-${id}`));
+  const data=await db.call<any>('youtubeData','channel');assert.equal(data.messages.length,4);
+  for(const id of ids)assert.equal(data.snapshots[`cursor:chat-${id}`].data,`cursor-chat-${id}`);
+  assert.equal((await db.call<any[]>('persons')).length,4);
+  assert.equal((await db.call<any[]>('sessions')).length,1);
+ }finally{await yt.stop();await db.stop();await rm(dir,{recursive:true,force:true});}
+});
