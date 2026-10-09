@@ -35,6 +35,8 @@ type Entity = {
     intervals: Span[];
     donations: Record<string, string>;
     core: boolean;
+    tags: string[];
+    manualCore: boolean|null;
 };
 export function unionSpans(spans: Span[]): Span[] {
     const sorted = spans.filter(x => x.to > x.from).sort((a, b) => a.session.localeCompare(b.session) || a.from - b.from || a.to - b.to), out: Span[] = [];
@@ -72,7 +74,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     }[];
     const entities = new Map<string, Entity>();
     const entity = (id: string, name: string, platform: 'twitch' | 'youtube') => { let e = entities.get(id); if (!e) {
-        e = { id, name, source: platform, messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, sessionIds: new Set(), attendanceSessionIds: new Set(), regular: false, intervals: [], donations: {}, core: false };
+        e = { id, name, source: platform, messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, sessionIds: new Set(), attendanceSessionIds: new Set(), regular: false, intervals: [], donations: {}, core: false, tags:[], manualCore:null };
         entities.set(id, e);
     } return e; };
     const allowed = new Map(people.map(p => [p.id, p.display_name]));
@@ -206,18 +208,26 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         if (++expanded > 2000000) throw new Error('ANALYTICS_RANGE_TOO_LARGE');
         minute(at);
     }
+    const entityIds=JSON.stringify([...entities.keys()]);
+    const preferences=new Map((db.prepare("SELECT person_id,manual_core FROM person_preferences WHERE person_id IN(SELECT value FROM json_each(?))").all(entityIds) as {person_id:string;manual_core:number|null}[]).map(row=>[row.person_id,row.manual_core]));
+    const tags=db.prepare(`WITH RECURSIVE owners(person_id,origin_id) AS (SELECT value,value FROM json_each(?) UNION SELECT o.person_id,m.source_person_id FROM owners o JOIN person_merges m ON m.target_person_id=o.origin_id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT o.person_id,t.label FROM owners o JOIN person_tags t ON t.person_id=o.origin_id ORDER BY t.label`).all(entityIds) as {person_id:string;label:string}[];
+    for(const tag of tags)entities.get(tag.person_id)!.tags.push(tag.label);
     for (const e of entities.values()) {
         e.intervals = unionSpans(e.intervals);
         for(const span of e.intervals)e.attendanceSessionIds.add(span.session);
-        e.regular=e.attendanceSessionIds.size>0 && e.attendanceSessionIds.size/selectedStreamCount*100>regularThresholdPercent;
+        for(const span of e.intervals){
+            const duration=(span.to-span.from)/60000;
+            if(span.kind==='observed')e.observedMinutes+=duration;else e.estimatedChatMinutes+=duration;
+            e.sessionIds.add(span.session);
+        }
+        const long=e.observedMinutes+e.estimatedChatMinutes>=minMinutes,chatty=e.messages>=minMessages;
+        const automatic=e.attendanceSessionIds.size>=minSessions && e.attendanceSessionIds.size>0 && e.attendanceSessionIds.size/selectedStreamCount*100>regularThresholdPercent && (rule==='frequency'||(rule==='both'?long&&chatty:long||chatty));
+        const override=preferences.get(e.id);
+        e.manualCore=override==null?null:override===1;
+        e.core=e.manualCore??automatic;
+        e.regular=e.core; // Compatibility fields refer to the same audience core.
         const signalMinutes=new Set<number>();
         for (const span of e.intervals) {
-            const duration = (span.to - span.from) / 60000;
-            if (span.kind === 'observed')
-                e.observedMinutes += duration;
-            else
-                e.estimatedChatMinutes += duration;
-            e.sessionIds.add(span.session);
             for (let at = Math.floor(span.from / 60000) * 60000; at < span.to; at += 60000) {
                 if (++expanded > 2000000)
                     throw new Error('ANALYTICS_RANGE_TOO_LARGE');
@@ -228,8 +238,6 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
                 else {point.estimated++;if(e.regular)point.regularEstimated++;}
             }
         }
-        const long = e.observedMinutes + e.estimatedChatMinutes >= minMinutes, chatty = e.messages >= minMessages;
-        e.core = e.sessionIds.size >= minSessions && (rule === 'frequency' || (rule === 'both' ? long && chatty : long || chatty));
     }
     for(const [at,authors] of messageAuthors)for(const [id,n] of authors)if(entities.get(id)?.regular)minute(at).regularMessages+=n;
     const categories = new Map<string, {
@@ -315,8 +323,8 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         if (point.presenceKnown)
             cell.observedKnownMinutes++;
     }
-    const audience = [...entities.values()].filter(e => e.sessionIds.size || e.messages).sort((a, b) => Number(b.core) - Number(a.core) || b.observedMinutes - a.observedMinutes || b.messages - a.messages).map(e => ({ ...e, sessionIds: [...e.sessionIds], attendanceSessionIds: [...e.attendanceSessionIds], attendanceRatio: selectedStreamCount?e.attendanceSessionIds.size/selectedStreamCount:0, visits: e.intervals.length, observedMinutesPerSession: e.sessionIds.size ? e.observedMinutes/e.sessionIds.size : 0, sessionRatio: e.sessionIds.size/selectedStreamCount, observedMinutes: Math.round(e.observedMinutes * 10) / 10, estimatedChatMinutes: Math.round(e.estimatedChatMinutes * 10) / 10 }));
-    const attendees=audience.filter(e=>e.attendanceSessionIds.length>0),regulars=attendees.filter(e=>e.regular).length;
+    const audience = [...entities.values()].filter(e => e.sessionIds.size || e.messages).sort((a, b) => Number(b.core) - Number(a.core) || b.observedMinutes - a.observedMinutes || b.messages - a.messages).map(e => ({ ...e, sessionIds: [...e.sessionIds], attendanceSessionIds: [...e.attendanceSessionIds], attendanceRatio: selectedStreamCount?e.attendanceSessionIds.size/selectedStreamCount:0, visits: e.intervals.length, observedMinutesPerSession: e.attendanceSessionIds.size ? e.observedMinutes/e.attendanceSessionIds.size : 0, sessionRatio: e.sessionIds.size/selectedStreamCount, observedMinutes: Math.round(e.observedMinutes * 10) / 10, estimatedChatMinutes: Math.round(e.estimatedChatMinutes * 10) / 10 }));
+    const attendees=audience.filter(e=>e.attendanceSessionIds.length>0),regulars=audience.filter(e=>e.core).length;
     const seen = new Set<string>();
     const streamComparison = sessions.filter(s => selected.some(segment => segment.session === s.id)).map(s => {
         const visitors = audience.filter(e => e.sessionIds.includes(s.id)), newInPeriod = visitors.filter(e => !seen.has(e.id)).length;
@@ -326,5 +334,5 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     });
     const report=source!=='twitch'&&options.youtubeAccount ? db.prepare("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {payload_json:string;updated_at_ms:number}|undefined : undefined;
     const youtubeReport=report ? {data:JSON.parse(report.payload_json),updatedAt:report.updated_at_ms} : null;
-    return { youtubeReport, streamComparison, availableCategories: [...new Map(segments.map(s => [s.categoryId, { id: s.categoryId, name: s.name }])).values()], filters: { fromMs: from, toMs: to, source, category, minSessions, minMinutes, minMessages, regularThresholdPercent, coreRule: rule, chatWindowMinutes: window, timezone }, summary: { entities: audience.length, attendees: attendees.length, regulars, regularShare: attendees.length?regulars/attendees.length:null, core: audience.filter(e => e.core).length, streams: new Set(selected.map(x => x.session)).size, messages: audience.reduce((sum, e) => sum + e.messages, 0) }, audience, categories: [...categories.values()].map(c => ({ ...c, sessions: c.sessions.size, audience: c.audience.size, core: c.core.size, messagesPerHour: c.minutes ? c.messages * 60 / c.minutes : 0, observedPerMinute: c.minutes ? c.observedMinutes / c.minutes : 0, observedPerKnownMinute: c.observedKnownMinutes ? c.observedMinutes / c.observedKnownMinutes : null, coverageRatio: c.minutes ? c.observedKnownMinutes/c.minutes : null })), timeline: [...timeline.values()].sort((a, b) => a.at - b.at), hours: [...hourly.values()].sort((a, b) => ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(a.day) - ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(b.day) || a.hour - b.hour), sessions, excluded: [...excluded] };
+    return { youtubeReport, streamComparison, availableCategories: [...new Map(segments.map(s => [s.categoryId, { id: s.categoryId, name: s.name }])).values()], filters: { fromMs: from, toMs: to, source, category, minSessions, minMinutes, minMessages, regularThresholdPercent, coreRule: rule, chatWindowMinutes: window, timezone }, summary: { entities: audience.length, attendees: attendees.length, regulars, regularShare: audience.length?regulars/audience.length:null, core: audience.filter(e => e.core).length, streams: new Set(selected.map(x => x.session)).size, messages: audience.reduce((sum, e) => sum + e.messages, 0) }, audience, categories: [...categories.values()].map(c => ({ ...c, sessions: c.sessions.size, audience: c.audience.size, core: c.core.size, messagesPerHour: c.minutes ? c.messages * 60 / c.minutes : 0, observedPerMinute: c.minutes ? c.observedMinutes / c.minutes : 0, observedPerKnownMinute: c.observedKnownMinutes ? c.observedMinutes / c.observedKnownMinutes : null, coverageRatio: c.minutes ? c.observedKnownMinutes/c.minutes : null })), timeline: [...timeline.values()].sort((a, b) => a.at - b.at), hours: [...hourly.values()].sort((a, b) => ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(a.day) - ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(b.day) || a.hour - b.hour), sessions, excluded: [...excluded] };
 }

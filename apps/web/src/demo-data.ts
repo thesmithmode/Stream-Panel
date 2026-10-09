@@ -310,6 +310,10 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
   const p = basePath(path);
   const q = parseQuery(path);
   const isPost = body !== undefined;
+  if (/^persons\/[^/]+\/metadata$/.test(p)) {
+    if(isPost)throw new Error("Метки доступны после подключения к серверу");
+    return {revision:0,tags:[],manualCore:null};
+  }
   if (/^persons\/[^/]+\/notes(?:\/[^/]+\/(?:update|delete))?$/.test(p)) {
     if (isPost) throw new Error("Заметки доступны после подключения к серверу");
     return [];

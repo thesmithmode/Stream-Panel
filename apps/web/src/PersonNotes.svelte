@@ -25,14 +25,14 @@
 <section aria-label="Заметки о человеке">
   <h3>Заметки</h3>
   <label>Новая заметка<textarea bind:value={draft} maxlength="10000" rows="3"></textarea></label>
-  <button disabled={busy||!draft.trim()} onclick={()=>change(async()=>{await api(`persons/${personId}/notes`,{body:draft});draft="";})}>Добавить заметку</button>
+  <button class="primary" disabled={busy||!draft.trim()} onclick={()=>change(async()=>{await api(`persons/${personId}/notes`,{body:draft});draft="";})}>Добавить заметку</button>
   {#if error}<p role="alert">{error}</p>{/if}
   {#each notes as note (note.id)}
     <article>
       <div class="small muted">{date(note.created_at_ms)}{#if note.revision>0} · Изменено {date(note.updated_at_ms)}{/if}</div>
       {#if editing?.id===note.id}
         <label>Текст заметки<textarea bind:value={editBody} maxlength="10000" rows="3"></textarea></label>
-        <button disabled={busy||!editBody.trim()} onclick={()=>change(async()=>{await api(`persons/${personId}/notes/${note.id}/update`,{body:editBody,revision:editing!.revision});editing=null;})}>Сохранить заметку</button>
+        <button class="primary" disabled={busy||!editBody.trim()} onclick={()=>change(async()=>{await api(`persons/${personId}/notes/${note.id}/update`,{body:editBody,revision:editing!.revision});editing=null;})}>Сохранить заметку</button>
         <button class="outline" disabled={busy} onclick={()=>editing=null}>Отмена</button>
       {:else}
         <p class="note-body">{note.body}</p>

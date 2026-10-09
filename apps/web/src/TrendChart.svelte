@@ -9,13 +9,13 @@
   function title(point:typeof buckets[number]) {
     const label=`${new Date(point.at).toLocaleString('ru-RU')} · ${Math.round(point.width/60000)} мин`;
     if(!point.known)return `${label} · нет данных`;
-    const regular=split&&point.value>0?` · постоянники: ${point.regularValue.toFixed(1)} (${(point.regularValue/point.value*100).toFixed(1)}%)`:'';
+    const regular=split&&point.value>0?` · ядро: ${point.regularValue.toFixed(1)} (${(point.regularValue/point.value*100).toFixed(1)}%)`:'';
     return `${label} · всего: ${point.value.toFixed(1)}${regular}`;
   }
 </script>
 <div class="trend-chart">
   {#if !buckets.length}<p class="muted">Пока нет точек для графика</p>{:else}
-    {#if split}<div class="legend chart-legend"><span><i class="regular-swatch"></i>Постоянники — снизу, жёлтым</span><span><i class:estimated={metric==='estimated'} class="other-swatch"></i>Остальные</span></div>{/if}
+    {#if split}<div class="legend chart-legend"><span><i class="regular-swatch"></i>Ядро аудитории</span><span><i class:estimated={metric==='estimated'} class="other-swatch"></i>Аудитория вне ядра</span></div>{/if}
     <div class="trend-plot"><svg viewBox="0 0 800 220" role="img" aria-label="График активности по выбранному периоду">
       <line x1="32" y1="190" x2="790" y2="190" stroke="currentColor" opacity=".25" />
       <text x="5" y="24" fill="currentColor" font-size="12">{Math.round(maximum)}</text><text x="8" y="190" fill="currentColor" font-size="12">0</text>

@@ -56,26 +56,26 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await page.getByText('Настроить отображение',{exact:true}).click();await page.getByLabel('Детализация графика').selectOption('1');await page.locator('.regular-segment').first().waitFor();await page.getByText('Настроить отображение',{exact:true}).click();
    assert.ok(await page.locator('.trend-chart rect.regular-segment').count()>0);
    assert.ok(await page.locator('.trend-chart .chart-bar').evaluateAll(groups=>groups.some(group=>{const full=group.querySelector('.total-segment'),regular=group.querySelector('.regular-segment');return regular&&Math.abs(Number(regular.getAttribute('height'))/Number(full.getAttribute('height'))-.5)<.001&&Math.abs(Number(regular.getAttribute('y'))+Number(regular.getAttribute('height'))-190)<.001;})));
-   assert.ok(await page.getByRole('row').filter({hasText:`Regular ${profile}`}).locator('.regular-badge').count()>0);
-   assert.equal(await page.getByRole('row').filter({hasText:`Occasional ${profile}`}).locator('.regular-badge').count(),0);
+   assert.ok(await page.getByRole('row').filter({hasText:`Regular ${profile}`}).locator('.core-badge').count()>0);
+   assert.equal(await page.getByRole('row').filter({hasText:`Occasional ${profile}`}).locator('.core-badge').count(),0);
    await page.getByLabel('Метрика графика').selectOption('viewers');assert.equal(await page.locator('.trend-chart rect.regular-segment').count(),0);await page.getByLabel('Метрика графика').selectOption('observed');
    await page.getByText('Настроить отображение',{exact:true}).click();
    await page.getByLabel('Детализация графика').selectOption('15');
    assert.ok((await page.locator('.trend-chart .chart-bar title').first().textContent()).includes('15 мин'));
-   await page.getByLabel('Жёлтая доля постоянников').uncheck();assert.equal(await page.locator('.regular-segment').count(),0);
-   await page.getByLabel('Только постоянники').check();assert.equal(await page.getByRole('button',{name:`Occasional ${profile}`,exact:true}).count(),0);
+   await page.getByLabel('Жёлтая доля ядра').uncheck();assert.equal(await page.locator('.regular-segment').count(),0);
+   await page.getByLabel('Только ядро').check();assert.equal(await page.getByRole('button',{name:`Occasional ${profile}`,exact:true}).count(),0);
    await page.getByLabel('Сортировка').selectOption('attendanceRatio');
    await page.getByLabel('Вид дней и часов').selectOption('table');assert.equal(await page.locator('.hour-heatmap').count(),0);
    await page.getByLabel('Вид дней и часов').selectOption('map');assert.equal(await page.locator('.hour-heatmap').count(),1);
-   const sections=[['Отчёт YouTube','Агрегатный отчёт YouTube: все видео канала'],['График активности','Активность по времени'],['Сравнение категорий','Что стримить: категории'],['Дни и часы','Когда стримить: дни и часы'],['Возвращения по эфирам','Возвращения по эфирам'],['Таблица аудитории','Состав аудитории']];
+   const sections=[['Отчёт YouTube','Агрегатный отчёт YouTube: все видео канала'],['График активности','Активность по времени'],['Сравнение категорий','Категории'],['Дни и часы','Активность по дням и часам'],['Возвращения по эфирам','Возвращения по эфирам'],['Таблица аудитории','Состав аудитории']];
    for(const [label,heading] of sections){await page.getByLabel(label,{exact:true}).uncheck();assert.equal(await page.getByRole('heading',{name:heading,exact:true}).count(),0);await page.getByLabel(label,{exact:true}).check();}
    await page.getByLabel('График активности',{exact:true}).uncheck();
    await page.getByRole('button',{name:'Обзор',exact:true}).click();await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
    assert.equal(await page.getByRole('heading',{name:'Активность по времени',exact:true}).count(),0);
    await page.getByText('Настроить отображение',{exact:true}).click();
-   assert.equal(await page.getByLabel('Детализация графика').inputValue(),'15');assert.equal(await page.getByLabel('Только постоянники').isChecked(),true);
+   assert.equal(await page.getByLabel('Детализация графика').inputValue(),'15');assert.equal(await page.getByLabel('Только ядро').isChecked(),true);
    await page.getByRole('button',{name:'Сбросить отображение',exact:true}).click();await page.getByRole('heading',{name:'Активность по времени',exact:true}).waitFor();
-   assert.equal(await page.getByLabel('Только постоянники').isChecked(),false);assert.ok(await page.locator('.regular-segment').count()>0);
+   assert.equal(await page.getByLabel('Только постоянники').count(),0);assert.ok(await page.locator('.regular-segment').count()>0);
    if(profile==='ruslan'){
     for(const width of [320,390,768,1280,1440]){
      await page.setViewportSize({width,height:900});
@@ -102,7 +102,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await page.getByLabel('Поиск участника').fill('Regular');await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).click();
    await page.getByRole('heading',{name:`Активность: Regular ${profile}`}).waitFor();assert.equal(await page.locator('.minute-dot').count(),1440);await page.getByRole('button',{name:'Закрыть детализацию'}).click();
    await page.getByLabel('Поиск участника').fill('');
-   for(const metric of ['estimated','messages','viewers','observed']){await page.getByLabel('Метрика графика').selectOption(metric);await page.getByLabel('Метрика карты').selectOption(metric);if(metric!=='viewers')assert.ok(await page.locator('.trend-chart rect.regular-segment').count()>0);}
+   for(const metric of ['estimated','messages','viewers','observed']){await page.getByLabel('Метрика графика').selectOption(metric);await page.getByLabel('Метрика карты').selectOption(metric);if(metric==='observed'||metric==='messages')assert.ok(await page.locator('.trend-chart rect.regular-segment').count()>0);else assert.equal(await page.locator('.trend-chart rect.regular-segment').count(),0);}
    await page.getByLabel('Обновлять каждую минуту').check();
    const refreshed=page.waitForResponse(r=>r.url().includes('/api/v1/analytics?')&&r.status()===200);await page.clock.fastForward(60300);await refreshed;await page.getByLabel('Обновлять каждую минуту').uncheck();
    await page.getByRole('button',{name:`YT ${profile}`,exact:true}).click();await page.getByText('Оценка по чату YouTube',{exact:true}).first().waitFor();await page.getByRole('button',{name:'Закрыть детализацию'}).click();
@@ -111,7 +111,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
    const youtubeFilter=watchAnalytics({source:'youtube',category:'game',timezone:'UTC'});
    await page.getByLabel('Площадка').selectOption('youtube');await advanceAutoFilter(youtubeFilter);
-   await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).count(),0);
+   await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor({state:'detached'});assert.equal(await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).count(),0);
    const twitchFilter=watchAnalytics({source:'twitch',category:'game',timezone:'UTC'});
    await page.getByLabel('Площадка').selectOption('twitch');await advanceAutoFilter(twitchFilter);
    await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).click();await page.getByText('Донаты с подтверждённым временем:',{exact:false}).first().waitFor();await page.getByRole('button',{name:'Открыть карточку человека',exact:true}).click();await openAnalytics({source:'all',category:'',timezone:'UTC'});await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();

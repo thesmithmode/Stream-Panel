@@ -13,6 +13,7 @@
   import EventList from "./EventList.svelte";
   import Icon from "./Icon.svelte";
   import PersonNotes from "./PersonNotes.svelte";
+  import PersonMetadata from "./PersonMetadata.svelte";
   let {
     people,
     sessions,
@@ -124,6 +125,11 @@
     const q = sessionFilter ? `?session=${sessionFilter}` : "";
     const value = await api<PersonStats>(`persons/${id}/stats${q}`);
     if (selectedId === id) stats = value;
+  }
+  async function refreshPerson(id:string) {
+    const person=await api(`persons/${id}`);
+    if(selectedId===id)detail=person;
+    await onChange();
   }
   async function select(id: string) {
     selectedId = id;
@@ -332,7 +338,10 @@
             >
           </div></label
         >
-        {#key detail.id}<PersonNotes personId={detail.id} />{/key}
+        {#key detail.id}
+          <PersonMetadata personId={detail.id} onChange={()=>refreshPerson(detail.id)} />
+          <PersonNotes personId={detail.id} />
+        {/key}
         <h3>Зрители и донатеры</h3>
         <p class="small muted">
           Person — связка. Twitch login = один зритель; одно имя DA = один

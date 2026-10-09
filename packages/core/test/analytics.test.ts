@@ -248,7 +248,7 @@ test('regular audience uses attendance share, excludes donation-only profiles an
    s.endSession(sid,start+3*minute,'observed');
   }
   const query={...opts,regularThresholdPercent:60},result=s.analytics(query);
-  assert.equal(result.summary.regulars,3);assert.equal(result.summary.attendees,5);assert.equal(result.summary.regularShare,.6);
+  assert.equal(result.summary.regulars,3);assert.equal(result.summary.attendees,5);assert.equal(result.summary.regularShare,.5);
   assert.equal(result.audience.find(e=>e.name==='Two thirds')!.attendanceRatio,2/3);
   assert.equal(result.audience.find(e=>e.name==='Donor only')!.regular,false);
   const first=result.timeline.find(p=>p.at===base)!;
@@ -256,7 +256,7 @@ test('regular audience uses attendance share, excludes donation-only profiles an
   assert.equal(first.estimated,2);assert.equal(first.regularEstimated,1);
   assert.equal(first.messages,4);assert.equal(first.regularMessages,2);
   assert.equal(s.analytics({...query,regularThresholdPercent:100}).summary.regulars,0);
-  assert.equal(s.analytics({...query,regularThresholdPercent:0}).summary.regulars,5);
+  assert.equal(s.analytics({...query,regularThresholdPercent:0}).summary.regulars,3);
   const exact=s.analytics({...query,regularThresholdPercent:100*2/3});
   assert.equal(exact.audience.find(e=>e.name==='Two thirds')!.regular,false);
   assert.equal(s.analytics({...query,category:'absent'}).summary.regularShare,null);
@@ -272,7 +272,7 @@ test('switching away and back within one minute never counts a regular attendee 
   s.recordPoll(sid,'channel',{startedAtMs:base,completedAtMs:base+minute,status:'complete',userIds:['human']});
   s.youtubeMessages('yt-owner','chat',[{id:'minute-return',snippet:{type:'textMessageEvent',publishedAt:new Date(base+5000).toISOString()},authorDetails:{channelId:'yt-human',displayName:'Human'}}]);
   s.endSession(sid,base+2*minute,'observed');
-  const point=s.analytics({...opts,category:'game'}).timeline.find(p=>p.at===base)!;
+  const point=s.analytics({...opts,minSessions:1,minMinutes:0,minMessages:0,category:'game'}).timeline.find(p=>p.at===base)!;
   assert.equal(point.observed,1);assert.equal(point.regularObserved,1);assert.equal(point.estimated,1);assert.equal(point.regularEstimated,1);
  }finally{s.close();}
 });

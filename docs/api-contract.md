@@ -4,7 +4,7 @@
 
 ## Вход и защита
 
-Серверный вход: POST /auth/login {username,password} → {csrf,user}; публичной регистрации и /bootstrap нет. Secure HttpOnly SameSite=Lax cookie sp_session на / действует 24 часа, хранится в SQLite в виде хэша. GET /auth/me возвращает свой профиль; POST /auth/logout требует CSRF и отзывает текущую сессию. Перезапуск не отзывает сессии автоматически. Все записи требуют точный Origin и X-CSRF-Token, точный Host проверяется для всех запросов. API профиля выбирается сервером из сессии, клиент не передаёт profile ID для доступа к чужой базе.
+Серверный вход: POST /auth/login {username,password} → {csrf,user}; публичной регистрации и /bootstrap нет. Secure HttpOnly SameSite=Lax cookie sp_session на / действует 24 часа, хранится в SQLite в виде хэша. GET /auth/me возвращает свой профиль; POST /auth/logout требует CSRF и отзывает текущую сессию. Перезапуск не отзывает сессии автоматически. Все записи требуют точный Origin и X-CSRF-Token, точный Host проверяется для всех запросов. Оба аккаунта могут выбрать любой из двух профилей: клиент передаёт X-Stream-Panel-Profile, сервер проверяет допустимое значение. Данные и OAuth state остаются изолированными по профилю.
 
 Публичный URL — HTTPS за reverse proxy; backend слушает только 127.0.0.1. GET /healthz проверяет workers без токенов/учётных данных, возвращает ok и release. Во время maintenance API возвращает 503 SERVER_UPDATING. OAuth callbacks DA/YouTube требуют ту же парольную сессию и short-lived одноразовый state. Утилита createApplication сохраняет старый локальный bootstrap только для низкоуровневых fixture-тестов; production entrypoint использует createHostedApplication.
 
@@ -77,3 +77,9 @@ Twitch категория привязана ко времени, включая
 Участник возвращает `attendanceSessionIds`, `attendanceRatio`, `regular`; существующие `sessionIds` описывают всю активность, включая донаты. Summary: `attendees`, `regulars`, `regularShare` (0–1 или null). Timeline: `regularObserved`, `regularEstimated`, `regularMessages` — подмножества соответствующих полных показателей. Один участник учитывается в минуте один раз даже при смене и возврате категории внутри минуты. Владельцы/боты исключены до классификации.
 
 График усредняет полную и регулярную аудиторию по одному набору известных минут; сообщения суммирует. Жёлтый сегмент занимает пропорциональную часть полной высоты снизу, не прибавляется к ней. Общий счётчик площадки не имеет персональной разбивки. Twitch и YouTube accounts не считаются одним человеком без подтверждённой связи; оценки YouTube не становятся доказанным временем просмотра.
+
+## Заметки, теги и ручное ядро
+
+- GET /persons/:id/notes → записи {id,person_id,body,created_at_ms,updated_at_ms,revision}. POST того же пути {body} создаёт отдельную запись. POST /persons/:id/notes/:noteId/update {body,revision}; POST .../delete {revision}. body 1–10000 символов; createdAt не меняется, updatedAt не уменьшается. Несовпадение revision — 409 NOTE_CONFLICT.
+- GET /persons/:id/metadata → {revision,tags,manualCore}. POST того же пути {revision,tags,manualCore}; максимум 50 тегов по 64 символа, пустые запрещены, пробелы по краям убираются, повторы удаляются. manualCore = null/true/false. Изменение атомарно повышает Person revision; устаревшая revision — 409 REVISION_CONFLICT.
+- Все записи требуют парольную/локальную fixture-сессию, CSRF и Origin. Данные изолированы по выбранному профилю. Заметки и теги учитывают активные цепочки merge без потери исходного владельца. Ручное ядро применяется к целевой карточке; raw events и подтверждение attendance не изменяет.

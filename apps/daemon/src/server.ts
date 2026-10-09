@@ -101,6 +101,7 @@ export async function createApplication(
     required,
   });
   const schemaBodies: Record<string, Record<string, unknown>> = {
+    "/api/v1/persons/:id/metadata": body({tags:{type:"array",maxItems:50,items:{type:"string",minLength:1,maxLength:64}},manualCore:{type:["boolean","null"]},revision},["tags","manualCore","revision"]),
     "/api/v1/persons/:id/notes": body({body:{type:"string",minLength:1,maxLength:10000}},["body"]),
     "/api/v1/persons/:id/notes/:noteId/update": body({body:{type:"string",minLength:1,maxLength:10000},revision},["body","revision"]),
     "/api/v1/persons/:id/notes/:noteId/delete": body({revision},["revision"]),
@@ -343,6 +344,11 @@ export async function createApplication(
   app.get("/api/v1/persons/:id", async (request) =>
     db.call("person", string(object(request.params).id)),
   );
+  app.get("/api/v1/persons/:id/metadata", async request => db.call("personMetadata",string(object(request.params).id)));
+  app.post("/api/v1/persons/:id/metadata", async request => {
+    const b=object(request.body);
+    return db.call("setPersonMetadata",string(object(request.params).id),b.tags,b.manualCore,Number(b.revision));
+  });
   app.get("/api/v1/persons/:id/notes", async request => db.call("personNotes",string(object(request.params).id)));
   app.post("/api/v1/persons/:id/notes", async request => db.call("createPersonNote",string(object(request.params).id),string(object(request.body).body)));
   app.post("/api/v1/persons/:id/notes/:noteId/update", async request => {

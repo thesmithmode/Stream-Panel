@@ -18,6 +18,7 @@ const allowed = new Set([
   "persons",
   "person",
   "personNotes", "createPersonNote", "updatePersonNote", "deletePersonNote",
+  "personMetadata", "setPersonMetadata",
   "events",
   "summary",
   "grid",
