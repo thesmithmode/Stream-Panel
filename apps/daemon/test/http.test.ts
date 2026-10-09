@@ -317,7 +317,7 @@ test("manual stream deletion requires authentication, CSRF and strict payload, a
  try{
   const now=Date.now(),manual=await f.a.db.call<string>('startSession','local','mistake',now,'manual',now);
   const url=`/api/v1/sessions/${manual}/delete`;
-  const inject=(headers:Record<string,string>,payload:unknown={})=>f.a.app.inject({method:'POST',url,headers,payload});
+  const inject=(headers:Record<string,string>,payload:Record<string,unknown>={})=>f.a.app.inject({method:'POST',url,headers,payload});
   assert.equal((await inject({host:f.headers.host})).statusCode,401);
   assert.equal((await inject({...f.headers,'x-csrf-token':'wrong'})).statusCode,403);
   assert.equal((await inject(f.headers,{unexpected:true})).statusCode,400);
