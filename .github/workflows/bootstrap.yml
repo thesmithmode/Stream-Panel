@@ -1,0 +1,87 @@
+name: Bootstrap private server
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: stream-panel-production
+  cancel-in-progress: false
+jobs:
+  bootstrap:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require current main and successful quality gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          test "$sha" = "$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha')"
+          gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&per_page=20" --jq '.workflow_runs | any(.conclusion == "success" and .head_branch == "main")' | grep -qx true
+          printf 'STREAM_PANEL_RELEASE=%s\n' "$sha" >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm prune --prod
+      - run: node scripts/server-bundle.mjs
+      - name: Install isolated service through CI only
+        env:
+          BOOTSTRAP_KEY: ${{ secrets.STREAM_PANEL_BOOTSTRAP_KEY }}
+          DEPLOY_HOST: ${{ secrets.STREAM_PANEL_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.STREAM_PANEL_DEPLOY_PORT }}
+          KNOWN_HOSTS: ${{ secrets.STREAM_PANEL_DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PUBLIC_KEY: ${{ secrets.STREAM_PANEL_DEPLOY_PUBLIC_KEY }}
+          BACKUP_KEY: ${{ secrets.STREAM_PANEL_BACKUP_KEY }}
+          ACCOUNTS: ${{ secrets.STREAM_PANEL_ACCOUNTS }}
+          SUPABASE_KEY: ${{ secrets.STREAM_PANEL_SUPABASE_KEY }}
+          SUPABASE_URL: ${{ vars.STREAM_PANEL_SUPABASE_URL }}
+          BRIDGE_IP: ${{ vars.STREAM_PANEL_BRIDGE_IP }}
+          PROXY_IP: ${{ vars.STREAM_PANEL_PROXY_IP }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$DEPLOY_HOST" =~ ^[0-9.]+$ && "$DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]] || exit 1
+          for value in "$BOOTSTRAP_KEY" "$KNOWN_HOSTS" "$DEPLOY_PUBLIC_KEY" "$BACKUP_KEY" "$ACCOUNTS" "$BRIDGE_IP" "$PROXY_IP" "$SUPABASE_KEY" "$SUPABASE_URL"; do
+            test -n "$value" || { echo 'Required production settings missing'; exit 1; }
+          done
+          task_dir=$(mktemp -d)
+          trap 'rm -rf "$task_dir"' EXIT
+          printf '%s\n' "$BOOTSTRAP_KEY" > "$task_dir/root-key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$task_dir/known-hosts"
+          mkdir "$task_dir/payload"
+          cp ops/bootstrap-traefik.sh ops/receive.py ops/stream-panel.service ops/configure-initial.sh "$task_dir/payload/"
+          cp artifacts/server.header artifacts/server.tar.gz "$task_dir/payload/"
+          printf '%s\n' "$DEPLOY_PUBLIC_KEY" > "$task_dir/payload/deploy.pub"
+          printf '%s' "$BACKUP_KEY" > "$task_dir/payload/backup-key"
+          printf '%s' "$ACCOUNTS" > "$task_dir/payload/accounts.json"
+          printf '%s' "$SUPABASE_KEY" > "$task_dir/payload/supabase-key"
+          printf '%s' "$SUPABASE_URL" > "$task_dir/payload/supabase-url"
+          printf '%s\n%s\n%s\n' "$DEPLOY_HOST" "$BRIDGE_IP" "$PROXY_IP" > "$task_dir/payload/network"
+          tar -czf "$task_dir/payload.tgz" -C "$task_dir/payload" .
+          ssh -i "$task_dir/root-key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$task_dir/known-hosts" -o ConnectTimeout=15 "root@$DEPLOY_HOST" 'set -eu; umask 077; task_dir=$(mktemp -d /tmp/stream-panel-bootstrap.XXXXXXXX); trap '\''rm -rf "$task_dir"'\'' EXIT; tar -xzf - -C "$task_dir"; cd "$task_dir"; bash configure-initial.sh' < "$task_dir/payload.tgz"
+      - name: Verify public HTTPS access and anonymous protection
+        env:
+          DEPLOY_HOST: ${{ secrets.STREAM_PANEL_DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          origin="https://stream-panel.${DEPLOY_HOST//./-}.sslip.io"
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error "$origin/healthz" -o artifacts/health.json; then break; fi
+            sleep 5
+          done
+          node -e 'const r=require("./artifacts/health.json");if(r.ok!==true||r.release!==process.env.STREAM_PANEL_RELEASE)process.exit(1)'
+          test "$(curl --silent --show-error -o /dev/null -w '%{http_code}' "$origin/api/v1/persons")" = 401
+          echo 'Public TLS and protected API verified'
+      - name: Clean confidential runner files
+        if: always()
+        run: rm -rf artifacts/server artifacts/server.tar.gz artifacts/server.header

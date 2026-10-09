@@ -37,3 +37,6 @@
 - Provision --resume проверяетвесьpayload иexistingcredentialhash/name/profileдоcreate, неreset/sessionrevoke; провереныpartial/repeat/conflictтестыготовыCI.
 - Историястримов: ledgerplatforms/latestnonemptytitle/confirmedURLs SQL без100RPC, frontendстримы/безfakeURLs/standaloneYT; escapedURL/title, legacyNULL/manualunknown. Unit+E2Eготовы; static0errors.
 - Positive replacement корректируетпредыдущийsameproviderstream, сохраняетsharedlogicalеслиotherproviderlive; RootисправилYTconcurrentbug: supersedeYTonlycompletepresentset, новыйIDсампособенедоказываетконец. RegressionpreparedCI.
+- Подготовленmain-onlybootstrapworkflow/Traefikscript: exclusive route/resource/topologypreflight/rollbackownobjects, scopedresumeidentitynetworkkeys, provisionresume/offlinebackupavoidrace. НовыйCIcontaineractualsuccess/preflight/latefail, не запускалсялокально. VPSпокаНЕизменён.
+- GitHubproductionenvironmentсоздан, deploymentbranchpolicyтолькоmain; scopedSecretsдеплойключ/rootbootstrapkey/backupkey/accounts/hostknownkeys, varsbridge/proxy/SupabaseURL. NoCIbootstrapdispatchyet, servicekeymissing. Dedicatedsecretsstoredignoredsecrets/production.
+- CI37851924111terminal: unit/integration/E2E/opsвсеsuccess, packaging skip; gatefailurebranches91.84%/Overviewlines92.94%. LatestGitHubtree224ae45, localnewcommitsahead. Lunausageexhausted, rootпродолжаетсам.

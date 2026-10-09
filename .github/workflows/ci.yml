@@ -39,11 +39,12 @@ jobs:
           retention-days: 7
   operations:
     runs-on: ubuntu-22.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - run: python3 -m unittest discover -s tests/deploy -p '*test.py'
-      - run: bash -n ops/bootstrap.sh ops/preflight.sh
+      - run: for script in ops/*.sh; do bash -n "$script"; done
+      - run: bash ops/test-bootstrap-ci.sh
   packaging:
     name: Linux package upgrade checks
     if: github.ref == 'refs/heads/main'
