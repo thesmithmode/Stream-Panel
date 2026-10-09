@@ -142,23 +142,32 @@ export class YouTubeConnection {
     if (!valid()) return 300000;
     await this.db.call("youtubeSnapshot", tokens.userId, "broadcasts", broadcasts, observedAt);
     if (!valid()) return 300000;
-    if (broadcasts.length) {
-      const ids = videoIds.slice(0, 2);
-      const numbers = ids.map(id => videoDetails.get(id)?.liveStreamingDetails?.concurrentViewers);
-      const complete = ids.length > 0 && ids.every(id => videoDetails.has(id));
-      const validCounts=numbers.every((x:any)=>/^[0-9]+$/.test(String(x))&&Number.isSafeInteger(Number(x)));
-      const sum=numbers.reduce((a:number,b:any)=>a+Number(b),0);
-      const viewers=complete&&validCounts&&Number.isSafeInteger(sum)?sum:null;
-      await this.db.call("youtubeViewers",observedAt,viewers);
-      if (!valid()) return 300000;
-    }
+    const logicalViewers = new Map<string, string[]>();
+    await this.db.call("youtubeSnapshot", tokens.userId, "liveVideoDetails", Object.fromEntries(videoDetails), observedAt);
+    if (!valid()) return 300000;
     for (const broadcast of broadcasts) {
       const actualStartTime = videoDetails.get(broadcast.id)?.liveStreamingDetails?.actualStartTime;
       if (typeof actualStartTime !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(actualStartTime)) continue;
       const startedAt = Date.parse(actualStartTime);
       if (!Number.isSafeInteger(startedAt) || startedAt < 0 || startedAt > observedAt) continue;
       const url = `https://www.youtube.com/watch?v=${encodeURIComponent(broadcast.id)}`;
-      await this.db.call("observePlatformStream", "youtube", tokens.userId, broadcast.id, startedAt, observedAt, url, string(broadcast.snippet?.title), videoIds);
+      const sessionId = await this.db.call<string | null>("observePlatformStream", "youtube", tokens.userId, broadcast.id, startedAt, observedAt, url, string(broadcast.snippet?.title), videoIds);
+      if (sessionId) logicalViewers.set(sessionId, [...(logicalViewers.get(sessionId) ?? []), broadcast.id]);
+      if (!valid()) return 300000;
+    }
+    const counts = (ids: string[]): number | null => {
+      const numbers = ids.map(id => videoDetails.get(id)?.liveStreamingDetails?.concurrentViewers);
+      const complete = ids.length > 0 && ids.every(id => videoDetails.has(id));
+      const validCounts = numbers.every(value => /^[0-9]+$/.test(String(value)) && Number.isSafeInteger(Number(value)));
+      const sum = numbers.reduce((total: number, value: any) => total + Number(value), 0);
+      return complete && validCounts && Number.isSafeInteger(sum) ? sum : null;
+    };
+    for (const [sessionId, ids] of logicalViewers) {
+      await this.db.call("youtubeViewers", observedAt, counts(ids), sessionId);
+      if (!valid()) return 300000;
+    }
+    if (broadcasts.length && !logicalViewers.size) {
+      await this.db.call("youtubeViewers", observedAt, counts(videoIds), null);
       if (!valid()) return 300000;
     }
     await this.db.call("platformMissing", "youtube", tokens.userId, videoIds, observedAt);

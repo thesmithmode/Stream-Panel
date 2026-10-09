@@ -97,9 +97,16 @@ export class StreamStore {
     if ([categoryId,categoryName,title].some(s => s.length > 1000) || (twitchViewers !== null && (!Number.isSafeInteger(twitchViewers) || twitchViewers < 0))) throw new Error("INVALID_STREAM_SAMPLE");
     this.db.prepare("INSERT INTO stream_samples VALUES (?,?,?,?,?,?,NULL) ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET category_id=excluded.category_id,category_name=excluded.category_name,title=excluded.title,twitch_viewers=excluded.twitch_viewers").run(sessionId,at,categoryId,categoryName,title,twitchViewers);
   }
-  youtubeViewers(at: number, viewers: number | null): void {
+  youtubeViewers(at: number, viewers: number | null, sessionId?: string | null): void {
     assertTimestamp(at);
     if (viewers !== null && (!Number.isSafeInteger(viewers) || viewers < 0)) throw new Error("INVALID_VIEWER_COUNT");
+    if (sessionId === null) return; // Unknown start time: preserve raw details without attributing another stream.
+    if (sessionId !== undefined) {
+      const session = this.db.prepare("SELECT id FROM sessions WHERE id=? AND ended_at_ms IS NULL AND EXISTS(SELECT 1 FROM platform_streams WHERE session_id=sessions.id AND platform='youtube' AND ended_at_ms IS NULL)").get(sessionId);
+      if (!session) throw new Error("INVALID_YOUTUBE_SESSION");
+      this.db.prepare("INSERT INTO stream_samples(session_id,observed_at_ms,category_id,category_name,title,twitch_viewers,youtube_viewers) VALUES (?,?,'','','',NULL,?) ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET youtube_viewers=excluded.youtube_viewers").run(sessionId,at,viewers);
+      return;
+    }
     // Join only the latest contemporaneous Twitch sample; never borrow an old category.
     this.db.prepare("INSERT INTO stream_samples SELECT x.session_id,?,x.category_id,x.category_name,x.title,NULL,? FROM stream_samples x JOIN sessions s ON s.id=x.session_id WHERE s.ended_at_ms IS NULL AND x.twitch_viewers IS NOT NULL AND x.observed_at_ms<=? AND x.observed_at_ms>=? ORDER BY x.observed_at_ms DESC LIMIT 1 ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET youtube_viewers=excluded.youtube_viewers").run(at,viewers,at,at-180000);
   }

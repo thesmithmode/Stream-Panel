@@ -86,7 +86,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     }[] = [];
     for (const s of sessions) {
         let start = Math.max(from, s.started_at_ms), end = Math.min(to, s.ended_at_ms ?? to), id = '', name = 'Категория неизвестна';
-        for (const sample of samples.filter(x => x.session_id === s.id)) {
+        for (const sample of samples.filter(x => x.session_id === s.id && (x.twitch_viewers !== null || x.category_id || x.category_name))) {
             if (sample.observed_at_ms < start) {
                 id = sample.category_id;
                 name = sample.category_name || 'Категория неизвестна';
