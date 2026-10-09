@@ -70,3 +70,9 @@ RealtIme и автоматический REST используют ingestLiveDon
 ## CI: проверка пропусков и Docker Hub
 
 CI коммита 25f0cb1 подтвердил unit/integration/E2E, включая новый сценарий раскрытия групп на desktop/mobile. Operations завершился до запуска bootstrap-контейнера с Docker Hub `toomanyrequests`, поэтому combined gate был skipped, а не успешным. Настройка runner Docker теперь добавляет официальное mirror.gcr.io в registry-mirrors, сохраняя прочие daemon options; исходный ubuntu:24.04 и установка в одноразовом контейнере не меняются. При отсутствии образа в кэше Docker использует Docker Hub. Источник: https://docs.cloud.google.com/artifact-registry/docs/pull-cached-dockerhub-images . Локальные deploy Python проверки 10/10 и проверки coverage-policy/discovery 3/3 прошли; успешное скачивание и bootstrap должны подтвердить новый CI.
+
+## Восстановление новой истории и исправление CI registry
+
+Новая регрессия восстанавливает зашифрованную копию двух профилей с одинаковыми external IDs. Проверены notes/revisions, tags/manual core, raw events и Person stats, ledger и первый missing check. Второе отсутствие YouTube после восстановления закрывает только YouTube; Twitch продолжает общий стрим. После окончания Twitch закрывается общий стрим. Источник не меняется, межпрофильный доступ отклонён. Backup suite: 9/9.
+
+CI ee8ba30 показал, что Google cache на runner не снял Docker Hub rate limit; настройка daemon удалена. Одноразовый bootstrap-контейнер теперь получает тот же Ubuntu 24.04 напрямую из официального Canonical registry `public.ecr.aws/ubuntu/ubuntu:24.04`, документированного https://ubuntu.com/docs/oci-registries/oci-how-to/getting-started/ . Шаги установки и проверки bootstrap сохранены. Синтаксис shell и 10 deploy unit-проверок проходят. Unit/integration ee8ba30 успешны; окончательные operations/E2E/coverage нового SHA ещё требует CI.

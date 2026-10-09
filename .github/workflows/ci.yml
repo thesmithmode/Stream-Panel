@@ -44,21 +44,6 @@ jobs:
       - uses: actions/checkout@v4
       - run: python3 -m unittest discover -s tests/deploy -p '*test.py'
       - run: for script in ops/*.sh; do bash -n "$script"; done
-      - name: Use Docker Hub cache for the disposable bootstrap container
-        run: |
-          # Preserve runner daemon options; Google's cache falls back to Docker Hub.
-          # https://docs.cloud.google.com/artifact-registry/docs/pull-cached-dockerhub-images
-          sudo python3 - <<'PY'
-          import json
-          from pathlib import Path
-          path = Path('/etc/docker/daemon.json')
-          config = json.loads(path.read_text()) if path.exists() else {}
-          mirrors = config.get('registry-mirrors', [])
-          config['registry-mirrors'] = ['https://mirror.gcr.io'] + [x for x in mirrors if x != 'https://mirror.gcr.io']
-          path.parent.mkdir(parents=True, exist_ok=True)
-          path.write_text(json.dumps(config))
-          PY
-          sudo systemctl restart docker
       - run: bash ops/test-bootstrap-ci.sh
   packaging:
     name: Linux package upgrade checks
