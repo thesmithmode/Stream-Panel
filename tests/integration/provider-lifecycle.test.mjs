@@ -46,6 +46,8 @@ function fixture(t) {
   const calls = [],
     sockets = [];
   let sessions = [];
+  const platformLinks = [];
+  let nextSession = 0;
   const config = {
     value: {
       twitchClientId: "client123",
@@ -68,20 +70,56 @@ function fixture(t) {
   };
   const db = {
     call: async (method, ...args) => {
-      calls.push({ method, args });
+      const call = { method, args };
+      calls.push(call);
       if (method === "sessions") return sessions;
-      if (method === "startSession") {
-        sessions = [
-          {
-            id: "session-db",
-            account_id: "owner",
-            kind: args[3],
-            ended_at_ms: null,
-          },
-        ];
-        return "session-db";
+      if (method === "observePlatformStream") {
+        const [platform, account_id, external_id, started_at_ms, observed_at_ms] = args;
+        let link = platformLinks.find(row => row.platform === platform &&
+          row.account_id === account_id && row.external_id === external_id);
+        if (link?.ended_at_ms !== null && link) { call.result = null; return null; }
+        if (!link) {
+          const occupied = sessions.some(row => row.account_id === account_id && row.ended_at_ms === null);
+          const active = sessions.find(row => row.kind === "platform" && row.ended_at_ms === null &&
+            platformLinks.some(item => item.session_id === row.id && item.ended_at_ms === null));
+          if (occupied && !active) { call.result = null; return null; }
+          let session = active;
+          if (!session) {
+            session = { id: `session-db-${++nextSession}`, account_id, kind: "platform", started_at_ms, ended_at_ms: null };
+            sessions.push(session);
+          }
+          link = { session_id: session.id, platform, account_id, external_id,
+            started_at_ms, last_observed_at_ms: observed_at_ms, offline_checks: 0,
+            first_missing_at_ms: null, ended_at_ms: null };
+          platformLinks.push(link);
+        } else if (observed_at_ms > link.last_observed_at_ms) {
+          link.last_observed_at_ms = observed_at_ms;
+          link.offline_checks = 0;
+          link.first_missing_at_ms = null;
+        }
+        call.result = link.session_id;
+        return link.session_id;
       }
-      if (method === "endSession") sessions[0].ended_at_ms = args[1];
+      if (method === "platformMissing") {
+        const [platform, account_id, present_ids, observed_at_ms] = args;
+        for (const link of platformLinks.filter(row => row.platform === platform && row.account_id === account_id && row.ended_at_ms === null)) {
+          if (present_ids.includes(link.external_id) || observed_at_ms <= link.last_observed_at_ms) continue;
+          link.last_observed_at_ms = observed_at_ms;
+          link.first_missing_at_ms ??= observed_at_ms;
+          if (++link.offline_checks >= 2) {
+            link.ended_at_ms = link.first_missing_at_ms;
+            const session = sessions.find(row => row.id === link.session_id);
+            if (session && !platformLinks.some(row => row.session_id === session.id && row.ended_at_ms === null))
+              session.ended_at_ms = link.ended_at_ms;
+          }
+        }
+      }
+      if (method === "activeLogicalStream")
+        return sessions.filter(row => row.kind === "platform" && row.ended_at_ms === null &&
+          platformLinks.some(link => link.session_id === row.id && link.ended_at_ms === null))
+          .sort((a, b) => b.started_at_ms - a.started_at_ms)[0] ?? null;
+      if (method === "platformStreams") return platformLinks.filter(row => row.session_id === args[0]);
+      if (method === "streamSample") return null;
       return null;
     },
   };
@@ -98,6 +136,8 @@ function fixture(t) {
     calls,
     sockets,
     socket,
+    platformLinks,
+    getSessions: () => sessions,
     setSessions: (value) => (sessions = value),
     tick: async (ms) => {
       t.mock.timers.tick(ms);
@@ -193,13 +233,16 @@ test("Twitch polls offline every five minutes, reacts online immediately and nev
     await f.tick(1); assert.equal(polls, 4);
     malformed = true;
     await f.tick(60000);
-    assert.equal(f.calls.filter(x => x.method === "endSession").length, 0);
+    assert.equal(f.calls.filter(x => x.method === "platformMissing").length, 0);
     assert.equal(c.status.detail, "INVALID_TWITCH_STREAMS");
     malformed = false; opts.offline = true;
     await f.tick(60000);
-    assert.equal(f.calls.filter(x => x.method === "endSession").length, 0);
+    assert.equal(f.platformLinks[0].offline_checks, 1);
+    assert.equal(f.platformLinks[0].ended_at_ms, null);
     await f.tick(60000);
-    assert.equal(f.calls.filter(x => x.method === "endSession").length, 1);
+    assert.equal(f.platformLinks[0].offline_checks, 2);
+    assert.equal(f.platformLinks[0].ended_at_ms, f.platformLinks[0].first_missing_at_ms);
+    assert.equal(f.getSessions()[0].ended_at_ms, f.platformLinks[0].first_missing_at_ms);
     const count = polls;
     await f.tick(299999); assert.equal(polls, count);
     await f.tick(1); assert.equal(polls, count + 1);
@@ -226,7 +269,7 @@ test("Twitch restart does not let an old pending poll block or overwrite the new
     await flush();
     release(response({ data: [{ id: "stale", started_at: new Date().toISOString() }] }));
     await flush();
-    assert.equal(f.calls.filter(x => x.method === "startSession").length, 0);
+    assert.equal(f.calls.filter(x => x.method === "observePlatformStream").length, 0);
     await f.tick(300000); assert.equal(polls, 3);
     await c.stop(); await f.tick(300000); assert.equal(polls, 3);
   } finally { release(response({ data: [] })); await c.stop(); }
@@ -285,9 +328,9 @@ test("Twitch lifecycle: full subscriptions, safe handoff, transient gap, offline
     assert.equal(c.status.state, "connected");
     opts.offline = true;
     await f.tick(60000);
-    assert.equal(f.calls.filter((x) => x.method === "endSession").length, 0);
+    assert.equal(f.platformLinks[0].offline_checks, 1);
     await f.tick(60000);
-    assert.equal(f.calls.filter((x) => x.method === "endSession").length, 1);
+    assert.equal(f.platformLinks[0].offline_checks, 2);
     await c.disconnect();
     assert.equal(c.status.state, "disconnected");
     assert.equal(f.config.value.twitch, undefined);
@@ -299,7 +342,7 @@ test("Twitch lifecycle: full subscriptions, safe handoff, transient gap, offline
 });
 test("Twitch partial poll and optional subscription rejection remain observable; manual session remains open", async (t) => {
   const f = fixture(t);
-  f.setSessions([{ id: "manual", kind: "manual", ended_at_ms: null }]);
+  f.setSessions([{ id: "manual", account_id: "owner", kind: "manual", ended_at_ms: null }]);
   const opts = { offline: true, badPoll: true, failType: "channel.cheer" };
   const c = new TwitchConnection(
     f.config,
@@ -319,7 +362,10 @@ test("Twitch partial poll and optional subscription rejection remain observable;
       ),
     );
     await f.tick(60000);
-    assert.equal(f.calls.filter((x) => x.method === "endSession").length, 0);
+    const manual = f.getSessions().find(row => row.id === "manual");
+    assert.equal(manual.ended_at_ms, null);
+    assert.equal(f.platformLinks.length, 0);
+    assert.equal(f.calls.filter(x => x.method === "observePlatformStream").length, 1);
     await f.tick(3600000);
     assert.equal(c.status.account, "Owner");
   } finally {
@@ -886,13 +932,15 @@ test("a stream poll from the previous account is never applied to the new login"
       }),
     );
     await starting;
-    assert.ok(f.calls.filter(x => x.method === "startSession").every(x => x.args[0] === "new-owner" && x.args[1] === "new-stream"), "a cancelled response must not attach the old stream to the new owner");
+    assert.equal(f.calls.filter(x => x.method === "observePlatformStream").length, 1, "a cancelled response must not attach the old stream to the new owner");
+    assert.equal(f.calls.find(x => x.method === "observePlatformStream").args[1], "new-owner");
     f.sockets.at(-1).push(welcome);
     await flush();
     await f.tick(60000);
-    const sessions = f.calls.filter((x) => x.method === "startSession");
+    const sessions = f.calls.filter((x) => x.method === "observePlatformStream");
     assert.equal(sessions.length, 2, "the new login checks immediately and again after one minute");
-    assert.ok(sessions.every(x => x.args[0] === "new-owner" && x.args[1] === "new-stream"));
+    assert.ok(sessions.every(x => x.args[1] === "new-owner" && x.args[2] === "new-stream"));
+    assert.equal(sessions[0].result, sessions[1].result, "repeated observations of one stream reuse its logical session ID");
   } finally {
     await c.stop();
   }

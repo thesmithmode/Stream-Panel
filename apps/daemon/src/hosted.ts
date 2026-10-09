@@ -63,7 +63,7 @@ export async function createHostedApplication(
     const requestedProfile = request.headers["x-stream-panel-profile"];
     if (requestedProfile !== undefined && (typeof requestedProfile !== "string" || !profiles.includes(requestedProfile as Profile)))
       return reply.code(400).send({ error: "INVALID_PROFILE" });
-    if (request.url.startsWith("/api/") && existsSync(join(dir, "deploying")))
+    if (request.url.startsWith("/api/") && ["deploying", "initializing"].some(marker=>existsSync(join(dir,marker))))
       return reply.header("Retry-After", "10").code(503).send({ error: "SERVER_UPDATING" });
     if (!["GET", "HEAD"].includes(request.method) && request.headers.origin !== publicOrigin)
       return reply.code(403).send({ error: "INVALID_ORIGIN" });

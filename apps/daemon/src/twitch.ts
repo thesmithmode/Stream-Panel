@@ -154,7 +154,6 @@ export class TwitchConnection {
   private reconcileRequested = false;
   private platformLive = false;
   private reconnectAttempt = 0;
-  private offlineCount = 0;
   private sessionId: string | null = null;
   private lastSuccessfulPollAt: number | null = null;
   private authGeneration = 0;
@@ -167,6 +166,7 @@ export class TwitchConnection {
     private request: typeof fetch = fetch,
     private socketFactory: SocketFactory = (url, options) =>
       new WebSocket(url, options),
+    private now: () => number = Date.now,
   ) {}
   private get token(): Tokens {
     if (!this.config.value.twitch) throw new Error("TWITCH_LOGIN_REQUIRED");
@@ -621,49 +621,50 @@ export class TwitchConnection {
         await this.api(`streams?user_id=${encodeURIComponent(accountId)}`),
       );
       if (!current()) return;
-      const sessions =
-        await this.db.call<Record<string, unknown>[]>("sessions");
-      if (!current()) return;
-      const manual = sessions.find(
-        (s) => s.kind === "manual" && s.ended_at_ms === null,
-      );
+      if (!Array.isArray(body.data) || body.data.length > 1)
+        throw new Error("INVALID_TWITCH_STREAMS");
       const previousSession = this.sessionId;
-      if (manual) this.sessionId = String(manual.id);
-      if (!Array.isArray(body.data)) throw new Error("INVALID_TWITCH_STREAMS");
-      const streams = body.data;
-      if (streams.length) {
-        const stream = object(streams[0]);
-        if (!string(stream.id) || !Number.isFinite(Date.parse(string(stream.started_at)))) throw new Error("INVALID_TWITCH_STREAM");
-        this.platformLive = true;
-        this.offlineCount = 0;
-        if (!manual)
-          this.sessionId = await this.db.call<string>(
-            "startSession",
-            accountId,
-            string(stream.id),
-            Date.parse(string(stream.started_at)),
-            "platform",
-            Date.now(),
-          );
-        if (this.sessionId && current()) await this.db.call("streamSample", this.sessionId, Date.now(), string(stream.game_id), string(stream.game_name), string(stream.title), Number.isSafeInteger(stream.viewer_count) ? Number(stream.viewer_count) : null);
-      } else if (!manual && ++this.offlineCount >= 2) {
-        this.platformLive = false;
-        const open = sessions.find(
-          (s) => s.account_id === accountId && s.ended_at_ms === null,
+      const observedAtMs = this.now();
+      if (body.data.length) {
+        const stream = object(body.data[0]);
+        const externalId = string(stream.id);
+        const startedAtMs = Date.parse(string(stream.started_at));
+        if (!externalId || !Number.isFinite(startedAtMs) ||
+          (stream.user_id !== undefined && stream.user_id !== accountId) ||
+          (stream.type !== undefined && stream.type !== "live"))
+          throw new Error("INVALID_TWITCH_STREAM");
+        const login = string(stream.user_login);
+        const url = /^[a-zA-Z0-9_]{1,25}$/.test(login)
+          ? `https://www.twitch.tv/${login}` : null;
+        const sessionId = await this.db.call<string | null>(
+          "observePlatformStream", "twitch", accountId, externalId,
+          startedAtMs, observedAtMs, url, string(stream.title), [externalId],
         );
-        if (open)
-          await this.db.call(
-            "endSession",
-            String(open.id),
-            Date.now(),
-            "observed",
-          );
-        this.sessionId = null;
+        if (!current()) return;
+        this.platformLive = true;
+        this.sessionId = sessionId;
+        if (sessionId) await this.db.call("streamSample", sessionId, observedAtMs,
+          string(stream.game_id), string(stream.game_name), string(stream.title),
+          Number.isSafeInteger(stream.viewer_count) ? Number(stream.viewer_count) : null);
+        if (!current()) return;
+      } else {
+        await this.db.call("platformMissing", "twitch", accountId, [], observedAtMs);
+        if (!current()) return;
+        const active = await this.db.call<Record<string, unknown> | null>("activeLogicalStream");
+        if (!current()) return;
+        const links = active
+          ? await this.db.call<Record<string, unknown>[]>("platformStreams", String(active.id))
+          : [];
+        if (!current()) return;
+        this.platformLive = false;
+        this.sessionId = links.some(link => link.platform === "twitch" &&
+          link.account_id === accountId && link.ended_at_ms === null)
+          ? String(active!.id) : null;
       }
       if (this.sessionId !== previousSession) this.lastSuccessfulPollAt = null;
       if (!current()) return;
       if (
-        this.sessionId &&
+        this.platformLive && this.sessionId &&
         this.token.scopes.includes("moderator:read:chatters")
       ) {
         try {
@@ -709,6 +710,7 @@ export class TwitchConnection {
             );
           }
         } catch (error) {
+          if (!current()) return;
           this.lastSuccessfulPollAt = null;
           this.status.capabilities.presence =
             error instanceof Error ? error.message : "chatters_error";

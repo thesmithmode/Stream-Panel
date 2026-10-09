@@ -22,22 +22,30 @@ const backupOptions = process.env.STREAM_PANEL_BACKUP_KEY_FILE ? {
   ...(process.env.STREAM_PANEL_SUPABASE_KEY_FILE ? {serviceKeyFile: process.env.STREAM_PANEL_SUPABASE_KEY_FILE} : {}),
 } : undefined;
 const hosted = await createHostedApplication(dir, origin, false, backupOptions, network);
+const runBackup = async () => {
+  try {
+    const result = await hosted.backup?.run();
+    if (result?.cloudError) console.error("Cloud backup failed; local copy saved; see protected status");
+  } catch { console.error("Backup failed; see protected status"); }
+};
 try {
   await hosted.app.listen({ host: network.bindHost, port });
 } catch (error) { await hosted.app.close(); throw error; }
 let closing = false, collectorsStarted = false;
 const startCollectors = async () => {
   if (collectorsStarted || closing) return;
-  try { await access(join(dir, "deploying")); return; }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") { console.error("Maintenance state unavailable; collectors remain stopped"); return; } }
+  for (const marker of ["deploying", "initializing"]) {
+    try { await access(join(dir, marker)); return; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") { console.error("Maintenance state unavailable; collectors remain stopped"); return; } }
+  }
   collectorsStarted = true;
-  void hosted.backup?.run().catch(() => console.error("Backup failed; see protected status"));
+  void runBackup();
   for (const runtime of hosted.runtimes.values()) {
     void runtime.twitch.start(); void runtime.da.start(); void runtime.youtube.start();
   }
 };
 await startCollectors();
-const backupTimer = setInterval(() => { if (collectorsStarted) void hosted.backup?.run().catch(() => console.error("Backup failed; see protected status")); }, 12 * 60 * 60 * 1000);
+const backupTimer = setInterval(() => { if (collectorsStarted) void runBackup(); }, 12 * 60 * 60 * 1000);
 const timer = setInterval(() => void startCollectors(), 2000);
 const shutdown = async () => {
   if (closing) return;

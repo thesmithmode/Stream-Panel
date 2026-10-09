@@ -40,6 +40,7 @@ lines=[line for line in path.read_text().splitlines() if not line.startswith(('S
 lines+=['STREAM_PANEL_SUPABASE_URL='+pathlib.Path('supabase-url').read_text(),'STREAM_PANEL_SUPABASE_KEY_FILE=/etc/stream-panel/supabase-key']
 path.write_text('\n'.join(lines)+'\n')
 PY
+install -m 600 /dev/null /var/lib/stream-panel/initializing
 cat server.header server.tar.gz | /usr/local/sbin/stream-panel-receive
 payload_dir=$PWD
 # Avoid concurrent startup and provisioning backups using the same snapshot file.
@@ -51,4 +52,5 @@ cd /opt/stream-panel/current
 set -a
 source /etc/stream-panel/server.env
 set +a
-/usr/sbin/runuser -u stream-panel -- ./bin/node --input-type=module -e 'import {BackupService} from "./dist/apps/daemon/src/backup.js";const backup=new BackupService(process.env.STREAM_PANEL_DATA_DIR,{keyFile:process.env.STREAM_PANEL_BACKUP_KEY_FILE,url:process.env.STREAM_PANEL_SUPABASE_URL,serviceKeyFile:process.env.STREAM_PANEL_SUPABASE_KEY_FILE});await backup.run();console.log("Provisioned data backup verified");'
+/usr/sbin/runuser -u stream-panel -- ./bin/node --input-type=module -e 'import {BackupService} from "./dist/apps/daemon/src/backup.js";const backup=new BackupService(process.env.STREAM_PANEL_DATA_DIR,{keyFile:process.env.STREAM_PANEL_BACKUP_KEY_FILE,url:process.env.STREAM_PANEL_SUPABASE_URL,serviceKeyFile:process.env.STREAM_PANEL_SUPABASE_KEY_FILE});const result=await backup.run();if(result.cloudError)throw new Error("INITIAL_CLOUD_BACKUP_FAILED");console.log("Provisioned data backup verified");'
+rm -f -- /var/lib/stream-panel/initializing

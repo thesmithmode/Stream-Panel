@@ -41,6 +41,7 @@ test('deployment maintenance delays startup backup until promotion; remote confi
   let c;
   try {
     await writeFile(join(dir,'deploying'),'');
+    await writeFile(join(dir,'initializing'),'');
     await writeFile(join(dir,'key'),randomBytes(32).toString('hex'));
     await writeFile(join(dir,'service'),'fixture');
     c=start(dir,port,{STREAM_PANEL_BACKUP_KEY_FILE:join(dir,'key'),STREAM_PANEL_SUPABASE_URL:'http://invalid.example.test',STREAM_PANEL_SUPABASE_KEY_FILE:join(dir,'service')});
@@ -49,6 +50,10 @@ test('deployment maintenance delays startup backup until promotion; remote confi
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/events`)).status,503);
     assert.equal((await readdir(dir)).includes('backups'),false);
     await unlink(join(dir,'deploying'));
+    await new Promise(r=>setTimeout(r,2300));
+    assert.equal((await readdir(dir)).includes('backups'),false,'independent initialization marker still holds collectors and backup');
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/events`)).status,503);
+    await unlink(join(dir,'initializing'));
     const deadline=Date.now()+7000;
     while (!(await readdir(dir)).includes('backups')) {
       assert.ok(Date.now()<deadline,'startup backup must run after maintenance');
@@ -60,7 +65,7 @@ test('deployment maintenance delays startup backup until promotion; remote confi
       await new Promise(r=>setTimeout(r,20));
     }
     assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status,200);
-    c.child.kill('SIGTERM');const exit=await c.exit;assert.equal(exit.code,0);assert.match(exit.stderr,/Backup failed; see protected status/);assert.doesNotMatch(exit.stderr,/invalid.example.test|fixture/);
+    c.child.kill('SIGTERM');const exit=await c.exit;assert.equal(exit.code,0);assert.match(exit.stderr,/Cloud backup failed; local copy saved; see protected status/);assert.doesNotMatch(exit.stderr,/invalid.example.test|fixture/);
   } finally {if(c){c.child.kill();await c.exit;}await rm(dir,{recursive:true,force:true});}
 });
 

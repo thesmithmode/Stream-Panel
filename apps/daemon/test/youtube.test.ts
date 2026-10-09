@@ -89,7 +89,7 @@ test('YouTube pagination and malformed optional API fields remain bounded and re
   return Response.json({});
  };
  const yt=new YouTubeConnection(config,db,'https://panel.test/oauth/youtube/callback','ruslan',request);
- try{assert.equal(await yt.collectOnce(),60000);assert.equal(pageCalls,2);mode='missing';assert.equal(await yt.collectOnce(),300000);mode='network';await yt.start();assert.equal(yt.status.detail,'YOUTUBE_CONNECTION_FAILED');}
+ try{assert.equal(await yt.collectOnce(),60000);assert.equal(pageCalls,2);mode='missing';await assert.rejects(yt.collectOnce(),/YOUTUBE_INVALID_BROADCASTS/);mode='network';await yt.start();assert.equal(yt.status.detail,'YOUTUBE_CONNECTION_FAILED');}
  finally{await yt.stop();}
 });
 

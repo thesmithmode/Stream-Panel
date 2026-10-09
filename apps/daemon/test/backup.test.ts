@@ -34,9 +34,9 @@ test('encrypted online backup restores both profiles and credentials, revokes se
   await assert.rejects(restoreBackup(blob,key,join(dir,'restored')),/EEXIST/);
   await assert.rejects(restoreBackup(blob,randomBytes(32),join(dir,'wrong-key')));
   for(let i=0;i<4;i++)await backup.run();assert.equal(remote.filter(x=>x.endsWith('.spbk')).length,3);assert.equal((await readdir(join(dir,'backups'))).filter(x=>x.endsWith('.spbk')).length,3);
-  privateBucket=false;await assert.rejects(backup.run(),/BACKUP_BUCKET_MUST_BE_PRIVATE/);privateBucket=true;fail=true;await assert.rejects(backup.run(),/BACKUP_UPLOAD_FAILED/);fail=false;
+  privateBucket=false;const privateFailure=await backup.run();assert.equal(privateFailure.cloudError,'BACKUP_BUCKET_MUST_BE_PRIVATE');assert.equal(backup.status.state,'partial');assert.equal(backup.status.local.filename,privateFailure.filename);privateBucket=true;fail=true;const uploadFailure=await backup.run();assert.equal(uploadFailure.cloudError,'BACKUP_UPLOAD_FAILED');assert.ok(await readFile(join(dir,'backups',uploadFailure.filename)));fail=false;
   const local=new BackupService(dir,{keyFile:join(dir,'key')});await local.run();assert.equal(local.status.state,'local');await local.stop();
-  const invalid=new BackupService(dir,{keyFile:join(dir,'key'),url:'http://evil.test'});await assert.rejects(invalid.run(),/INVALID_BACKUP_REMOTE/);
+  const invalid=new BackupService(dir,{keyFile:join(dir,'key'),url:'http://evil.test'});const invalidRemote=await invalid.run();assert.equal(invalidRemote.cloudError,'INVALID_BACKUP_REMOTE');assert.equal(invalid.status.local.filename,invalidRemote.filename);
   await writeFile(join(dir,'key'),'bad');await assert.rejects(backup.run(),/INVALID_BACKUP_KEY/);
  }finally{await backup.stop();a.close();b.close();auth.close();await rm(dir,{recursive:true,force:true});}
 });
@@ -48,11 +48,11 @@ test('backup rejects unsafe remote settings, malformed secret metadata and remot
  const options={keyFile:join(dir,'key'),serviceKeyFile:join(dir,'service'),url:'https://test.supabase.co'};
  try {
   const privateInfo:typeof fetch=async(input)=>Response.json(String(input).includes('/bucket/')?{public:false}:[]);
-  await assert.rejects(new BackupService(dir,{...options,bucket:'../other'},privateInfo).run(),/INVALID_BACKUP_BUCKET/);
-  await writeFile(join(dir,'service'),'');await assert.rejects(new BackupService(dir,options,privateInfo).run(),/MISSING_BACKUP_SERVICE_KEY/);await writeFile(join(dir,'service'),'secret');
+  assert.equal((await new BackupService(dir,{...options,bucket:'../other'},privateInfo).run()).cloudError,'INVALID_BACKUP_BUCKET');
+  await writeFile(join(dir,'service'),'');assert.equal((await new BackupService(dir,options,privateInfo).run()).cloudError,'MISSING_BACKUP_SERVICE_KEY');await writeFile(join(dir,'service'),'secret');
   const malformed:typeof fetch=async(input)=>Response.json(String(input).includes('/bucket/')?{public:false}:{});
-  await assert.rejects(new BackupService(dir,options,malformed).run(),/BACKUP_INVALID_LIST/);
-  await assert.rejects(new BackupService(dir,options,privateInfo).run(),/BACKUP_UPLOAD_NOT_VERIFIED/);
+  assert.equal((await new BackupService(dir,options,malformed).run()).cloudError,'BACKUP_INVALID_LIST');
+  assert.equal((await new BackupService(dir,options,privateInfo).run()).cloudError,'BACKUP_UPLOAD_NOT_VERIFIED');
   await writeFile(join(dir,'key'),key.toString('hex')+'invalid');
   await assert.rejects(new BackupService(dir,{keyFile:join(dir,'key')}).run(),/INVALID_BACKUP_KEY/);
   await writeFile(join(dir,'key'),key.toString('hex'));

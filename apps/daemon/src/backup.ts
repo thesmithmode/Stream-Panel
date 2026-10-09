@@ -7,6 +7,8 @@ const magic = Buffer.from("SPBK1");
 const maxSize = 48 * 1024 * 1024;
 const maxPayloadSize = 64 * 1024 * 1024;
 const profiles = ["ruslan", "gulnaz"] as const;
+type BackupChannelStatus = { state: string; lastSuccessAt: number; filename: string; error: string };
+type BackupStatus = { state: string; lastSuccessAt: number; filename: string; error: string; local: BackupChannelStatus; cloud: BackupChannelStatus };
 export function sealBackup(payload: Buffer, key: Buffer): Buffer {
   if (key.length !== 32) throw new Error("INVALID_BACKUP_KEY");
   if (payload.length > maxPayloadSize) throw new Error("BACKUP_SIZE_LIMIT");
@@ -21,14 +23,26 @@ export function openBackup(blob: Buffer, key: Buffer): Buffer {
   return gunzipSync(Buffer.concat([cipher.update(blob.subarray(17, -16)), cipher.final()]), { maxOutputLength: maxPayloadSize });
 }
 export class BackupService {
-  status = { state: "disabled", lastSuccessAt: 0, error: "" };
-  private active: Promise<{filename:string}> | undefined;
+  status: BackupStatus = {
+    state: "disabled", lastSuccessAt: 0, filename: "", error: "",
+    local: { state: "pending", lastSuccessAt: 0, filename: "", error: "" },
+    cloud: { state: "disabled", lastSuccessAt: 0, filename: "", error: "" },
+  };
+  private active: Promise<{filename:string;cloudError?:string}> | undefined;
   constructor(private dir: string, private options: { keyFile: string; url?: string; serviceKeyFile?: string; bucket?: string }, private request: typeof fetch = fetch) {
     this.status.state = options.url ? "pending" : "local";
+    this.status.local.state = "pending";
+    this.status.cloud.state = options.url ? "pending" : "disabled";
   }
   run() {
     if (this.active) return this.active;
-    this.active = this.perform().catch(error => { this.status.state = "error"; this.status.error = /^[A-Z_]+$/.test(error.message) ? error.message : "BACKUP_FAILED"; throw new Error(this.status.error); }).finally(() => { this.active = undefined; });
+    this.active = this.perform().catch(error => {
+      const code = /^[A-Z_]+$/.test(error.message) ? error.message : "BACKUP_FAILED";
+      this.status.state = "error";
+      this.status.error = code;
+      this.status.local = { ...this.status.local, state: "error", error: code };
+      throw new Error(code);
+    }).finally(() => { this.active = undefined; });
     return this.active;
   }
   private async perform() {
@@ -59,9 +73,37 @@ export class BackupService {
       await writeFile(path + ".tmp", blob, {mode:0o600}); await rename(path + ".tmp", path);
       const owned = (await readdir(directory)).filter(f => /^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/.test(f)).sort().reverse();
       for (const old of owned.slice(3)) await rm(join(directory,old));
-      if (this.options.url) await this.upload(filename, blob);
-      this.status = { state: this.options.url ? "uploaded" : "local", lastSuccessAt: Date.now(), error:"" };
-      return {filename};
+      const localSuccessAt = Date.now();
+      this.status = {
+        ...this.status,
+        state: this.options.url ? "pending" : "local",
+        lastSuccessAt: localSuccessAt,
+        filename,
+        error: "",
+        local: { state: "success", lastSuccessAt: localSuccessAt, filename, error: "" },
+      };
+      if (!this.options.url) return {filename};
+      try {
+        await this.upload(filename, blob);
+        const cloudSuccessAt = Date.now();
+        this.status = {
+          ...this.status,
+          state: "uploaded",
+          lastSuccessAt: cloudSuccessAt,
+          error: "",
+          cloud: { state: "success", lastSuccessAt: cloudSuccessAt, filename, error: "" },
+        };
+        return {filename};
+      } catch (error) {
+        const cloudError = error instanceof Error && /^[A-Z_]+$/.test(error.message) ? error.message : "BACKUP_FAILED";
+        this.status = {
+          ...this.status,
+          state: "partial",
+          error: cloudError,
+          cloud: { ...this.status.cloud, state: "error", error: cloudError },
+        };
+        return {filename, cloudError};
+      }
     } finally { await rm(snapshot, {force:true}); }
   }
   private async upload(filename: string, blob: Buffer) {

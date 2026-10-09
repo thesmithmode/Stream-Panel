@@ -1,5 +1,5 @@
 // Migration 1. All times are UTC epoch milliseconds; names are never unique identifiers.
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 export const schemaV1 = `
 CREATE TABLE persons (
@@ -138,4 +138,26 @@ SELECT 'twitch',s.account_id,s.stream_id,s.id,s.started_at_ms,s.ended_at_ms,
   COALESCE((SELECT title FROM stream_samples WHERE session_id=s.id ORDER BY observed_at_ms DESC LIMIT 1),'')
 FROM sessions s WHERE s.kind='platform';
 PRAGMA user_version = 6;
+`;
+
+export const schemaV7 = `
+CREATE TABLE person_notes (
+  id TEXT PRIMARY KEY,
+  person_id TEXT NOT NULL REFERENCES persons(id),
+  body TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 0
+) STRICT;
+CREATE INDEX person_notes_person_created ON person_notes(person_id, created_at_ms);
+CREATE TABLE person_tags (
+  person_id TEXT NOT NULL REFERENCES persons(id),
+  label TEXT NOT NULL,
+  PRIMARY KEY(person_id, label)
+) WITHOUT ROWID;
+CREATE TABLE person_preferences (
+  person_id TEXT PRIMARY KEY REFERENCES persons(id),
+  manual_core INTEGER CHECK(manual_core IN (0, 1))
+) STRICT;
+PRAGMA user_version = 7;
 `;

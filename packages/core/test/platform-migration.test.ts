@@ -5,25 +5,21 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {StreamStore} from '../src/store.js';
+import {schemaV1,schemaV2,schemaV3,schemaV4,schemaV5} from '../src/schema.js';
 
 test('v5 migration preserves stream history and seeds one Twitch ledger row per platform session',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-platform-migration-'));
  const path=join(dir,'data.sqlite');
- const initial=new StreamStore(path);
- let platformId='';
- try {
-  platformId=initial.startSession('account','external-1',1000,'platform',1100);
-  initial.streamSample(platformId,1200,'cat-1','Category 1','First title',5);
-  initial.streamSample(platformId,1300,'cat-2','Category 2','Latest title',8);
-  initial.endSession(platformId,1400);
-  const manualId=initial.startSession('account','manual-1',2000,'manual',2100);
-  initial.streamSample(manualId,2200,'','', 'Manual sample',null);
- } finally {initial.close();}
-
+ const platformId='platform-session';
  const legacy=new Database(path);
+ legacy.exec(`${schemaV1}\n${schemaV2}\n${schemaV3}\n${schemaV4}\n${schemaV5}`);
+ legacy.prepare('INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?)').run(platformId,'account','external-1','platform',1000,1100,1400,'unknown');
+ legacy.prepare('INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?)').run('manual-session','account','manual-1','manual',2000,2100,null,'unknown');
+ legacy.prepare('INSERT INTO stream_samples VALUES (?,?,?,?,?,?,?)').run(platformId,1200,'cat-1','Category 1','First title',5,null);
+ legacy.prepare('INSERT INTO stream_samples VALUES (?,?,?,?,?,?,?)').run(platformId,1300,'cat-2','Category 2','Latest title',8,null);
+ legacy.prepare('INSERT INTO stream_samples VALUES (?,?,?,?,?,?,?)').run('manual-session',2200,'','','Manual sample',null,null);
  const sessionsBefore=legacy.prepare('SELECT * FROM sessions ORDER BY id').all();
  const samplesBefore=legacy.prepare('SELECT * FROM stream_samples ORDER BY session_id,observed_at_ms').all();
- legacy.exec('DROP TABLE platform_streams; PRAGMA user_version=5;');
  legacy.close();
 
  try {

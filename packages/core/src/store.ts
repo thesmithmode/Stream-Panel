@@ -11,7 +11,7 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6 } from "./schema.js";
+import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
 import { presenceMinutes, pollCoveredMinutes, type PresencePoll } from "./presence.js";
 
@@ -76,6 +76,8 @@ export class StreamStore {
         this.db.transaction(() => this.db.exec(schemaV5)).immediate();
       if ((this.db.pragma("user_version", { simple: true }) as number) < 6)
         this.db.transaction(() => this.db.exec(schemaV6)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 7)
+        this.db.transaction(() => this.db.exec(schemaV7)).immediate();
       this.db.exec("CREATE TABLE IF NOT EXISTS sp_youtube_quota (day TEXT NOT NULL, profile TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(day,profile)) WITHOUT ROWID");
       // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.

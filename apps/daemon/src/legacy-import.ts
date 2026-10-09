@@ -3,9 +3,9 @@ import {mkdir,readFile,writeFile,copyFile,rename,rm,access,chmod} from 'node:fs/
 import {join,dirname,resolve} from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {StreamStore} from '../../../packages/core/src/store.js';
-import {schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6} from '../../../packages/core/src/schema.js';
+import {schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7} from '../../../packages/core/src/schema.js';
 import {AccountStore} from './auth.js';
-const tables=[...`${schemaV1}\n${schemaV2}\n${schemaV3}\n${schemaV4}\n${schemaV5}\n${schemaV6}`.matchAll(/CREATE TABLE (\w+)/g)].map(m=>m[1]!);
+const tables=[...`${schemaV1}\n${schemaV2}\n${schemaV3}\n${schemaV4}\n${schemaV5}\n${schemaV6}\n${schemaV7}`.matchAll(/CREATE TABLE (\w+)/g)].map(m=>m[1]!);
 async function exists(path:string){try{await access(path);return true;}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return false;throw e;}}
 export async function migrateLegacy(source:string,destination:string) {
  if(await exists(destination))throw new Error('DESTINATION_EXISTS');
