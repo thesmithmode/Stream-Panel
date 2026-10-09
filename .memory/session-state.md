@@ -35,3 +35,4 @@
 - Периоды180/365/all добавлены; from0allhistory,365inclusive,366reject; safetycapsсохранены. Boundary/all sparsefixture иE2Epresetsподготовлены; staticgates0errors.
 - Missingplatform persisted2uniquechecks chronological scoped, linkclosefirstmissing, logicalonlyallclosedMAXend. Повторныйend сталno-op assignments; regression stale/restart/profile/halfopen подготовлен.
 - Provision --resume проверяетвесьpayload иexistingcredentialhash/name/profileдоcreate, неreset/sessionrevoke; провереныpartial/repeat/conflictтестыготовыCI.
+- Историястримов: ledgerplatforms/latestnonemptytitle/confirmedURLs SQL без100RPC, frontendстримы/безfakeURLs/standaloneYT; escapedURL/title, legacyNULL/manualunknown. Unit+E2Eготовы; static0errors.

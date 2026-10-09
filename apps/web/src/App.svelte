@@ -68,9 +68,18 @@
       error = "";
     } catch (e) { error = authMessage((e as Error).message); }
   }
+  function isConfirmedPlatformUrl(entry: { platform: string; url: string }): boolean {
+    try {
+      const url = new URL(entry.url);
+      if (url.protocol !== "https:" || url.username || url.password || url.port || url.hash) return false;
+      if (entry.platform === "youtube")
+        return (url.hostname === "youtube.com" || url.hostname === "www.youtube.com") && url.pathname === "/watch" && Boolean(url.searchParams.get("v"));
+      return entry.platform === "twitch" && (url.hostname === "twitch.tv" || url.hostname === "www.twitch.tv") && /^\/[A-Za-z0-9_]+(?:\/.*)?$/.test(url.pathname);
+    } catch { return false; }
+  }
   const titles: Record<string, string> = {
     overview: "Обзор эфира",
-    sessions: "Сессии",
+    sessions: "Стримы",
     people: "Люди",
     analytics: "Аналитика аудитории",
     youtube: "YouTube",
@@ -78,7 +87,7 @@
   };
   const descriptions: Record<string, string> = {
     overview: "История чата, донаты и наблюдения.",
-    sessions: "История записей и полнота собранных данных.",
+    sessions: "История стримов и полнота собранных данных.",
     people: "Активность людей и управляемые связи аккаунтов.",
     analytics: "Ядро аудитории, категории и время эфиров. Наблюдения и оценки показаны отдельно.",
     youtube: "Статистика канала и чат эфиров своего профиля.",
@@ -86,7 +95,7 @@
   };
   const nav = [
     ["overview", "Обзор"],
-    ["sessions", "Сессии"],
+    ["sessions", "Стримы"],
     ["people", "Люди"],
     ["analytics", "Аналитика"],
     ["youtube", "YouTube"],
@@ -299,22 +308,22 @@
         />
       {:else if tab === "sessions"}<section class="panel">
           <header>
-            <h2>История сессий</h2>
+            <h2>История стримов</h2>
             <span class="small muted">Последние 100</span>
           </header>
           {#if !sessions.length}<div class="empty">
               <Icon name="sessions" size={48} />
-              <h3>Записей пока нет</h3>
-              <p>Сессия появится автоматически при начале эфира.</p>
+              <h3>Стримов пока нет</h3>
+              <p>Стрим появится автоматически при начале эфира.</p>
             </div>{:else}<div class="table-scroll">
               <table>
                 <thead
                   ><tr
-                    ><th>Начало</th><th>Конец / состояние</th><th>Источник</th
-                    ><th>События</th><th></th></tr
+                    ><th>Начало</th><th>Конец / состояние</th><th>Площадки</th
+                    ><th>Название и ссылка</th><th>События</th><th></th></tr
                   ></thead
                 ><tbody
-                  >{#each sessions as session}<tr
+                  >{#each sessions as session}<tr data-session-id={session.id}
                       ><td>{date(session.started_at_ms)}</td><td
                         >{session.ended_at_ms === null
                           ? "Запись не закрыта"
@@ -323,10 +332,16 @@
                             ? "Граница приблизительная"
                             : ""}</small
                         ></td
-                      ><td
-                        >{session.kind === "manual"
-                          ? "Ручная запись"
-                          : "Twitch"}</td
+                      ><td class="platform-labels"
+                        >{session.platforms?.length
+                          ? session.platforms.map((platform) => platform === "twitch" ? "Twitch" : "YouTube").join(", ")
+                          : "Источник неизвестен"}</td
+                      ><td class="platform-details">
+                        {#if session.primaryTitle}<span>{session.primaryTitle}</span>{/if}
+                        {#each (session.confirmedUrls ?? []).filter((entry) => isConfirmedPlatformUrl(entry)) as entry}
+                          <a href={entry.url} target="_blank" rel="noopener noreferrer">{entry.platform === "twitch" ? "Twitch" : "YouTube"}</a>
+                        {/each}
+                      </td
                       ><td>{session.event_count}</td><td
                         ><button
                           class="outline small"

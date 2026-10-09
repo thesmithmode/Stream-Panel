@@ -68,6 +68,9 @@ export interface Session {
   ended_at_ms: number | null;
   event_count: number;
   end_quality: string;
+  platforms?: Array<"twitch" | "youtube">;
+  primaryTitle?: string | null;
+  confirmedUrls?: Array<{ platform: "twitch" | "youtube"; url: string }>;
 }
 export interface Summary {
   messages: number;

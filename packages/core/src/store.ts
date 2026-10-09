@@ -914,12 +914,22 @@ export class StreamStore {
   }
 
   sessions(): Record<string, unknown>[] {
-    return this.db
+    const rows = this.db
       .prepare(
-        `SELECT s.*, (SELECT count(*) FROM event_sessions e WHERE e.session_id=s.id) event_count
-      FROM sessions s ORDER BY started_at_ms DESC LIMIT 100`,
+        `SELECT s.*,
+          (SELECT count(*) FROM event_sessions es WHERE es.session_id=s.id) AS event_count,
+          (SELECT title FROM platform_streams p WHERE p.session_id=s.id AND trim(title)<>'' ORDER BY last_observed_at_ms DESC,platform,account_id,external_id LIMIT 1) AS primaryTitle,
+          (SELECT json_group_array(platform) FROM (SELECT DISTINCT platform FROM platform_streams p WHERE p.session_id=s.id ORDER BY platform)) AS platforms_json,
+          (SELECT json_group_array(json_object('platform',platform,'url',url)) FROM (SELECT DISTINCT platform,url FROM platform_streams p WHERE p.session_id=s.id AND url IS NOT NULL ORDER BY platform,url)) AS urls_json
+        FROM sessions s ORDER BY started_at_ms DESC,s.id DESC LIMIT 100`,
       )
       .all() as Record<string, unknown>[];
+    return rows.map(({platforms_json, urls_json, ...row}) => ({
+      ...row,
+      platforms: JSON.parse(platforms_json as string) as string[],
+      confirmedUrls: (JSON.parse(urls_json as string) as {platform:"twitch"|"youtube";url:string}[])
+        .filter(link=>this.validPlatformStreamUrl(link.platform,link.url)),
+    }));
   }
 
   platformStreams(sessionId: string): Record<string, unknown>[] {

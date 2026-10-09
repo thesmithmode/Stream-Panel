@@ -260,15 +260,15 @@ test(
       await page
         .getByRole("button", { name: "Открыть интеграции", exact: true })
         .waitFor();
-      await page.getByRole("button", { name: "Сессии", exact: true }).click();
-      await page.getByText("Записей пока нет", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "Стримы", exact: true }).click();
+      await page.getByText("Стримов пока нет", { exact: true }).waitFor();
       await page.getByRole("button", { name: "Люди", exact: true }).click();
       await page.getByText("Пока никого нет", { exact: true }).waitFor();
       const s = await seed(a);
       await reload(page);
       assert.equal(await page.locator(".record-button").count(), 0);
       assert.equal(await page.getByRole("button", { name: /запись/i }).count(), 0);
-      await page.getByRole("button", { name: "Сессии", exact: true }).click();
+      await page.getByRole("button", { name: "Стримы", exact: true }).click();
       await page.getByText("Twitch", { exact: true }).waitFor();
       await page.getByRole("button", { name: "Обзор", exact: true }).click();
       await page.getByLabel("Фильтр событий").selectOption("donation");
@@ -277,7 +277,7 @@ test(
       assert.equal(await page.locator(".event-row").count(), 8);
       await page.locator(".event-title button").first().click();
       await page.getByLabel("Имя группы").waitFor();
-      await page.getByRole("button", { name: "Сессии", exact: true }).click();
+      await page.getByRole("button", { name: "Стримы", exact: true }).click();
       await page.getByRole("button", { name: "Открыть", exact: true }).click();
       assert.equal(await page.getByLabel("Период аналитики").inputValue(), s);
       await page.getByLabel("Фильтр событий").selectOption("donation");
@@ -286,7 +286,7 @@ test(
       await page.getByLabel("Фильтр событий").selectOption("all");
       await a.db.call("endSession", s, Date.now(), "estimated");
       await reload(page);
-      await page.getByRole("button", { name: "Сессии", exact: true }).click();
+      await page.getByRole("button", { name: "Стримы", exact: true }).click();
       await page
         .getByText("Граница приблизительная", { exact: true })
         .waitFor();

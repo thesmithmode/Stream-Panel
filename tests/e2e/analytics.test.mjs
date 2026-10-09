@@ -79,7 +79,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    if(profile==='ruslan'){
     for(const width of [320,390,768,1280,1440]){
      await page.setViewportSize({width,height:900});
-     for(const tab of ['Обзор','Сессии','Люди','Аналитика','YouTube','Интеграции']){
+     for(const tab of ['Обзор','Стримы','Люди','Аналитика','YouTube','Интеграции']){
       if(tab==='Аналитика')await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});
       else await page.getByRole('button',{name:tab,exact:true}).click();await page.locator('main h1').waitFor();
       if(tab==='Аналитика')await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();

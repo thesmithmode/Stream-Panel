@@ -145,7 +145,7 @@ test(
 
       await a.db.call("endSession", sessionId, Date.now(), "observed");
       await reload(page);
-      await page.getByRole("button", { name: "Сессии", exact: true }).click();
+      await page.getByRole("button", { name: "Стримы", exact: true }).click();
       await page.getByText("Twitch", { exact: true }).waitFor();
       await page.getByText("Запись не закрыта", { exact: true }).waitFor({ state: "hidden" });
       checks.push("automatic stream session remains in history after DB close");
