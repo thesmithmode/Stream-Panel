@@ -153,13 +153,17 @@
       if (selectedId === id) error = (e as Error).message;
     }
   }
+  async function loadAudit() {
+    const [joined,separated]=await Promise.all([api<any[]>("merges"),api<any[]>("splits")]);
+    merges=[...joined.map(row=>({...row,kind:"merge"})),...separated.map(row=>({...row,kind:"split"}))].sort((a,b)=>b.created_at_ms-a.created_at_ms);
+  }
   async function operation(action: () => Promise<void>) {
     busy = true;
     error = "";
     try {
       await action();
       await onChange();
-      merges = await api("merges");
+      await loadAudit();
     } catch (e) {
       error = (e as Error).message;
     } finally {
@@ -211,9 +215,7 @@
   });
   import { onMount } from "svelte";
   onMount(() => {
-    void api<any[]>("merges")
-      .then((v) => (merges = v))
-      .catch((e) => (error = e.message));
+    void loadAudit().catch((e) => (error = e.message));
   });
 </script>
 
@@ -441,18 +443,18 @@
   </section>
 </div>
 {#if merges.length}<section class="panel audit">
-    <header><h2>История объединений</h2></header>
+    <header><h2>История связей</h2></header>
     {#each merges as merge}<div class="capability">
         <span
           >{date(merge.created_at_ms)} · {merge.undone_at_ms
             ? "Отменено"
-            : "Объединение"}</span
+            : merge.kind === "split" ? "Разъединение" : "Объединение"}</span
         ><button
           class="outline small"
           disabled={busy || merge.undone_at_ms !== null}
           onclick={() =>
             operation(async () => {
-              await api(`merges/${merge.id}/undo`, {});
+              await api(`${merge.kind === "split" ? "splits" : "merges"}/${merge.id}/undo`, {});
               detail = null;
             })}>Отменить</button
         >

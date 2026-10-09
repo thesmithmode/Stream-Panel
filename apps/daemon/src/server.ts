@@ -136,6 +136,7 @@ export async function createApplication(
       ["identityIds", "name", "revision"],
     ),
     "/api/v1/merges/:id/undo": body(),
+    "/api/v1/splits/:id/undo": body(),
     "/api/v1/youtube/connect": body({clientId:text,clientSecret:{type:"string",maxLength:256}},["clientId"]),
     "/api/v1/youtube/disconnect": body(),
     "/api/v1/twitch/connect": body(
@@ -417,6 +418,8 @@ export async function createApplication(
       ),
     };
   });
+  app.get("/api/v1/splits",async()=>db.call("splits"));
+  app.post("/api/v1/splits/:id/undo",async request=>{await db.call("undoSplit",string(object(request.params).id),Date.now());return {ok:true};});
   app.get("/api/v1/merges", async () => db.call("merges"));
   app.post("/api/v1/merges/:id/undo", async (request) => {
     await db.call("undoMerge", string(object(request.params).id), Date.now());

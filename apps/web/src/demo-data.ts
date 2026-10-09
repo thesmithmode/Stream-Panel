@@ -470,7 +470,7 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
     ];
   }
 
-  if (p === "merges") return [];
+  if (p === "merges" || p === "splits") return [];
 
   if (p === "presence") {
     const from = Number(q.get("from") || now - 90 * minute);
@@ -485,7 +485,7 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
   // Block real credential / connection mutations in demo.
   if (
     isPost &&
-    /^(twitch\/|donationalerts\/|persons\/|merges\/)/.test(p)
+    /^(twitch\/|donationalerts\/|persons\/|merges\/|splits\/)/.test(p)
   ) {
     if (/\/rename$/.test(p)) {
       const m = /^persons\/([^/]+)\/rename$/.exec(p);

@@ -11,7 +11,7 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9 } from "./schema.js";
+import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
 import { presenceMinutes, pollCoveredMinutes, type PresencePoll } from "./presence.js";
 
@@ -82,6 +82,8 @@ export class StreamStore {
         this.db.transaction(() => this.db.exec(schemaV8)).immediate();
       if ((this.db.pragma("user_version", { simple: true }) as number) < 9)
         this.db.transaction(() => this.db.exec(schemaV9)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 10)
+        this.db.transaction(() => this.db.exec(schemaV10)).immediate();
       this.db.exec("CREATE TABLE IF NOT EXISTS sp_youtube_quota (day TEXT NOT NULL, profile TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(day,profile)) WITHOUT ROWID");
       // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
@@ -1459,7 +1461,7 @@ export class StreamStore {
           LEFT JOIN events e ON e.identity_id = i.id
           GROUP BY i.person_id
         ) ec ON ec.person_id = p.id
-        WHERE (EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id) OR EXISTS(SELECT 1 FROM youtube_identities y WHERE y.person_id=p.id))
+        WHERE (EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id) OR EXISTS(SELECT 1 FROM youtube_identities y WHERE y.person_id=p.id) OR (NOT EXISTS(SELECT 1 FROM person_merges m WHERE m.source_person_id=p.id AND m.undone_at_ms IS NULL) AND (EXISTS(SELECT 1 FROM person_notes n WHERE n.person_id=p.id) OR EXISTS(SELECT 1 FROM person_tags t WHERE t.person_id=p.id) OR EXISTS(SELECT 1 FROM person_preferences pref WHERE pref.person_id=p.id))))
           AND (
             ? = '' OR instr(lower(p.display_name), lower(?)) > 0
             OR EXISTS(
@@ -1847,16 +1849,39 @@ export class StreamStore {
       this.db
         .prepare("UPDATE persons SET revision=revision+1 WHERE id=?")
         .run(source);
+      const operationId=randomUUID();
       this.db
         .prepare("INSERT INTO membership_operations VALUES (?, ?, ?, ?, ?)")
         .run(
-          randomUUID(),
+          operationId,
           "split",
           JSON.stringify(all),
           JSON.stringify(all.map((row) => ({ ...row, personId: target }))),
           nowMs,
         );
+      this.db.prepare("INSERT INTO split_guards VALUES (?,?,?,?,NULL)").run(operationId,source,target,JSON.stringify({members:this.memberships([source,target]),sourceRevision:this.personRevision(source),targetRevision:this.personRevision(target)}));
       return target;
+    }).immediate();
+  }
+
+  splits(): Record<string,unknown>[] {
+    return this.db.prepare("SELECT g.operation_id AS id,g.source_person_id,g.target_person_id,o.created_at_ms,g.undone_at_ms FROM split_guards g JOIN membership_operations o ON o.id=g.operation_id ORDER BY o.created_at_ms DESC,g.operation_id LIMIT 100").all() as Record<string,unknown>[];
+  }
+
+  undoSplit(id: string, atMs: number): void {
+    assertTimestamp(atMs);
+    this.db.transaction(()=>{
+      const operation=this.db.prepare("SELECT g.*,o.before_json FROM split_guards g JOIN membership_operations o ON o.id=g.operation_id WHERE g.operation_id=? AND o.kind='split'").get(id) as {source_person_id:string;target_person_id:string;expected_json:string;before_json:string;undone_at_ms:number|null}|undefined;
+      if(!operation)throw new Error("SPLIT_NOT_FOUND");
+      if(operation.undone_at_ms!==null)throw new Error("ALREADY_UNDONE");
+      const expected=JSON.parse(operation.expected_json) as {members:Membership[];sourceRevision:number;targetRevision:number};
+      if(this.personRevision(operation.source_person_id)!==expected.sourceRevision || this.personRevision(operation.target_person_id)!==expected.targetRevision || JSON.stringify(this.memberships([operation.source_person_id,operation.target_person_id]))!==JSON.stringify(expected.members))throw new Error("UNDO_CONFLICT");
+      for(const member of JSON.parse(operation.before_json) as Membership[]){
+        this.db.prepare("UPDATE identities SET person_id=? WHERE id=?").run(member.personId,member.id);
+        this.db.prepare("UPDATE youtube_identities SET person_id=? WHERE id=?").run(member.personId,member.id);
+      }
+      this.db.prepare("UPDATE persons SET revision=revision+1 WHERE id IN(?,?)").run(operation.source_person_id,operation.target_person_id);
+      this.db.prepare("UPDATE split_guards SET undone_at_ms=? WHERE operation_id=?").run(atMs,id);
     }).immediate();
   }
 

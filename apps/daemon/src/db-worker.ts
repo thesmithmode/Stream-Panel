@@ -25,7 +25,7 @@ const allowed = new Set([
   "summary",
   "grid",
   "renamePerson",
-  "splitIdentities",
+  "splitIdentities", "splits", "undoSplit",
   "merges",
   "merge",
   "undoMerge",

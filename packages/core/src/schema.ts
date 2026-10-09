@@ -1,5 +1,5 @@
 // Migration 1. All times are UTC epoch milliseconds; names are never unique identifiers.
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 10;
 
 export const schemaV1 = `
 CREATE TABLE persons (
@@ -203,4 +203,14 @@ CREATE TABLE session_tombstones (
  before_event_ids_json TEXT NOT NULL CHECK(json_valid(before_event_ids_json))
 ) STRICT;
 PRAGMA user_version = 9;
+`;
+
+export const schemaV10 = `
+CREATE TABLE split_guards (
+ operation_id TEXT PRIMARY KEY REFERENCES membership_operations(id),
+ source_person_id TEXT NOT NULL REFERENCES persons(id),
+ target_person_id TEXT NOT NULL REFERENCES persons(id),
+ expected_json TEXT NOT NULL CHECK(json_valid(expected_json)), undone_at_ms INTEGER
+) STRICT;
+PRAGMA user_version = 10;
 `;

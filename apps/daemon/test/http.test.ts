@@ -331,3 +331,20 @@ test("manual stream deletion requires authentication, CSRF and strict payload, a
   assert.equal((await f.a.db.call<any[]>('sessions')).length,1);
  }finally{await f.close();}
 });
+
+test('split history and guarded undo are available only through protected API',async()=>{
+ const f=await fixture();
+ try{
+  const now=Date.now();await f.a.db.call('youtubeMessages','channel','chat',[{id:'message',snippet:{type:'textMessageEvent',publishedAt:new Date(now).toISOString()},authorDetails:{channelId:'author',displayName:'Author'}}]);
+  const person=await f.a.db.call<any>('person','youtube:author'),identity=person.identities[0];
+  const split=await f.a.app.inject({method:'POST',url:'/api/v1/persons/split',headers:f.headers,payload:{identityIds:[identity.id],name:'Separate',revision:person.revision}});assert.equal(split.statusCode,200);
+  const audit=await f.a.app.inject({url:'/api/v1/splits',headers:f.headers});assert.equal(audit.statusCode,200);const id=audit.json()[0].id;
+  const url=`/api/v1/splits/${id}/undo`;
+  assert.equal((await f.a.app.inject({method:'POST',url,headers:{host:f.headers.host},payload:{}})).statusCode,401);
+  assert.equal((await f.a.app.inject({method:'POST',url,headers:{...f.headers,'x-csrf-token':'wrong'},payload:{}})).statusCode,403);
+  assert.equal((await f.a.app.inject({method:'POST',url,headers:f.headers,payload:{unexpected:true}})).statusCode,400);
+  assert.equal((await f.a.app.inject({method:'POST',url,headers:f.headers,payload:{}})).statusCode,200);
+  assert.equal((await f.a.db.call<any>('person','youtube:author')).identities.length,1);
+  assert.equal((await f.a.app.inject({method:'POST',url,headers:f.headers,payload:{}})).statusCode,400);
+ }finally{await f.close();}
+});
