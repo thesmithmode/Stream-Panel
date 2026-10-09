@@ -40,15 +40,16 @@ test("Overview insights render loading, empty, error and person paths; close on 
       }
     });
 
+    const sessionId = await seed(app);
+    const persons = await app.db.call("persons");
+    personId = persons.find((person) => person.display_name === "Тестовый зритель")?.id;
+    assert.ok(personId);
     await startCoverage(page);
     await goto(page, app.bootstrap());
-    await page.getByRole("button", { name: "Открыть интеграции", exact: true }).waitFor();
+
     await page.getByRole("button", { name: "Обзор", exact: true }).waitFor();
-    await page.getByRole("button", { name: "Обзор", exact: true }).click();
-    await page.getByText("эфир не идёт — опросы присутствия появятся после начала стрима.", { exact: true }).waitFor();
-    await page.getByRole("alert").filter({ hasText: "Войди снова — авторизация сброшена" }).waitFor();
-    await page.getByRole("button", { name: "Войти снова", exact: true }).waitFor();
-    await page.locator(".source-row").filter({ hasText: "DonationAlerts" }).getByRole("button", { name: "Интеграции", exact: true }).waitFor();
+    await page.getByRole("button", { name: "Стримы", exact: true }).click();
+    await page.getByRole("button", { name: "Открыть", exact: true }).click();
     const trigger = page.getByRole("button", { name: "Показать паттерны", exact: true });
     await trigger.click();
     const insightDialog = page.getByRole("dialog", { name: "Инсайты" });
@@ -59,15 +60,12 @@ test("Overview insights render loading, empty, error and person paths; close on 
 
     await page.getByRole("button", { name: "Показать паттерны", exact: true }).click();
     await page.getByRole("alert").filter({ hasText: "INSIGHTS_UNAVAILABLE" }).waitFor();
-    await page.getByRole("heading", { name: "Наблюдаемые участники по опросам" }).click();
+    await page.getByRole("heading", { name: /Аудитория в чате/ }).click();
     assert.equal(await insightDialog.count(), 0);
 
-    const sessionId = await seed(app);
-    const persons = await app.db.call("persons");
-    personId = persons.find((person) => person.display_name === "Тестовый зритель")?.id;
-    assert.ok(personId, "seed creates a person for the insight action");
     await reload(page);
-    await page.getByLabel("Период аналитики").selectOption(sessionId);
+    await page.getByRole("button", { name: "Стримы", exact: true }).click();
+    await page.getByRole("button", { name: "Открыть", exact: true }).click();
     await page.getByRole("button", { name: "Показать паттерны", exact: true }).click();
     await page.getByText("Активный участник", { exact: true }).waitFor();
     assert.match(insightUrls[2], new RegExp(`[?&]session=${sessionId}$`));

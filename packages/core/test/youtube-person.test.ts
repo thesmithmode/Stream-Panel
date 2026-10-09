@@ -130,3 +130,22 @@ test('a linked excluded YouTube owner suppresses every personal aggregate while 
   assert.equal(s.events(undefined,tw).length,2);assert.equal(s.eventCount(),1);
  }finally{s.close();}
 });
+
+
+test('stream summary includes every platform participant, deduplicates linked people and excludes bots',()=>{
+ const s=new StreamStore(':memory:');try{
+  const session=s.observePlatformStream('youtube','channel','video',at,at,null,'Stream')!;
+  s.observePlatformStream('twitch','owner','stream',at,at,null,'Stream');const tw=twitch(s);
+  s.youtubeMessages('channel','chat',[message('first','author','Author'),message('second','author','Author',at+minute),message('other','other','Other'),message('bot','bot','StreamElements'),message('owner','channel','Owner')]);
+  let summary=s.summary(session);assert.equal(summary.messages,4);assert.equal(summary.uniquePersons,3);
+  assert.equal((summary.participants as any[]).length,3);
+  s.merge('youtube:author',tw,s.personRevision('youtube:author'),s.personRevision(tw),at+minute);
+  summary=s.summary(session);assert.equal(summary.messages,4);assert.equal(summary.uniquePersons,2);
+  assert.equal((summary.participants as any[]).find(p=>p.personId===tw).messages,3);
+  assert.equal(s.summary().messages,4);
+  s.endSession(session,at+3*minute);
+  const other=s.observePlatformStream('youtube','elsewhere','different',at+4*minute,at+4*minute,null,'Separate')!;
+  s.youtubeMessages('elsewhere','another',[message('third','third','Third',at+4*minute)]);
+  assert.equal(s.summary(session).messages,4);assert.equal(s.summary(other).messages,1);assert.equal(s.summary().messages,5);
+ }finally{s.close();}
+});

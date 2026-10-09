@@ -1599,6 +1599,19 @@ export class StreamStore {
       messages: number;
       donations: number;
     };
+    const youtubeParticipants=this.db.prepare(`SELECT y.person_id,y.display_name,count(*) AS messages
+      FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id
+      WHERE json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
+        AND y.is_owner=0 AND y.external_id<>y.account_id AND y.match_key NOT IN(SELECT value FROM json_each(?))
+        AND (? IS NULL OR EXISTS(SELECT 1 FROM platform_streams ps WHERE ps.session_id=? AND ps.platform='youtube' AND ps.account_id=m.account_id AND m.published_at_ms>=ps.started_at_ms AND (ps.ended_at_ms IS NULL OR m.published_at_ms<ps.ended_at_ms)))
+      GROUP BY y.person_id`).all(botJson,sid,sid) as {person_id:string;display_name:string;messages:number}[];
+    const participants=this.db.prepare(`SELECT i.person_id,i.display_name,count(*) AS messages FROM effective_events e JOIN identities i ON i.id=e.identity_id
+      WHERE ${inSession} AND e.type='chat.message' AND i.match_key NOT IN(SELECT value FROM json_each(?))
+        AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id)
+      GROUP BY i.person_id`).all(sid,sid,botJson) as {person_id:string;display_name:string;messages:number}[];
+    const combinedParticipants=new Map(participants.map(row=>[row.person_id,{personId:row.person_id,name:row.display_name,messages:row.messages}]));
+    for(const row of youtubeParticipants){const previous=combinedParticipants.get(row.person_id);if(previous)previous.messages+=row.messages;else combinedParticipants.set(row.person_id,{personId:row.person_id,name:row.display_name,messages:row.messages});}
+    const youtubeMessageCount=youtubeParticipants.reduce((sum,row)=>sum+row.messages,0);
     const donationRows = this.db
       .prepare(
         `SELECT json_extract(e.payload_json, '$.currency') AS currency,
@@ -1678,7 +1691,7 @@ export class StreamStore {
         const durationMin = sessionDurationMs / 60_000;
         messagesPerMinuteOfSession =
           durationMin > 0
-            ? Math.round((counts.messages / durationMin) * 1000) / 1000
+            ? Math.round(((counts.messages + youtubeMessageCount) / durationMin) * 1000) / 1000
             : null;
         const cov = this.sessionCoverage(sessionId, fromMs, toMs);
         coverage = cov;
@@ -1710,7 +1723,7 @@ export class StreamStore {
           .prepare(
             `SELECT p.id, p.completed_at_ms FROM presence_polls p
              WHERE p.session_id = ? AND p.status = 'complete'
-             ORDER BY p.completed_at_ms ASC LIMIT 200`,
+             ORDER BY p.completed_at_ms ASC`,
           )
           .all(sessionId) as { id: string; completed_at_ms: number }[];
         const chatterStmt = this.db.prepare(
@@ -1740,15 +1753,18 @@ export class StreamStore {
         }
       ).n;
     }
+    const uniquePeople=new Set((this.db.prepare(`SELECT DISTINCT i.person_id FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND i.match_key NOT IN(SELECT value FROM json_each(?))`).all(sid,sid,botJson) as {person_id:string}[]).map(row=>row.person_id));
+    for(const row of youtubeParticipants)uniquePeople.add(row.person_id);
     return {
-      messages: counts.messages,
+      messages: counts.messages + youtubeMessageCount,
+      participants:[...combinedParticipants.values()].sort((a,b)=>b.messages-a.messages||a.name.localeCompare(b.name)),
       donations: counts.donations,
       totals,
       chatters,
       lastPollAtMs: latest?.completed_at_ms ?? null,
-      events: counts.event_count,
+      events: counts.event_count + youtubeMessageCount,
       excludedBots: botKeys.length,
-      uniquePersons: unique.unique_persons_events,
+      uniquePersons: uniquePeople.size,
       uniqueIdentities: unique.unique_identities_events,
       uniquePersonsObserved,
       uniqueIdentitiesObserved,

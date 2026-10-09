@@ -90,6 +90,7 @@ export interface Summary {
     totalMinutes: number;
     ratio: number | null;
   } | null;
+  participants?: {personId:string;name:string;messages:number}[];
   chattersOverTime?: { atMs: number; chatters: number }[];
   gapCount?: number;
 }

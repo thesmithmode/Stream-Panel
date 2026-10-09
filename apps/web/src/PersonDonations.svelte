@@ -43,8 +43,8 @@
  {#if error}<p role="alert">{error}</p>{/if}
  {#if conflict&&editing}<button class="outline" disabled={busy} onclick={()=>change(async()=>openForm(await api(`donations/${encodeURIComponent(editing!.id)}`)))}>Загрузить актуальный донат</button>{/if}
  {#if formOpen}<form onsubmit={e=>{e.preventDefault();void save();}}>
-  <label>Получатель<select bind:value={recipient} disabled={busy}>{#each people as person}<option value={person.id}>{person.display_name}</option>{/each}</select></label>
-  <div class="form-row"><label>Сумма<input inputmode="decimal" bind:value={amount} required maxlength="50" disabled={busy}/></label><label>Валюта<select bind:value={currency} disabled={busy}>{#each ['RUB','USD','EUR','BYN','KZT','UAH','BRL','TRY'] as code}<option value={code}>{code}</option>{/each}</select></label></div>
+  <label>Получатель<select aria-label="Получатель" bind:value={recipient} disabled={busy}>{#each people as person}<option value={person.id}>{person.display_name}</option>{/each}</select></label>
+  <div class="form-row"><label>Сумма<input inputmode="decimal" bind:value={amount} required maxlength="50" disabled={busy}/></label><label>Валюта<select aria-label="Валюта" bind:value={currency} disabled={busy}>{#each ['RUB','USD','EUR','BYN','KZT','UAH','BRL','TRY'] as code}<option value={code}>{code}</option>{/each}</select></label></div>
   <label>Дата и время доната<input type="datetime-local" step="1" bind:value={time} required={!editing} disabled={busy}/></label>
   <label>Источник доната<input bind:value={source} required maxlength="200" disabled={busy}/></label>
   <label>Сообщение доната<textarea bind:value={message} maxlength="10000" rows="3" disabled={busy}></textarea></label>

@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import Icon from "./Icon.svelte";
   import Overview from "./Overview.svelte";
+  import ChannelOverview from "./ChannelOverview.svelte";
   import Analytics from "./Analytics.svelte";
   import YouTube from "./YouTube.svelte";
   import Connections from "./Connections.svelte";
@@ -78,7 +79,8 @@
     } catch { return false; }
   }
   const titles: Record<string, string> = {
-    overview: "Обзор эфира",
+    overview: "Обзор канала",
+    stream: "Стрим",
     sessions: "Стримы",
     people: "Люди",
     analytics: "Аналитика аудитории",
@@ -100,7 +102,7 @@
   ] as const;
   async function refresh() {
     const current = epoch;
-    const query = sessionFilter ? `?session=${sessionFilter}` : "";
+    const query = tab !== "overview" && sessionFilter ? `?session=${encodeURIComponent(sessionFilter)}` : "";
     const values = await Promise.all([
       api("status"),
       api<Session[]>("sessions"),
@@ -130,9 +132,12 @@
     }
   }
   function navigate(next: string) {
+    epoch++;
+    if(next === "overview")sessionFilter = "";
     tab = next;
     personId = "";
     window.scrollTo({ top: 0, behavior: "instant" });
+    void action(async()=>{});
   }
   function openPerson(id: string) {
     navigate("people");
@@ -140,6 +145,7 @@
   }
   async function switchMode(mode: DataMode) {
     if (mode === dataMode) return;
+    epoch++;sessionFilter="";personId="";if(tab==="stream")tab="overview";
     setDataMode(mode);
     dataMode = mode;
     error = "";
@@ -147,7 +153,7 @@
   }
   async function switchProfile(next: Profile) {
     if (next === profile) return;
-    epoch++; setProfile(next); profile = next;
+    epoch++;if(tab==="stream")tab="overview"; setProfile(next); profile = next;
     status = null; sessions = []; people = []; events = []; personId = sessionFilter = ""; error = "";
     summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
     await action(async () => {});
@@ -259,7 +265,7 @@
           secrets.json отключена.
         </p>{/if}
       {#key `${profile}:${dataMode}`}
-      {#if tab === "overview" || tab === "people"}{#if sessions.length}<div
+      {#if tab === "people"}{#if sessions.length}<div
             class="session-picker"
           >
             <label
@@ -274,16 +280,12 @@
                       : ""}</option
                   >{/each}</select
               ></label
-            >{#if tab === "overview"}<span class="small muted"
-                >Лента: последние 200 событий</span
-              >{:else}<span class="small muted"
-                >Фильтр для топов и KPI карточки</span
-              >{/if}
+            >
           </div>{/if}{/if}
-      {#if tab === "overview"}<Overview
+      {#if tab === "overview"}<ChannelOverview {events} onPerson={openPerson} onStream={id=>{sessionFilter=id;navigate("stream");}} connect={()=>navigate("connections")} />
+      {:else if tab === "stream"}<button class="outline" onclick={()=>navigate("sessions")}>К списку стримов</button><Overview
           {summary}
           {events}
-          {status}
           {sessionFilter}
           connect={() => navigate("connections")}
           onPerson={openPerson}
@@ -344,7 +346,7 @@
                           onclick={() =>
                             action(async () => {
                               sessionFilter = session.id;
-                              navigate("overview");
+                              navigate("stream");
                             })}>Открыть</button
                           >{#if session.kind === "manual"}<button class="outline small" onclick={()=>action(async()=>{await api(`sessions/${session.id}/delete`,{});if(sessionFilter===session.id)sessionFilter="";await refresh();})}>Удалить</button>{/if}
                         </td

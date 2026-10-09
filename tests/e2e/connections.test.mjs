@@ -279,10 +279,11 @@ test(
       await page.getByLabel("Имя группы").waitFor();
       await page.getByRole("button", { name: "Стримы", exact: true }).click();
       await page.getByRole("button", { name: "Открыть", exact: true }).click();
-      assert.equal(await page.getByLabel("Период аналитики").inputValue(), s);
+      await page.getByRole("button", {name:"К списку стримов",exact:true}).waitFor();
+      assert.equal(await page.getByLabel("Период аналитики").count(), 0);
       await page.getByLabel("Фильтр событий").selectOption("donation");
       await page.getByText("Событий этого типа нет", { exact: true }).waitFor();
-      await page.getByLabel("Период аналитики").selectOption("");
+      await page.getByRole("button", {name:"Обзор",exact:true}).click();
       await page.getByLabel("Фильтр событий").selectOption("all");
       await a.db.call("endSession", s, Date.now(), "estimated");
       await reload(page);
