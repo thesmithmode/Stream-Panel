@@ -214,6 +214,8 @@ test(
     try {
       await c.start();
       assert.equal(factories, 1);
+      await until(() => c.status.capabilities.history === "Ожидание эфира");
+      await c.scanHistory();
       await until(
         () =>
           c.status.capabilities.history === "Импорт доступных страниц завершён",

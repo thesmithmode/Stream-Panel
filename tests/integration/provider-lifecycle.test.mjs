@@ -579,7 +579,7 @@ test("DA OAuth state is single use; handshake, history, rate limiting and discon
     s.emit("open");
     assert.equal(s.sent[0].params.token, "socket");
     await f.tick(1100);
-    assert.equal(c.status.state, "degraded");
+    assert.equal(c.status.state, "connecting");
     s.push({ id: 1, result: { client: "client" } });
     await f.tick(1100);
     assert.equal(s.sent[1].method, 1);
@@ -621,6 +621,8 @@ test("DA failed channel authorization preserves REST, missing history metadata f
     await f.tick(1100);
     await f.tick(1100);
     assert.equal(c.status.detail, "DA_CHANNEL_TOKEN_MISSING");
+    const initialImport = c.scanHistory();
+    await f.tick(1100); await initialImport;
     assert.equal(
       c.status.capabilities.history,
       "Импорт доступных страниц завершён",
@@ -704,8 +706,9 @@ test("DA API retries rotated token once, reports 429/403 and requires refresh cr
     await starting;
     assert.equal(f.config.value.daAccessToken, "rotated");
     mode = "429";
-    await f.tick(1100);
-    assert.equal(c.status.detail, "DA_RATE_LIMIT");
+    const limited = assert.rejects(c.scanHistory(), /DA_RATE_LIMIT/);
+    await f.tick(1100); await limited;
+    assert.equal(c.status.capabilities.history, "Ошибка импорта");
     await c.stop();
     mode = "403";
     const forbidden = c.start();
@@ -997,4 +1000,22 @@ test("a validation response from the previous account cannot mutate or reconnect
   } finally {
     await c.stop();
   }
+});
+
+test("DA automatic history waits for a logical stream; explicit history import remains available offline", async t => {
+  const f = fixture(t); let historyRequests = 0;
+  const fallback = daRequest(f);
+  const request = async (url, init) => { if (url.includes('alerts/donations')) historyRequests++; return fallback(url, init); };
+  const c = new DonationAlertsConnection(f.config, f.db, request, f.socket);
+  try {
+    await c.start(); await flush();
+    assert.equal(historyRequests, 0);
+    await f.tick(300000); assert.equal(historyRequests, 0);
+    await c.scanHistory(); assert.equal(historyRequests, 1);
+    await f.db.call('observePlatformStream','youtube','yt','live',Date.now(),Date.now(),null,'Live');
+    const automatic = c.scanHistory(true); await f.tick(1100); await automatic;
+    assert.equal(historyRequests, 2);
+    f.setSessions([]);
+    await c.scanHistory(true); assert.equal(historyRequests, 2);
+  } finally { await c.stop(); }
 });

@@ -260,9 +260,9 @@ export class DonationAlertsConnection {
       this.status.account = string(profile.name);
       this.connect(string(profile.socket_connection_token), generation);
       // REST remains useful if realtime permission/protocol fails. State exposes each capability.
-      void this.scanHistory().catch((error) => this.report(error));
+      void this.scanHistory(true).catch((error) => this.report(error));
       this.history = setInterval(() => {
-        void this.scanHistory().catch((error) => this.report(error));
+        void this.scanHistory(true).catch((error) => this.report(error));
       }, 300000);
     } catch (error) {
       if (this.stopped || generation !== this.generation) return;
@@ -353,6 +353,8 @@ export class DonationAlertsConnection {
           }
           const donation = findDonation(message);
           if (donation) {
+            const active = await this.db.call<{id:string;started_at_ms:number} | null>("activeLogicalStream");
+            if (!active || this.stopped || generation !== this.generation) return;
             await this.db.call(
               "ingest",
               normalizeDonation(
@@ -379,12 +381,15 @@ export class DonationAlertsConnection {
       this.status.capabilities.realtime = "Ошибка WebSocket";
     });
   }
-  async scanHistory(): Promise<void> {
+  async scanHistory(automatic = false): Promise<void> {
     if (this.scanning || this.stopped) return;
     this.scanning = true;
     const generation = this.generation;
     this.status.capabilities.history = "Импорт…";
     try {
+      const active = automatic ? await this.db.call<{id:string;started_at_ms:number} | null>("activeLogicalStream") : null;
+      if (this.stopped || generation !== this.generation) return;
+      if (automatic && !active) { this.status.capabilities.history = "Ожидание эфира"; return; }
       let complete = false;
       let knownStreak = 0;
       const stopAfterKnownPages = 3;
@@ -402,15 +407,13 @@ export class DonationAlertsConnection {
         let pageAllKnown = response.data.length > 0;
         for (const raw of response.data) {
           try {
-            const result = await this.db.call<{ inserted: boolean }>(
-              "ingest",
-              normalizeDonation(
-                raw,
-                this.recipient,
-                "rest",
-                this.config.value.daUtcOffsetMinutes,
-              ),
-            );
+            const event = normalizeDonation(raw, this.recipient, "rest", this.config.value.daUtcOffsetMinutes);
+            if (automatic) {
+              const current = await this.db.call<{id:string;started_at_ms:number} | null>("activeLogicalStream");
+              if (this.stopped || generation !== this.generation || !current || current.id !== active!.id) return;
+              if (event.occurredAtMs === null || event.occurredAtMs < current.started_at_ms) continue;
+            }
+            const result = await this.db.call<{ inserted: boolean }>("ingest", event);
             if (result.inserted) pageAllKnown = false;
           } catch (error) {
             pageAllKnown = false;
