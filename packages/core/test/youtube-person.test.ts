@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {StreamStore} from '../src/store.js';
+import {daDonorExternalId} from '../src/domain.js';
 const at=Date.UTC(2026,9,9,12), minute=60000;
 const message=(id:string,author:string,name:string,time=at)=>({id,snippet:{type:'textMessageEvent',publishedAt:new Date(time).toISOString(),displayMessage:'hello'},authorDetails:{channelId:author,displayName:name}});
 function twitch(store:StreamStore){return store.ingest({source:'twitch',accountId:'owner',externalId:'tw-message',type:'chat.message',actor:{externalId:'viewer',displayName:'SameName'},occurredAtMs:at,receivedAtMs:at,sourceTime:new Date(at).toISOString(),timeQuality:'provider',transport:'eventsub',payload:{text:'twitch'}}).personId!;}
@@ -100,5 +101,32 @@ test('lifetime observed ranking includes streams beyond the former twenty-stream
   }
   const row=s.personsTop('observed_minutes')[0]!;
   assert.equal(row.id,person);assert.equal(row.observedMinutes,25);
+ }finally{s.close();}
+});
+
+test('first presence is confirmed chat or complete poll; donations never invent a viewing date',()=>{
+ const s=new StreamStore(':memory:');try{
+  const donor=s.ingest({source:'donationalerts',accountId:'da',externalId:'donation',type:'donation',actor:{externalId:daDonorExternalId('Donor'),displayName:'Donor'},occurredAtMs:at-minute,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'rest',payload:{amountMinor:'100',currency:'RUB'}}).personId!;
+  assert.equal(s.personStats(donor).watchingSinceMs,null);
+  const tw=twitch(s);assert.equal(s.personStats(tw).watchingSinceMs,at);
+  s.youtubeMessages('channel','chat',[message('first','author','YT',at-2*minute)]);
+  assert.equal(s.personStats('youtube:author').watchingSinceMs,at-2*minute);
+  s.merge('youtube:author',tw,s.personRevision('youtube:author'),s.personRevision(tw),at);
+  assert.equal(s.personStats(tw).watchingSinceMs,at-2*minute);
+  assert.equal(s.personStats(tw).followedAtMs,null);
+ }finally{s.close();}
+});
+
+test('a linked excluded YouTube owner suppresses every personal aggregate while retaining original events and polls',()=>{
+ const s=new StreamStore(':memory:');try{
+  const session=s.observePlatformStream('twitch','owner','video',at,at,null,'Stream')!,tw=twitch(s);
+  s.recordPoll(session,'owner',{startedAtMs:at,completedAtMs:at+minute,status:'complete',userIds:['viewer']});
+  s.youtubeMessages('channel','chat',[{...message('owner-msg','yt-owner','Owner'),authorDetails:{channelId:'yt-owner',displayName:'Owner',isChatOwner:true}}]);
+  s.merge('youtube:yt-owner',tw,s.personRevision('youtube:yt-owner'),s.personRevision(tw),at+minute);
+  s.endSession(session,at+2*minute);
+  const stats=s.personStats(tw);assert.equal(stats.messageCount,0);assert.equal(stats.donationCount,0);
+  assert.equal(stats.totalObservedMinutes,0);assert.equal(stats.sessionsWithAttendance,0);assert.equal(stats.watchingSinceMs,null);
+  assert.equal(s.personsTop('messages').length,0);assert.equal(s.personsTop('observed_minutes').length,0);
+  assert.equal(s.events(undefined,tw).length,2);assert.equal(s.eventCount(),1);
  }finally{s.close();}
 });

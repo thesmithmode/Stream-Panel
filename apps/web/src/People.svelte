@@ -12,6 +12,7 @@
   import { formatDuration } from "./duration";
   import EventList from "./EventList.svelte";
   import Icon from "./Icon.svelte";
+  import Help from "./Help.svelte";
   import PersonNotes from "./PersonNotes.svelte";
   import PersonMetadata from "./PersonMetadata.svelte";
   let {
@@ -345,21 +346,14 @@
           <PersonMetadata personId={detail.id} onChange={()=>refreshPerson(detail.id)} />
           <PersonNotes personId={detail.id} />
         {/key}
-        <h3>Зрители и донатеры</h3>
-        <p class="small muted">
-          Person — связка. Twitch login = один зритель; одно имя DA = один
-          донатер. Одинаковое имя между платформами не доказывает, что это один
-          человек, пока нет авто-связи или ручного объединения.
-        </p>
+        <h3>Связанные аккаунты <Help id="person-identities-help" label="О связях аккаунтов" text="Здесь собраны аккаунты одного человека. Совпадение имени служит подсказкой для проверки. YouTube связывается вручную; выбранный аккаунт можно разъединить, сохранив события." /></h3>
         {#each detail.identities as identity}<label class="identity-row"
             ><input
               type="checkbox"
               bind:group={selectedIdentities}
               value={identity.id}
             /><strong>{identity.display_name}</strong><span class="small muted"
-              >{identity.source === "twitch"
-                ? "Зритель"
-                : "Донатер"} · {identity.source} · {identity.external_id}</span
+              >{identity.source === "donationalerts" ? "Донатер" : "Участник"} · {identity.source === "twitch" ? "Twitch" : identity.source === "youtube" ? "YouTube" : "DonationAlerts"}</span
             ></label
           >{/each}
         {#if selectedIdentities.length}<div class="inline">
@@ -439,7 +433,7 @@
         {:else if gridLoaded}
           <p class="empty-small presence-empty">нет данных — эфир не идёт</p>
         {/if}
-        <h3>Последние события <span class="small muted">до 200</span></h3>
+        <h3>События</h3>
         <EventList
           events={minute === null ? (detail.events as Event[]) : minuteEvents}
         />

@@ -2022,6 +2022,7 @@ export class StreamStore {
       .get(personId) as { id: string; display_name: string } | undefined;
     if (!person) throw new Error("PERSON_NOT_FOUND");
     const botJson = this.botJson(excludedBotLogins);
+    const excludedPerson=Boolean(this.db.prepare(`SELECT 1 FROM identities WHERE person_id=? AND match_key IN(SELECT value FROM json_each(?)) UNION ALL SELECT 1 FROM youtube_identities WHERE person_id=? AND (is_owner=1 OR external_id=account_id OR match_key IN(SELECT value FROM json_each(?))) LIMIT 1`).get(personId,botJson,personId,botJson));
     const sid = sessionId ?? null;
     const inSession =
       "(? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?))";
@@ -2047,11 +2048,11 @@ export class StreamStore {
                 json_extract(e.payload_json, '$.amountMinor') AS amount_minor
          FROM events e
          JOIN identities i ON i.id = e.identity_id
-         WHERE i.person_id = ? AND ${inSession} AND e.type = 'donation'
+         WHERE i.person_id = ? AND ${inSession} AND e.type = 'donation' AND ${this.notBotClause('i')}
            AND json_extract(e.payload_json, '$.currency') IS NOT NULL
            AND json_extract(e.payload_json, '$.amountMinor') IS NOT NULL`,
       )
-      .all(personId, sid, sid) as { currency: string; amount_minor: string }[];
+      .all(personId, sid, sid,botJson) as { currency: string; amount_minor: string }[];
     const donationTotals: Record<string, string> = {};
     for (const row of donationRows) {
       donationTotals[row.currency] = (
@@ -2116,7 +2117,7 @@ export class StreamStore {
     const attended = new Set(youtube.sessionIds);
     let offsetSum = 0;
     let offsetSessions = 0;
-    for (const session of sessions) {
+    for (const session of excludedPerson?[]:sessions) {
       const fromMs = Math.floor(session.started_at_ms / 60_000) * 60_000;
       const endMs = session.ended_at_ms ?? Date.now();
       let toMs = Math.ceil(endMs / 60_000) * 60_000;
@@ -2150,9 +2151,9 @@ export class StreamStore {
       donationTotals,
       firstEventMs: eventBounds.first_event_ms,
       lastEventMs: eventBounds.last_event_ms,
-      firstObservedMs,
-      lastObservedMs,
-      observedMinutesThisSession,
+      firstObservedMs:excludedPerson?null:firstObservedMs,
+      lastObservedMs:excludedPerson?null:lastObservedMs,
+      observedMinutesThisSession:excludedPerson?0:observedMinutesThisSession,
       avgObservedMinutes:
         observedSessions > 0
           ? Math.round((observedSum / observedSessions) * 1000) / 1000
@@ -2168,7 +2169,11 @@ export class StreamStore {
       recordedStreams: sessions.length,
       attendanceRatio: sessions.length ? attended.size / sessions.length : null,
       followedAtMs,
-      watchingSinceMs: (this.db.prepare("SELECT min(p.completed_at_ms) AS at FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id WHERE i.person_id=? AND p.status='complete'").get(personId) as {at:number|null}).at,
+      watchingSinceMs: excludedPerson?null:(this.db.prepare(`SELECT min(at) AS at FROM (
+        SELECT min(p.completed_at_ms) AS at FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id WHERE i.person_id=? AND p.status='complete'
+        UNION ALL SELECT min(e.occurred_at_ms) AS at FROM events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id=? AND e.type='chat.message' AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id)
+        UNION ALL SELECT ? AS at
+      )`).get(personId,personId,youtube.firstSeenMs) as {at:number|null}).at,
       observedBeforeFollowMinutes: followedAtMs === null ? null : observedBeforeFollowMinutes,
     };
   }
