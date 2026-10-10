@@ -873,9 +873,9 @@ select:focus-visible {
     grid-template-columns: 1fr;
   }
   .sidebar {
-    position: sticky;
+    position: static;
     height: auto;
-    z-index: 5;
+    z-index: auto;
     display: block;
     padding: 12px 16px;
     border-right: 0;

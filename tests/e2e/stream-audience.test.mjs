@@ -57,6 +57,7 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   const help=page.getByRole('dialog',{name:'О детализации минуты'});await help.waitFor();
   const box=await help.boundingBox();assert.ok(box.x>=0&&box.x+box.width<=390);
   await page.keyboard.press('Escape');assert.equal(await help.count(),0);
+  assert.equal(await page.evaluate(()=>{const nav=document.querySelector('.sidebar').getBoundingClientRect(),main=document.querySelector('main').getBoundingClientRect();return nav.bottom<=main.top+.5;}),true,'mobile navigation must remain above content, not overlay the scrolled chart');
   if(evidence)await page.screenshot({path:join(evidence,'stream-audience-mobile.png'),fullPage:true});
   await assertUiLayout(page);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await detail.getByRole('button',{name:'Silent Viewer',exact:true}).click();
