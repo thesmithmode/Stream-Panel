@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import {currencyRates} from './rates.js';
 import { botExclusionSet, isExcludedBot } from './bots.js';
 export interface AnalyticsOptions {
     fromMs: number;
@@ -115,6 +116,12 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     const sessionMessages = new Map<string, number>();
     const categoryAudience = new Map<string, Set<string>>();
     const categoryMessages = new Map<string, number>();
+    const categoryDonations=new Map<string,Record<string,string>>(),streamDonations=new Map<string,Record<string,string>>();
+    const categoryDonationCounts=new Map<string,number>(),streamDonationCounts=new Map<string,number>();
+    const minuteDonations=new Map<number,Record<string,string>>(),minuteDonationCounts=new Map<number,number>();
+    const addDonation=(totals:Map<string,Record<string,string>>,counts:Map<string,number>,key:string,currency:string,amount:string)=>{
+        const values=totals.get(key)??{};values[currency]=(BigInt(values[currency]??'0')+BigInt(amount)).toString();totals.set(key,values);counts.set(key,(counts.get(key)??0)+1);
+    };
     const addMessages = (sid: string, at: number, n: number, id: string) => { const segment = selected.find(s => s.session === sid && at >= s.from && at < s.to); if (segment) {
         if(n>0){const atMinute=Math.floor(at/60000)*60000,authors=messageAuthors.get(atMinute)??new Map<string,number>();authors.set(id,(authors.get(id)??0)+n);messageAuthors.set(atMinute,authors);}
         sessionMessages.set(sid, (sessionMessages.get(sid) ?? 0) + n);
@@ -175,6 +182,11 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             const e = entity(tip.person_id, name, 'twitch');
             e.donations[tip.currency] = (BigInt(e.donations[tip.currency] ?? '0') + BigInt(tip.amount)).toString();
             e.sessionIds.add(tip.session_id);
+            const segment=selected.find(segment=>segment.session===tip.session_id&&tip.at>=segment.from&&tip.at<segment.to)!;
+            addDonation(categoryDonations,categoryDonationCounts,segment.categoryId,tip.currency,tip.amount);
+            addDonation(streamDonations,streamDonationCounts,tip.session_id,tip.currency,tip.amount);
+            const atMinute=Math.floor(tip.at/60000)*60000,totals=minuteDonations.get(atMinute)??{};
+            totals[tip.currency]=(BigInt(totals[tip.currency]??'0')+BigInt(tip.amount)).toString();minuteDonations.set(atMinute,totals);minuteDonationCounts.set(atMinute,(minuteDonationCounts.get(atMinute)??0)+1);
 
         }
     }
@@ -207,6 +219,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         }
     }
     let expanded = 0;
+    const activityDurations = new Map<number, { observed: number; estimated: number }>();
     // Materialize the selected recording interval, including empty samples and gaps.
     for (const segment of selected) for (let at = Math.floor(segment.from / 60000) * 60000; at < segment.to; at += 60000) {
         if (++expanded > 2000000) throw new Error('ANALYTICS_RANGE_TOO_LARGE');
@@ -236,6 +249,11 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             for (let at = Math.floor(span.from / 60000) * 60000; at < span.to; at += 60000) {
                 if (++expanded > 2000000)
                     throw new Error('ANALYTICS_RANGE_TOO_LARGE');
+                const duration = (Math.min(at + 60000, span.to) - Math.max(at, span.from)) / 60000;
+                const durations = activityDurations.get(at) ?? { observed: 0, estimated: 0 };
+                if (span.kind === 'observed') durations.observed += duration;
+                else durations.estimated += duration;
+                activityDurations.set(at, durations);
                 const signalKey=`${span.kind}:${at}`;
                 if(signalMinutes.has(signalKey))continue;
                 signalMinutes.add(signalKey);
@@ -313,21 +331,25 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         observedKnownMinutes: number;
         viewersTotal: number;
         viewerSamples: number;
+        donationTotals:Record<string,string>;donationCount:number;
     }>();
     for (const point of timeline.values()) {
         const parts = clock.formatToParts(point.at), day = parts.find(x => x.type === 'weekday')!.value, hour = Number(parts.find(x => x.type === 'hour')!.value), key = `${day}:${hour}`;
         let cell = hourly.get(key);
         if (!cell) {
-            cell = { day, hour, observed: 0, estimated: 0, messages: 0, sampleMinutes: 0, observedKnownMinutes: 0, viewersTotal: 0, viewerSamples: 0 };
+            cell = { day, hour, observed: 0, estimated: 0, messages: 0, sampleMinutes: 0, observedKnownMinutes: 0, viewersTotal: 0, viewerSamples: 0,donationTotals:{},donationCount:0 };
             hourly.set(key, cell);
         }
-        cell.observed += point.observed;
-        cell.estimated += point.estimated;
+        const elapsed=selected.reduce((n,segment)=>n+Math.max(0,Math.min(point.at+60000,segment.to)-Math.max(point.at,segment.from)),0)/60000;
+        cell.observed += activityDurations.get(point.at)?.observed ?? 0;
+        cell.estimated += activityDurations.get(point.at)?.estimated ?? 0;
+        for(const [currency,total] of Object.entries(minuteDonations.get(point.at)??{}))cell.donationTotals[currency]=(BigInt(cell.donationTotals[currency]??'0')+BigInt(total)).toString();
+        cell.donationCount+=minuteDonationCounts.get(point.at)??0;
         cell.messages += point.messages;
-        cell.sampleMinutes++;
-        if(point.viewers !== null) {cell.viewersTotal+=point.viewers;cell.viewerSamples++;}
+        cell.sampleMinutes+=elapsed;
+        if(point.viewers !== null) {cell.viewersTotal+=point.viewers*elapsed;cell.viewerSamples+=elapsed;}
         if (point.presenceKnown)
-            cell.observedKnownMinutes++;
+            cell.observedKnownMinutes+=elapsed;
     }
     const audience = [...entities.values()].filter(e => e.sessionIds.size || e.messages).sort((a, b) => Number(b.core) - Number(a.core) || b.observedMinutes - a.observedMinutes || b.messages - a.messages).map(e => ({ ...e, sessionIds: [...e.sessionIds], attendanceSessionIds: [...e.attendanceSessionIds], attendanceRatio: selectedStreamCount?e.attendanceSessionIds.size/selectedStreamCount:0, visits: e.intervals.length, observedMinutesPerSession: e.attendanceSessionIds.size ? e.observedMinutes/e.attendanceSessionIds.size : 0, sessionRatio: e.sessionIds.size/selectedStreamCount, observedMinutes: Math.round(e.observedMinutes * 10) / 10, estimatedChatMinutes: Math.round(e.estimatedChatMinutes * 10) / 10 }));
     const attendees=audience.filter(e=>e.attendanceSessionIds.length>0),regulars=audience.filter(e=>e.core).length;
@@ -336,9 +358,11 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         const visitors = audience.filter(e => e.attendanceSessionIds.includes(s.id)), newInPeriod = visitors.filter(e => !seen.has(e.id)).length;
         for (const e of visitors)
             seen.add(e.id);
-        return { id: s.id, startedAt: s.started_at_ms, endedAt: s.ended_at_ms ?? to, title: samples.find(x => x.session_id === s.id)?.title ?? "", audience: visitors.length, core: visitors.filter(e => e.core).length, newInPeriod, returning: visitors.length - newInPeriod, messages: sessionMessages.get(s.id) ?? 0, categories: [...new Set(selected.filter(segment => segment.session === s.id).map(segment => segment.name))] };
+        const durationMs=selected.filter(segment=>segment.session===s.id).reduce((n,segment)=>n+segment.to-segment.from,0);
+        const donations=streamDonations.get(s.id)??{},messages=sessionMessages.get(s.id)??0;
+        return { durationMs,messagesPerHour:durationMs?messages*3600000/durationMs:null,donationCount:streamDonationCounts.get(s.id)??0,donationTotals:donations,donationsPerHourMinor:currencyRates(donations,durationMs),id: s.id, startedAt: s.started_at_ms, endedAt: s.ended_at_ms ?? to, title: samples.find(x => x.session_id === s.id)?.title ?? "", audience: visitors.length, core: visitors.filter(e => e.core).length, newInPeriod, returning: visitors.length - newInPeriod, messages: sessionMessages.get(s.id) ?? 0, categories: [...new Set(selected.filter(segment => segment.session === s.id).map(segment => segment.name))] };
     });
     const report=source!=='twitch'&&options.youtubeAccount ? db.prepare("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {payload_json:string;updated_at_ms:number}|undefined : undefined;
     const youtubeReport=report ? {data:JSON.parse(report.payload_json),updatedAt:report.updated_at_ms} : null;
-    return { youtubeReport, streamComparison, availableCategories: [...new Map(segments.map(s => [s.categoryId, { id: s.categoryId, name: s.name }])).values()], filters: { fromMs: from, toMs: to, source, category, minSessions, minMinutes, minMessages, regularThresholdPercent, coreRule: rule, chatWindowMinutes: window, timezone }, summary: { entities: audience.length, attendees: attendees.length, regulars, regularShare: audience.length?regulars/audience.length:null, core: audience.filter(e => e.core).length, streams: new Set(selected.map(x => x.session)).size, messages: audience.reduce((sum, e) => sum + e.messages, 0) }, audience, categories: [...categories.values()].map(c => ({ ...c, sessions: c.sessions.size, audience: c.audience.size, core: c.core.size, messagesPerHour: c.minutes ? c.messages * 60 / c.minutes : 0, observedPerMinute: c.minutes ? c.observedMinutes / c.minutes : 0, observedPerKnownMinute: c.observedKnownMinutes ? c.observedMinutes / c.observedKnownMinutes : null, coverageRatio: c.minutes ? c.observedKnownMinutes/c.minutes : null })), timeline: [...timeline.values()].sort((a, b) => a.at - b.at), hours: [...hourly.values()].sort((a, b) => ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(a.day) - ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(b.day) || a.hour - b.hour), sessions, excluded: [...excluded] };
+    return { youtubeReport, streamComparison, availableCategories: [...new Map(segments.map(s => [s.categoryId, { id: s.categoryId, name: s.name }])).values()], filters: { fromMs: from, toMs: to, source, category, minSessions, minMinutes, minMessages, regularThresholdPercent, coreRule: rule, chatWindowMinutes: window, timezone }, summary: { entities: audience.length, attendees: attendees.length, regulars, regularShare: audience.length?regulars/audience.length:null, core: audience.filter(e => e.core).length, streams: new Set(selected.map(x => x.session)).size, messages: audience.reduce((sum, e) => sum + e.messages, 0) }, audience, categories: [...categories.values()].map(c => ({ ...c, donationCount:categoryDonationCounts.get(c.id)??0,donationTotals:categoryDonations.get(c.id)??{},donationsPerHourMinor:currencyRates(categoryDonations.get(c.id)??{},Math.round(c.minutes*60000)),sessions: c.sessions.size, audience: c.audience.size, core: c.core.size, messagesPerHour: c.minutes ? c.messages * 60 / c.minutes : 0, observedPerMinute: c.minutes ? c.observedMinutes / c.minutes : 0, observedPerKnownMinute: c.observedKnownMinutes ? c.observedMinutes / c.observedKnownMinutes : null, coverageRatio: c.minutes ? c.observedKnownMinutes/c.minutes : null })), timeline: [...timeline.values()].sort((a, b) => a.at - b.at), hours: [...hourly.values()].map(cell=>({...cell,donationsPerHourMinor:currencyRates(cell.donationTotals,Math.round(cell.sampleMinutes*60000))})).sort((a, b) => ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(a.day) - ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(b.day) || a.hour - b.hour), sessions, excluded: [...excluded] };
 }

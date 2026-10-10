@@ -68,7 +68,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await page.getByLabel('Сортировка').selectOption('attendanceRatio');
    await page.getByLabel('Вид дней и часов').selectOption('table');assert.equal(await page.locator('.hour-heatmap').count(),0);
    await page.getByLabel('Вид дней и часов').selectOption('map');assert.equal(await page.locator('.hour-heatmap').count(),1);
-   const sections=[['Отчёт YouTube','Агрегатный отчёт YouTube: все видео канала'],['График активности','Активность по времени'],['Сравнение категорий','Категории'],['Дни и часы','Активность по дням и часам'],['Возвращения по эфирам','Возвращения по эфирам'],['Таблица аудитории','Состав аудитории']];
+   const sections=[['Отчёт YouTube','Агрегатный отчёт YouTube: все видео канала'],['График активности','Активность по времени'],['Сравнение категорий','Категории'],['Дни и часы','Активность по дням и часам'],['Сравнение стримов','Сравнение стримов'],['Таблица аудитории','Состав аудитории']];
    for(const [label,heading] of sections){await page.getByLabel(label,{exact:true}).uncheck();assert.equal(await page.getByRole('heading',{name:heading,exact:true}).count(),0);await page.getByLabel(label,{exact:true}).check();}
    await page.getByLabel('График активности',{exact:true}).uncheck();
    await page.getByRole('button',{name:'Обзор',exact:true}).click();await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
@@ -104,8 +104,8 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await page.getByRole('heading',{name:`Активность: Regular ${profile}`}).waitFor();assert.equal(await page.locator('.minute-dot').count(),1440);await page.getByRole('button',{name:'Закрыть детализацию'}).click();
    await page.getByLabel('Поиск участника').fill('');
    for(const metric of ['estimated','messages','viewers','observed']){await page.getByLabel('Метрика графика').selectOption(metric);await page.getByLabel('Метрика карты').selectOption(metric);if(metric==='observed'||metric==='messages')assert.ok(await page.locator('.trend-chart rect.regular-segment').count()>0);else assert.equal(await page.locator('.trend-chart rect.regular-segment').count(),0);}
-   await page.getByLabel('Обновлять каждую минуту').check();
-   const refreshed=page.waitForResponse(r=>r.url().includes('/api/v1/analytics?')&&r.status()===200);await page.clock.fastForward(60300);await refreshed;await page.getByLabel('Обновлять каждую минуту').uncheck();
+   assert.equal(await page.getByLabel('Обновлять каждую минуту').count(),0);
+   const refreshed=page.waitForResponse(r=>r.url().includes('/api/v1/analytics?')&&r.status()===200);await page.clock.fastForward(60300);await refreshed;
    await page.getByRole('button',{name:`YT ${profile}`,exact:true}).click();await page.getByText('Оценка по чату YouTube',{exact:true}).first().waitFor();await page.getByRole('button',{name:'Закрыть детализацию'}).click();
    const autoFilter=watchAnalytics({source:'all',category:'game',timezone:'UTC'});
    await page.getByLabel('Часовой пояс сравнения').selectOption('UTC');await page.getByLabel('Категория Twitch').selectOption('game');await advanceAutoFilter(autoFilter);
@@ -121,7 +121,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await page.getByLabel('Площадка').selectOption('youtube');await advanceAutoFilter(youtubeAgain);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    await page.getByLabel('Сортировка').selectOption('estimatedChatMinutes');await page.getByLabel('Сортировка').selectOption('sessions');await page.getByLabel('Сортировка').selectOption('messages');
    const streamFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC'},200,url=>Number(url.searchParams.get('to'))-Number(url.searchParams.get('from'))===20*minute);
-   await page.getByRole('heading',{name:'Возвращения по эфирам',exact:true}).locator('..').locator('..').getByRole('button').first().click();await advanceAutoFilter(streamFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
+   await page.getByRole('heading',{name:'Сравнение стримов',exact:true}).locator('..').locator('..').getByRole('button').first().click();await advanceAutoFilter(streamFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    const weekRange=await presetPeriod(7),weekFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...weekRange});
    await page.getByRole('button',{name:'7 дней',exact:true}).click();await advanceAutoFilter(weekFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    const quarterRange=await presetPeriod(90),quarterFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...quarterRange});

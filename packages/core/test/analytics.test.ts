@@ -283,3 +283,32 @@ test('switching away and back within one minute never counts a regular attendee 
   assert.equal(point.observed,1);assert.equal(point.regularObserved,1);assert.equal(point.estimated,1);assert.equal(point.regularEstimated,1);
  }finally{s.close();}
 });
+
+test('stream and category donation efficiency use clipped period durations and keep currencies exact',()=>{
+ const s=new StreamStore(':memory:');try{
+  const sid=s.observePlatformStream('twitch','channel','rates',base,base,null,'Rates')!;
+  s.streamSample(sid,base,'game','Game','Rates',10);s.streamSample(sid,base+minute,'talk','Talk','Rates',20);s.endSession(sid,base+2*minute);
+  const person=String(s.createPerson('Supporter').id);
+  s.createDonation({personId:person,amount:'10',currency:'RUB',occurredAtMs:base+45000,message:'',sourceName:'Cash'},base+3*minute);
+  s.createDonation({personId:person,amount:'1.25',currency:'USD',occurredAtMs:base+75000,message:'',sourceName:'Transfer'},base+3*minute);
+  const data=s.analytics({fromMs:base+30000,toMs:base+90000});
+  assert.equal(data.hours[0]!.sampleMinutes,1);assert.deepEqual(data.hours[0]!.donationTotals,{RUB:'1000',USD:'125'});assert.deepEqual(data.hours[0]!.donationsPerHourMinor,{RUB:'60000',USD:'7500'});
+  const comparison=data.streamComparison[0]!;assert.equal(comparison.durationMs,60000);assert.equal(comparison.donationCount,2);
+  assert.deepEqual(comparison.donationTotals,{RUB:'1000',USD:'125'});assert.deepEqual(comparison.donationsPerHourMinor,{RUB:'60000',USD:'7500'});assert.equal(comparison.audience,0);assert.equal(comparison.messagesPerHour,0);
+  const game=data.categories.find(c=>c.id==='game')!,talk=data.categories.find(c=>c.id==='talk')!;
+  assert.equal(game.minutes,.5);assert.equal(talk.minutes,.5);assert.deepEqual(game.donationsPerHourMinor,{RUB:'120000'});assert.deepEqual(talk.donationsPerHourMinor,{USD:'15000'});
+  const filtered=s.analytics({fromMs:base+30000,toMs:base+90000,category:'game'}).streamComparison[0]!;assert.equal(filtered.durationMs,30000);assert.equal(filtered.donationCount,1);assert.deepEqual(filtered.donationsPerHourMinor,{RUB:'120000'});
+ }finally{s.close();}
+});
+
+test('hourly activity uses the actual clipped YouTube window within a partial minute',()=>{
+ const s=new StreamStore(':memory:');try{
+  const sid=s.observePlatformStream('youtube','yt-owner','partial-window',base,base,null,'Partial')!;
+  s.youtubeMessages('yt-owner','partial-chat',[{id:'partial-message',snippet:{type:'textMessageEvent',publishedAt:new Date(base+45000).toISOString(),displayMessage:'hi'},authorDetails:{channelId:'visitor',displayName:'Visitor'}}]);
+  s.endSession(sid,base+minute);
+  const data=s.analytics({fromMs:base+30000,toMs:base+minute,youtubeAccount:'yt-owner'});
+  assert.equal(data.hours[0]!.sampleMinutes,.5);
+  assert.equal(data.hours[0]!.estimated,.25);
+  assert.equal(data.hours[0]!.messages,1);
+ }finally{s.close();}
+});
