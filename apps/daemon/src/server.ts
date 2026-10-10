@@ -259,8 +259,11 @@ export async function createApplication(
   );
   app.get("/api/v1/analytics", async request => {
     const q=object(request.query);
+    const sessionId=string(q.session);
+    const session=sessionId?(await db.call("sessions") as {id:string;started_at_ms:number;ended_at_ms:number|null}[]).find(s=>s.id===sessionId):undefined;
+    if(sessionId&&!session)throw new Error("SESSION_NOT_FOUND");
     return db.call("analytics", {
-      fromMs:Number(q.from),toMs:Math.min(Number(q.to),Date.now()),source:string(q.source)||"all",category:string(q.category),
+      sessionId:sessionId||undefined,fromMs:session?session.started_at_ms:Number(q.from),toMs:session?Math.min(session.ended_at_ms??Date.now(),Date.now()):Math.min(Number(q.to),Date.now()),source:string(q.source)||"all",category:string(q.category),
       regularThresholdPercent:q.regularThresholdPercent===undefined?50:Number(q.regularThresholdPercent),minSessions:q.minSessions===undefined?3:Number(q.minSessions),minMinutes:q.minMinutes===undefined?30:Number(q.minMinutes),minMessages:q.minMessages===undefined?5:Number(q.minMessages),
       chatWindowMinutes:q.chatWindowMinutes===undefined?5:Number(q.chatWindowMinutes),coreRule:string(q.coreRule)||"either",timezone:string(q.timezone)||"Europe/Moscow",
       excludedLogins:configuration.value.excludedBotLogins,ownerId:configuration.value.twitch?.userId??"",youtubeAccount:configuration.value.youtube?.userId??configuration.value.youtubeAccountId??"",

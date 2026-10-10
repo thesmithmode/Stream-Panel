@@ -180,3 +180,25 @@ test("DonationAlerts callback distinguishes rejected client credentials without 
   generic.mock.restore();
  } finally {t.mock.restoreAll();await f.close();}
 });
+
+test('single-stream analytics derives its bounds server-side and never includes overlapping recordings',async()=>{
+ const f=await fixture();
+ try{
+  const base=Math.floor((Date.now()-3600000)/60000)*60000;
+  const first=await f.a.db.call<string>('startSession','a','scoped-a',base,'platform',base);
+  const other=await f.a.db.call<string>('startSession','b','scoped-b',base,'platform',base);
+  for(const [id,account,user] of [[first,'a','silent'],[other,'b','other']]){
+   await f.a.db.call('recordPoll',id,account,{startedAtMs:base,completedAtMs:base+120000,status:'complete',userIds:[user]});
+   await f.a.db.call('endSession',id,base+600000,'observed');
+  }
+  const r=await f.a.app.inject({url:`/api/v1/analytics?session=${first}&from=0&to=1`,headers:f.headers});
+  assert.equal(r.statusCode,200,r.body);
+  assert.equal(r.json().summary.streams,1);
+  assert.deepEqual(r.json().audience.map((p:any)=>p.name),['silent']);
+  assert.equal(r.json().audience[0].observedMinutes,3);
+  assert.equal(r.json().filters.fromMs,base);
+  assert.equal(r.json().filters.toMs,base+600000);
+  const missing=await f.a.app.inject({url:'/api/v1/analytics?session=missing',headers:f.headers});
+  assert.notEqual(missing.statusCode,200);assert.equal(missing.json().error,'SESSION_NOT_FOUND');
+ }finally{await f.close();}
+});

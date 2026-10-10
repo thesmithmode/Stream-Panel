@@ -7,6 +7,7 @@ export interface AnalyticsOptions {
     toMs: number;
     source?: 'all' | 'twitch' | 'youtube';
     category?: string;
+    sessionId?: string;
     minSessions?: number;
     regularThresholdPercent?: number;
     minMinutes?: number;
@@ -66,7 +67,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         throw new Error('INVALID_TIMEZONE');
     }
     const excluded = botExclusionSet(['fullrandomname_twitch', ...(options.excludedLogins ?? [])]), botJson = JSON.stringify([...excluded]);
-    const sessions = db.prepare('SELECT * FROM sessions WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id) AND started_at_ms<? AND coalesce(ended_at_ms,?)>? ORDER BY started_at_ms LIMIT 1001').all(to, to, from) as any[];
+    const sessions = db.prepare('SELECT * FROM sessions WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id) AND started_at_ms<? AND coalesce(ended_at_ms,?)>? AND (? IS NULL OR id=?) ORDER BY started_at_ms LIMIT 1001').all(to, to, from, options.sessionId??null,options.sessionId??null) as any[];
     if (sessions.length > 1000)
         throw new Error('ANALYTICS_RANGE_TOO_LARGE');
     const sessionIds = JSON.stringify(sessions.map(s => s.id));

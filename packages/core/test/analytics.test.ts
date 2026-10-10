@@ -351,3 +351,26 @@ test('comparison deduplicates linked Twitch/YouTube chatters and exposes indepen
   assert.equal(comparison.viewers.youtube.mean,4);assert.equal(comparison.viewers.youtube.coverageRatio,.5);
  }finally{s.close();}
 });
+
+test('single-stream analytics scopes overlapping recordings and ranks silent attendance across gaps', () => {
+ const s=new StreamStore(':memory:');
+ try {
+  const first=s.startSession('first-channel','single-first',base,'platform',base);
+  const other=s.startSession('other-channel','single-other',base,'platform',base);
+  s.recordPoll(first,'first-channel',{startedAtMs:base,completedAtMs:base+2*minute,status:'complete',userIds:['silent','talker','streamelements'],userNames:{silent:'Silent',talker:'Talker'}});
+  s.recordPoll(first,'first-channel',{startedAtMs:base+3*minute,completedAtMs:base+4*minute,status:'failed',userIds:['silent']});
+  s.recordPoll(first,'first-channel',{startedAtMs:base+5*minute,completedAtMs:base+6*minute,status:'complete',userIds:['silent']});
+  s.recordPoll(other,'other-channel',{startedAtMs:base,completedAtMs:base+9*minute,status:'complete',userIds:['other'],userNames:{other:'Other'}});
+  s.ingest({source:'twitch',accountId:'first-channel',externalId:'single-message',type:'chat.message',actor:{externalId:'talker',displayName:'Talker'},occurredAtMs:base+minute,receivedAtMs:base+minute,timeQuality:'provider',sourceTime:null,transport:'eventsub',payload:{text:'hello'}});
+  s.endSession(first,base+10*minute,'observed');s.endSession(other,base+10*minute,'observed');
+  const result=s.analytics({...opts,sessionId:first} as any);
+  assert.equal(result.summary.streams,1);
+  assert.deepEqual(result.audience.map(p=>p.name).sort(),['Silent','Talker']);
+  const silent=result.audience.find(p=>p.name==='Silent')!;
+  assert.equal(silent.messages,0);assert.equal(silent.observedMinutes,5);
+  assert.equal(result.audience.find(p=>p.name==='Talker')!.observedMinutes,3);
+  assert.equal(result.timeline.find(p=>p.at===base+3*minute)!.presenceKnown,false);
+  assert.deepEqual(result.audience.filter(p=>p.intervals.some(i=>i.from<base+minute&&i.to>base)).map(p=>p.name).sort(),['Silent','Talker']);
+  assert.equal(s.analytics({...opts,sessionId:'missing'} as any).summary.streams,0);
+ }finally{s.close();}
+});
