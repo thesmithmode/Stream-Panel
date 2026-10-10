@@ -107,6 +107,7 @@ def activate(release, origin, user):
             try:
                 source.backup(target)
                 if target.execute('PRAGMA integrity_check').fetchone()[0] != 'ok': raise RuntimeError('Snapshot integrity failed')
+                if target.execute('PRAGMA foreign_key_check').fetchall(): raise RuntimeError('Snapshot foreign keys failed')
             finally: target.close(); source.close()
             if (DATA / 'profiles').exists(): shutil.copytree(DATA / 'profiles', snapshot / 'profiles')
             saved = True
@@ -116,11 +117,19 @@ def activate(release, origin, user):
     except Exception:
         service('stop')
         if saved:
-            for suffix in ['', '-wal', '-shm']:
+            check = sqlite3.connect(f'file:{snapshot / "data.sqlite"}?mode=ro', uri=True)
+            try:
+                if check.execute('PRAGMA integrity_check').fetchone()[0] != 'ok' or check.execute('PRAGMA foreign_key_check').fetchall(): raise RuntimeError('Rollback snapshot invalid; maintenance retained')
+            finally: check.close()
+            # Prepare and sync the replacement before replacing the current database.
+            restored = DATA / 'rollback.next.sqlite'
+            shutil.copy2(snapshot / 'data.sqlite', restored)
+            os.chown(restored, user.pw_uid, user.pw_gid)
+            os.chmod(restored, 0o600)
+            with restored.open('rb') as handle: os.fsync(handle.fileno())
+            for suffix in ['-wal', '-shm']:
                 (DATA / ('data.sqlite' + suffix)).unlink(missing_ok=True)
-            shutil.copy2(snapshot / 'data.sqlite', DATA / 'data.sqlite')
-            os.chown(DATA / 'data.sqlite', user.pw_uid, user.pw_gid)
-            os.chmod(DATA / 'data.sqlite', 0o600)
+            os.replace(restored, DATA / 'data.sqlite')
             if (snapshot / 'profiles').exists():
                 shutil.rmtree(DATA / 'profiles', ignore_errors=True)
                 shutil.copytree(snapshot / 'profiles', DATA / 'profiles')

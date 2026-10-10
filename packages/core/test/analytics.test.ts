@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { StreamStore } from '../src/store.js';
-import { unionSpans } from '../src/analytics.js';
+import { audienceAnalytics, unionSpans } from '../src/analytics.js';
 const minute = 60000, base = Date.UTC(2026, 9, 1, 12), end = base + 20 * minute;
 function recordedStream(s:StreamStore, account:string, external:string, start:number, mode:'platform', observed:number) {
  const sid=s.startSession(account,external,start,mode,observed);
@@ -107,6 +107,27 @@ test('empty/default analytics is safe; too many sessions or expanded minutes req
     finally {
         broad.close();
     }
+});
+
+test('analytics rejects oversized query result sets before expanding dashboard data',()=>{
+ const store=new StreamStore(':memory:');
+ const cases=[
+  ['WITH raw AS(',{fromMs:base,toMs:end}],
+  ['SELECT i.person_id,es.session_id,min(e.occurred_at_ms)',{fromMs:base,toMs:end}],
+  ['SELECT i.person_id,es.session_id,e.occurred_at_ms AS at',{fromMs:base,toMs:end}],
+  ['WITH scoped AS (',{fromMs:base,toMs:end,youtubeAccount:'yt-owner'}],
+ ] as const;
+ try {
+  for(const [sqlPart,options] of cases){
+   const raw=(store as any).db;
+   const db=new Proxy(raw,{get(target,key){
+    if(key==='prepare')return(sql:string)=>sql.includes(sqlPart)?{all:()=>Array.from({length:50001},()=>({}))}:target.prepare(sql);
+    const value=Reflect.get(target,key,target);
+    return typeof value==='function'?value.bind(target):value;
+   }});
+   assert.throws(()=>audienceAnalytics(db,{...options,ownerId:'owner'}),/ANALYTICS_RANGE_TOO_LARGE/);
+  }
+ } finally {store.close();}
 });
 test('excluded owner donations stay in raw history but never inflate summary or audience statistics', async () => {
     const { daDonorExternalId, moneyToMinor } = await import('../src/domain.js');

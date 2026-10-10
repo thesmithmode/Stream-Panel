@@ -26,6 +26,11 @@ test('YouTube estimate segments remain bounded by the total and tolerate legacy 
  assert.equal(chartSeries([{at:0,estimated:4}],'estimated')[0]?.regularValue,0);
 });
 
+test('known legacy sample without the selected metric contributes a zero instead of NaN',()=>{
+ const [point]=chartSeries([{at:0,presenceKnown:true}],'observed');
+ assert.deepEqual(point,{at:0,known:true,value:0,regularValue:0,width:60000});
+});
+
  test('requested chart resolution aggregates accurately and caps long periods',()=>{
  const points=[{at:0,messages:2,regularMessages:1},{at:60000,messages:3,regularMessages:2}];
  assert.equal(chartSeries(points,'messages',5)[0]?.width,300000);

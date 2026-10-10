@@ -27,3 +27,14 @@ test('donation audit describes changed amount, recipient, source and message whi
  assert.equal(donationAuditChanges('null',JSON.stringify(after)).length,5);
  assert.deepEqual(donationAuditChanges(JSON.stringify(after),JSON.stringify(after)),[]);
 });
+
+test('donation audit formats missing fields and timestamp edits without inventing source values',async()=>{
+ const {donationAuditChanges}=await import('./donation-form.ts');
+ const changes=donationAuditChanges('null',JSON.stringify({amountMinor:'invalid',personName:null,occurredAtMs:'unknown',sourceName:null,message:null}));
+ assert.deepEqual(changes.map(row=>row.after),['—','Аноним','Время неизвестно','','']);
+ assert.ok(changes.every(row=>row.before===null));
+ const original=Date.UTC(2026,0,2,3,4,5);
+ const edited=localDonationTime(original).replace(/T\d{2}:\d{2}:\d{2}$/,'T03:05:05');
+ assert.equal(donationTimestamp(edited,original),new Date(2026,0,2,3,5,5).getTime());
+ assert.throws(()=>donationTimestamp('999999-12-31T23:59:59'),/корректные дату/);
+});

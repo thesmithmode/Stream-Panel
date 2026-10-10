@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
+import { randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { mkdir, readFile, writeFile, readdir, rm, stat, lstat, rename, open } from "node:fs/promises";
 import {constants} from "node:fs";
@@ -42,7 +42,7 @@ export class BackupService {
     cloud: { state: "disabled", lastSuccessAt: 0, filename: "", error: "" },
   };
   private active: Promise<{filename:string;cloudError?:string}> | undefined;
-  constructor(private dir: string, private options: { keyFile: string; url?: string; serviceKeyFile?: string; bucket?: string }, private request: typeof fetch = fetch) {
+  constructor(private dir: string, private options: { keyFile: string; url?: string; serviceKeyFile?: string; bucket?: string }, private request: typeof fetch = fetch, private readPersistedBackup: (path:string)=>Promise<Buffer> = readFile) {
     this.status.state = options.url ? "pending" : "local";
     this.status.local.state = "pending";
     this.status.cloud.state = options.url ? "pending" : "disabled";
@@ -106,11 +106,33 @@ export class BackupService {
       const snapshotSize = (await stat(snapshot)).size;
       if (metadata.length + 4 + snapshotSize > maxPayloadSize) throw new Error("BACKUP_SIZE_LIMIT");
       const length = Buffer.alloc(4); length.writeUInt32BE(metadata.length);
-      const blob = sealBackup(Buffer.concat([length, metadata, await readFile(snapshot)]), key);
+      const payload = Buffer.concat([length, metadata, await readFile(snapshot)]);
+      const payloadHash = createHash("sha256").update(payload).digest("hex");
+      const blob = sealBackup(payload, key);
       if (blob.length > maxSize) throw new Error("BACKUP_SIZE_LIMIT");
       const filename = `stream-panel-${new Date().toISOString().replace(/[:.]/g,"-")}-${randomBytes(4).toString("hex")}.spbk`;
       const path = join(directory, filename);
-      await writeFile(path + ".tmp", blob, {mode:0o600}); await rename(path + ".tmp", path);
+      const temporary = path + ".tmp";
+      const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+      try {
+        await handle.writeFile(blob);
+        await handle.sync();
+      } catch (error) {
+        await rm(temporary, {force:true});
+        throw error;
+      } finally { await handle.close(); }
+      await rename(temporary, path);
+      const directoryHandle = await open(directory, constants.O_RDONLY);
+      try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
+      try {
+        const persisted = await this.readPersistedBackup(path);
+        const decoded = openBackup(persisted, key);
+        if (createHash("sha256").update(decoded).digest("hex") !== payloadHash)
+          throw new Error("BACKUP_LOCAL_VERIFY_FAILED");
+      } catch {
+        await rm(path, {force:true});
+        throw new Error("BACKUP_LOCAL_VERIFY_FAILED");
+      }
       const owned = (await readdir(directory)).filter(f => /^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/.test(f)).sort().reverse();
       for (const old of owned.slice(3)) await rm(join(directory,old));
       const localSuccessAt = Date.now();
@@ -164,6 +186,10 @@ export class BackupService {
     const info = await (await call(`bucket/${bucket}`)).json() as {public?:boolean};
     if (info.public !== false) throw new Error("BACKUP_BUCKET_MUST_BE_PRIVATE");
     await call(`object/${bucket}/stream-panel/${filename}`, "POST", new Uint8Array(blob), "application/octet-stream");
+    const downloaded = await call(`object/authenticated/${bucket}/stream-panel/${filename}`);
+    const remoteBlob = Buffer.from(await downloaded.arrayBuffer());
+    if (createHash("sha256").update(remoteBlob).digest("hex") !== createHash("sha256").update(blob).digest("hex"))
+      throw new Error("BACKUP_UPLOAD_VERIFY_FAILED");
     const listed = await (await call(`object/list/${bucket}`, "POST", JSON.stringify({prefix:"stream-panel",limit:1000,offset:0,sortBy:{column:"name",order:"desc"}}))).json() as {name:string}[];
     if (!Array.isArray(listed)) throw new Error("BACKUP_INVALID_LIST");
     const owned = listed.map(x => x.name).filter(x => /^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/.test(x)).sort().reverse();

@@ -113,4 +113,22 @@ class ReceiverTests(unittest.TestCase):
    with patch.multiple(r,BASE=base,DATA=data,STATE=state),patch.object(r,'service'),patch.object(r,'health',return_value=True):r.activate(new,'https://panel.test',pwd.getpwuid(os.getuid()))
    self.assertEqual((base/'current').resolve(),new);self.assertFalse((data/'deploying').exists());self.assertTrue((other/'keep').exists())
    self.assertLessEqual(len([p for p in (base/'releases').iterdir() if len(p.name)==40]),3)
+ def test_rollback_copy_failure_does_not_delete_database_and_retains_maintenance(self):
+  with tempfile.TemporaryDirectory() as folder:
+   root=pathlib.Path(folder);base=root/'app';data=root/'data';state=root/'state'
+   for path in [base/'releases',data,state]:path.mkdir(parents=True)
+   old=base/'releases'/('a'*40);new=base/'releases'/('b'*40);old.mkdir();new.mkdir();(base/'current').symlink_to(old)
+   db=sqlite3.connect(data/'data.sqlite');db.execute('create table important(value text)');db.execute("insert into important values ('original')");db.commit();db.close()
+   actions=[]
+   def action(command):
+    actions.append(command)
+    if command=='start' and (base/'current').resolve()==new:
+     db=sqlite3.connect(data/'data.sqlite');db.execute("update important set value='failed upgrade preserved'");db.commit();db.close()
+   with patch.multiple(r,BASE=base,DATA=data,STATE=state),patch.object(r,'service',side_effect=action),patch.object(r,'health',return_value=False),patch.object(r.shutil,'copy2',side_effect=OSError('disk full')):
+    with self.assertRaisesRegex(OSError,'disk full'):r.activate(new,'https://panel.test',pwd.getpwuid(os.getuid()))
+   self.assertTrue((data/'data.sqlite').exists());self.assertTrue((data/'deploying').exists())
+   db=sqlite3.connect(data/'data.sqlite');self.assertEqual(db.execute('select value from important').fetchone()[0],'failed upgrade preserved');db.close()
+   self.assertEqual(actions,['stop','start','stop'])
+   snapshots=list((state/'snapshots').iterdir());self.assertEqual(len(snapshots),1)
+   saved=sqlite3.connect(snapshots[0]/'data.sqlite');self.assertEqual(saved.execute('select value from important').fetchone()[0],'original');saved.close()
 if __name__=='__main__':unittest.main()

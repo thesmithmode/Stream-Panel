@@ -20,6 +20,7 @@ test('cloud failure returns a restorable local backup and a later upload retry r
   await writeFile(join(dir, 'profiles', 'ruslan', 'secrets.json'), JSON.stringify({ version: 1, daAccessToken: 'fixture-secret' }));
   let mode: 'fail' | 'ok' = 'fail';
   const uploaded: string[] = [];
+  const remoteBlobs = new Map<string, Buffer>();
   let failedUploads = 0;
   const request: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
@@ -28,11 +29,16 @@ test('cloud failure returns a restorable local backup and a later upload retry r
       failedUploads++;
       return Response.json({}, { status: 503 });
     }
+    if (url.pathname.includes('/object/authenticated/')) {
+      const name = url.pathname.split('/').at(-1)!;
+      const blob = remoteBlobs.get(name);
+      return blob ? new Response(new Uint8Array(blob)) : Response.json({}, { status: 404 });
+    }
     if (url.pathname.includes('/object/list/')) return Response.json(uploaded.map(name => ({ name })));
     if (init?.method === 'DELETE') {
       const removed = JSON.parse(String(init.body)).prefixes.map((value: string) => value.split('/').at(-1));
-      for (let i = uploaded.length - 1; i >= 0; i--) if (removed.includes(uploaded[i])) uploaded.splice(i, 1);
-    } else uploaded.push(url.pathname.split('/').at(-1)!);
+      for (let i = uploaded.length - 1; i >= 0; i--) if (removed.includes(uploaded[i])) { remoteBlobs.delete(uploaded[i]!); uploaded.splice(i, 1); }
+    } else {const name=url.pathname.split('/').at(-1)!;uploaded.push(name);remoteBlobs.set(name,Buffer.from(init?.body as Uint8Array));}
     return Response.json({ ok: true });
   };
   const backup = new BackupService(dir, { keyFile: join(dir, 'key'), url: 'https://fixture.supabase.co', serviceKeyFile: join(dir, 'service-key') }, request);
@@ -101,6 +107,35 @@ test('local failure keeps the last successful local file metadata and never repo
     assert.equal((await readdir(join(dir, 'backups'))).filter(name => name.endsWith('.spbk')).length, 1);
   } finally {
     await backup.stop();
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('wrong key or corrupted persisted blob never rotates prior local backups', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sp-backup-local-verify-'));
+  const store = new StreamStore(join(dir, 'data.sqlite'));
+  const keyPath = join(dir, 'key'), key = randomBytes(32).toString('hex');
+  await writeFile(keyPath, key);
+  const backup = new BackupService(dir, { keyFile: keyPath });
+  const corruptReader: (path: string) => Promise<Buffer> = async path => {
+    const persisted = Buffer.from(await readFile(path));
+    persisted[persisted.length - 1] = persisted.at(-1)! ^ 1;
+    return persisted;
+  };
+  const corrupted = new BackupService(dir, { keyFile: keyPath }, fetch, corruptReader);
+  try {
+    for (let i = 0; i < 3; i++) await backup.run();
+    const before = (await readdir(join(dir, 'backups'))).filter(name => name.endsWith('.spbk')).sort();
+    await writeFile(keyPath, 'wrong-key');
+    await assert.rejects(new BackupService(dir, { keyFile: keyPath }).run(), /INVALID_BACKUP_KEY/);
+    assert.deepEqual((await readdir(join(dir, 'backups'))).filter(name => name.endsWith('.spbk')).sort(), before);
+    await writeFile(keyPath, key);
+    await assert.rejects(corrupted.run(), /BACKUP_LOCAL_VERIFY_FAILED/);
+    assert.deepEqual((await readdir(join(dir, 'backups'))).filter(name => name.endsWith('.spbk')).sort(), before);
+  } finally {
+    await backup.stop();
+    await corrupted.stop();
     store.close();
     await rm(dir, { recursive: true, force: true });
   }

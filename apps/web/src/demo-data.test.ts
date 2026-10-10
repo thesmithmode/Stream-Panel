@@ -59,6 +59,41 @@ test('demo analytics respects source and strict audience thresholds',async()=>{
  assert.equal(qualified.summary.core,1,'message threshold qualifies only the first eligible audience member');
  assert.equal(qualified.summary.regulars,1);
  assert.ok(qualified.timeline.some((point:any)=>point.regularObserved>0&&point.regularMessages>0));
+ const belowBoth=await demoApi(`analytics?${range}&source=twitch&minSessions=1&regularThresholdPercent=49&minMinutes=999&minMessages=999`) as any;
+ assert.equal(belowBoth.summary.core,0,'failing both activity thresholds excludes the audience member');
+});
+
+test('demo read routes handle missing optional fields and manual session lifecycle',async()=>{
+ const rows=await demoApi('events') as any[],donation=rows.find((row:any)=>row.type==='donation'&&row.display_name==='Вика');
+ assert.ok(donation);
+ const originalPayload={...donation.payload},originalTime=donation.occurred_at_ms;
+ const vikaEvents=rows.filter((row:any)=>row.person_id===donation.person_id),originalTimes=vikaEvents.map((row:any)=>row.occurred_at_ms);
+ const sessions=await demoApi('sessions') as any[],live=sessions.find((row:any)=>row.ended_at_ms===null),originalEnd=live.ended_at_ms;
+ let startedId:string|undefined;
+ try{
+  donation.payload.currency='';donation.payload.amountMinor='';
+  for(const event of vikaEvents)event.occurred_at_ms=null;
+  const summary=await demoApi('summary?session=demo-live') as any;
+  assert.equal(summary.totals.RUB,'75000','empty currency and amount use safe demo defaults');
+  const found=await demoApi('events?from=0&to=1') as any[];
+  assert.ok(found.some((event:any)=>event.id===donation.id),'null event time sorts into the zero-length range');
+  assert.ok(found.every((event:any)=>event.person_id===donation.person_id));
+  assert.deepEqual(await demoApi('events?from=9007199254740991'),[]);
+  const detail=await demoApi(`persons/${donation.person_id}`) as any;
+  assert.equal(detail.identities[0].source,'donationalerts');
+  const stats=await demoApi(`persons/${donation.person_id}/stats`) as any;
+  assert.equal(stats.donationTotals.RUB,'0');assert.equal(stats.firstEventMs,null);assert.equal(stats.lastEventMs,null);
+  const tops=await demoApi('persons/tops') as any[],top=tops.find((row:any)=>row.id===donation.person_id);
+  assert.equal(top.donationTotals.RUB,'0');
+  live.ended_at_ms=Date.now();
+  const started=await demoApi('sessions/start',{}) as any;startedId=started.id;
+  assert.ok(startedId);assert.equal((await demoApi(`sessions/${startedId}/stop`,{} ) as any).ok,true);
+ }finally{
+  donation.payload=originalPayload;donation.occurred_at_ms=originalTime;
+  vikaEvents.forEach((event:any,index:number)=>event.occurred_at_ms=originalTimes[index]);
+  live.ended_at_ms=originalEnd;
+  if(startedId){const liveSessions=await demoApi('sessions') as any[],index=liveSessions.findIndex((row:any)=>row.id===startedId);if(index>=0)liveSessions.splice(index,1);}
+ }
 });
 
 test('demo blocks mutations and handles empty lookups without changing real data',async()=>{
