@@ -37,3 +37,29 @@ test('follower snapshots reject malformed input without overwriting existing raw
  for(const args of [['bad','owner',[],true,at],['twitch','',[],true,at],['twitch','owner',[],null,at],['twitch','owner',Array(25001).fill({}),true,at],['twitch','owner',[],true,at,-1],['twitch','owner',[],true,at,0.5],['twitch','owner',[{id:'',name:'x',followedAtMs:null}],true,at],['twitch','owner',[{id:'x',name:null,followedAtMs:null}],true,at],['twitch','owner',[{id:'x',name:'x',followedAtMs:-1}],true,at]])assert.throws(()=>(s.followingSnapshot as (...args:any[])=>void)(...args));
  }finally{s.close();}
 });
+test('live follow events without polls and public YouTube subscribers retain platform-specific dates',()=>{
+ const s=new StreamStore(':memory:');try{
+ const id=s.observePlatformStream('twitch','owner','one',at,at,null,'Stream')!,person=event(s,'follow-only','follow',at+m);
+ const state=s.personFollowing(person,id)[0]!;assert.equal(state.status,true);assert.equal(state.streamStatus,true);assert.equal(state.followedDuringStreamMs,at+m);assert.equal(state.firstMessageMs,null);assert.equal(state.firstSeenInChatMs,null);
+ s.youtubeMessages('channel','chat',[{id:'yt',snippet:{type:'textMessageEvent',publishedAt:new Date(at).toISOString(),displayMessage:'Hello'},authorDetails:{channelId:'author',displayName:'YT'}}]);
+ const yt=String(s.persons().find(p=>p.sources==='youtube')!.id);
+ s.followingSnapshot('youtube','channel',[{id:'author',name:'YT',followedAtMs:at+2*m},{id:'before',name:'Earlier',followedAtMs:at-m},{id:'future',name:'Later',followedAtMs:at+100*m}],true,at+3*m);
+ s.endSession(id,at+4*m);
+ assert.equal(s.personFollowing(yt,id)[0]!.followedDuringStreamMs,at+2*m);
+ assert.equal(s.followingAnalytics(id).newFollowers.find(f=>f.source==='youtube')!.personId,yt);
+ s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:at+m}],true,at+5*m);
+ s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:at+6*m}],true,at+7*m);
+ assert.deepEqual(s.personFollowing(person)[0]!.history.map(p=>p.followedAtMs),[at+m,at+6*m]);
+ }finally{s.close();}
+});
+test('long stream history retains an early subscription after recent snapshot limits',()=>{
+ const s=new StreamStore(':memory:');try{
+ const id=s.observePlatformStream('twitch','owner','long',at,at,null,'Long')!,person=event(s,'message','chat.message',at);
+ s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:at+m}],true,at+2*m);
+ for(let n=3;n<=210;n++)s.followingSnapshot('twitch','owner',[],true,at+n*m);
+ s.endSession(id,at+211*m);
+ const state=s.personFollowing(person,id)[0]!;
+ assert.equal(state.status,false);assert.equal(state.streamStatus,false);assert.equal(state.followedAtMs,at+m);assert.equal(state.followedDuringStreamMs,at+m);
+ assert.equal(state.history.length,1);
+ }finally{s.close();}
+});
