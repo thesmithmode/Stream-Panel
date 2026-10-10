@@ -326,6 +326,7 @@ export class DonationAlertsConnection {
                 }),
               }),
             );
+            if (this.stopped || generation !== this.generation) return;
             const subscriptions = Array.isArray(response.channels)
               ? response.channels
               : [];
@@ -396,6 +397,7 @@ export class DonationAlertsConnection {
       if (this.stopped || generation !== this.generation) return;
       if (automatic && !active) { this.status.capabilities.history = "Ожидание эфира"; return; }
       let complete = false;
+      let skippedRows = 0;
       let knownStreak = 0;
       const stopAfterKnownPages = 3;
       for (
@@ -421,8 +423,10 @@ export class DonationAlertsConnection {
             const result = automatic
               ? await this.db.call<{inserted:boolean}|null>("ingestLiveDonation",event,active!.id)
               : await this.db.call<{inserted:boolean}>("ingest",event);
+            if (this.stopped || generation !== this.generation) return;
             if (result?.inserted) pageAllKnown = false;
           } catch (error) {
+            skippedRows++;
             pageAllKnown = false;
             console.error(
               "DA history row skipped",
@@ -444,7 +448,7 @@ export class DonationAlertsConnection {
         }
       }
       this.status.capabilities.history = complete
-        ? "Импорт доступных страниц завершён"
+        ? skippedRows ? `Импорт неполный: пропущено записей ${skippedRows}` : "Импорт доступных страниц завершён"
         : "Импорт неполный (лимит/остановка)";
       if (this.status.state !== "connected") {
         this.status.state = "degraded";

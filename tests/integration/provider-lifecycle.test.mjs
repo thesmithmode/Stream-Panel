@@ -1095,3 +1095,49 @@ test('a failed presence request after Twitch stop cannot append a stale gap',asy
     assert.equal(c.status.capabilities.presence,undefined);
   }finally{await c.stop();}
 });
+
+test('DA disconnect while subscribing ignores the late channel token and sends nothing to the closed socket',async t=>{
+ const f=fixture(t),original=daRequest(f);let release,requested=false;
+ const pending=new Promise(resolve=>{release=resolve;});
+ const request=async(url,init)=>{if(url.endsWith('/centrifuge/subscribe')){requested=true;return pending;}return original(url,init);};
+ const c=new DonationAlertsConnection(f.config,f.db,request,f.socket);
+ try{
+  await c.start();f.sockets[0].emit('open');f.sockets[0].push({id:1,result:{client:'client'}});await f.tick(1100);assert.equal(requested,true);
+  const sent=f.sockets[0].sent.length;await c.disconnect();release(response({channels:[{channel:'$alerts:donation_7',token:'late'}]}));await flush();
+  assert.equal(f.sockets[0].sent.length,sent);assert.equal(c.status.state,'disconnected');assert.equal(f.config.value.daAccessToken,'');
+ }finally{release(response({channels:[]}));await c.stop();}
+});
+
+test('DA history continues past an invalid row, stops at its page budget and never reports complete',async t=>{
+ const f=fixture(t);let pages=0,inserted=0;
+ const logs=t.mock.method(console,'error',()=>{});
+ const db={call:async(method,...args)=>{if(method==='ingest'){inserted++;return {inserted:true};}return f.db.call(method,...args);}};
+ const request=async()=>{pages++;t.mock.timers.tick(1100);return response({data:pages===1?[{id:'invalid'}, {id:2,amount:'1',currency:'RUB',created_at:'',username:'Valid'}]:[],links:{next:'next'}});};
+ const c=new DonationAlertsConnection(f.config,db,request,f.socket);c.stopped=false;c.recipient='7';
+ try{
+  await c.scanHistory();assert.equal(pages,1000);assert.equal(inserted,1);assert.equal(logs.mock.callCount(),1);
+  assert.equal(c.status.capabilities.history,'Импорт неполный (лимит/остановка)');assert.equal(c.status.state,'degraded');
+ }finally{await c.stop();}
+});
+
+test('DA automatic scan stops after three known pages and duplicate automatic calls share in-flight work',async t=>{
+ const f=fixture(t);await f.db.call('observePlatformStream','twitch','owner','live',Date.now()-60000,Date.now(),null,'Live');
+ let pages=0,release;const pending=new Promise(resolve=>{release=resolve;});
+ const row={id:1,amount:'1',currency:'RUB',created_at:'2026-10-10 07:00:00',username:'Known'};f.config.value.daUtcOffsetMinutes=0;
+ f.setSessions([{id:'live',kind:'platform',started_at_ms:0,ended_at_ms:null}]);
+ const db={call:async(method,...args)=>method==='activeLogicalStream'?{id:'live',started_at_ms:0}:method==='ingestLiveDonation'?{inserted:false}:f.db.call(method,...args)};
+ const request=async()=>{pages++;t.mock.timers.tick(1100);if(pages===1)return pending;return response({data:[row],links:{next:'next'}});};
+ const c=new DonationAlertsConnection(f.config,db,request,f.socket);c.stopped=false;c.recipient='7';
+ try{
+  const scan=c.scanHistory(true);await flush();await c.scanHistory(true);assert.equal(pages,1);
+  release(response({data:[row],links:{next:'next'}}));await scan;assert.equal(pages,3);assert.equal(c.status.capabilities.history,'Импорт доступных страниц завершён');
+ }finally{release(response({data:[],links:{next:null}}));await c.stop();}
+});
+
+test('DA a finished page with a rejected row stays incomplete while its valid donation survives',async t=>{
+ const f=fixture(t);let ingested=0;t.mock.method(console,'error',()=>{});
+ const db={call:async(method)=>{if(method==='ingest'){ingested++;return {inserted:true};}return null;}};
+ const request=async()=>response({data:[{id:'broken'},{id:2,amount:'2.90',currency:'RUB',created_at:'',username:'Valid'}],links:{next:null}});
+ const c=new DonationAlertsConnection(f.config,db,request,f.socket);c.stopped=false;c.recipient='7';
+ try{await c.scanHistory();assert.equal(ingested,1);assert.equal(c.status.capabilities.history,'Импорт неполный: пропущено записей 1');}finally{await c.stop();}
+});

@@ -184,3 +184,10 @@ CI c1f5041 проверен непосредственно: все unit/integrat
 TDD подтвердил зависание degraded после успешного восстановления stream poll. Ошибка этого опроса сбрасывается после успеха при работающем EventSub; независимое предупреждение об отзыве подписки сохраняется. Provider lifecycle 23/23, отрицательные provider-validation 4/4; дополнительно проверены неверные payload/time/id, анонимное происхождение, non-JSON/network refresh failures, совместный refresh и rate-limit без reset header. Demo использует единое core/regular в таблице, сводке, категориях и графиках; до исправления regression показывал core=0/regulars=1. Все 22 web-unit проверки прошли, Svelte 0 errors/warnings, production build прошёл.
 
 CI 6587560: unit/integration/operations успешны; 17 из 18 E2E успешны, analytics test остановился при выборе скрытого timezone control, перенесённого в настройки отображения. Scenario теперь открывает настройки перед изменением, исходные проверки сохранены; добавлено явное утверждение движения текущего конца периода. Новый SHA требует CI.
+
+
+## Отмена Twitch/DA на границах записи
+
+Добавлены 8 Twitch cancellation-regressions и восстановление после SQLITE_BUSY без закрытия эфира. Пять DA cancellation-regressions воспроизвели продолжение ручного импорта после stop и лишний запрос после ingestLiveDonation; добавлена проверка generation после записи каждой строки. При отключении во время realtime subscribe поздний channel token не отправляется в закрытый socket. История с отклонёнными строками остаётся явно неполной, валидные донаты сохраняются. Проверены page budget 1000, три известные страницы автоматического scan и совместные автоматические запросы. Collector subset 41/41, core build проходит.
+
+CI 4731a7b: все unit/integration/E2E/operations успешны. Lines 99,41%, functions 95,61%, branches 93,55%; gate красный только по branches. Текущий следующий SHA требует своей проверки. Main/release/deploy не выполнялись.
