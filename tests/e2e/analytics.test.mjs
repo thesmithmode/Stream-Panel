@@ -1,3 +1,4 @@
+import {chartSeries} from '../../apps/web/src/chart-series.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
@@ -63,7 +64,10 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    for(const name of ['RenamedOwner','jeetbot','fullrandomname_twitch','streemelements',`Regular ${profile==='ruslan'?'gulnaz':'ruslan'}`])assert.equal(await page.getByRole('button',{name,exact:true}).count(),0);
    await page.getByText('Настроить отображение',{exact:true}).click();await page.getByLabel('Детализация графика').selectOption('1');await page.locator('.regular-segment').first().waitFor();await page.getByText('Настроить отображение',{exact:true}).click();
    assert.ok(await page.locator('.trend-chart rect.regular-segment').count()>0);
-   assert.ok(await page.locator('.trend-chart .chart-bar').evaluateAll(groups=>groups.some(group=>{const full=group.querySelector('.total-segment'),regular=group.querySelector('.regular-segment');return regular&&Math.abs(Number(regular.getAttribute('height'))/Number(full.getAttribute('height'))-.5)<.001&&Math.abs(Number(regular.getAttribute('y'))+Number(regular.getAttribute('height'))-190)<.001;})));
+   const effectiveMinutes=Number((await page.locator('.chart-caption').first().textContent()).match(/Столбец: (\d+) мин/)[1]);
+   const expectedBars=chartSeries(analyticsData.timeline,'observed',effectiveMinutes);
+   const geometry=await page.locator('.trend-chart .chart-bar').evaluateAll(groups=>groups.map(group=>{const full=group.querySelector('.total-segment'),regular=group.querySelector('.regular-segment');return {ratio:regular?Number(regular.getAttribute('height'))/Number(full.getAttribute('height')):0,bottom:regular?Number(regular.getAttribute('y'))+Number(regular.getAttribute('height')):190};}));
+   assert.equal(geometry.length,expectedBars.length);geometry.forEach((bar,i)=>{const expected=expectedBars[i];assert.ok(Math.abs(bar.ratio-(expected.value?expected.regularValue/expected.value:0))<.001);assert.ok(Math.abs(bar.bottom-190)<.001);});
    assert.ok(await page.getByRole('row').filter({hasText:`Regular ${profile}`}).locator('.core-badge').count()>0);
    assert.equal(await page.getByRole('row').filter({hasText:`Occasional ${profile}`}).locator('.core-badge').count(),0);
    await page.getByLabel('Метрика графика').selectOption('viewers');assert.equal(await page.locator('.trend-chart rect.regular-segment').count(),0);await page.getByLabel('Метрика графика').selectOption('observed');
@@ -84,7 +88,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    assert.ok((await page.locator('.trend-chart svg text').allTextContents()).some(text=>/^\d{2}:(00|15|30|45)$/.test(text)));
    await page.getByText('Настроить отображение',{exact:true}).click();
    await page.getByLabel('Детализация графика').selectOption('15');
-   assert.ok((await page.locator('.trend-chart .chart-bar title').first().textContent()).includes('15 мин'));
+   const fittedMinutes=Number((await page.locator('.chart-caption').first().textContent()).match(/Столбец: (\d+) мин/)[1]);assert.ok(fittedMinutes>=15);assert.ok((await page.locator('.trend-chart .chart-bar title').first().textContent()).includes(`${fittedMinutes} мин`));
    await page.locator('.trend-chart .chart-bar').first().click();await barDetail.waitFor();await barDetail.getByLabel('Минута столбца').selectOption({index:1});assert.equal(await barDetail.getByLabel('Минута столбца').count(),1);await page.getByRole('button',{name:'Закрыть детализацию',exact:true}).click();
    await page.getByLabel('Жёлтая доля ядра').uncheck();assert.equal(await page.locator('.regular-segment').count(),0);
    await page.getByLabel('Только ядро').check();assert.equal(await page.getByRole('button',{name:`Occasional ${profile}`,exact:true}).count(),0);

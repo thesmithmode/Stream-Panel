@@ -184,11 +184,11 @@ test(
         false,
       );
       await da
-        .getByRole("button", { name: "Повторить импорт" })
+        .getByRole("button", { name: "Обновить данные о донатах" })
         .click();
       await page
         .getByRole("status")
-        .filter({ hasText: "Повторный импорт запущен" })
+        .filter({ hasText: "Обновление данных о донатах запущено" })
         .waitFor();
       await da.getByRole("button", { name: "Отключить", exact: true }).click();
       await until(() => a.configuration.value.daAccessToken === "", 8000);

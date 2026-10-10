@@ -15,6 +15,7 @@
   import Help from "./Help.svelte";
   import PersonNotes from "./PersonNotes.svelte";
   import PersonDonations from "./PersonDonations.svelte";
+  import Following from "./Following.svelte";
   import PersonMetadata from "./PersonMetadata.svelte";
   let {
     people,
@@ -22,11 +23,13 @@
     sessionFilter = "",
     initialId = "",
     onChange,
+    onSelect,
   }: {
     people: Person[];
     sessions: Session[];
     sessionFilter?: string;
     initialId?: string;
+    onSelect:(id:string)=>void;
     onChange: () => Promise<void>;
   } = $props();
   let createOpen=$state(false),newPersonName=$state("");
@@ -136,6 +139,7 @@
     await onChange();
   }
   async function select(id: string) {
+    if(selectedId!==id)onSelect(id);
     selectedId = id;
     error = "";
     stats = null;
@@ -270,6 +274,7 @@
       </div>{/if}{#each visible as person}<button
         class:chosen={selectedId === person.id}
         class="person-row"
+        aria-label={person.display_name}
         onclick={() => select(person.id)}
         ><span class="avatar"
           >{person.display_name.slice(0, 1).toUpperCase()}</span
@@ -323,15 +328,7 @@
           {#if stats.estimatedChatMinutes != null && stats.estimatedChatMinutes > 0}
           <div class="kpi"><span>Оценка активности YouTube</span><strong>{formatDuration(stats.estimatedChatMinutes)}</strong></div>
           {/if}
-          <div class="kpi">
-            <span>Первое наблюдение</span><strong>{date(stats.watchingSinceMs)}</strong>
-          </div>
-          <div class="kpi">
-            <span>Подписан с</span><strong>{date(stats.followedAtMs)}</strong>
-          </div>
-          <div class="kpi">
-            <span>Время до подписки</span><strong>{formatDuration(stats.observedBeforeFollowMinutes)}</strong>
-          </div>
+
         </div>{/if}
       <div class="settings-body">
         <label
@@ -349,6 +346,7 @@
           </div></label
         >
         {#key detail.id}
+          <Following personId={detail.id} sessionId={sessionFilter} onPerson={onSelect} />
           <PersonMetadata personId={detail.id} onChange={()=>refreshPerson(detail.id)} />
           <PersonDonations personId={detail.id} {people} onChange={()=>detail?refreshPerson(detail.id):Promise.resolve()} />
           <PersonNotes personId={detail.id} />

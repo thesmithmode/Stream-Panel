@@ -268,7 +268,7 @@ export class DonationAlertsConnection {
       void this.scanHistory(true).catch((error) => this.report(error));
       this.history = setInterval(() => {
         void this.scanHistory(true).catch((error) => this.report(error));
-      }, 300000);
+      }, 60000);
     } catch (error) {
       if (this.stopped || generation !== this.generation) return;
       this.report(error);
@@ -398,9 +398,7 @@ export class DonationAlertsConnection {
     const generation = this.generation;
     this.status.capabilities.history = "Импорт…";
     try {
-      const active = automatic ? await this.db.call<{id:string;started_at_ms:number} | null>("activeLogicalStream") : null;
-      if (this.stopped || generation !== this.generation) return;
-      if (automatic && !active) { this.status.capabilities.history = "Ожидание эфира"; return; }
+      if(this.stopped||generation!==this.generation)return;
       let complete = false;
       let skippedRows = 0;
       let knownStreak = 0;
@@ -420,14 +418,7 @@ export class DonationAlertsConnection {
         for (const raw of response.data) {
           try {
             const event = normalizeDonation(raw, this.recipient, "rest", this.config.value.daUtcOffsetMinutes);
-            if (automatic) {
-              const current = await this.db.call<{id:string;started_at_ms:number} | null>("activeLogicalStream");
-              if (this.stopped || generation !== this.generation || !current || current.id !== active!.id) return;
-              if (event.occurredAtMs === null || event.occurredAtMs < current.started_at_ms) continue;
-            }
-            const result = automatic
-              ? await this.db.call<{inserted:boolean}|null>("ingestLiveDonation",event,active!.id)
-              : await this.db.call<{inserted:boolean}>("ingest",event);
+            const result=await this.db.call<{inserted:boolean}>('ingest',event);
             if (this.stopped || generation !== this.generation) return;
             if (result?.inserted) pageAllKnown = false;
           } catch (error) {

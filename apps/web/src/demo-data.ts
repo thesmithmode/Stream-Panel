@@ -320,6 +320,8 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
     return [];
   }
 
+  if (/^persons\/[^/]+\/following$/.test(p)) return [];
+  if (/^sessions\/[^/]+\/followers$/.test(p)) return {newFollowers:[],polls:[]};
   if (p === "analytics") {
     const session=q.get("session")?sessions.find(s=>s.id===q.get("session")):undefined;
     if(q.get("session")&&!session)throw new Error("SESSION_NOT_FOUND");

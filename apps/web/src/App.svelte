@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import {readRoute,routeUrl,type View} from "./route";
+  import {ConnectionError} from "./request";
   import Icon from "./Icon.svelte";
   import {streamRange} from "./stream-time";
   import Overview from "./Overview.svelte";
@@ -46,18 +48,23 @@
   let username = $state(""), password = $state(""), user = $state<any>(null);
   let profile = $state<Profile>(getProfile());
   let epoch = 0;
+  let scopeReady=$state(false),connectionLost=$state(false);
+  let refreshTask:{epoch:number;task:Promise<void>}|null=null;
+  function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile,mode:dataMode});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
+  function clearScope(){busy=false;scopeReady=false;events=[];summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
+  function restoreRoute(){const route=readRoute(location.search,getProfile());epoch++;tab=route.view;sessionFilter=route.session;personId=route.person;setProfile(route.profile);profile=route.profile;setDataMode(route.mode);dataMode=route.mode;clearScope();}
+  function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}connectionLost=!navigator.onLine;error=authMessage((e as Error).message);}
+
   const authMessage = (code: string) => ({ INVALID_LOGIN: "Неверный логин или пароль", LOGIN_RATE_LIMIT: "Слишком много попыток. Попробуйте позже.", LOGIN_REQUIRED: "Войдите в свой профиль", LOCAL_LOGIN_REQUIRED: "Войдите в свой профиль" }[code] ?? code);
   async function login() {
     busy = true; error = "";
     try {
-      const response = await fetch("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
-      const result = await response.json();
-      password = "";
-      if (!response.ok) throw new Error(result.error);
+      const result=await api<any>("auth/login",{username,password});
+      password="";
       epoch++; setCsrf(result.csrf); user = result.user;
       if (result.user?.profile) { setProfile(result.user.profile); profile = result.user.profile; }
-      await refresh(); authorized = true;
-    } catch (e) { error = authMessage((e as Error).message); }
+      setDataMode(dataMode);await refresh(); authorized = true;saveRoute(true);
+    } catch (e) { reportFailure(e); }
     finally { busy = false; }
   }
   async function logout() {
@@ -67,8 +74,8 @@
       sessions = []; people = []; events = []; personId = sessionFilter = "";
       summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
       setCsrf(""); setDataMode("real"); dataMode = "real";
-      error = "";
-    } catch (e) { error = authMessage((e as Error).message); }
+      tab="overview";clearScope();saveRoute(true);error = "";
+    } catch (e) { reportFailure(e); }
   }
   function isConfirmedPlatformUrl(entry: { platform: string; url: string }): boolean {
     try {
@@ -102,22 +109,15 @@
     ["connections", "Интеграции"],
   ] as const;
   async function refresh() {
-    const current = epoch;
-    const query = tab !== "overview" && sessionFilter ? `?session=${encodeURIComponent(sessionFilter)}` : "";
-    const values = await Promise.all([
-      api("status"),
-      api<Session[]>("sessions"),
-      api<Person[]>("persons"),
-      api<Event[]>(`events${query}`),
-      api<Summary>(`summary${query}`),
-    ]);
-    if (current !== epoch) return;
-    status = values[0];
-    if (dataMode === "real") { setCsrf(status.csrf); user = status.user ?? user; }
-    sessions = values[1];
-    people = values[2];
-    events = values[3];
-    summary = values[4];
+    const current=epoch;if(refreshTask?.epoch===current)return refreshTask.task;
+    const query=(tab==='stream'||tab==='people')&&sessionFilter?`?session=${encodeURIComponent(sessionFilter)}`:'';
+    const task=(async()=>{
+      const values=await Promise.all([api('status'),api<Session[]>('sessions'),api<Person[]>('persons'),api<Event[]>(`events${query}`),api<Summary>(`summary${query}`)]);
+      if(current!==epoch)return;
+      status=values[0];if(dataMode==='real'){setCsrf(status.csrf);user=status.user??user;}
+      sessions=values[1];people=values[2];events=values[3];summary=values[4];scopeReady=true;connectionLost=!navigator.onLine;error='';
+    })();refreshTask={epoch:current,task};
+    try{await task;}finally{if(refreshTask?.task===task)refreshTask=null;}
   }
   async function action(fn: () => Promise<void>) {
     const current = epoch;
@@ -127,29 +127,22 @@
       await fn();
       await refresh();
     } catch (e) {
-      if (current === epoch) error = (e as Error).message;
+      if(current===epoch)reportFailure(e);
     } finally {
       if (current === epoch) busy = false;
     }
   }
-  function navigate(next: string) {
-    epoch++;
-    if(next === "overview")sessionFilter = "";
-    tab = next;
-    personId = "";
-    window.scrollTo({ top: 0, behavior: "instant" });
-    void action(async()=>{});
+  function navigate(next:string,person='') {
+    epoch++;if(next==='overview')sessionFilter='';tab=next;personId=person;clearScope();saveRoute();
+    window.scrollTo({top:0,behavior:'instant'});void action(async()=>{});
   }
-  function openPerson(id: string) {
-    navigate("people");
-    personId = id;
-  }
+  function openPerson(id:string){navigate('people',id);}
   async function switchMode(mode: DataMode) {
     if (mode === dataMode) return;
     epoch++;sessionFilter="";personId="";if(tab==="stream")tab="overview";
     setDataMode(mode);
-    dataMode = mode;
-    error = "";
+    dataMode=mode;clearScope();saveRoute();
+    error="";
     await action(async () => {});
   }
   async function switchProfile(next: Profile) {
@@ -157,34 +150,32 @@
     epoch++;if(tab==="stream")tab="overview"; setProfile(next); profile = next;
     status = null; sessions = []; people = []; events = []; personId = sessionFilter = ""; error = "";
     summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
-    await action(async () => {});
+    clearScope();saveRoute();await action(async () => {});
   }
   onMount(() => {
-    let alive = true;
-    const timer = setInterval(() => {
-      if (authorized) void refresh().catch((e) => {
-        if (["LOGIN_REQUIRED", "LOCAL_LOGIN_REQUIRED"].includes(e.message)) { epoch++; authorized = false; people = []; events = []; sessions = []; }
-        error = authMessage(e.message);
-      });
-    }, 5000);
+    let alive=true,initializing=false;
+    const update=()=>{if(!alive||document.hidden||!navigator.onLine)return;if(!authorized){void initialize();return;}const current=epoch;void refresh().catch(e=>{if(current!==epoch||!alive)return;if(['LOGIN_REQUIRED','LOCAL_LOGIN_REQUIRED'].includes(e.message)){epoch++;authorized=false;people=[];events=[];sessions=[];clearScope();}reportFailure(e);});};
+    const timer=setInterval(update,5000);
     async function initialize() {
-      setDataMode("real"); dataMode = "real";
+      if(initializing)return;initializing=true;
+      restoreRoute();setDataMode("real");
       loading = true;
       error = "";
       try {
         const key = new URLSearchParams(location.hash.slice(1)).get("key");
         if (key) {
-          const response = await api("bootstrap", { key });
-          setCsrf(response.csrf);
-          history.replaceState(null, "", location.pathname);
+          try{const response=await api("bootstrap",{key});setCsrf(response.csrf);}
+          catch(bootstrapError){try{await api("status");}catch{throw bootstrapError;}}
+          history.replaceState(null,"",location.pathname+location.search);
         }
+        const auth=await api<any>("status");
+        setCsrf(auth.csrf);user=auth.user;restoreRoute();
         await refresh();
         if (!alive) return;
-        authorized = true;
-      } catch (e) {
-        error = authMessage((e as Error).message);
+        authorized=true;saveRoute(true);
+      } catch(e){reportFailure(e);
       } finally {
-        loading = false;
+        loading=false;initializing=false;
       }
     }
     void initialize();
@@ -192,11 +183,13 @@
       if (new URLSearchParams(location.hash.slice(1)).has("key"))
         void initialize();
     };
+    const back=()=>{restoreRoute();update();};
+    const offline=()=>connectionLost=true;window.addEventListener('offline',offline);window.addEventListener('popstate',back);window.addEventListener('online',update);window.addEventListener('focus',update);document.addEventListener('visibilitychange',update);
     window.addEventListener("hashchange", onHashChange);
     return () => {
       alive = false;
       window.removeEventListener("hashchange", onHashChange);
-      clearInterval(timer);
+      window.removeEventListener('offline',offline);window.removeEventListener('popstate',back);window.removeEventListener('online',update);window.removeEventListener('focus',update);document.removeEventListener('visibilitychange',update);clearInterval(timer);
     };
   });
 </script>
@@ -250,7 +243,7 @@
     </div>
     {#if loading}<div class="panel empty">
         <p>Загружаем профиль…</p>
-      </div>{:else if !authorized}<section class="panel empty">
+      </div>{:else if !authorized&&connectionLost}<section class="panel empty"><p role="status">Нет связи с сервером. Ожидаем подключения…</p><button onclick={()=>location.reload()}>Попробовать снова</button></section>{:else if !authorized}<section class="panel empty">
         <Icon name="connections" size={48} />
         <h2>Вход в Stream Panel</h2>
         <form class="login-form" onsubmit={(event) => { event.preventDefault(); void login(); }}>
@@ -258,14 +251,16 @@
           <label>Пароль<input type="password" autocomplete="current-password" bind:value={password} required maxlength="256" /></label>
           <button class="primary" disabled={busy}>{busy ? "Входим…" : "Войти"}</button>
         </form>
-        {#if error}<p role="alert" class="small notice error">{error}</p>{/if}
+      {#if error}<p role="alert" class="small notice error">{error}</p>{/if}
       </section>{:else}
+      {#if connectionLost}<p role="status" class="notice">Связь прервана. Показываем последние загруженные данные.</p>{/if}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}
       {#if dataMode === "demo"}<p class="demo-banner" role="status">
           Режим <strong>Демо</strong>: показаны фикстуры. Запись в SQLite и
           secrets.json отключена.
         </p>{/if}
-      {#key `${profile}:${dataMode}`}
+      {#key `${profile}:${dataMode}:${tab}:${sessionFilter}:${personId}`}
+      {#if !scopeReady}<div class="panel empty" role="status">Загружаем данные…</div>{:else}
       {#if tab === "people"}{#if sessions.length}<div
             class="session-picker"
           >
@@ -273,7 +268,7 @@
               >Период<select
                 aria-label="Период аналитики"
                 bind:value={sessionFilter}
-                onchange={() => action(async () => {})}
+                onchange={()=>{epoch++;clearScope();saveRoute();void action(async()=>{});}}
                 ><option value="">Вся история</option
                 >{#each sessions as session}<option value={session.id}
                     >{date(session.started_at_ms)}{session.ended_at_ms === null
@@ -303,6 +298,7 @@
           {sessions}
           {sessionFilter}
           initialId={personId}
+          onSelect={(id)=>{personId=id;saveRoute();}}
           onChange={refresh}
         />
       {:else if tab === "sessions"}<section class="panel">
@@ -353,6 +349,7 @@
               </table>
             </div>{/if}
         </section>{/if}
+      {/if}
       {/key}
     {/if}
   </main>

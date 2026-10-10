@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type {Configuration} from '../src/config.js';
 import type {StoreClient} from '../src/db.js';
 import {DonationAlertsConnection} from '../src/donationalerts.js';
-for(const target of ['request:history','active:first','active:row','ingestLiveDonation','ingest']) {
+for(const target of ['request:history','ingest']) {
  test(`DA cancellation after ${target} never imports later rows or restores import status`,async()=>{
   const automatic=target!=='ingest';
   const config={value:{daAccessToken:'fixture',daUtcOffsetMinutes:0},save:async()=>{}} as unknown as Configuration;

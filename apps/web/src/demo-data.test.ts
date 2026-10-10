@@ -141,3 +141,10 @@ test('demo single-stream analytics accepts stream scope without date filters',as
  assert.ok(result.audience.every((p:any)=>p.intervals.every((i:any)=>i.session===streams[0].id)));
  await assert.rejects(demoApi('analytics?session=missing'),/SESSION_NOT_FOUND/);
 });
+test('demo stream metadata and subscription panels expose empty histories and presence has a safe default range',async()=>{
+ assert.deepEqual(await demoApi('persons/demo/following?session=demo-live'),[]);
+ assert.deepEqual(await demoApi('sessions/demo-live/followers'),{newFollowers:[],polls:[]});
+ assert.deepEqual(await demoApi('sessions/demo-live/metadata'),[]);
+ const grid=await demoApi('presence') as any[];
+ assert.equal(grid.length,90);assert.ok(grid.every(cell=>Number.isFinite(cell.minuteStartMs)));
+});

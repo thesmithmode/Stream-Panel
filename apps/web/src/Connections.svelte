@@ -186,8 +186,8 @@
             onclick={() =>
               run(async () => {
                 await api("donationalerts/rescan", {});
-                message = "Повторный импорт запущен.";
-              })}>Повторить импорт</button
+                message = "Обновление данных о донатах запущено.";
+              })}>Обновить данные о донатах</button
           >
         </div>
         {#if status.config.daUtcOffsetMinutes != null}<p class="small muted">

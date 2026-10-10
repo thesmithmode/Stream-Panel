@@ -34,6 +34,7 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   assert.equal(await rank.locator('li strong').first().textContent(),'4 сообщ.');
   assert.equal(await rank.getByRole('button',{name:'Silent Viewer',exact:true}).count(),0);
   await rank.getByLabel('Рейтинг по').selectOption('observedMinutes');
+  await page.getByLabel('Показатель графика стрима').selectOption('observed');
   const bars=page.locator('.series-panel .chart-bar');
   await bars.first().click();
   const detail=page.getByRole('region',{name:'Детали выбранного столбца'});

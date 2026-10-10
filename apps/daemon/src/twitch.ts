@@ -163,6 +163,7 @@ export class TwitchConnection {
   private reconcileError: string | null = null;
   private reconnectAttempt = 0;
   private sessionId: string | null = null;
+  private lastFollowersPollAt:number|null=null;
   private lastSuccessfulPollAt: number | null = null;
   private authGeneration = 0;
   private gapStart: number | null = null;
@@ -620,6 +621,22 @@ export class TwitchConnection {
       }
     }
   }
+  private async collectFollowers(account:string,current:()=>boolean,at:number){
+    if(!this.token?.scopes.includes('moderator:read:followers')){this.status.capabilities.followers='Для проверки подписок нужны права чтения followers';return;}
+    if(this.lastFollowersPollAt!==null&&at-this.lastFollowersPollAt<15*60000)return;
+    try{
+      const followers:{id:string;name:string;followedAtMs:number|null;raw:unknown}[]=[],seen=new Set<string>();let cursor='',complete=false,total:number|null=null;
+      for(let page=0;page<25;page++){
+        const result=object(await this.api(`channels/followers?${new URLSearchParams({broadcaster_id:account,first:'100',...(cursor?{after:cursor}:{})})}`));if(!current())return;
+        if(!Array.isArray(result.data))throw new Error('INVALID_FOLLOWERS');
+        if(Number.isSafeInteger(result.total)&&Number(result.total)>=0)total=Number(result.total);
+        for(const raw of result.data){const f=object(raw),id=string(f.user_id);if(!id)throw new Error('INVALID_FOLLOWERS');const date=Date.parse(string(f.followed_at));followers.push({id,name:string(f.user_name)||string(f.user_login)||id,followedAtMs:Number.isFinite(date)&&date>=0?date:null,raw});}
+        cursor=string(object(result.pagination).cursor);if(!cursor){complete=true;break;}if(seen.has(cursor))throw new Error('FOLLOWERS_PAGINATION_LOOP');seen.add(cursor);
+      }
+      if(!current())return;await this.db.call('followingSnapshot','twitch',account,followers,complete,at,total);if(!current())return;
+      this.lastFollowersPollAt=at;this.status.capabilities.followers=complete?'Подписки проверены':'Получена часть подписок; отсутствие не считается отпиской';
+    }catch{if(current())this.status.capabilities.followers='Не удалось проверить подписки; чат продолжает собираться';}
+  }
   private async reconcile(): Promise<void> {
     if (this.stopped) return;
     if (this.reconcilingGeneration === this.authGeneration) { this.reconcileRequested = true; return; }
@@ -736,6 +753,7 @@ export class TwitchConnection {
           // Isolate from EventSub — do not rethrow into start()/reconnect.
         }
       }
+      if(current())await this.collectFollowers(accountId,current,this.now());
       if (current() && this.reconcileError !== null) {
         if (this.eventSubReady && this.status.detail === this.reconcileError) {
           this.status.state = "connected";
@@ -785,6 +803,7 @@ export class TwitchConnection {
       if (timer) clearTimeout(timer);
     this.retry = this.tick = this.hourly = null;
     this.reconcileRequested = false;
+    this.lastFollowersPollAt=null;
     this.lastSuccessfulPollAt = null;
     for (const socket of this.sockets) socket.close();
     this.sockets.clear();

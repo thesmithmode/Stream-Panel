@@ -32,7 +32,7 @@ test("Overview insights render loading, empty, error and person paths; close on 
         await new Promise((resolve) => setTimeout(resolve, 150));
         await route.fulfill({ json: [] });
       } else if (requestCount === 2) {
-        await route.fulfill({ status: 503, json: { error: "INSIGHTS_UNAVAILABLE" } });
+        await route.fulfill({ status: 500, json: { error: "INSIGHTS_UNAVAILABLE" } });
       } else {
         await route.fulfill({
           json: [{ kind: "person", title: "Активный участник", detail: "Тестовый паттерн", personId, sessionId: null, metrics: {} }],
@@ -60,7 +60,7 @@ test("Overview insights render loading, empty, error and person paths; close on 
 
     await page.getByRole("button", { name: "Показать паттерны", exact: true }).click();
     await page.getByRole("alert").filter({ hasText: "INSIGHTS_UNAVAILABLE" }).waitFor();
-    await page.getByRole("heading", { name: /Аудитория в чате/ }).click();
+    await page.getByRole("heading", { name: /Зрители и чат/ }).click();
     assert.equal(await insightDialog.count(), 0);
 
     await reload(page);

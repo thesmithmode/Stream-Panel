@@ -3,6 +3,7 @@ import { StreamStore } from "../../../packages/core/src/store.js";
 const store = new StreamStore(String(workerData.path), workerData.profile);
 const allowed = new Set([
   "analytics", "streamSample", "youtubeViewers",
+  "followingSnapshot","personFollowing","followingAnalytics",
   "youtubeQuota", "youtubeSnapshot", "providerSnapshot", "collectionLifecycle", "streamMetadata", "youtubeMessages", "youtubeData",
   "ingest",
   "ingestLiveDonation",
