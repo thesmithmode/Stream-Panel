@@ -60,7 +60,7 @@ test("Overview insights render loading, empty, error and person paths; close on 
 
     await page.getByRole("button", { name: "Показать паттерны", exact: true }).click();
     await page.getByRole("alert").filter({ hasText: "INSIGHTS_UNAVAILABLE" }).waitFor();
-    await page.getByRole("heading", { name: /Аудитория в чате/ }).click();
+    await page.getByRole("heading", { name: /Зрители и чат/ }).click();
     assert.equal(await insightDialog.count(), 0);
 
     await reload(page);

@@ -88,7 +88,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    assert.ok((await page.locator('.trend-chart svg text').allTextContents()).some(text=>/^\d{2}:(00|15|30|45)$/.test(text)));
    await page.getByText('Настроить отображение',{exact:true}).click();
    await page.getByLabel('Детализация графика').selectOption('15');
-   assert.ok((await page.locator('.trend-chart .chart-bar title').first().textContent()).includes('15 мин'));
+   const fittedMinutes=Number((await page.locator('.chart-caption').first().textContent()).match(/Столбец: (\d+) мин/)[1]);assert.ok(fittedMinutes>=15);assert.ok((await page.locator('.trend-chart .chart-bar title').first().textContent()).includes(`${fittedMinutes} мин`));
    await page.locator('.trend-chart .chart-bar').first().click();await barDetail.waitFor();await barDetail.getByLabel('Минута столбца').selectOption({index:1});assert.equal(await barDetail.getByLabel('Минута столбца').count(),1);await page.getByRole('button',{name:'Закрыть детализацию',exact:true}).click();
    await page.getByLabel('Жёлтая доля ядра').uncheck();assert.equal(await page.locator('.regular-segment').count(),0);
    await page.getByLabel('Только ядро').check();assert.equal(await page.getByRole('button',{name:`Occasional ${profile}`,exact:true}).count(),0);

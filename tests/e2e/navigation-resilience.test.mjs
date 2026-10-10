@@ -21,8 +21,9 @@ test('stream scope never flashes channel totals, reload/back retain the route an
   await reload(page);await page.getByText('Нет донатов',{exact:true}).waitFor();assert.ok(new URL(page.url()).searchParams.get('stream')===id);
   const ranking=page.getByRole('region',{name:'Рейтинг участников'});await ranking.getByRole('button',{name:'Viewer',exact:true}).click();await page.getByRole('heading',{name:'Viewer',exact:true}).waitFor();
   await page.goBack();await page.getByText('Нет донатов',{exact:true}).waitFor();await page.goBack();await page.getByRole('heading',{name:'История стримов',exact:true}).waitFor();await page.goForward();await page.getByText('Нет донатов',{exact:true}).waitFor();
-  await page.waitForFunction(()=>{const el=document.querySelector('.trend-plot');return el&&el.scrollWidth<=el.clientWidth+1;});
-  assert.equal(await page.locator('.trend-plot').first().evaluate(el=>el.scrollWidth<=el.clientWidth+1),true);
+  await page.locator('.trend-plot svg').first().waitFor();
+  const layout=await page.locator('.trend-plot').first().evaluate(el=>{const svg=el.querySelector('svg'),box=svg.getBoundingClientRect();el.scrollLeft=1000;return {viewport:innerWidth,width:el.clientWidth,scrollWidth:el.scrollWidth,scrollLeft:el.scrollLeft,svgLeft:box.left,svgRight:box.right,barsFit:[...svg.querySelectorAll('.chart-bar rect')].every(bar=>{const r=bar.getBoundingClientRect();return r.left>=box.left-1&&r.right<=box.right+1;})};});
+  assert.ok(layout.svgLeft>=0&&layout.svgRight<=layout.viewport&&layout.barsFit,JSON.stringify(layout));assert.equal(layout.scrollLeft,0,JSON.stringify(layout));
   await page.getByLabel('Показатель графика стрима').selectOption('observed');await page.locator('.series-panel .chart-bar').first().click();
   await page.getByRole('region',{name:'Детали выбранного столбца'}).waitFor();assert.equal(await page.getByText('Участники по сигналам:',{exact:false}).count(),0);
   const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(evidence){await mkdir(evidence,{recursive:true});await page.screenshot({path:join(evidence,'stream-responsive-mobile.png'),fullPage:true});}
