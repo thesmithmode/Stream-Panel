@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApplication } from "../src/server.js";
@@ -87,4 +87,96 @@ test("unexpected non-Error failures are sanitized and null UTC offset is accepte
     assert.equal(nullable.statusCode, 200, nullable.body);
     assert.equal(typeof nullable.json().url, "string");
   } finally { t.mock.restoreAll(); await f.close(); }
+});
+
+test("DonationAlerts rejects a URL as the effective secret before stopping or mutating config", async (t) => {
+  const f = await fixture();
+  try {
+    f.a.configuration.value.daClientId = "saved-client";
+    f.a.configuration.value.daClientSecret = "saved-secret";
+    await f.a.configuration.save();
+    const before = await readFile(join(f.dir, "secrets.json"), "utf8");
+    const stop = t.mock.method(f.a.da, "stop", async () => {});
+    const result = await f.a.app.inject({
+      method: "POST", url: "/api/v1/donationalerts/connect", headers: f.headers,
+      payload: { clientSecret: " https://example.test/oauth/callback ", utcOffsetMinutes: null },
+    });
+    assert.equal(result.statusCode, 400);
+    assert.equal(result.json().error, "DA_CLIENT_SECRET_IS_URL");
+    assert.equal(stop.mock.callCount(), 0);
+    assert.equal(f.a.configuration.value.daClientSecret, "saved-secret");
+    assert.equal(await readFile(join(f.dir, "secrets.json"), "utf8"), before);
+  } finally { t.mock.restoreAll(); await f.close(); }
+});
+
+test("DonationAlerts requires effective OAuth credentials before stopping or saving", async (t) => {
+  const f = await fixture();
+  try {
+    await f.a.configuration.save();
+    const before = await readFile(join(f.dir, "secrets.json"), "utf8");
+    const stop = t.mock.method(f.a.da, "stop", async () => {});
+    const result = await f.a.app.inject({
+      method: "POST", url: "/api/v1/donationalerts/connect", headers: f.headers,
+      payload: { clientId: "  ", clientSecret: "  ", utcOffsetMinutes: null },
+    });
+    assert.equal(result.statusCode, 400);
+    assert.equal(result.json().error, "DA_APP_CREDENTIALS_REQUIRED");
+    assert.equal(stop.mock.callCount(), 0);
+    assert.equal(f.a.configuration.value.daClientId, "");
+    assert.equal(f.a.configuration.value.daClientSecret, "");
+    assert.equal(await readFile(join(f.dir, "secrets.json"), "utf8"), before);
+  } finally { t.mock.restoreAll(); await f.close(); }
+});
+
+test("DonationAlerts trims new OAuth credentials and reuses saved credentials; manual token bypasses OAuth credentials", async (t) => {
+  const f = await fixture();
+  try {
+    const stop = t.mock.method(f.a.da, "stop", async () => {});
+    const start = t.mock.method(f.a.da, "start", async () => {});
+    const first = await f.a.app.inject({
+      method: "POST", url: "/api/v1/donationalerts/connect", headers: f.headers,
+      payload: { clientId: "  fixture-client  ", clientSecret: "  fixture-secret  ", utcOffsetMinutes: null },
+    });
+    assert.equal(first.statusCode, 200, first.body);
+    const authorization = new URL(first.json().url);
+    assert.equal(authorization.searchParams.get("client_id"), "fixture-client");
+    assert.equal(f.a.configuration.value.daClientId, "fixture-client");
+    assert.equal(f.a.configuration.value.daClientSecret, "fixture-secret");
+
+    const second = await f.a.app.inject({
+      method: "POST", url: "/api/v1/donationalerts/connect", headers: f.headers,
+      payload: { clientId: " ", clientSecret: " ", utcOffsetMinutes: null },
+    });
+    assert.equal(second.statusCode, 200, second.body);
+    assert.equal(new URL(second.json().url).searchParams.get("client_id"), "fixture-client");
+    assert.equal(f.a.configuration.value.daClientSecret, "fixture-secret");
+
+    const manual = await f.a.app.inject({
+      method: "POST", url: "/api/v1/donationalerts/connect", headers: f.headers,
+      payload: { accessToken: " manual-access ", refreshToken: "manual-refresh", utcOffsetMinutes: null },
+    });
+    assert.equal(manual.statusCode, 200, manual.body);
+    assert.deepEqual(manual.json(), { ok: true });
+    assert.equal(f.a.configuration.value.daAccessToken, "manual-access");
+    assert.equal(start.mock.callCount(), 1);
+    assert.equal(stop.mock.callCount(), 3);
+  } finally { t.mock.restoreAll(); await f.close(); }
+});
+
+test("DonationAlerts callback distinguishes rejected client credentials without exposing provider details",async(t)=>{
+ const f=await fixture();
+ try {
+  const finish=t.mock.method(f.a.da,'finishAuth',async()=>{throw new Error('DA_OAUTH_HTTP_401');});
+  const rejected=await f.a.app.inject({url:'/oauth/donationalerts/callback?code=code&state=state',headers:f.headers});
+  assert.equal(rejected.statusCode,400);
+  assert.match(rejected.body,/Client ID или Client Secret/);
+  assert.match(rejected.body,/Redirect URI укажите отдельно/);
+  finish.mock.restore();
+  const generic=t.mock.method(f.a.da,'finishAuth',async()=>{throw new Error('private-provider-detail');});
+  const failed=await f.a.app.inject({url:'/oauth/donationalerts/callback?code=code&state=state',headers:f.headers});
+  assert.equal(failed.statusCode,400);
+  assert.match(failed.body,/redirect URI и state/);
+  assert.equal(failed.body.includes('private-provider-detail'),false);
+  generic.mock.restore();
+ } finally {t.mock.restoreAll();await f.close();}
 });

@@ -64,3 +64,47 @@ test('DA history reports unknown pagination and marks pages incomplete when a ro
   assert.equal(connection.status.capabilities.history,'Импорт неполный: пропущено записей 1');
  } finally {await connection.stop();}
 });
+
+test('DA rejects incomplete successful OAuth and refresh responses without overwriting saved credentials',async()=>{
+ const state=da(async()=>Response.json({access_token:'new-access'}));
+ const callback='https://panel.test/oauth/donationalerts/callback';
+ const authState=new URL(state.connection.authUrl(callback)).searchParams.get('state')!;
+ try {
+  await assert.rejects(state.connection.finishAuth('code',authState,callback),/DA_OAUTH_REFRESH_REQUIRED/);
+  assert.equal(state.config.value.daAccessToken,'old-access');
+  assert.equal(state.config.value.daRefreshToken,'keep-refresh');
+ } finally {await state.connection.stop();}
+ const malformed=da(async()=>Response.json({refresh_token:'new-refresh'}));
+ try {
+  await assert.rejects((malformed.connection as any).refresh(),/DA_OAUTH_INVALID_TOKEN/);
+  assert.equal(malformed.config.value.daAccessToken,'old-access');
+  assert.equal(malformed.config.value.daRefreshToken,'keep-refresh');
+ } finally {await malformed.connection.stop();}
+});
+
+test('DA revoked authorization stops reconnect and explicitly requires login, temporary provider failures retry',async()=>{
+ for(const status of [400,401,500]) {
+  let requests=0;
+  const state=da(async input=>{
+   requests++;
+   return String(input).endsWith('/oauth/token')
+    ? Response.json({error:status===500?'server_error':'invalid_grant'},{status})
+    : Response.json({error:'unauthorized'},{status:401});
+  });
+  try {
+   await state.connection.start();
+   assert.equal(requests,2);
+   assert.equal(state.config.value.daRefreshToken,'keep-refresh','failure never erases a recoverable token');
+   if(status===500) {
+    assert.equal(state.connection.status.state,'degraded');
+    assert.equal(state.connection.status.detail,'DA_OAUTH_HTTP_500');
+    assert.notEqual((state.connection as any).retry,null);
+   } else {
+    assert.equal(state.connection.status.state,'error');
+    assert.equal(state.connection.status.detail,'DA_REAUTH_REQUIRED');
+    assert.equal((state.connection as any).retry,null);
+    assert.equal((state.connection as any).stopped,true);
+   }
+  } finally {await state.connection.stop();}
+ }
+});

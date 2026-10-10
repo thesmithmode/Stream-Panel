@@ -163,6 +163,7 @@ export class DonationAlertsConnection {
     if (generation !== this.generation) throw new Error("DA_AUTH_CANCELLED");
     if (!response.ok || !string(body.access_token))
       throw new Error(`DA_OAUTH_HTTP_${response.status}`);
+    if (!string(body.refresh_token)) throw new Error("DA_OAUTH_REFRESH_REQUIRED");
     this.config.value.daAccessToken = string(body.access_token);
     this.config.value.daRefreshToken = string(body.refresh_token);
     await this.config.save();
@@ -193,7 +194,10 @@ export class DonationAlertsConnection {
       );
       const body = object(await response.json());
       if (generation !== this.generation) throw new Error("DA_AUTH_CANCELLED");
-      if (!response.ok) throw new Error("DA_REAUTH_REQUIRED");
+      if (!response.ok)
+        throw new Error(response.status === 400 || response.status === 401
+          ? "DA_REAUTH_REQUIRED" : `DA_OAUTH_HTTP_${response.status}`);
+      if (!string(body.access_token)) throw new Error("DA_OAUTH_INVALID_TOKEN");
       c.daAccessToken = string(body.access_token);
       if (string(body.refresh_token))
         c.daRefreshToken = string(body.refresh_token);
@@ -460,8 +464,10 @@ export class DonationAlertsConnection {
     }
   }
   private report(error: unknown): void {
-    this.status.state = "degraded";
     this.status.detail = error instanceof Error ? error.message : "DA_ERROR";
+    const reauth = ["DA_REAUTH_REQUIRED", "DA_LOGIN_REQUIRED"].includes(this.status.detail);
+    this.status.state = reauth ? "error" : "degraded";
+    if (reauth) void this.stop();
   }
   private schedule(): void {
     if (this.stopped || this.retry) return;

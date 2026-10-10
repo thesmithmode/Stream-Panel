@@ -1,5 +1,5 @@
 import { clampChattersPollSeconds } from "../../../packages/core/src/presence.js";
-import { mkdir, readFile, writeFile, rename, chmod } from "node:fs/promises";
+import { mkdir, readFile, rename, open, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 export interface Tokens {
@@ -75,9 +75,29 @@ export class Configuration {
     const data = JSON.stringify(this.value);
     const path = join(this.dir, "secrets.json");
     const operation = this.saving.then(async () => {
-      await writeFile(path + ".tmp", data, { mode: 0o600 });
-      await chmod(path + ".tmp", 0o600);
-      await rename(path + ".tmp", path);
+      const temporary = path + ".tmp";
+      try {
+        const handle = await open(temporary, "w", 0o600);
+        try {
+          await handle.writeFile(data);
+          await handle.chmod(0o600);
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+        await rename(temporary, path);
+        if (process.platform !== "win32") {
+          const directory = await open(this.dir, "r");
+          try {
+            await directory.sync();
+          } finally {
+            await directory.close();
+          }
+        }
+      } catch (error) {
+        await rm(temporary, { force: true }).catch(() => {});
+        throw error;
+      }
     });
     this.saving = operation.catch(() => {});
     await operation;
