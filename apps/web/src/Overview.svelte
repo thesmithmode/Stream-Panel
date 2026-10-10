@@ -26,10 +26,11 @@
     connect: () => void;
     onPerson: (id: string) => void;
   } = $props();
-  let audienceData=$state<any>(null),audienceError=$state(''),audienceBusy=$state(false);
+  let audienceData=$state<any>(null),audienceError=$state(''),audienceBusy=$state(false),barOpen=$state(false);
   let audienceRequest=0,lastAudienceSession='';
   $effect(()=>{
     const current=sessionFilter;void summary;
+    if(current===lastAudienceSession&&barOpen)return;
     const id=++audienceRequest;audienceBusy=true;audienceError='';
     if(current!==lastAudienceSession){audienceData=null;lastAudienceSession=current;}
     if(!current){audienceData=null;audienceBusy=false;return;}
@@ -180,7 +181,7 @@
 <section class="panel series-panel">
   <header><h2>Аудитория в чате <Help id="stream-presence" label="Об аудитории стрима" text="График показывает наблюдения присутствия в чате Twitch. Это не подтверждение просмотра видео; неизвестные промежутки не считаются нулём. Нажмите столбец, чтобы увидеть участников за минуту." /></h2></header>
   {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceData}
-    <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric="observed" resolution={1} showRegulars={false} {onPerson}/>
+    <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric="observed" resolution={1} showRegulars={false} {onPerson} onselection={(open)=>barOpen=open}/>
   {:else}<p class="empty-small" role="status">{audienceBusy?'Загружаем присутствие…':'Выберите стрим'}</p>{/if}
 </section>
 <AudienceRanking people={audienceData?.audience??[]} {onPerson}/>

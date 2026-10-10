@@ -1,4 +1,5 @@
 <script lang="ts">
+ import {onDestroy} from 'svelte';
  import TrendChart from './TrendChart.svelte';
  import Help from './Help.svelte';
  import {participantsAt,type SignalParticipant} from './chart-detail';
@@ -12,6 +13,7 @@
  const label=(at:number)=>new Date(at).toLocaleString('ru-RU',{timeZone:timezone});
  $effect(()=>{void points;void metric;void resolution;bucket=null;minute=null;});
  $effect(()=>onselection?.(bucket!==null));
+ onDestroy(()=>onselection?.(false));
 </script>
 <TrendChart {points} {metric} {resolution} {showRegulars} {timezone} onselect={point=>{bucket=point;minute=null;}}/>
 {#if selected}
