@@ -130,8 +130,8 @@ test("stream writer and reader remove partial outputs when file sync fails", asy
     const sync = t.mock.method(handlePrototype, "sync", async () => {
       throw Object.assign(new Error("disk sync failed"), { code: "EIO" });
     });
-    await assert.rejects(sealBackupFile(chunks(payload), writeFailure, key), /EIO/);
-    await assert.rejects(openBackupFile(sealed, readFailure, key), /EIO/);
+    await assert.rejects(sealBackupFile(chunks(payload), writeFailure, key), {code:"EIO"});
+    await assert.rejects(openBackupFile(sealed, readFailure, key), {code:"EIO"});
     await assert.rejects(sealBackupFile(chunks(payload), preserved, key), /EEXIST/);
     assert.ok(sync.mock.callCount() >= 2);
     assert.deepEqual(await readFile(preserved), kept);
