@@ -203,7 +203,7 @@
           <p class="small">Доступ DonationAlerts истёк или отозван. Подключите аккаунт снова.</p>
         {/if}
         <label
-          >Client Secret приложения<input
+          >Client secret<input
             type="password"
             bind:value={daSecret}
             placeholder={status.config.hasDaSecret

@@ -1,8 +1,11 @@
 import Database from "better-sqlite3";
 import { randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
-import { mkdir, readFile, writeFile, readdir, rm, stat, lstat, rename, open } from "node:fs/promises";
+import { mkdir, readFile, writeFile, readdir, rm, stat, statfs, lstat, rename, open } from "node:fs/promises";
 import {constants} from "node:fs";
+import {createReadStream,createWriteStream} from "node:fs";
+import {pipeline} from "node:stream/promises";
+import {BACKUP_STREAM_MAX_SIZE,sealBackupFile,openBackupFile} from "./backup-stream.js";
 import { join,resolve } from "node:path";
 import { CURRENT_SCHEMA_VERSION } from "../../../packages/core/src/schema.js";
 const magic = Buffer.from("SPBK1");
@@ -42,7 +45,7 @@ export class BackupService {
     cloud: { state: "disabled", lastSuccessAt: 0, filename: "", error: "" },
   };
   private active: Promise<{filename:string;cloudError?:string}> | undefined;
-  constructor(private dir: string, private options: { keyFile: string; url?: string; serviceKeyFile?: string; bucket?: string }, private request: typeof fetch = fetch, private readPersistedBackup: (path:string)=>Promise<Buffer> = readFile) {
+  constructor(private dir: string, private options: { keyFile: string; url?: string; serviceKeyFile?: string; bucket?: string }, private request: typeof fetch = fetch, private readPersistedBackup: (path:string)=>Promise<Buffer> = readFile, private freeSpace:()=>Promise<number> = async()=>{const info=await statfs(this.dir);return info.bavail*info.bsize;}) {
     this.status.state = options.url ? "pending" : "local";
     this.status.local.state = "pending";
     this.status.cloud.state = options.url ? "pending" : "disabled";
@@ -67,7 +70,7 @@ export class BackupService {
     for(const entry of entries.filter(e=>e.isFile()&&backupFilename.test(e.name)).sort((a,b)=>b.name.localeCompare(a.name))){
       try {
         const info=await lstat(join(directory,entry.name));
-        if(info.isFile()&&info.size>=33&&info.size<=maxSize)files.push({filename:entry.name,size:info.size,createdAt:info.mtimeMs});
+        if(info.isFile()&&info.size>=33&&info.size<=BACKUP_STREAM_MAX_SIZE)files.push({filename:entry.name,size:info.size,createdAt:info.mtimeMs});
       }catch(error){if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error;}
     }
     return {directory,files,local:this.status.local,cloud:this.status.cloud};
@@ -80,18 +83,40 @@ export class BackupService {
         const info=await handle.stat();
         if(!info.isFile()||info.size<33||info.size>maxSize)throw new Error("BACKUP_NOT_FOUND");
         const blob=await handle.readFile();
-        if(blob.length>maxSize||!blob.subarray(0,5).equals(magic))throw new Error("BACKUP_NOT_FOUND");
+        if(blob.length>maxSize||!["SPBK1","SPBK2"].includes(blob.subarray(0,5).toString()))throw new Error("BACKUP_NOT_FOUND");
         return blob;
       }finally{await handle.close();}
     }catch(error){if(["ENOENT","ELOOP","ENOTDIR"].includes((error as NodeJS.ErrnoException).code??""))throw new Error("BACKUP_NOT_FOUND");throw error;}
+  }
+  async download(filename:string) {
+    if(!backupFilename.test(filename))throw new Error("BACKUP_NOT_FOUND");
+    try {
+    const handle=await open(join(this.dir,"backups",filename),constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+    try {
+      const info=await handle.stat(),header=Buffer.alloc(5);
+      if(!info.isFile()||info.size<33||info.size>BACKUP_STREAM_MAX_SIZE)throw new Error("BACKUP_NOT_FOUND");
+      await handle.read(header,0,5,0);
+      if(!["SPBK1","SPBK2"].includes(header.toString()))throw new Error("BACKUP_NOT_FOUND");
+      return handle.createReadStream({start:0,autoClose:true});
+    } catch(error) {await handle.close();throw error;}
+    } catch(error) {
+      if(["ENOENT","ELOOP","ENOTDIR"].includes((error as NodeJS.ErrnoException).code??""))throw new Error("BACKUP_NOT_FOUND");
+      throw error;
+    }
   }
   private async perform() {
     const directory = join(this.dir, "backups"); await mkdir(directory, {recursive:true,mode:0o700});
     const encodedKey = (await readFile(this.options.keyFile, "utf8")).trim();
     if (!/^[a-fA-F0-9]{64}$/.test(encodedKey)) throw new Error("INVALID_BACKUP_KEY");
     const key = Buffer.from(encodedKey, "hex");
-    if ((await stat(join(this.dir, "data.sqlite"))).size > 40 * 1024 * 1024) throw new Error("BACKUP_SIZE_LIMIT");
+    const databaseSize=(await stat(join(this.dir,"data.sqlite"))).size;
+    if (databaseSize > BACKUP_STREAM_MAX_SIZE) throw new Error("BACKUP_SIZE_LIMIT");
+    let walSize=0;
+    try {walSize=(await stat(join(this.dir,"data.sqlite-wal"))).size;}
+    catch(error){if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error;}
+    if(await this.freeSpace()<512*1024*1024+3*(databaseSize+walSize))throw new Error("BACKUP_STORAGE_LIMIT");
     const snapshot = join(directory, "snapshot.tmp.sqlite");
+    let pendingFile:string|undefined;
     try {
       const db = new Database(join(this.dir, "data.sqlite"), {readonly:true});
       try { await db.backup(snapshot); } finally { db.close(); }
@@ -104,16 +129,24 @@ export class BackupService {
       }
       const metadata = Buffer.from(JSON.stringify({version:1,profiles:secrets}));
       const snapshotSize = (await stat(snapshot)).size;
-      if (metadata.length + 4 + snapshotSize > maxPayloadSize) throw new Error("BACKUP_SIZE_LIMIT");
+      if (metadata.length > 1024*1024 || metadata.length + 4 + snapshotSize > BACKUP_STREAM_MAX_SIZE) throw new Error("BACKUP_SIZE_LIMIT");
       const length = Buffer.alloc(4); length.writeUInt32BE(metadata.length);
-      const payload = Buffer.concat([length, metadata, await readFile(snapshot)]);
-      const payloadHash = createHash("sha256").update(payload).digest("hex");
-      const blob = sealBackup(payload, key);
-      if (blob.length > maxSize) throw new Error("BACKUP_SIZE_LIMIT");
       const filename = `stream-panel-${new Date().toISOString().replace(/[:.]/g,"-")}-${randomBytes(4).toString("hex")}.spbk`;
       const path = join(directory, filename);
       const temporary = path + ".tmp";
+      const streaming = metadata.length + 4 + snapshotSize > 40*1024*1024;
+      let blob:Buffer|undefined,payloadHash:string;
+      if(streaming) {
+        const source=async function*(){yield length;yield metadata;yield* createReadStream(snapshot);};
+        payloadHash=await sealBackupFile(source(),temporary,key);
+        pendingFile=temporary;
+      } else {
+      const payload = Buffer.concat([length, metadata, await readFile(snapshot)]);
+      payloadHash = createHash("sha256").update(payload).digest("hex");
+      blob = sealBackup(payload, key);
+      if (blob.length > maxSize) throw new Error("BACKUP_SIZE_LIMIT");
       const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+      pendingFile=temporary;
       try {
         await handle.writeFile(blob);
         await handle.sync();
@@ -121,13 +154,22 @@ export class BackupService {
         await rm(temporary, {force:true});
         throw error;
       } finally { await handle.close(); }
+      }
       await rename(temporary, path);
+      pendingFile=undefined;
       const directoryHandle = await open(directory, constants.O_RDONLY);
       try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
       try {
-        const persisted = await this.readPersistedBackup(path);
-        const decoded = openBackup(persisted, key);
-        if (createHash("sha256").update(decoded).digest("hex") !== payloadHash)
+        let verifiedHash:string;
+        if(streaming) {
+          const verification=path+".verify.tmp";
+          try {verifiedHash=await openBackupFile(path,verification,key);}
+          finally {await rm(verification,{force:true});}
+        } else {
+          const persisted = await this.readPersistedBackup(path);
+          verifiedHash=createHash("sha256").update(openBackup(persisted,key)).digest("hex");
+        }
+        if (verifiedHash !== payloadHash)
           throw new Error("BACKUP_LOCAL_VERIFY_FAILED");
       } catch {
         await rm(path, {force:true});
@@ -146,7 +188,8 @@ export class BackupService {
       };
       if (!this.options.url) return {filename};
       try {
-        await this.upload(filename, blob);
+        if((await stat(path)).size>maxSize)throw new Error("BACKUP_CLOUD_SIZE_LIMIT");
+        await this.upload(filename, blob ?? await readFile(path));
         const cloudSuccessAt = Date.now();
         this.status = {
           ...this.status,
@@ -167,6 +210,7 @@ export class BackupService {
         return {filename, cloudError};
       }
     } finally {
+      if(pendingFile)await rm(pendingFile,{force:true});
       for (const path of [snapshot, snapshot + "-wal", snapshot + "-shm"])
         await rm(path, {force:true});
     }
@@ -218,4 +262,45 @@ export async function restoreBackup(blob: Buffer, key: Buffer, destination: stri
     const sessions = new Database(database);
     try { sessions.exec("DELETE FROM sp_auth_sessions"); } finally { sessions.close(); }
   } catch (e) { await rm(destination,{recursive:true,force:true}); throw e; }
+}
+
+export async function restoreBackupFile(input:string,key:Buffer,destination:string) {
+  const source=await open(input,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+  let format:string;
+  try {
+    const header=Buffer.alloc(5);await source.read(header,0,5,0);format=header.toString();
+    if(format==="SPBK1") {
+      if((await source.stat()).size>maxSize)throw new Error("BACKUP_SIZE_LIMIT");
+      return await restoreBackup(await source.readFile(),key,destination);
+    }
+  } finally {await source.close();}
+  if(format!=="SPBK2")throw new Error("BACKUP_INVALID");
+  await mkdir(destination,{mode:0o700});
+  try {
+    const staging=join(destination,"payload.tmp");
+    await openBackupFile(input,staging,key);
+    const handle=await open(staging,"r");
+    let metadata:{version:number;profiles:Record<string,unknown>},length:number;
+    try {
+      const size=(await handle.stat()).size,header=Buffer.alloc(4);
+      if((await handle.read(header,0,4,0)).bytesRead!==4)throw new Error("BACKUP_INVALID");
+      length=header.readUInt32BE();
+      if(length>1024*1024||length>size-4)throw new Error("BACKUP_INVALID");
+      const content=Buffer.alloc(length);
+      if((await handle.read(content,0,length,4)).bytesRead!==length)throw new Error("BACKUP_INVALID");
+      try {metadata=JSON.parse(content.toString());}catch{throw new Error("BACKUP_INVALID");}
+      if(!metadata||metadata.version!==1||!metadata.profiles||typeof metadata.profiles!=="object")throw new Error("UNSUPPORTED_BACKUP");
+    } finally {await handle.close();}
+    const database=join(destination,"data.sqlite");
+    await pipeline(createReadStream(staging,{start:4+length}),createWriteStream(database,{flags:"wx",mode:0o600}));
+    const db=new Database(database,{readonly:true});
+    try {validateSnapshot(db);}finally{db.close();}
+    for(const profile of profiles)if(metadata.profiles[profile]) {
+      const directory=join(destination,"profiles",profile);await mkdir(directory,{recursive:true,mode:0o700});
+      await writeFile(join(directory,"secrets.json"),JSON.stringify(metadata.profiles[profile]),{mode:0o600,flag:"wx"});
+    }
+    const sessions=new Database(database);
+    try {sessions.exec("DELETE FROM sp_auth_sessions");}finally{sessions.close();}
+    await rm(staging);
+  } catch(error) {await rm(destination,{recursive:true,force:true});throw error;}
 }

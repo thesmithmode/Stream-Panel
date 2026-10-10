@@ -169,7 +169,7 @@ export async function createHostedApplication(
     if(!canReadBackups(request,reply))return;
     const filename=(request.params as {filename:string}).filename;
     try {
-      const blob=await backup!.file(filename);
+      const blob=await backup!.download(filename);
       return reply.type("application/octet-stream").header("Content-Disposition",`attachment; filename="${filename}"`).send(blob);
     }catch(error){if((error as Error).message==="BACKUP_NOT_FOUND")return reply.code(404).send({error:"BACKUP_NOT_FOUND"});throw error;}
   });
