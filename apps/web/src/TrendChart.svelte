@@ -41,8 +41,8 @@
       {#each ticks as at,i}
         {@const x=32+(at-start)/(end-start)*(plotWidth-50)}
         <line x1={x} y1="190" x2={x} y2="197" stroke="currentColor" opacity=".4" />
-        {#if i%layout.labelEvery===0}<text x={x} y="213" text-anchor="middle" fill="currentColor" font-size="12">{timeLabel(at)}</text>
-        <text x={x} y="231" text-anchor="middle" fill="currentColor" font-size="10">{new Date(at).toLocaleDateString('ru-RU',{timeZone:timezone,day:'2-digit',month:'2-digit'})}</text>{/if}
+        {#if i%layout.labelEvery===0}<text x={Math.max(38,Math.min(x,plotWidth-38))} y="213" text-anchor="middle" fill="currentColor" font-size="12">{timeLabel(at)}</text>
+        <text x={Math.max(38,Math.min(x,plotWidth-38))} y="231" text-anchor="middle" fill="currentColor" font-size="10">{new Date(at).toLocaleDateString('ru-RU',{timeZone:timezone,day:'2-digit',month:'2-digit'})}</text>{/if}
       {/each}
     </svg></div>
     <div class="chart-caption"><span>Столбец: {Math.round((buckets[0]?.width??60000)/60000)} мин · {timezone}</span><Help id={`${id}-help`} label="Как читать график" text="Нажмите столбец для детализации. Шкала — каждые 15 минут; для периодов длиннее суток шаг укрупняется. Столбцы объединяются по ширине экрана; внутри выбранного столбца можно выбрать отдельную минуту. Для участников высота — среднее по известным сигналам, для сообщений — сумма. Жёлтый сегмент — ядро аудитории. Серые отметки — нет данных."/></div>
@@ -51,7 +51,9 @@
 
 <style>
   .chart-caption{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:8px;}
+  .trend-chart{width:100%;min-width:0;}
   .trend-plot{width:100%;min-width:0;}
+  svg{overflow:hidden;height:auto;}
   .chart-bar{cursor:pointer;}
   .chart-bar:focus{outline:2px solid currentColor;}
 </style>

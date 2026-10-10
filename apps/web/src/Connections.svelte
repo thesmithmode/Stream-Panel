@@ -186,7 +186,7 @@
             onclick={() =>
               run(async () => {
                 await api("donationalerts/rescan", {});
-                message = "Обновить данные о донатах запущен.";
+                message = "Обновление данных о донатах запущено.";
               })}>Обновить данные о донатах</button
           >
         </div>

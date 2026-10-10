@@ -51,7 +51,7 @@
   let scopeReady=$state(false),connectionLost=$state(false);
   let refreshTask:{epoch:number;task:Promise<void>}|null=null;
   function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile,mode:dataMode});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
-  function clearScope(){scopeReady=false;events=[];summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
+  function clearScope(){busy=false;scopeReady=false;events=[];summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
   function restoreRoute(){const route=readRoute(location.search,getProfile());epoch++;tab=route.view;sessionFilter=route.session;personId=route.person;setProfile(route.profile);profile=route.profile;setDataMode(route.mode);dataMode=route.mode;clearScope();}
   function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}error=authMessage((e as Error).message);}
 
@@ -63,7 +63,7 @@
       password="";
       epoch++; setCsrf(result.csrf); user = result.user;
       if (result.user?.profile) { setProfile(result.user.profile); profile = result.user.profile; }
-      await refresh(); authorized = true;saveRoute(true);
+      setDataMode(dataMode);await refresh(); authorized = true;saveRoute(true);
     } catch (e) { reportFailure(e); }
     finally { busy = false; }
   }

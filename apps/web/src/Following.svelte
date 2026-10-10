@@ -15,7 +15,7 @@
 </script>
 <section class="panel following" aria-label="Подписки на канал">
  <header><h3>Подписки на канал <Help id="following-help" label="О подписках на канал" text="Здесь подписка означает follow Twitch или подписку YouTube на канал. Это не платная подписка Twitch. Дата проверки указана рядом со статусом. YouTube скрывает часть подписчиков: отсутствие в списке означает «неизвестно». Первый вход — первое сохранённое присутствие в чате, а не начало просмотра видео. История собирается с подключения; прошлое восстановить полностью нельзя." /></h3></header>
- {#if error}<p class="muted" role="status">{error}</p>{/if}{#if data===null}<p class="muted">Загрузка подписок…</p>
+ {#if error}<p class="muted" role="status">{error}</p>{/if}{#if data===null}{#if !error}<p class="muted">Загрузка подписок…</p>{/if}
  {:else if personId}
   {#each data as row}<article class="follow-platform"><h4>{platform(row.source)} · {row.name}</h4>
    <dl><div><dt>Последний статус</dt><dd>{status(row.status)}{#if row.checkedAtMs!==null} · {date(row.checkedAtMs)}{/if}</dd></div>

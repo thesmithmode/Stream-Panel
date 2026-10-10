@@ -596,7 +596,8 @@ test("DA OAuth state is single use; handshake, history, rate limiting and discon
     s.emit("open");
     assert.equal(s.sent[0].params.token, "socket");
     await f.tick(1100);
-    assert.equal(c.status.state, "connecting");
+    assert.equal(c.status.state, "degraded");
+    assert.equal(c.status.capabilities.history,"Импорт доступных страниц завершён");
     s.push({ id: 1, result: { client: "client" } });
     await f.tick(1100);
     assert.equal(s.sent[1].method, 1);
@@ -1019,22 +1020,19 @@ test("a validation response from the previous account cannot mutate or reconnect
   }
 });
 
-test("DA automatic history waits for a logical stream; explicit history import remains available offline", async t => {
-  const f = fixture(t); let historyRequests = 0;
-  const fallback = daRequest(f);
-  const request = async (url, init) => { if (url.includes('alerts/donations')) historyRequests++; return fallback(url, init); };
-  const c = new DonationAlertsConnection(f.config, f.db, request, f.socket);
-  try {
-    await c.start(); await flush();
-    assert.equal(historyRequests, 0);
-    await f.tick(300000); assert.equal(historyRequests, 0);
-    await c.scanHistory(); assert.equal(historyRequests, 1);
-    await f.db.call('observePlatformStream','youtube','yt','live',Date.now(),Date.now(),null,'Live');
-    const automatic = c.scanHistory(true); await f.tick(1100); await automatic;
-    assert.equal(historyRequests, 2);
-    f.setSessions([]);
-    await c.scanHistory(true); assert.equal(historyRequests, 2);
-  } finally { await c.stop(); }
+test("DA automatically checks history offline and after a stream, with explicit refresh still available", async t => {
+  const f=fixture(t);let historyRequests=0;const fallback=daRequest(f);
+  const request=async(url,init)=>{if(url.includes('alerts/donations'))historyRequests++;return fallback(url,init);};
+  const c=new DonationAlertsConnection(f.config,f.db,request,f.socket);
+  try{
+   await c.start();await f.tick(1100);assert.equal(historyRequests,1);
+   const socket=f.sockets[0];socket.emit('open');socket.push({id:1,result:{client:'client'}});await f.tick(1100);socket.push({id:2,result:{}});await flush();
+   for(let n=0;n<6;n++){socket.push({});await f.tick(10000);}assert.equal(historyRequests,2);
+   const explicit=c.scanHistory();await f.tick(1100);await explicit;assert.equal(historyRequests,3);
+   await f.db.call('observePlatformStream','youtube','yt','live',Date.now(),Date.now(),null,'Live');
+   const active=c.scanHistory(true);await f.tick(1100);await active;assert.equal(historyRequests,4);
+   f.setSessions([]);const offline=c.scanHistory(true);await f.tick(1100);await offline;assert.equal(historyRequests,5);
+  }finally{await c.stop();}
 });
 
 test("Twitch channel.update v2 preserves category and title changes as timestamped raw events", async t => {
@@ -1102,7 +1100,7 @@ test('DA disconnect while subscribing ignores the late channel token and sends n
  const request=async(url,init)=>{if(url.endsWith('/centrifuge/subscribe')){requested=true;return pending;}return original(url,init);};
  const c=new DonationAlertsConnection(f.config,f.db,request,f.socket);
  try{
-  await c.start();f.sockets[0].emit('open');f.sockets[0].push({id:1,result:{client:'client'}});await f.tick(1100);assert.equal(requested,true);
+  await c.start();f.sockets[0].emit('open');f.sockets[0].push({id:1,result:{client:'client'}});await f.tick(1100);await f.tick(1100);assert.equal(requested,true);
   const sent=f.sockets[0].sent.length;await c.disconnect();release(response({channels:[{channel:'$alerts:donation_7',token:'late'}]}));await flush();
   assert.equal(f.sockets[0].sent.length,sent);assert.equal(c.status.state,'disconnected');assert.equal(f.config.value.daAccessToken,'');
  }finally{release(response({channels:[]}));await c.stop();}

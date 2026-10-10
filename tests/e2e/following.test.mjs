@@ -9,7 +9,7 @@ test('stream subscriptions show platform totals, exact follow dates and independ
   await app.db.call('followingSnapshot','twitch','owner',[],true,at,0);
   await app.db.call('followingSnapshot','twitch','owner',[{id:'viewer',name:'Follow Viewer',followedAtMs:at+m},{id:'unlinked',name:'Unlinked subscriber',followedAtMs:at+2*m}],false,at+3*m,2);
   await app.db.call('youtubeMessages','youtube','chat',[{id:'ytmsg',snippet:{type:'textMessageEvent',publishedAt:new Date(at).toISOString(),displayMessage:'Hi'},authorDetails:{channelId:'author',displayName:'YT Viewer'}}]);
-  const yt=(await app.db.call('persons')).find(p=>p.sources==='youtube');await app.db.call('merge',yt.id,person,await app.db.call('personRevision',yt.id),await app.db.call('personRevision',person),at+3*m);
+  const yt=(await app.db.call('persons')).find(p=>p.sources==='youtube');await app.db.call('merge',yt.id,person,(await app.db.call('person',yt.id)).revision,(await app.db.call('person',person)).revision,at+3*m);
   await app.db.call('followingSnapshot','youtube','youtube',[],true,at+3*m,null);
   await app.db.call('endSession',id,at+4*m);await app.db.call('followingSnapshot','twitch','owner',[],true,at+5*m,0);
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(10000);const errors=[];page.on('pageerror',e=>errors.push(e.message));await goto(page,app.bootstrap());
