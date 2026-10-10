@@ -371,6 +371,6 @@ test('single-stream analytics scopes overlapping recordings and ranks silent att
   assert.equal(result.audience.find(p=>p.name==='Talker')!.observedMinutes,3);
   assert.equal(result.timeline.find(p=>p.at===base+3*minute)!.presenceKnown,false);
   assert.deepEqual(result.audience.filter(p=>p.intervals.some(i=>i.from<base+minute&&i.to>base)).map(p=>p.name).sort(),['Silent','Talker']);
-  assert.equal(s.analytics({...opts,sessionId:'missing'} as any).summary.streams,0);
+  assert.throws(()=>s.analytics({...opts,sessionId:'missing'}),/SESSION_NOT_FOUND/);
  }finally{s.close();}
 });

@@ -8,7 +8,7 @@
   const maximum=$derived(Math.max(1,...buckets.map(p=>p.value)));
   const start=$derived(buckets[0]?.at??0),end=$derived((buckets.at(-1)?.at??0)+(buckets[0]?.width??60000));
   const ticks=$derived(timelineTicks(start,end));
-  const plotWidth=$derived(Math.max(800,ticks.length*64));
+  const plotWidth=$derived(Math.max(800,ticks.length*64,buckets.length*12+50));
   const timeLabel=(at:number)=>new Date(at).toLocaleTimeString('ru-RU',{timeZone:timezone,hour:'2-digit',minute:'2-digit'});
   const split=$derived(showRegulars&&metric!=='viewers');
   const height=(value:number)=>value>0?Math.max(1,value/maximum*160):0;

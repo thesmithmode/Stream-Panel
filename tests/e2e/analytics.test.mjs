@@ -178,7 +178,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    const monthRange=await presetPeriod(30),presetFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...monthRange});
    await page.getByRole('button',{name:'30 дней',exact:true}).click();await advanceAutoFilter(presetFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);await page.setViewportSize({width:1280,height:800});
-   await page.getByRole('button',{name:'Демо',exact:true}).click();await page.clock.fastForward(300);await page.getByRole('cell',{name:'Демо-игра',exact:true}).waitFor();
+   await page.getByRole('button',{name:'Демо',exact:true}).click();await page.clock.fastForward(300);await page.getByText('Сравнения и отчёты',{exact:true}).click();await page.getByRole('cell',{name:'Демо-игра',exact:true}).waitFor();
    const realFilter=watchAnalytics({source:'all',category:'',timezone:'UTC'});
    await page.getByRole('button',{name:'Реальные',exact:true}).click();await advanceAutoFilter(realFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    await page.evaluate(()=>{Storage.prototype.getItem=()=>{throw new Error('storage unavailable');};Storage.prototype.setItem=()=>{throw new Error('storage unavailable');};});
