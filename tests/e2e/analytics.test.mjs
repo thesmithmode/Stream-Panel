@@ -183,6 +183,12 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await page.getByRole('button',{name:'Реальные',exact:true}).click();await advanceAutoFilter(realFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    await page.evaluate(()=>{Storage.prototype.getItem=()=>{throw new Error('storage unavailable');};Storage.prototype.setItem=()=>{throw new Error('storage unavailable');};});
    await page.getByRole('button',{name:'Обзор',exact:true}).click();await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
+   await page.getByRole('button',{name:'О данных отчёта YouTube',exact:true}).click();
+   assert.ok((await page.getByRole('dialog',{name:'О данных отчёта YouTube',exact:true}).textContent()).includes('Отчёт охватывает весь канал'));
+   await page.keyboard.press('Escape');
+   await page.locator('.trend-chart .chart-bar').first().click();await barDetail.waitFor();
+   await barDetail.getByRole('button',{name:`Regular ${profile}`,exact:true}).click();
+   await page.getByRole('heading',{name:`Regular ${profile}`,exact:true}).waitFor();
    assert.deepEqual(errors,[]);await saveCoverage(page);await context.close();
   }
  }finally{await browser.close();await h.app.close();await rm(dir,{recursive:true,force:true});}

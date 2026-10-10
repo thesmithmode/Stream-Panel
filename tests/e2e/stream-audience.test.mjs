@@ -53,6 +53,12 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   const box=await help.boundingBox();assert.ok(box.x>=0&&box.x+box.width<=390);
   await page.keyboard.press('Escape');assert.equal(await help.count(),0);
   await assertUiLayout(page);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await detail.getByRole('button',{name:'Silent Viewer',exact:true}).click();
+  await page.getByRole('heading',{name:'Silent Viewer',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Стримы',exact:true}).click();
+  await page.locator(`tr[data-session-id="${first}"]`).getByRole('button',{name:'Открыть',exact:true}).click();
+  await rank.getByRole('button',{name:'Silent Viewer',exact:true}).click();
+  await page.getByRole('heading',{name:'Silent Viewer',exact:true}).waitFor();
   assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });
