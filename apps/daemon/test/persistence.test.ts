@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -28,6 +28,30 @@ test("configuration rejects invalid versions/JSON and recovers its serialized wr
     const loaded = new Configuration(dir);
     await loaded.load();
     assert.equal(loaded.value.daClientId, "own-app");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+test("concurrent configuration saves persist the last value with private permissions", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sp-config-durable-"));
+  try {
+    const config = new Configuration(dir);
+    config.value.daClientId = "first-app";
+    config.value.daAccessToken = "existing-access";
+    config.value.daRefreshToken = "existing-refresh";
+    const first = config.save();
+    config.value.daClientId = "last-app";
+    const last = config.save();
+    await Promise.all([first, last]);
+
+    const path = join(dir, "secrets.json");
+    const loaded = new Configuration(dir);
+    await loaded.load();
+    assert.equal(loaded.value.daClientId, "last-app");
+    assert.equal(loaded.value.daAccessToken, "existing-access");
+    assert.equal(loaded.value.daRefreshToken, "existing-refresh");
+    if (process.platform !== "win32")
+      assert.equal((await stat(path)).mode & 0o777, 0o600);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

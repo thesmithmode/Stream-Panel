@@ -42,7 +42,10 @@
       await action();
       await onChange();
     } catch (e) {
-      error = (e as Error).message;
+      const code = (e as Error).message;
+      error = code === "DA_CLIENT_SECRET_IS_URL"
+        ? "В Client Secret вставлен адрес. Скопируйте секрет приложения из кабинета DonationAlerts; Redirect URI указывается отдельно."
+        : code;
     } finally {
       busy = false;
     }
@@ -196,8 +199,11 @@
             autocomplete="off"
           /></label
         >
+        {#if ["DA_REAUTH_REQUIRED", "DA_LOGIN_REQUIRED"].includes(status.donationalerts.detail)}
+          <p class="small">Доступ DonationAlerts истёк или отозван. Подключите аккаунт снова.</p>
+        {/if}
         <label
-          >Client secret<input
+          >Client Secret приложения<input
             type="password"
             bind:value={daSecret}
             placeholder={status.config.hasDaSecret
@@ -210,7 +216,11 @@
             Secret уже сохранён.
           </p>{/if}
         <p class="small muted">
-          Redirect: <code>{status.config.daRedirectUri}</code>
+          В настройках приложения DA укажите Redirect URI: <code>{status.config.daRedirectUri}</code>
+        </p>
+        <p class="small muted">
+          Client Secret — секрет из карточки приложения DA, а не адрес Redirect URI.
+          <a href="https://www.donationalerts.com/application/clients" target="_blank" rel="noreferrer">Открыть приложения DA</a>
         </p>
         <details class="compact-details">
           <summary>Дополнительно</summary>

@@ -475,23 +475,35 @@ export async function createApplication(
   });
   app.post("/api/v1/donationalerts/connect", async (request) => {
     const b = object(request.body),
-      offset = b.utcOffsetMinutes === null ? null : Number(b.utcOffsetMinutes);
+      offset = b.utcOffsetMinutes === null ? null : Number(b.utcOffsetMinutes),
+      clientId = string(b.clientId).trim(),
+      clientSecret = string(b.clientSecret).trim(),
+      accessToken = string(b.accessToken).trim();
     if (
       offset !== null &&
       (!Number.isInteger(offset) || Math.abs(offset) > 840)
     )
       throw new Error("INVALID_UTC_OFFSET");
+    if (!accessToken) {
+      const effectiveClientId = clientId || configuration.value.daClientId.trim();
+      const effectiveClientSecret = clientSecret || configuration.value.daClientSecret.trim();
+      if (!effectiveClientId || !effectiveClientSecret)
+        throw new Error("DA_APP_CREDENTIALS_REQUIRED");
+      let secretUrl: URL | null = null;
+      try { secretUrl = new URL(effectiveClientSecret); } catch { /* Opaque OAuth secrets are not URLs. */ }
+      if (secretUrl && (secretUrl.protocol === "http:" || secretUrl.protocol === "https:"))
+        throw new Error("DA_CLIENT_SECRET_IS_URL");
+    }
     await da.stop();
     configuration.value.daUtcOffsetMinutes = offset;
-    if (string(b.clientId)) configuration.value.daClientId = string(b.clientId);
-    if (string(b.clientSecret))
-      configuration.value.daClientSecret = string(b.clientSecret);
-    if (string(b.accessToken)) {
-      configuration.value.daAccessToken = string(b.accessToken);
+    if (clientId) configuration.value.daClientId = clientId;
+    if (clientSecret) configuration.value.daClientSecret = clientSecret;
+    if (accessToken) {
+      configuration.value.daAccessToken = accessToken;
       configuration.value.daRefreshToken = string(b.refreshToken);
     }
     await configuration.save();
-    if (string(b.accessToken)) {
+    if (accessToken) {
       void da.start();
       return { ok: true };
     }
@@ -502,12 +514,14 @@ export async function createApplication(
       const q = object(request.query);
       await da.finishAuth(string(q.code), string(q.state), callback);
       return reply.redirect(origin + "/");
-    } catch {
+    } catch (error) {
       return reply
         .code(400)
         .type("text/plain")
         .send(
-          "DonationAlerts: вход не завершён. Проверьте redirect URI и state. Вернитесь в панель.",
+          error instanceof Error && error.message === "DA_OAUTH_HTTP_401"
+            ? "DonationAlerts отклонил Client ID или Client Secret. Скопируйте секрет приложения из кабинета DA, а Redirect URI укажите отдельно; затем повторите подключение из панели."
+            : "DonationAlerts: вход не завершён. Проверьте redirect URI и state. Вернитесь в панель.",
         );
     }
   });
