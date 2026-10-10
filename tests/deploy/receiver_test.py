@@ -3,6 +3,21 @@ from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('receiver',pathlib.Path(__file__).resolve().parents[2]/'ops/receive.py')
 r=importlib.util.module_from_spec(spec);spec.loader.exec_module(r)
 class ReceiverTests(unittest.TestCase):
+ def test_read_header_accepts_complete_protocol_header_without_consuming_archive(self):
+  sha='a'*40;expected='b'*64;archive=b'archive payload'
+  stream=io.BytesIO(f'{sha} {expected}\n'.encode('ascii')+archive)
+  self.assertEqual(len(f'{sha} {expected}\n'.encode('ascii')),106)
+  self.assertEqual(r.read_header(stream),(sha,expected))
+  self.assertEqual(stream.read(),archive)
+ def test_read_header_rejects_malformed_lines_without_consuming_following_archive(self):
+  valid=f'{"a"*40} {"b"*64}\n'.encode('ascii')
+  invalid=[b'a'*40+b' '+b'b'*63+b'\n',b'a'*40+b' '+b'b'*65+b'\n',valid.replace(b' ',b'-',1),valid.replace(b'a',b'\xff',1)]
+  for header in invalid:
+   with self.subTest(header=header[:8]):
+    archive=b'archive payload';stream=io.BytesIO(header+archive)
+    with self.assertRaisesRegex(RuntimeError,'Invalid bundle header'):r.read_header(stream)
+    self.assertEqual(stream.read(),archive)
+  with self.assertRaisesRegex(RuntimeError,'Invalid bundle header'):r.read_header(io.BytesIO(valid[:-1]))
  def test_failed_release_cleanup_preserves_current_and_unrelated_objects_and_bounds_snapshots(self):
   with tempfile.TemporaryDirectory() as folder:
    root=pathlib.Path(folder);base=root/'app';data=root/'data';state=root/'state'

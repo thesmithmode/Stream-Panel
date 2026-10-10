@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import pathlib
 import subprocess
@@ -23,6 +24,7 @@ class ConfigureInitialTest(unittest.TestCase):
         (self.payload / "backup-key").write_text("a" * 64)
         (self.payload / "server.header").write_text("test header\n")
         (self.payload / "server.tar.gz").write_bytes(b"test archive")
+        (self.payload / "receive.py").write_bytes((ROOT / "ops/receive.py").read_bytes())
         self.config = self.root / "etc" / "stream-panel"
         self.data = self.root / "var" / "lib" / "stream-panel"
         self.current = self.root / "opt" / "stream-panel" / "current"
@@ -31,6 +33,9 @@ class ConfigureInitialTest(unittest.TestCase):
         self.log = self.root / "commands.log"
         self.bin = self.root / "mock-bin"
         self.bin.mkdir()
+        self.installed_sbin = self.root / "installed-sbin"
+        self.installed_sbin.mkdir()
+        subprocess.run(["sudo", "-n", "chown", "root:root", str(self.installed_sbin)], check=True)
         self.write_command("configure-bootstrap", "mkdir -p \"$TEST_CONFIG_DIR\"; test -e \"$TEST_CONFIG_DIR/server.env\" || printf 'STREAM_PANEL_BACKUP_KEY_FILE=%s/backup-key\\n' \"$TEST_DATA_DIR\" > \"$TEST_CONFIG_DIR/server.env\"")
         self.write_command("configure-receive", "echo receive >> \"$TEST_COMMAND_LOG\"")
         self.write_command("configure-systemctl", "echo \"systemctl $*\" >> \"$TEST_COMMAND_LOG\"")
@@ -43,7 +48,10 @@ case \" $* \" in
     if [[ -n ${STREAM_PANEL_SUPABASE_URL:-} ]]; then echo 'Provisioned local and cloud backups verified'; else echo 'Provisioned encrypted local backup verified'; fi
     ;;
 esac""")
-        self.write_command("install", """args=(\"$@\"); src=${args[-2]}; dst=${args[-1]}; mkdir -p \"$(dirname \"$dst\")\"; if [[ $src == /dev/null ]]; then : > \"$dst\"; else cp \"$src\" \"$dst\"; fi; chmod \"${args[1]}\" \"$dst\"""")
+        self.write_command("install", """mode=; owner=; group=; while (($#)); do case \"$1\" in -m) mode=$2; shift 2;; -o) owner=$2; shift 2;; -g) group=$2; shift 2;; *) break;; esac; done
+src=$1; dst=$2; mkdir -p \"$(dirname \"$dst\")\"; if [[ $src == /dev/null ]]; then : > \"$dst\"; else cp \"$src\" \"$dst\"; fi
+[[ -z $mode ]] || chmod \"$mode\" \"$dst\"
+[[ -z $owner ]] || chown \"$owner\" \"$dst\"""")
         self.env = {
             "PATH": str(self.bin) + os.pathsep + os.environ["PATH"],
             "TEST_CONFIG_DIR": str(self.config),
@@ -54,6 +62,7 @@ esac""")
             "STREAM_PANEL_CURRENT_DIR": str(self.current),
             "STREAM_PANEL_LOCK_FILE": str(self.root / "run" / "lock" / "configure.lock"),
             "STREAM_PANEL_RECEIVE": str(self.bin / "configure-receive"),
+            "STREAM_PANEL_INSTALLED_RECEIVER": str(self.installed_sbin / "stream-panel-receive"),
             "STREAM_PANEL_BOOTSTRAP_TRAEFIK": str(self.bin / "configure-bootstrap"),
             "STREAM_PANEL_SYSTEMCTL": str(self.bin / "configure-systemctl"),
             "STREAM_PANEL_RUNUSER": str(self.bin / "configure-runuser"),
@@ -74,6 +83,30 @@ esac""")
             return subprocess.run(args, cwd=self.payload, text=True, capture_output=True)
         finally:
             self.restore_temp_ownership()
+
+    def seed_identity(self, **changes):
+        identity = {
+            "version": 1,
+            "public": "192.0.2.1",
+            "bridge": "172.21.0.1",
+            "proxy": "172.21.0.2",
+            "deploy_key": hashlib.sha256((self.payload / "deploy.pub").read_bytes()).hexdigest(),
+            "backup_key": hashlib.sha256((self.payload / "backup-key").read_bytes()).hexdigest(),
+        }
+        identity.update(changes)
+        self.config.mkdir(parents=True, exist_ok=True)
+        (self.config / "server.env").write_text("STREAM_PANEL_BACKUP_KEY_FILE=" + str(self.data / "backup-key") + "\n")
+        marker = self.config / "bootstrap-identity.json"
+        marker.write_text(json.dumps(identity))
+        marker.chmod(0o600)
+        subprocess.run(["sudo", "-n", "chown", "root:root", str(marker)], check=True)
+
+    def seed_old_receiver(self):
+        target = self.installed_sbin / "stream-panel-receive"
+        source = self.root / "old-receiver"
+        source.write_text("old receiver")
+        subprocess.run(["sudo", "-n", "install", "-o", "root", "-g", "root", "-m", "755", str(source), str(target)], check=True)
+        return target
 
     def restore_temp_ownership(self):
         temp_root = pathlib.Path(tempfile.gettempdir()).resolve()
@@ -127,6 +160,21 @@ os.chown(root,uid,gid,follow_symlinks=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue((self.config / "supabase-key").is_file())
         self.assertTrue((self.data / "initializing").exists())
+
+    def test_resume_refreshes_receiver_after_valid_identity(self):
+        self.seed_identity()
+        target = self.seed_old_receiver()
+        result = self.run_configure()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(target.read_bytes(), (ROOT / "ops/receive.py").read_bytes())
+        self.assertEqual(target.stat().st_mode & 0o777, 0o755)
+
+    def test_invalid_identity_does_not_replace_existing_receiver(self):
+        self.seed_identity(public="198.51.100.7")
+        target = self.seed_old_receiver()
+        result = self.run_configure()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(target.read_text(), "old receiver")
 
 
 if __name__ == "__main__":
