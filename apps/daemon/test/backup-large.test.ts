@@ -48,6 +48,22 @@ test('large SQLite uses streaming encrypted backup and restores data, credential
   const invalid=join(dir,'invalid.spbk');await writeFile(invalid,tampered);
   await assert.rejects(restoreBackupFile(invalid,key,join(dir,'invalid-restore')),/BACKUP_INVALID/);
   await assert.rejects(stat(join(dir,'invalid-restore')),/ENOENT/);
+  await writeFile(join(dir,'service-key'),'fixture-service-key');
+  let uploaded:Buffer|undefined,remoteName='';
+  const request:typeof fetch=async(input,options)=>{
+   const url=String(input);
+   if(url.includes('/bucket/'))return Response.json({public:false});
+   if(url.includes('/object/list/'))return Response.json([{name:remoteName}]);
+   if(url.includes('/object/authenticated/'))return new Response(new Uint8Array(uploaded!));
+   remoteName=url.split('/').at(-1)!;uploaded=Buffer.from(options!.body as Uint8Array);
+   return Response.json({ok:true});
+  };
+  const cloud=new BackupService(dir,{keyFile:join(dir,'key'),url:'https://test.supabase.co',serviceKeyFile:join(dir,'service-key')},request);
+  const remote=await cloud.run();
+  assert.equal(remote.cloudError,undefined);
+  assert.equal(uploaded!.subarray(0,5).toString(),'SPBK2');
+  assert.equal(cloud.status.cloud.state,'success');
+  assert.equal(cloud.status.local.state,'success');
  } finally {store.close();auth.close();await rm(dir,{recursive:true,force:true});}
 });
 
