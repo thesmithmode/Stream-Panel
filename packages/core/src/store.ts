@@ -14,6 +14,7 @@ import {
 } from "./domain.js";
 import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11,schemaV12 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
+import {personFollowing,followingAnalytics,type Follower} from './following.js';
 import { sessionWindows,sessionBreaks } from './session-windows.js';
 import { presenceMinutes, pollCoveredMinutes, type PresencePoll } from "./presence.js";
 
@@ -168,6 +169,13 @@ export class StreamStore {
     if(!['twitch','youtube','donationalerts'].includes(source)||!account||!key)throw new Error('INVALID_PROVIDER_SNAPSHOT');
     this.db.prepare('INSERT INTO provider_snapshots VALUES (?,?,?,?,?,?,?)').run(randomUUID(),source,account,key,at,sessionId,JSON.stringify(payload));
   }
+  followingSnapshot(source:'twitch'|'youtube',account:string,followers:Follower[],complete:boolean,at:number,total:number|null=null):void {
+    if(!['twitch','youtube'].includes(source)||!account||typeof complete!=='boolean'||followers.length>25000||total!==null&&(!Number.isSafeInteger(total)||total<0))throw new Error('INVALID_FOLLOWERS');
+    for(const follower of followers){if(!follower.id||typeof follower.name!=='string')throw new Error('INVALID_FOLLOWERS');if(follower.followedAtMs!==null)assertTimestamp(follower.followedAtMs);}
+    this.providerSnapshot(source,account,'followers',{followers:[...new Map(followers.map(f=>[f.id,f])).values()],complete,total},at);
+  }
+  personFollowing(personId:string,sessionId=''){this.person(personId);if(sessionId)this.sessionRow(sessionId);return personFollowing(this.db,personId,sessionId);}
+  followingAnalytics(sessionId:string){this.sessionRow(sessionId);return followingAnalytics(this.db,sessionId);}
   streamMetadata(sessionId:string){
     this.sessionRow(sessionId);
     return this.db.prepare(`SELECT observed_at_ms AS at,category_id AS categoryId,category_name AS categoryName,title
@@ -1363,7 +1371,7 @@ export class StreamStore {
       INSERT OR IGNORE INTO event_sessions(event_id,session_id)
       SELECT e.id,? FROM effective_events e JOIN sessions s ON s.id=?
       WHERE e.occurred_at_ms IS NOT NULL
-        AND e.occurred_at_ms>=s.recording_started_at_ms AND e.occurred_at_ms<=?
+        AND e.occurred_at_ms>=CASE WHEN e.source='donationalerts' THEN s.started_at_ms ELSE s.recording_started_at_ms END AND e.occurred_at_ms<=?
         AND ((e.source='twitch' AND EXISTS (
           SELECT 1 FROM platform_streams ps WHERE ps.session_id=s.id
             AND ps.platform='twitch' AND ps.account_id=e.account_id
@@ -2727,7 +2735,7 @@ export class StreamStore {
       cards.push({
         kind: "coverage_hole",
         title: "Дыры в опросах присутствия",
-        detail: `Покрытие сессии: ${Math.round(cov.ratio * 100)}% (${cov.knownMinutes}/${cov.totalMinutes} мин)`,
+        detail: `Покрытие сессии: ${Math.round(cov.ratio * 100)}% (${cov.knownMinutes.toLocaleString("ru-RU",{maximumFractionDigits:1})}/${cov.totalMinutes.toLocaleString("ru-RU",{maximumFractionDigits:1})} мин)`,
         personId: null,
         sessionId: sid,
         metrics: cov,

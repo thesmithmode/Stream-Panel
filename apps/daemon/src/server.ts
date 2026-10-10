@@ -279,6 +279,8 @@ export async function createApplication(
     gaps: await db.call("gaps"),
   }));
   app.get("/api/v1/sessions", async () => db.call("sessions"));
+  app.get("/api/v1/sessions/:id/followers",async(request)=>db.call("followingAnalytics",string(object(request.params).id)));
+  app.get("/api/v1/persons/:id/following",async(request)=>db.call("personFollowing",string(object(request.params).id),string(object(request.query).session)));
   app.get("/api/v1/sessions/:id/metadata",async(request)=>db.call('streamMetadata',string(object(request.params).id)));
   app.post("/api/v1/sessions/start", async () => {
     const existing = await db.call<Record<string, unknown>[]>("sessions");

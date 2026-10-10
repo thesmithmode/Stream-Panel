@@ -32,7 +32,7 @@ test("Overview insights render loading, empty, error and person paths; close on 
         await new Promise((resolve) => setTimeout(resolve, 150));
         await route.fulfill({ json: [] });
       } else if (requestCount === 2) {
-        await route.fulfill({ status: 503, json: { error: "INSIGHTS_UNAVAILABLE" } });
+        await route.fulfill({ status: 500, json: { error: "INSIGHTS_UNAVAILABLE" } });
       } else {
         await route.fulfill({
           json: [{ kind: "person", title: "Активный участник", detail: "Тестовый паттерн", personId, sessionId: null, metrics: {} }],

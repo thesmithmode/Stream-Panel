@@ -184,7 +184,7 @@ test(
         false,
       );
       await da
-        .getByRole("button", { name: "Повторить импорт" })
+        .getByRole("button", { name: "Обновить данные о донатах" })
         .click();
       await page
         .getByRole("status")

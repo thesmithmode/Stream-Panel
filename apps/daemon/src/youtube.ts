@@ -191,8 +191,24 @@ export class YouTubeConnection {
       await this.db.call("youtubeSnapshot", tokens.userId, "report", { start, end, ...report }, this.now());
       if (!valid()) return 300000;
     }
+    await this.collectSubscribers(tokens,valid,this.now());if(!valid())return 300000;
     this.status = { state: "connected", account: tokens.userId, detail: broadcasts.length ? "Чат активных эфиров собирается" : "Канал подключён; активных эфиров нет" };
     return Math.min(interval, 3600000);
+  }
+  private async collectSubscribers(tokens:Tokens,valid:()=>boolean,at:number){
+    const previous=await this.db.call<any>('youtubeData',tokens.userId);if(!valid()||at-(previous.snapshots["cursor:followers"]?.updatedAt??-Infinity)<15*60000)return;
+    try{
+      let page='',complete=false;const seen=new Set<string>(),followers:{id:string;name:string;followedAtMs:number|null;raw:unknown}[]=[];
+      for(let n=0;n<25;n++){
+        const result=await this.api('subscriptions',{part:'snippet,subscriberSnippet',mySubscribers:'true',maxResults:'50',...(page?{pageToken:page}:{})},tokens);if(!valid())return;
+        if(!Array.isArray(result.items))throw new Error('INVALID_SUBSCRIBERS');
+        for(const raw of result.items){const f=object(raw),subscriber=object(f.subscriberSnippet),id=string(subscriber.channelId);if(!id)throw new Error('INVALID_SUBSCRIBERS');const date=Date.parse(string(object(f.snippet).publishedAt));followers.push({id,name:string(subscriber.title)||id,followedAtMs:Number.isFinite(date)&&date>=0?date:null,raw});}
+        page=string(result.nextPageToken);if(!page){complete=true;break;}if(seen.has(page))throw new Error('SUBSCRIBERS_PAGINATION_LOOP');seen.add(page);
+      }
+      if(!valid())return;await this.db.call('followingSnapshot','youtube',tokens.userId,followers,complete,at,null);if(!valid())return;
+      await this.db.call('youtubeSnapshot',tokens.userId,'cursor:followers',true,at);
+      // A private or API-limited YouTube subscription remains unknown, even after full pagination.
+    }catch{if(valid())await this.db.call('gap','youtube','subscribers_unavailable',at,at);}
   }
   async start() {
     if (this.running || this.timer || !this.config.value.youtube) return;

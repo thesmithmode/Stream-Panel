@@ -9,7 +9,7 @@
  let bucket=$state<ReturnType<typeof chartSeries>[number]|null>(null),minute=$state<number|null>(null);
  const minutePoints=$derived(bucket?points.filter(p=>p.at>=bucket!.at&&p.at<bucket!.at+bucket!.width):[]);
  const selected=$derived(minute===null?bucket:chartSeries(minutePoints.filter(p=>p.at===minute),metric,1)[0]??null);
- const people=$derived(selected?participantsAt(audience,selected.at,selected.at+selected.width).filter(p=>metric==='observed'?p.observed:metric==='estimated'?p.estimated:true):[]);
+ const people=$derived(selected?participantsAt(audience,selected.at,selected.at+selected.width).filter(p=>['observed','twitchViewers'].includes(metric)?p.observed:['estimated','youtubeViewers'].includes(metric)?p.estimated:true):[]);
  const label=(at:number)=>new Date(at).toLocaleString('ru-RU',{timeZone:timezone});
  $effect(()=>{void points;void metric;void resolution;bucket=null;minute=null;});
  $effect(()=>onselection?.(bucket!==null));
@@ -20,8 +20,8 @@
  <section class="bar-detail" aria-label="Детали выбранного столбца">
   <header><h3>{label(selected.at)}{selected.width>60000?` — ${label(selected.at+selected.width)}`:''} <Help id={`${id}-help`} label="О детализации минуты" text="Список показывает персональные сигналы в выбранном интервале: наблюдения чата Twitch или оценку по сообщениям YouTube. Счётчик площадки не раскрывает личности всех зрителей. Для широкого столбца высота — среднее, а список — уникальные участники; выберите отдельную минуту. В метрике сообщений список не определяет авторов отдельных сообщений."/></h3><button class="outline small" onclick={()=>{bucket=null;minute=null;}}>Закрыть детализацию</button></header>
   {#if bucket&&bucket.width>60000}<label>Минута столбца<select bind:value={minute}><option value={null}>Весь интервал</option>{#each minutePoints as p}<option value={p.at}>{label(p.at)}</option>{/each}</select></label>{/if}
-  <div class="detail-values"><span>Значение: <strong>{selected.isBreak?'перерыв':selected.known?selected.value.toLocaleString('ru-RU',{maximumFractionDigits:1}):'нет данных'}</strong></span><span>Участники по сигналам: <strong>{people.length}</strong></span></div>
-  <ul>{#each people as person}<li><button class="text-button" onclick={()=>onPerson(person.id)}>{person.name}</button><span>{person.observed?'Twitch':''}{person.observed&&person.estimated?' · ':''}{person.estimated?'YouTube · оценка':''}</span></li>{:else}<li class="muted">Нет сохранённых персональных сигналов в этом интервале.</li>{/each}</ul>
+  <div class="detail-values"><span>{metric==='messages'?'Сообщения':metric==='observed'?(selected.width>60000?'В среднем в чате Twitch':'Люди в чате Twitch'):metric==='estimated'?'Активность чата YouTube':metric==='twitchViewers'?'Зрители Twitch':metric==='youtubeViewers'?'Зрители YouTube':'Зрители по данным площадок'}: <strong>{selected.isBreak?'перерыв':selected.known?selected.value.toLocaleString('ru-RU',{maximumFractionDigits:1}):'нет данных'}</strong></span>{#if selected.width>60000&&['observed','estimated'].includes(metric)}<span>Уникальные люди за интервал: <strong>{people.length}</strong></span>{/if}</div>
+  {#if metric!=='messages'}<p class="small muted">Люди из чата в этом интервале</p><ul>{#each people as person}<li><button class="text-button" onclick={()=>onPerson(person.id)}>{person.name}</button><span>{person.observed?'Twitch':''}{person.observed&&person.estimated?' · ':''}{person.estimated?'YouTube · оценка':''}</span></li>{:else}<li class="muted">Нет сохранённых персональных сигналов в этом интервале.</li>{/each}</ul>{/if}
  </section>
 {/if}
 <style>

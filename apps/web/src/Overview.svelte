@@ -1,7 +1,9 @@
 <script lang="ts">
+  import Following from "./Following.svelte";
   import Icon from "./Icon.svelte";
   import Help from "./Help.svelte";
   import EventList from "./EventList.svelte";
+  import type {ChartMetric} from './chart-series';
   import AudienceChart from "./AudienceChart.svelte";
   import AudienceRanking from "./AudienceRanking.svelte";
   import {streamRange,streamTime} from './stream-time';
@@ -10,7 +12,6 @@
   import {
     api,
     money,
-    date,
     type Event,
     type Summary,
     type InsightCard,
@@ -31,17 +32,22 @@
     session?:Session|undefined;
   } = $props();
   let audienceData=$state<any>(null),audienceError=$state(''),audienceBusy=$state(false),barOpen=$state(false);
+  let audienceMetric=$state<ChartMetric>('twitchViewers');
+  const viewers=$derived(audienceData?.streamComparison?.[0]?.viewers?.twitch);
+  const youtubeViewers=$derived(audienceData?.streamComparison?.[0]?.viewers?.youtube);
+  const lastViewers=$derived(audienceData?.timeline?.findLast((p:any)=>p.twitchViewers!=null)?.twitchViewers);
+  const decimal=(n:number)=>n.toLocaleString('ru-RU',{maximumFractionDigits:1});
   let metadata=$state<Array<{at:number;title:string;categoryName:string}>>([]);
   let audienceRequest=0,lastAudienceSession='';
   $effect(()=>{
     const current=sessionFilter;void summary;
     if(current===lastAudienceSession&&barOpen)return;
-    const id=++audienceRequest;audienceBusy=true;audienceError='';
+    const id=++audienceRequest;audienceBusy=audienceData===null;audienceError='';
     if(current!==lastAudienceSession){audienceData=null;metadata=[];lastAudienceSession=current;}
     if(!current){audienceData=null;audienceBusy=false;return;}
     void Promise.all([api(`analytics?${new URLSearchParams({session:current,source:'all',timezone:'Europe/Moscow'})}`),api<Array<{at:number;title:string;categoryName:string}>>(`sessions/${current}/metadata`)]).then(([result,history])=>{
       if(id===audienceRequest){audienceData=result;metadata=history.filter((row,i)=>!i||row.title!==history[i-1]!.title||row.categoryName!==history[i-1]!.categoryName);}
-    }).catch(error=>{if(id===audienceRequest){audienceError=(error as Error).message;audienceData=null;}}).finally(()=>{if(id===audienceRequest)audienceBusy=false;});
+    }).catch(error=>{if(id===audienceRequest){audienceError=(error as Error).message;}}).finally(()=>{if(id===audienceRequest)audienceBusy=false;});
     return()=>{audienceRequest++;};
   });
   let filter = $state("all");
@@ -90,7 +96,7 @@
   function coverageLabel() {
     const c = summary.coverage;
     if (!c || c.ratio === null) return "—";
-    return `${Math.round(c.ratio * 100)}% (${c.knownMinutes}/${c.totalMinutes} мин)`;
+    return `${Math.round(c.ratio * 100)}% (${decimal(c.knownMinutes)}/${decimal(c.totalMinutes)} мин)`;
   }
 </script>
 {#if session}<section class="panel stream-facts">
@@ -117,16 +123,9 @@
   <div class="metric">
     <span class="teal"><Icon name="people" size={27} /></span>
     <div>
-      <span>Наблюдаемые участники</span><strong
-        >{summary.chatters != null
-          ? summary.chatters
-          : "нет данных"}</strong
-      >{#if summary.lastPollAtMs}<small
-          >Опрос: {date(summary.lastPollAtMs)}</small
-        >{:else}<small>эфир не идёт / нет опросов присутствия</small>{/if}
-      {#if summary.uniquePersonsObserved != null}<small
-          >За стрим: {summary.uniquePersonsObserved}</small
-        >{/if}
+      <span>Среднее число зрителей Twitch</span><strong>{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'Нет замеров'}</strong>
+      {#if viewers?.peak!=null}<small>Максимум: {viewers.peak}</small>{/if}
+      {#if lastViewers!=null}<small>Последний замер: {lastViewers}</small>{/if}
     </div>
   </div>
   <div class="metric">
@@ -137,21 +136,24 @@
           ? Object.entries(summary.totals)
               .map(([c, a]) => money(a, c))
               .join(" · ")
-          : "Нет данных"}</strong
+          : "Нет донатов"}</strong
       >
     </div>
   </div>
 </section>
+{#if youtubeViewers?.mean!=null}<section class="metrics"><div class="metric"><div><span>Среднее число зрителей YouTube</span><strong>{decimal(youtubeViewers.mean)}</strong><small>Максимум: {youtubeViewers.peak}</small></div></div></section>{/if}
+{#if sessionFilter}<Following sessionId={sessionFilter} {onPerson} />{/if}
 <section class="metrics secondary-metrics">
   <div class="metric">
     <div>
-      <span>Участники</span><strong
-        >{(summary.uniquePersons ?? 0).toLocaleString("ru-RU")}</strong
+      <span>Писали в чате</span><strong
+        >{(summary.participants?.length ?? 0).toLocaleString("ru-RU")}</strong
       >
+      <small>Уникальные авторы сообщений</small>
     </div>
   </div>
-  <div class="metric">
-    <div>
+  <div class="metric"><div><span>Людей в чате Twitch за стрим</span><strong>{summary.uniquePersonsObserved??'Нет опросов'}</strong><small>Уникальные люди по опросам чата, не зрители видео</small></div></div>
+  <div class="metric"><div>
       <span>Полнота наблюдений</span><strong>{coverageLabel()}</strong>
       {#if (summary.gapCount ?? 0) > 0}<small class="gap-badge"
           >Пропуски сбора: {summary.gapCount}</small
@@ -191,9 +193,9 @@
   </div>
 </section>
 <section class="panel series-panel">
-  <header><h2>Аудитория в чате <Help id="stream-presence" label="Об аудитории стрима" text="График показывает наблюдения присутствия в чате Twitch. Это не подтверждение просмотра видео; неизвестные промежутки не считаются нулём. Нажмите столбец, чтобы увидеть участников за минуту." /></h2></header>
+  <header><label>График<select aria-label="Показатель графика стрима" bind:value={audienceMetric}><option value="twitchViewers">Зрители Twitch</option><option value="youtubeViewers">Зрители YouTube</option><option value="observed">Люди в чате Twitch</option><option value="estimated">Активность чата YouTube</option><option value="messages">Сообщения</option></select></label><h2>Аудитория в чате <Help id="stream-presence" label="Об аудитории стрима" text="График показывает наблюдения присутствия в чате Twitch. Это не подтверждение просмотра видео; неизвестные промежутки не считаются нулём. Нажмите столбец, чтобы увидеть участников за минуту." /></h2></header>
   {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceData}
-    <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric="observed" resolution={1} showRegulars={false} {onPerson} onselection={(open)=>barOpen=open}/>
+    <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric={audienceMetric} resolution={1} showRegulars={false} {onPerson} onselection={(open)=>barOpen=open}/>
   {:else}<p class="empty-small" role="status">{audienceBusy?'Загружаем присутствие…':'Выберите стрим'}</p>{/if}
 </section>
 <AudienceRanking people={audienceData?.audience??[]} {onPerson} showIntervals/>

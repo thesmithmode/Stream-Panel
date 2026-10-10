@@ -2,6 +2,7 @@ import { demoApi, getDataMode, setDataMode, type DataMode } from "./demo-data";
 import { createProfileSelection } from "./profile";
 export { getDataMode, setDataMode, type DataMode };
 
+import {requestJson} from "./request";
 let csrf = "";
 export type { Profile } from "./profile";
 const selection = createProfileSelection(() => localStorage);
@@ -12,7 +13,7 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
   if (getDataMode() === "demo" && !path.startsWith("auth/")) {
     return (await demoApi(path, body)) as T;
   }
-  const response = await fetch(`/api/v1/${path}`, {
+  return requestJson<T>(`/api/v1/${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers:
       body === undefined
@@ -20,9 +21,7 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
         : { "Content-Type": "application/json", "X-CSRF-Token": csrf, "X-Stream-Panel-Profile": getProfile() },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || `HTTP_${response.status}`);
-  return data as T;
+
 }
 export function money(minor: string, currency: string) {
   const value = BigInt(minor);
