@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import {currencyRates} from './rates.js';
+import {streamMetrics} from './stream-metrics.js';
 import { botExclusionSet, isExcludedBot } from './bots.js';
 export interface AnalyticsOptions {
     fromMs: number;
@@ -113,6 +114,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     const clip = (span: Span) => selected.filter(s => s.session === span.session && s.from < span.to && s.to > span.from).map(s => ({ ...span, from: Math.max(span.from, s.from), to: Math.min(span.to, s.to) }));
     const selectedStreamCount=new Set(selected.map(segment=>segment.session)).size;
     const messageAuthors=new Map<number,Map<string,number>>();
+    const streamAuthors=new Map<string,Map<number,Set<string>>>();
     const sessionMessages = new Map<string, number>();
     const categoryAudience = new Map<string, Set<string>>();
     const categoryMessages = new Map<string, number>();
@@ -123,7 +125,9 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         const values=totals.get(key)??{};values[currency]=(BigInt(values[currency]??'0')+BigInt(amount)).toString();totals.set(key,values);counts.set(key,(counts.get(key)??0)+1);
     };
     const addMessages = (sid: string, at: number, n: number, id: string) => { const segment = selected.find(s => s.session === sid && at >= s.from && at < s.to); if (segment) {
-        if(n>0){const atMinute=Math.floor(at/60000)*60000,authors=messageAuthors.get(atMinute)??new Map<string,number>();authors.set(id,(authors.get(id)??0)+n);messageAuthors.set(atMinute,authors);}
+        if(n>0){const atMinute=Math.floor(at/60000)*60000,authors=messageAuthors.get(atMinute)??new Map<string,number>();authors.set(id,(authors.get(id)??0)+n);messageAuthors.set(atMinute,authors);
+            const minutes=streamAuthors.get(sid)??new Map<number,Set<string>>(),ids=minutes.get(atMinute)??new Set<string>();ids.add(id);minutes.set(atMinute,ids);streamAuthors.set(sid,minutes);
+        }
         sessionMessages.set(sid, (sessionMessages.get(sid) ?? 0) + n);
         categoryMessages.set(segment.categoryId, (categoryMessages.get(segment.categoryId) ?? 0) + n);
         const ids = categoryAudience.get(segment.categoryId) ?? new Set();
@@ -360,7 +364,8 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             seen.add(e.id);
         const durationMs=selected.filter(segment=>segment.session===s.id).reduce((n,segment)=>n+segment.to-segment.from,0);
         const donations=streamDonations.get(s.id)??{},messages=sessionMessages.get(s.id)??0;
-        return { durationMs,messagesPerHour:durationMs?messages*3600000/durationMs:null,donationCount:streamDonationCounts.get(s.id)??0,donationTotals:donations,donationsPerHourMinor:currencyRates(donations,durationMs),id: s.id, startedAt: s.started_at_ms, endedAt: s.ended_at_ms ?? to, title: samples.find(x => x.session_id === s.id)?.title ?? "", audience: visitors.length, core: visitors.filter(e => e.core).length, newInPeriod, returning: visitors.length - newInPeriod, messages: sessionMessages.get(s.id) ?? 0, categories: [...new Set(selected.filter(segment => segment.session === s.id).map(segment => segment.name))] };
+        const metrics=streamMetrics(selected.filter(segment=>segment.session===s.id),samples.filter(sample=>sample.session_id===s.id),streamAuthors.get(s.id)??new Map());
+        return { ...metrics,durationMs,messagesPerHour:durationMs?messages*3600000/durationMs:null,donationCount:streamDonationCounts.get(s.id)??0,donationTotals:donations,donationsPerHourMinor:currencyRates(donations,durationMs),id: s.id, startedAt: s.started_at_ms, endedAt: s.ended_at_ms ?? to, title: samples.find(x => x.session_id === s.id)?.title ?? "", audience: visitors.length, core: visitors.filter(e => e.core).length, newInPeriod, returning: visitors.length - newInPeriod, messages: sessionMessages.get(s.id) ?? 0, categories: [...new Set(selected.filter(segment => segment.session === s.id).map(segment => segment.name))] };
     });
     const report=source!=='twitch'&&options.youtubeAccount ? db.prepare("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {payload_json:string;updated_at_ms:number}|undefined : undefined;
     const youtubeReport=report ? {data:JSON.parse(report.payload_json),updatedAt:report.updated_at_ms} : null;

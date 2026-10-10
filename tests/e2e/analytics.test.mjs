@@ -50,6 +50,10 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    },days);
    await goto(page,origin);await page.getByLabel('Логин',{exact:true}).fill(profile);await page.getByLabel('Пароль',{exact:true}).fill(`${profile}-analytics-password`);await page.getByRole('button',{name:'Войти',exact:true}).click();
    await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});await page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).waitFor();await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
+   const comparison=page.getByRole('heading',{name:'Сравнение стримов',exact:true}).locator('..').locator('..');
+   assert.equal(await comparison.getByRole('cell',{name:'13.5 / 15',exact:true}).count(),3);
+   assert.equal(await comparison.getByRole('cell',{name:'4.0 / 4',exact:true}).count(),3);
+   assert.equal(await comparison.getByRole('columnheader',{name:'Чатеры: уник. / пик / ср.',exact:true}).count(),1);
    assert.equal(await page.getByRole('button',{name:'Применить',exact:true}).count(),0);
    for(const label of ['Порог постоянника, % посещений','Минимум эфиров','Минимум минут активности','Минимум сообщений','Правило ядра','Окно активности YouTube, мин'])assert.equal(await page.getByLabel(label,{exact:true}).count(),0,label);
    assert.equal(await page.getByText('Как определять ядро аудитории',{exact:true}).count(),0);

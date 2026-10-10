@@ -191,3 +191,10 @@ CI 6587560: unit/integration/operations успешны; 17 из 18 E2E успе�
 Добавлены 8 Twitch cancellation-regressions и восстановление после SQLITE_BUSY без закрытия эфира. Пять DA cancellation-regressions воспроизвели продолжение ручного импорта после stop и лишний запрос после ingestLiveDonation; добавлена проверка generation после записи каждой строки. При отключении во время realtime subscribe поздний channel token не отправляется в закрытый socket. История с отклонёнными строками остаётся явно неполной, валидные донаты сохраняются. Проверены page budget 1000, три известные страницы автоматического scan и совместные автоматические запросы. Collector subset 41/41, core build проходит.
 
 CI 4731a7b: все unit/integration/E2E/operations успешны. Lines 99,41%, functions 95,61%, branches 93,55%; gate красный только по branches. Текущий следующий SHA требует своей проверки. Main/release/deploy не выполнялись.
+
+
+## Сравнение стримов: чатеры и зрители площадок
+
+Добавлены unique/peak/mean авторов сообщений по минутам с дедупликацией ручных Twitch/YouTube связей. Отдельные mean/peak/knownMinutes/coverageRatio/viewerMinutes площадок используют записанные минутные замеры и обрезанные границы периода; неизвестность отличается от подтверждённого нуля. UI сравнения показывает оба счётчика и полноту. Core/analytics subset 18/18, production build и Svelte check 0 ошибок/предупреждений. Добавлены browser assertions реальных fixture средних/пиков для трёх стримов, ожидают CI.
+
+CI d6941b7: все unit/integration/E2E/operations успешны, включая late-DA cancellation. Lines 99,59%, functions 95,61%, branches 93,91%; threshold остаётся 95%, gate красный.

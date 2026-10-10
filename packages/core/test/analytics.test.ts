@@ -312,3 +312,21 @@ test('hourly activity uses the actual clipped YouTube window within a partial mi
   assert.equal(data.hours[0]!.messages,1);
  }finally{s.close();}
 });
+
+test('comparison deduplicates linked Twitch/YouTube chatters and exposes independent sample coverage',()=>{
+ const s=new StreamStore(':memory:');try{
+  const sid=s.observePlatformStream('twitch','channel','metric-stream',base,base,null,'Metrics')!;
+  s.observePlatformStream('youtube','yt-owner','metric-video',base,base,null,'Metrics');
+  s.streamSample(sid,base,'game','Game','Metrics',10);s.youtubeViewers(base,4,sid);
+  s.streamSample(sid,base+minute,'game','Game','Metrics',20);
+  const tw=s.ingest({source:'twitch',accountId:'channel',externalId:'metric-tw',type:'chat.message',actor:{externalId:'metric-author',displayName:'Linked'},occurredAtMs:base,receivedAtMs:base,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
+  s.youtubeMessages('yt-owner','metric-chat',[{id:'metric-yt',snippet:{type:'textMessageEvent',publishedAt:new Date(base).toISOString(),displayMessage:'hello'},authorDetails:{channelId:'metric-author-yt',displayName:'Linked'}}]);
+  const yp=s.persons().find(p=>String(p.sources).includes('youtube'))!;
+  s.merge(String(yp.id),tw.personId!,s.personRevision(String(yp.id)),s.personRevision(tw.personId!),base+minute);
+  s.endSession(sid,base+2*minute);
+  const comparison=s.analytics({fromMs:base,toMs:base+2*minute,youtubeAccount:'yt-owner'}).streamComparison[0]!;
+  assert.equal(comparison.uniqueChatters,1);assert.equal(comparison.peakChatters,1);assert.equal(comparison.meanChatters,.5);assert.equal(comparison.messages,2);
+  assert.equal(comparison.viewers.twitch.mean,15);assert.equal(comparison.viewers.twitch.peak,20);assert.equal(comparison.viewers.twitch.coverageRatio,1);
+  assert.equal(comparison.viewers.youtube.mean,4);assert.equal(comparison.viewers.youtube.coverageRatio,.5);
+ }finally{s.close();}
+});
