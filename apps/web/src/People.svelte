@@ -430,8 +430,8 @@
           </div>
           <p class="small muted">
             {grid.filter((c) => c.state === "observed").length} минут с наблюдением
-            в чате · {grid.filter((c) => c.state !== "unknown")
-              .length}/{grid.length} минут с полным опросом
+            в чате · {grid.filter((c) => ['observed','not_observed'].includes(c.state))
+              .length}/{grid.filter(c=>c.state!=='break').length} минут с полным опросом
           </p>
           {#if minute !== null}<p class="small">
               Выбрана минута: {date(minute)}. Показаны доступные события этой

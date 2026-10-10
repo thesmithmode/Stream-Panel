@@ -1,5 +1,5 @@
 // Migration 1. All times are UTC epoch milliseconds; names are never unique identifiers.
-export const CURRENT_SCHEMA_VERSION = 11;
+export const CURRENT_SCHEMA_VERSION = 12;
 
 export const schemaV1 = `
 CREATE TABLE persons (
@@ -238,4 +238,15 @@ CREATE VIEW effective_events AS SELECT e.id,e.source,e.account_id,e.external_id,
  e.transport,coalesce(c.payload_json,e.payload_json) AS payload_json
  FROM events e LEFT JOIN donation_corrections c ON c.event_id=e.id LEFT JOIN anonymous_donors a ON a.account_id=e.account_id AND e.source='donationalerts' AND e.type='donation' WHERE coalesce(c.deleted,0)=0;
 PRAGMA user_version = 11;
+`;
+
+export const schemaV12 = `
+CREATE TABLE provider_snapshots (
+ id TEXT PRIMARY KEY, source TEXT NOT NULL, account_id TEXT NOT NULL, key TEXT NOT NULL,
+ observed_at_ms INTEGER NOT NULL, session_id TEXT REFERENCES sessions(id),
+ payload_json TEXT NOT NULL CHECK(json_valid(payload_json))
+) STRICT;
+CREATE INDEX provider_snapshots_session_time ON provider_snapshots(session_id,observed_at_ms);
+CREATE INDEX provider_snapshots_account_time ON provider_snapshots(source,account_id,key,observed_at_ms);
+PRAGMA user_version = 12;
 `;

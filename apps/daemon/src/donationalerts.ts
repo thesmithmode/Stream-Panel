@@ -65,6 +65,7 @@ export function normalizeDonation(
     timeQuality: occurredAtMs === null ? "unknown" : "configured",
     transport,
     payload: {
+      raw:data,
       amountMinor: amount,
       currency: string(data.currency),
       text: string(data.message),

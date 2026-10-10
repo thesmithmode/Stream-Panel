@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import {extraTwitchEvents,extraTwitchScopes} from './twitch-events.js';
 import type { Configuration, Tokens } from "./config.js";
 import type { StoreClient } from "./db.js";
 import {
@@ -38,6 +39,7 @@ const optionalScopes = [
   "moderator:read:followers",
   "channel:read:subscriptions",
   "bits:read",
+  ...extraTwitchScopes,
 ];
 
 export function normalizeTwitch(
@@ -66,7 +68,7 @@ export function normalizeTwitch(
     "channel.chat.clear": "chat.clear",
     "channel.chat.clear_user_messages": "chat.clear_user_messages",
   };
-  const mapped = mappings[type];
+  const mapped = mappings[type] ?? (extraTwitchEvents.some(([name])=>name===type)?type.replace(/^channel\./,''):undefined);
   if (!mapped) return null;
   const userId =
     string(event.chatter_user_id) ||
@@ -100,7 +102,9 @@ export function normalizeTwitch(
     timeQuality: "provider",
     transport: "eventsub",
     payload: {
-      text: messageText(event.message),
+      raw:root,
+      text: messageText(event.message) || string(event.user_input),
+      reward:event.reward??null,
       actorName: label,
       originChannelId: string(event.source_broadcaster_user_id) || accountId,
       bits: event.bits ?? null,
@@ -589,6 +593,8 @@ export class TwitchConnection {
           ] as [string, string, Record<string, string>, string],
       ),
       ["channel.cheer", "1", { broadcaster_user_id: id }, "bits:read"],
+      ...extraTwitchEvents.map(([type,version,scope])=>[type,version,
+        type.startsWith('channel.chat')?{broadcaster_user_id:id,user_id:id}:{broadcaster_user_id:id},scope] as [string,string,Record<string,string>,string|null]),
     ];
     for (const [type, version, condition, scope] of definitions) {
       if (scope && !this.token.scopes.includes(scope)) {
@@ -650,6 +656,7 @@ export class TwitchConnection {
         if (!current()) return;
         this.platformLive = true;
         this.sessionId = sessionId;
+        if (sessionId) await this.db.call("providerSnapshot",'twitch',accountId,'stream',stream,observedAtMs,sessionId);
         if (sessionId) await this.db.call("streamSample", sessionId, observedAtMs,
           string(stream.game_id), string(stream.game_name), string(stream.title),
           Number.isSafeInteger(stream.viewer_count) ? Number(stream.viewer_count) : null);

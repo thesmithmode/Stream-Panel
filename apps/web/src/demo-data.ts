@@ -485,6 +485,8 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
   if(p.startsWith("donations/"))throw new Error("Изменения донатов доступны после подключения к серверу");
   if (p === "merges" || p === "splits") return [];
 
+  if (/^sessions\/[^/]+\/metadata$/.test(p)) return [];
+
   if (p === "presence") {
     const from = Number(q.get("from") || now - 90 * minute);
     const to = Number(q.get("to") || now);

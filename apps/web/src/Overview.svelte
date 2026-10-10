@@ -4,6 +4,8 @@
   import EventList from "./EventList.svelte";
   import AudienceChart from "./AudienceChart.svelte";
   import AudienceRanking from "./AudienceRanking.svelte";
+  import {streamRange,streamTime} from './stream-time';
+  import type {Session} from './api';
   import { onMount } from "svelte";
   import {
     api,
@@ -19,14 +21,17 @@
     sessionFilter = "",
     connect,
     onPerson,
+    session,
   }: {
     summary: Summary;
     events: Event[];
     sessionFilter?: string;
     connect: () => void;
     onPerson: (id: string) => void;
+    session?:Session|undefined;
   } = $props();
   let audienceData=$state<any>(null),audienceError=$state(''),audienceBusy=$state(false),barOpen=$state(false);
+  let metadata=$state<Array<{at:number;title:string;categoryName:string}>>([]);
   let audienceRequest=0,lastAudienceSession='';
   $effect(()=>{
     const current=sessionFilter;void summary;
@@ -34,8 +39,8 @@
     const id=++audienceRequest;audienceBusy=true;audienceError='';
     if(current!==lastAudienceSession){audienceData=null;lastAudienceSession=current;}
     if(!current){audienceData=null;audienceBusy=false;return;}
-    void api(`analytics?${new URLSearchParams({session:current,source:'all',timezone:'Europe/Moscow'})}`).then(result=>{
-      if(id===audienceRequest)audienceData=result;
+    void Promise.all([api(`analytics?${new URLSearchParams({session:current,source:'all',timezone:'Europe/Moscow'})}`),api<Array<{at:number;title:string;categoryName:string}>>(`sessions/${current}/metadata`)]).then(([result,history])=>{
+      if(id===audienceRequest){audienceData=result;metadata=history.filter((row,i)=>!i||row.title!==history[i-1]!.title||row.categoryName!==history[i-1]!.categoryName);}
     }).catch(error=>{if(id===audienceRequest){audienceError=(error as Error).message;audienceData=null;}}).finally(()=>{if(id===audienceRequest)audienceBusy=false;});
     return()=>{audienceRequest++;};
   });
@@ -88,7 +93,14 @@
     return `${Math.round(c.ratio * 100)}% (${c.knownMinutes}/${c.totalMinutes} мин)`;
   }
 </script>
-
+{#if session}<section class="panel stream-facts">
+ <header><h2>{session.primaryTitle||'Стрим'}</h2><span>{streamRange(session.started_at_ms,session.ended_at_ms)} МСК</span></header>
+ {#each session.breaks??[] as pause}<p class="small">Перерыв: {streamRange(pause.from,pause.to)} МСК</p>{/each}
+ <details class="compact-details"><summary>История названий и категорий</summary>
+  {#each metadata as row}<p class="small">{streamTime(row.at)} · {row.categoryName||'Категория неизвестна'} · {row.title||'Без названия'}</p>{:else}<p class="small muted">Нет сохранённых метаданных.</p>{/each}
+  <p class="small muted">Текст уведомления о начале эфира публичный Twitch API не отдаёт.</p>
+ </details>
+</section>{/if}
 <section class="metrics">
   <div class="metric">
     <Icon name="chat" size={27} />

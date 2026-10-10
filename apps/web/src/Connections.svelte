@@ -3,10 +3,11 @@
   import { statusLabel } from "./labels";
   import BackupFiles from './BackupFiles.svelte';
   import CollectionGaps from './CollectionGaps.svelte';
+  import IntegrationGuide from './IntegrationGuide.svelte';
   let { status, onChange }: { status: any; onChange: () => Promise<void> } =
     $props();
   let twitchClient = $state(""),
-    extended = $state(false),
+    extended = $state(true),
     youtubeClient = $state(""), youtubeSecret = $state(""),
     daClient = $state(""),
     daSecret = $state(""),
@@ -82,6 +83,7 @@
   <section class="panel settings">
     <header>
       <h2>Twitch</h2>
+      <IntegrationGuide provider="Twitch"/>
       <span class="state" class:online={twitchConnected}
         >{statusLabel(status.twitch.state)}</span
       >
@@ -117,8 +119,7 @@
         <details class="compact-details">
           <summary>Дополнительно</summary>
           <label class="check"
-            ><input type="checkbox" bind:checked={extended} /> Подписки, Bits и
-            фолловеры</label
+            ><input type="checkbox" bind:checked={extended} /> Полный сбор событий: подписки, Bits, награды и активность канала</label
           >
           <p class="small muted">
             <a
@@ -157,6 +158,7 @@
   <section class="panel settings">
     <header>
       <h2>DonationAlerts</h2>
+      <IntegrationGuide provider="DonationAlerts" redirect={status.config.daRedirectUri}/>
       <span class="state" class:online={daConnected}
         >{statusLabel(status.donationalerts.state)}</span
       >
@@ -267,7 +269,7 @@
     </div>
   </section>
   <section class="panel settings">
-    <header><h2>YouTube</h2><span class="state" class:online={status.youtube?.state === "connected"}>{statusLabel(status.youtube?.state ?? "disconnected")}</span></header>
+    <header><h2>YouTube</h2><IntegrationGuide provider="YouTube" redirect={status.config.youtubeRedirectUri??''}/><span class="state" class:online={status.youtube?.state === "connected"}>{statusLabel(status.youtube?.state ?? "disconnected")}</span></header>
     <div class="settings-body">
       <p class="small muted">{status.youtube?.detail ?? "Подключите канал этого профиля"}</p>
       {#if ["connected", "error"].includes(status.youtube?.state)}
@@ -306,3 +308,7 @@
   >
     {message}
   </p>{/if}
+
+<style>
+ :global(.settings>header){flex-wrap:wrap;gap:12px;}
+</style>

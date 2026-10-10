@@ -10,7 +10,7 @@ export interface PresencePoll {
 
 export interface PresenceMinute {
   minuteStartMs: number;
-  state: "observed" | "not_observed" | "unknown";
+  state: "observed" | "not_observed" | "unknown" | "break";
 }
 
 // Complete polls cover [startedAtMs, completedAtMs] minute buckets (inclusive).

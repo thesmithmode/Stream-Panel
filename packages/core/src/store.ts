@@ -12,8 +12,9 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11 } from "./schema.js";
+import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11,schemaV12 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
+import { sessionWindows,sessionBreaks } from './session-windows.js';
 import { presenceMinutes, pollCoveredMinutes, type PresencePoll } from "./presence.js";
 
 interface IdentityRow {
@@ -87,6 +88,8 @@ export class StreamStore {
         this.db.transaction(() => this.db.exec(schemaV10)).immediate();
       if ((this.db.pragma("user_version", { simple: true }) as number) < 11)
         this.db.transaction(() => this.db.exec(schemaV11)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 12)
+        this.db.transaction(() => this.db.exec(schemaV12)).immediate();
       this.db.exec("CREATE TABLE IF NOT EXISTS sp_youtube_quota (day TEXT NOT NULL, profile TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(day,profile)) WITHOUT ROWID");
       // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
@@ -141,7 +144,20 @@ export class StreamStore {
   }
   youtubeSnapshot(account: string, key: string, payload: unknown, now = Date.now()): void {
     if (!account || !key) throw new Error("INVALID_YOUTUBE_KEY");
-    this.db.prepare("INSERT INTO youtube_snapshots VALUES (?,?,?,?) ON CONFLICT(account_id,key) DO UPDATE SET payload_json=excluded.payload_json,updated_at_ms=excluded.updated_at_ms").run(account, key, JSON.stringify(payload), now);
+    this.db.transaction(()=>{
+      this.db.prepare("INSERT INTO youtube_snapshots VALUES (?,?,?,?) ON CONFLICT(account_id,key) DO UPDATE SET payload_json=excluded.payload_json,updated_at_ms=excluded.updated_at_ms").run(account, key, JSON.stringify(payload), now);
+      if(!key.startsWith('cursor:'))this.providerSnapshot('youtube',account,key,payload,now);
+    }).immediate();
+  }
+  providerSnapshot(source:string,account:string,key:string,payload:unknown,at:number,sessionId:string|null=null):void {
+    assertTimestamp(at);
+    if(!['twitch','youtube','donationalerts'].includes(source)||!account||!key)throw new Error('INVALID_PROVIDER_SNAPSHOT');
+    this.db.prepare('INSERT INTO provider_snapshots VALUES (?,?,?,?,?,?,?)').run(randomUUID(),source,account,key,at,sessionId,JSON.stringify(payload));
+  }
+  streamMetadata(sessionId:string){
+    this.sessionRow(sessionId);
+    return this.db.prepare(`SELECT observed_at_ms AS at,category_id AS categoryId,category_name AS categoryName,title
+      FROM stream_samples WHERE session_id=? AND (twitch_viewers IS NOT NULL OR category_id<>'' OR title<>'') ORDER BY observed_at_ms`).all(sessionId);
   }
   youtubeMessages(account: string, chat: string, messages: any[]): void {
     if (!account || !chat || messages.length > 2000) throw new Error("INVALID_YOUTUBE_MESSAGES");
@@ -1095,6 +1111,7 @@ export class StreamStore {
       .all() as Record<string, unknown>[];
     return rows.map(({platforms_json, urls_json, ...row}) => ({
       ...row,
+      breaks:sessionBreaks(sessionWindows(this.db,String(row.id),Number(row.started_at_ms),Number(row.ended_at_ms??Date.now()))),
       platforms: JSON.parse(platforms_json as string) as string[],
       confirmedUrls: (JSON.parse(urls_json as string) as {platform:"twitch"|"youtube";url:string}[])
         .filter(link=>this.validPlatformStreamUrl(link.platform,link.url)),
@@ -1211,9 +1228,20 @@ export class StreamStore {
           const streamId = `${platform}:${externalId}`;
           const prior = this.db.prepare("SELECT 1 FROM sessions WHERE account_id=? AND stream_id=? LIMIT 1").get(accountId, streamId);
           if (occupied || prior) return null;
-          sessionId = randomUUID();
-          this.db.prepare("INSERT INTO sessions VALUES (?,?,?,?,?,?,NULL,'unknown')")
-            .run(sessionId, accountId, streamId, "platform", startedAtMs, observedAtMs);
+          const recent=this.db.prepare(`SELECT s.id FROM sessions s
+            WHERE s.kind='platform' AND s.ended_at_ms IS NOT NULL
+              AND s.ended_at_ms<=? AND s.ended_at_ms>?
+              AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)
+              AND EXISTS(SELECT 1 FROM platform_streams p WHERE p.session_id=s.id AND p.platform=? AND p.account_id=?)
+            ORDER BY s.ended_at_ms DESC,s.id DESC LIMIT 1`).get(startedAtMs,startedAtMs-30*60000,platform,accountId) as {id:string}|undefined;
+          if(recent){
+            sessionId=recent.id;
+            this.db.prepare("UPDATE sessions SET ended_at_ms=NULL,end_quality='unknown' WHERE id=?").run(sessionId);
+          }else{
+            sessionId = randomUUID();
+            this.db.prepare("INSERT INTO sessions VALUES (?,?,?,?,?,?,NULL,'unknown')")
+              .run(sessionId, accountId, streamId, "platform", startedAtMs, observedAtMs);
+          }
         }
       }
       this.attachPlatformStreamInTransaction(sessionId, platform, accountId, externalId, startedAtMs, observedAtMs, url, title);
@@ -1706,7 +1734,7 @@ export class StreamStore {
         const fromMs = Math.floor(session.started_at_ms / 60_000) * 60_000;
         const endMs = session.ended_at_ms ?? Date.now();
         const toMs = Math.ceil(endMs / 60_000) * 60_000;
-        sessionDurationMs = Math.max(0, endMs - session.started_at_ms);
+        sessionDurationMs = sessionWindows(this.db,sessionId,session.started_at_ms,endMs).reduce((sum,span)=>sum+span.to-span.from,0);
         const durationMin = sessionDurationMs / 60_000;
         messagesPerMinuteOfSession =
           durationMin > 0
@@ -1833,7 +1861,8 @@ export class StreamStore {
       status: poll.status,
       userIds: observed.has(poll.id) ? [personId] : [],
     }));
-    return presenceMinutes(normalized, personId, fromMs, toMs);
+    const windows=sessionWindows(this.db,sessionId,fromMs,toMs);
+    return presenceMinutes(normalized, personId, fromMs, toMs).map(row=>windows.some(span=>row.minuteStartMs<span.to&&row.minuteStartMs+60000>span.from)?row:{...row,state:'break' as const});
   }
 
 
@@ -1982,7 +2011,9 @@ export class StreamStore {
     fromMs: number,
     toMs: number,
   ): { knownMinutes: number; totalMinutes: number; ratio: number | null } {
-    const totalMinutes = Math.max(0, (toMs - fromMs) / 60_000);
+    const windows=sessionWindows(this.db,sessionId,fromMs,toMs);
+    const liveMinute=(at:number)=>windows.some(span=>at<span.to&&at+60000>span.from);
+    const totalMinutes=windows.reduce((sum,span)=>sum+span.to-span.from,0)/60000;
     const polls = this.db
       .prepare(
         `SELECT started_at_ms, completed_at_ms FROM presence_polls
@@ -2001,7 +2032,7 @@ export class StreamStore {
         fromMs,
         toMs,
       ))
-        known.add(minute);
+        if(liveMinute(minute))known.add(minute);
     return {
       knownMinutes: known.size,
       totalMinutes,
@@ -2030,6 +2061,7 @@ export class StreamStore {
       started_at_ms: number;
       completed_at_ms: number;
     }[];
+    const windows=sessionWindows(this.db,sessionId,fromMs,toMs);
     const observed = new Set<number>();
     for (const poll of polls)
       for (const minute of pollCoveredMinutes(
@@ -2038,7 +2070,7 @@ export class StreamStore {
         fromMs,
         toMs,
       ))
-        observed.add(minute);
+        if(windows.some(span=>minute<span.to&&minute+60000>span.from))observed.add(minute);
     let firstObservedMs: number | null = null;
     let lastObservedMs: number | null = null;
     for (const minute of observed) {

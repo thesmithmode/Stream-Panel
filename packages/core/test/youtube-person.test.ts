@@ -95,7 +95,7 @@ test('lifetime observed ranking includes streams beyond the former twenty-stream
  const s=new StreamStore(':memory:');try{
   const person=twitch(s);
   for(let n=0;n<25;n++){
-   const start=at+n*10*minute,session=s.observePlatformStream('twitch','owner',`video-${n}`,start,start,null,'Stream')!;
+   const start=at+n*60*minute,session=s.observePlatformStream('twitch','owner',`video-${n}`,start,start,null,'Stream')!;
    s.recordPoll(session,'owner',{startedAtMs:start,completedAtMs:start+minute,status:'complete',userIds:['viewer']});
    s.endSession(session,start+minute);
   }

@@ -16,6 +16,7 @@
     const label=`${new Date(point.at).toLocaleString('ru-RU',{timeZone:timezone})} · ${Math.round(point.width/60000)} мин`;
     if(!point.known)return `${label} · нет данных`;
     const regular=split&&point.value>0?` · ядро: ${point.regularValue.toFixed(1)} (${(point.regularValue/point.value*100).toFixed(1)}%)`:'';
+    if(point.isBreak)return `${label} · Перерыв`;
     return `${label} · всего: ${point.value.toFixed(1)}${regular}`;
   }
 </script>

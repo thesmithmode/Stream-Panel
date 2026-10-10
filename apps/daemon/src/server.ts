@@ -279,6 +279,7 @@ export async function createApplication(
     gaps: await db.call("gaps"),
   }));
   app.get("/api/v1/sessions", async () => db.call("sessions"));
+  app.get("/api/v1/sessions/:id/metadata",async(request)=>db.call('streamMetadata',string(object(request.params).id)));
   app.post("/api/v1/sessions/start", async () => {
     const existing = await db.call<Record<string, unknown>[]>("sessions");
     if (existing.some((s) => s.ended_at_ms === null))
