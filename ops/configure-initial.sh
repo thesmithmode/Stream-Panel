@@ -50,6 +50,16 @@ PY
 else
   bash "$bootstrap_cmd" "${network[0]}" deploy.pub backup-key "${network[1]}" "${network[2]}"
 fi
+# If UFW is already active, permit only the configured private Traefik proxy
+# to reach the application listener. Never enable, reset, or reload the firewall.
+if command -v ufw >/dev/null 2>&1; then
+  ufw_status=$(LC_ALL=C ufw status)
+  if [[ "$ufw_status" == *$'\nStatus: active\n'* || "$ufw_status" == 'Status: active'* ]]; then
+    if ! awk -v dest="${network[1]}" -v source="${network[2]}" '$1==dest && $2=="47831/tcp" && $3=="ALLOW" && $4=="IN" && $5==source {found=1} END {exit !found}' <<< "$ufw_status"; then
+      ufw allow from "${network[2]}" to "${network[1]}" port 47831 proto tcp comment 'Stream Panel private proxy'
+    fi
+  fi
+fi
 # Resume may find an installation marker written before an interrupted bootstrap
 # installed the current receiver. Refresh it only after identity validation.
 python3 - "$installed_receiver" <<'PY'
