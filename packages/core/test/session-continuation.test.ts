@@ -58,3 +58,15 @@ test('a new provider ID after a long collector outage does not invent a zero-len
   assert.notEqual(next,first);assert.equal(s.sessions().find(row=>row.id===first)!.ended_at_ms,60000);
  }finally{s.close();}
 });
+
+test('coverage weights partial live minutes and never counts break time',()=>{
+ const s=new StreamStore(':memory:');try{
+  const first=s.observePlatformStream('twitch','owner','first',30000,30000,null,'')!;
+  s.recordPoll(first,'owner',{startedAtMs:30000,completedAtMs:65000,status:'complete',userIds:[]});
+  s.endSession(first,90000);
+  const second=s.observePlatformStream('twitch','owner','next',130000,130000,null,'')!;assert.equal(second,first);
+  s.recordPoll(first,'owner',{startedAtMs:130000,completedAtMs:140000,status:'complete',userIds:[]});s.endSession(first,150000);
+  const coverage=(s.summary(first) as {coverage:{knownMinutes:number;totalMinutes:number;ratio:number}}).coverage;
+  assert.equal(coverage.totalMinutes,4/3);assert.equal(coverage.knownMinutes,4/3);assert.equal(coverage.ratio,1);
+ }finally{s.close();}
+});

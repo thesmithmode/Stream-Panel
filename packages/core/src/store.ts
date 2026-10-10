@@ -2050,10 +2050,11 @@ export class StreamStore {
         toMs,
       ))
         if(liveMinute(minute))known.add(minute);
+    const knownMinutes=[...known].reduce((sum,at)=>sum+windows.reduce((n,span)=>n+Math.max(0,Math.min(at+60000,span.to)-Math.max(at,span.from)),0),0)/60000;
     return {
-      knownMinutes: known.size,
+      knownMinutes,
       totalMinutes,
-      ratio: totalMinutes > 0 ? Math.round((known.size / totalMinutes) * 1000) / 1000 : null,
+      ratio: totalMinutes > 0 ? Math.round((knownMinutes / totalMinutes) * 1000) / 1000 : null,
     };
   }
 

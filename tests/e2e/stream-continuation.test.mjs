@@ -32,7 +32,7 @@ test('stream continuation shows Moscow dates, a real break, participant interval
   await page.getByText('История названий и категорий',{exact:true}).click();
   assert.ok((await page.locator('.stream-facts').textContent()).includes('First game · First title'));
   assert.ok((await page.locator('.stream-facts').textContent()).includes('Second game · Second title'));
-  await page.locator('.series-panel .chart-bar').nth(4).click();assert.ok((await page.getByRole('region',{name:'Детали выбранного столбца'}).textContent()).includes('перерыв'));
+  const breakBar=page.locator('.series-panel .chart-bar').nth(4);assert.match(await breakBar.getAttribute('aria-label'),/Перерыв/);await breakBar.click();assert.ok((await page.getByRole('region',{name:'Детали выбранного столбца'}).textContent()).includes('перерыв'));
   const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(evidence){await mkdir(evidence,{recursive:true});await page.screenshot({path:join(evidence,'stream-continuation-desktop.png'),fullPage:true});}
   await page.getByRole('button',{name:'Интеграции',exact:true}).click();
   for(const provider of ['Twitch','DonationAlerts','YouTube']){
