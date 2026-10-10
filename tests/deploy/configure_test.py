@@ -70,7 +70,34 @@ esac""")
     def run_configure(self, **extra):
         env = {**self.env, **extra}
         args = ["sudo", "-n", "env", *(f"{key}={value}" for key, value in env.items()), "bash", str(ROOT / "ops/configure-initial.sh")]
-        return subprocess.run(args, cwd=self.payload, text=True, capture_output=True)
+        try:
+            return subprocess.run(args, cwd=self.payload, text=True, capture_output=True)
+        finally:
+            self.restore_temp_ownership()
+
+    def restore_temp_ownership(self):
+        temp_root = pathlib.Path(tempfile.gettempdir()).resolve()
+        root = self.root.resolve(strict=True)
+        if root.parent != temp_root or not root.name.startswith("tmp") or self.root.is_symlink():
+            raise AssertionError("Refusing to chown outside this TemporaryDirectory")
+        script = """import os,stat,sys
+root,temp_root,uid,gid=sys.argv[1],sys.argv[2],int(sys.argv[3]),int(sys.argv[4])
+if os.path.dirname(root)!=temp_root or not os.path.basename(root).startswith('tmp'):
+ raise SystemExit('Temporary directory boundary check failed')
+info=os.lstat(root)
+if not stat.S_ISDIR(info.st_mode): raise SystemExit('Temporary root is not a real directory')
+for current,dirs,files in os.walk(root,topdown=True,followlinks=False):
+ dirs[:]=[name for name in dirs if not os.path.islink(os.path.join(current,name))]
+ for name in dirs+files:
+  os.chown(os.path.join(current,name),uid,gid,follow_symlinks=False)
+os.chown(root,uid,gid,follow_symlinks=False)
+"""
+        subprocess.run(
+            ["sudo", "-n", "python3", "-c", script, str(root), str(temp_root), str(os.getuid()), str(os.getgid())],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     def test_partial_supabase_pair_fails_before_any_server_command(self):
         (self.payload / "supabase-url").write_text("https://project.supabase.co")

@@ -9,3 +9,4 @@
 - Luna добавили адресные regression/coverage tests, root перепроверил и исправил ошибочные предположения. Проверки TypeScript и Svelte проходят; tests запускаются только GitHub Actions.
 - Последний удалённый CI fe651b9: тестовые сегменты и operations success, gate failure по branches93.91<95. Новый код ещё ожидает CI; main/bootstrap/deploy пока не выполнены.
 - GitHub команды запускать только вне sandbox. Локальный gh авторизован repo без workflow scope; серверный штатный gh доступен. Токены не извлекать и не переносить.
+- CI38040105468 terminal failure: server bundle/integration success; operations root-owned fixture permissions, unit YouTube malformed moderation deleting anonymous audit, E2E badge name assertion. Исправлены фикстуры и assertion; устранён реальный rootcause удаления всех YouTube author_id пустых при malformed ban. Новый CI ожидается.

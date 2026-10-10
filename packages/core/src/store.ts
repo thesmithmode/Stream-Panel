@@ -150,8 +150,16 @@ export class StreamStore {
       for (const m of messages) {
         const time = Date.parse(m.snippet?.publishedAt ?? "");
         if (!m.id || !Number.isFinite(time)) continue;
-        if (m.snippet.type === "messageDeletedEvent") this.db.prepare("DELETE FROM youtube_messages WHERE account_id=? AND id=?").run(account, m.snippet.messageDeletedDetails?.deletedMessageId ?? "");
-        if (m.snippet.type === "userBannedEvent") this.db.prepare("DELETE FROM youtube_messages WHERE account_id=? AND author_id=?").run(account, m.snippet.userBannedDetails?.bannedUserDetails?.channelId ?? "");
+        if (m.snippet.type === "messageDeletedEvent") {
+          const deletedMessageId = m.snippet.messageDeletedDetails?.deletedMessageId;
+          if (typeof deletedMessageId === "string" && deletedMessageId.trim())
+            this.db.prepare("DELETE FROM youtube_messages WHERE account_id=? AND id=?").run(account, deletedMessageId);
+        }
+        if (m.snippet.type === "userBannedEvent") {
+          const bannedChannelId = m.snippet.userBannedDetails?.bannedUserDetails?.channelId;
+          if (typeof bannedChannelId === "string" && bannedChannelId.trim())
+            this.db.prepare("DELETE FROM youtube_messages WHERE account_id=? AND author_id=?").run(account, bannedChannelId);
+        }
         if (insert.run(m.id, account, chat, m.authorDetails?.channelId ?? "", time, JSON.stringify(m)).changes)
           this.ensureYoutubeIdentity(account,m.authorDetails,time);
       }
