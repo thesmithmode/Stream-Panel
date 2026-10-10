@@ -3,6 +3,40 @@ from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('receiver',pathlib.Path(__file__).resolve().parents[2]/'ops/receive.py')
 r=importlib.util.module_from_spec(spec);spec.loader.exec_module(r)
 class ReceiverTests(unittest.TestCase):
+ def test_failed_release_cleanup_preserves_current_and_unrelated_objects_and_bounds_snapshots(self):
+  with tempfile.TemporaryDirectory() as folder:
+   root=pathlib.Path(folder);base=root/'app';data=root/'data';state=root/'state'
+   for path in [base/'releases',data,state/'snapshots']:path.mkdir(parents=True)
+   old=base/'releases'/('a'*40);failed=base/'releases'/('b'*40)
+   old.mkdir();failed.mkdir();(base/'current').symlink_to(old)
+   other=state/'snapshots'/'unrelated';other.mkdir();(other/'keep').write_text('keep')
+   for index in range(6):
+    snap=state/'snapshots'/('b'*40+'-'+str(1700000000000000+index));snap.mkdir();(snap/'data.sqlite').write_text('snapshot')
+   with patch.multiple(r,BASE=base,DATA=data,STATE=state):
+    r.discard_failed_release(failed)
+    r.discard_failed_release(old)
+   self.assertFalse(failed.exists());self.assertTrue(old.exists())
+   self.assertEqual((other/'keep').read_text(),'keep')
+   self.assertEqual(len([p for p in (state/'snapshots').iterdir() if p.name.startswith('b'*40)]),3)
+ def test_failed_rollback_retains_release_and_snapshot_evidence(self):
+  with tempfile.TemporaryDirectory() as folder:
+   root=pathlib.Path(folder);base=root/'app';data=root/'data';state=root/'state'
+   for path in [base/'releases',data,state/'snapshots']:path.mkdir(parents=True)
+   failed=base/'releases'/('b'*40);failed.mkdir();(data/'deploying').touch()
+   snapshot=state/'snapshots'/('b'*40+'-1700000000000000');snapshot.mkdir()
+   with patch.multiple(r,BASE=base,DATA=data,STATE=state):r.discard_failed_release(failed)
+   self.assertTrue(failed.exists());self.assertTrue(snapshot.exists());self.assertTrue((data/'deploying').exists())
+ def test_repeated_active_release_requires_real_health_and_does_not_restart_or_snapshot(self):
+  with tempfile.TemporaryDirectory() as folder:
+   root=pathlib.Path(folder);base=root/'app';data=root/'data';state=root/'state'
+   for path in [base/'releases',data,state]:path.mkdir(parents=True)
+   release=base/'releases'/('a'*40);release.mkdir();(base/'current').symlink_to(release)
+   with patch.multiple(r,BASE=base,DATA=data,STATE=state),patch.object(r,'service') as action,patch.object(r,'health',return_value=True) as health:
+    r.activate(release,'https://panel.test',pwd.getpwuid(os.getuid()))
+    health.assert_called_once_with('https://panel.test',release.name);action.assert_not_called()
+   with patch.multiple(r,BASE=base,DATA=data,STATE=state),patch.object(r,'health',return_value=False):
+    with self.assertRaisesRegex(RuntimeError,'Active release'):r.activate(release,'https://panel.test',pwd.getpwuid(os.getuid()))
+   self.assertEqual((base/'current').resolve(),release);self.assertFalse((state/'snapshots').exists())
  def test_health_defaults_to_loopback_when_bind_host_file_is_absent(self):
   with tempfile.TemporaryDirectory() as folder:
    missing=pathlib.Path(folder)/'bind-host';requests=[]

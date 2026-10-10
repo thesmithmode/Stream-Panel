@@ -25,3 +25,16 @@ test('YouTube reports, duplicate messages, moderation, account and profile isola
   assert.equal(a.youtubeData('channel').messages.some(m=>m.id==='same'),false);
  }finally{a.close();b.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+test('YouTube moderation with missing target IDs is a no-op for stored messages',()=>{
+ const store=new StreamStore(':memory:');
+ try {
+  const message={id:'kept',snippet:{type:'textMessageEvent',publishedAt:'2026-10-07T12:00:00Z',displayMessage:'Keep me'},authorDetails:{channelId:'viewer'}};
+  store.youtubeMessages('channel','chat',[message]);
+  store.youtubeMessages('channel','chat',[
+   {id:'delete-no-target',snippet:{type:'messageDeletedEvent',publishedAt:message.snippet.publishedAt}},
+   {id:'ban-no-target',snippet:{type:'userBannedEvent',publishedAt:message.snippet.publishedAt}},
+  ]);
+  assert.deepEqual(store.youtubeData('channel').messages.map(row=>row.id),['kept']);
+ } finally {store.close();}
+});

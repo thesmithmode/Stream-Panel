@@ -106,3 +106,18 @@ test("checking prior moderation uses a type-indexed lookup without walking messa
     db.close();
   }
 });
+
+test("moderation events without target ids leave messages visible", () => {
+  const db = new StreamStore(":memory:");
+  try {
+    db.ingest(message("kept-delete", 60_000));
+    db.ingest(message("kept-user", 60_000, "two"));
+    db.ingest(moderation("chat.message_delete", "delete-without-target", 120_000, {}));
+    db.ingest(moderation("chat.clear_user_messages", "clear-user-without-target", 120_000, {}));
+    const rows = db.events();
+    assert.equal((rows.find((row) => row.external_id === "kept-delete")!.payload as any).redacted, undefined);
+    assert.equal((rows.find((row) => row.external_id === "kept-user")!.payload as any).redacted, undefined);
+  } finally {
+    db.close();
+  }
+});

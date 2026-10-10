@@ -33,7 +33,7 @@ Google OAuth в Testing может ограничивать срок refresh-т�
 
 ## Развёртывание и автоматические обновления
 
-Инструкция: [docs/ops/server.md](docs/ops/server.md). `main` и `dev` сохраняются. Quality gate проверяет Linux, TypeScript/Svelte, unit/integration/e2e, покрытие ≥95% и откат деплоя. После зелёного CI на текущем `main` собирается Linux `.deb` для локальной проверки: [установка и перенос данных](docs/linux-release.md). Автодеплой VPS включается переменной `STREAM_PANEL_PRODUCTION_ENABLED=true` после проверки живого сервера. Старый desktop release v0.0.4 остаётся историческим.
+Инструкция: [docs/ops/server.md](docs/ops/server.md). `main` и `dev` сохраняются. Quality gate проверяет Linux, TypeScript/Svelte, unit/integration/e2e, покрытие ≥95%, серверный bundle и откат деплоя. CI собирает серверный архив для Linux amd64 с привязкой к SHA коммита. Автодеплой VPS включается переменной `STREAM_PANEL_PRODUCTION_ENABLED=true` после проверки живого сервера. Старый desktop release v0.0.4 остаётся историческим.
 
 Отдельные systemd-пользователи, каталоги, лимиты CPU/RAM, forced-command deploy key. При обновлении: maintenance → остановка службы → согласованный снимок → новая неизменяемая версия → healthcheck → включение сбора. Ошибка возвращает предыдущую версию, БД и настройки. Ротация сохраняет три версии и три снимка, затрагивая только каталоги Stream Panel.
 

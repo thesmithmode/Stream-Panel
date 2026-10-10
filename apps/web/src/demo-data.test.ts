@@ -43,6 +43,24 @@ test('demo uses one core classification in summary, audience, categories and cha
  }
 });
 
+test('demo analytics respects source and strict audience thresholds',async()=>{
+ const range=`from=${Date.now()-7200000}&to=${Date.now()}`;
+ const empty=await demoApi(`analytics?${range}&source=youtube`) as any;
+ assert.deepEqual(empty.audience,[]);
+ assert.equal(empty.summary.regularShare,null);
+ assert.equal(empty.summary.core,0);
+ assert.ok(empty.timeline.every((point:any)=>point.messages===0&&point.regularMessages===0&&point.observed===0));
+ const threshold=await demoApi(`analytics?${range}&source=twitch&minSessions=1&regularThresholdPercent=100`) as any;
+ assert.equal(threshold.audience.length,3);
+ assert.ok(threshold.audience.every((person:any)=>person.core===false&&person.regular===false));
+ assert.equal(threshold.summary.regularShare,0);
+ assert.equal(threshold.categories[0].core,0);
+ const qualified=await demoApi(`analytics?${range}&source=all&minSessions=1&regularThresholdPercent=49&minMinutes=999&minMessages=20`) as any;
+ assert.equal(qualified.summary.core,1,'message threshold qualifies only the first eligible audience member');
+ assert.equal(qualified.summary.regulars,1);
+ assert.ok(qualified.timeline.some((point:any)=>point.regularObserved>0&&point.regularMessages>0));
+});
+
 test('demo blocks mutations and handles empty lookups without changing real data',async()=>{
  for(const path of ['persons','persons/demo/metadata','persons/demo/notes','persons/demo/notes/n/update','persons/demo/notes/n/delete','donations','donations/d/update','twitch/connect','donationalerts/rescan','merges/m/undo','splits/s/undo'])
   await assert.rejects(demoApi(path,{}));

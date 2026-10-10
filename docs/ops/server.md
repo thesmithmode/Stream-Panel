@@ -1,36 +1,38 @@
 # Сервер и обновления
 
-## Выбор VPS
+## Подтверждённая инфраструктура
 
-Сначала запустить `bash ops/preflight.sh` только для чтения: Linux x86_64 + systemd, glibc ≥2.35, актуальный Python с tarfile.data_filter, ≥640 MiB свободной RAM, ≥3 GiB свободного диска, свободные 80/443/47831. Это пороги установки, не результат измерения имеющихся VPS. Желательно от 1 GiB RAM; лимиты служб: приложение 512 MiB/75% одного CPU, Caddy 128 MiB/20%. При занятых 80/443 подключать существующий прокси отдельным vhost после инвентаризации, не менять его вслепую.
+Последняя read-only проверка подтвердила Ubuntu 24, около 3,4 GiB RAM, около 2 GiB доступной RAM и около 16 GiB свободного диска. Порты 80/443 заняты существующим Traefik; его конфигурация находится в `/root/traefik/config`. Проверенная сеть: bridge `172.21.0.1`, proxy `172.21.0.2`. Публичный адрес в документацию не записывается.
 
-Прямой SSH трёх предоставленных хостов из среды разработки недоступен (Network is unreachable). Ресурсы, дистрибутив, свободные порты и текущее содержимое сервера не проверены. Внешнее развёртывание пока не выполнено.
+Bootstrap проверяет не менее 640 MiB доступной RAM, glibc ≥2.35, Python с `tarfile.data_filter` и не менее 3 GiB свободного места в `/opt`. Проверенный свободный диск превышает порог; перед запуском bootstrap нужно повторить read-only preflight. Проверка конфигурации не означает, что приложение уже установлено: deployment ещё не выполнен, он ожидает завершения CI и проверки артефакта.
 
-## Одноразовое развёртывание
+## Первичная настройка
 
-1. Проверить DNS `stream-panel.<public-IP-with-hyphens>.sslip.io` и доступность входящих TCP 80/443. sslip.io — бесплатная внешняя DNS-зависимость, не купленный собственный домен. Проверить выдачу сертификата и лимиты ACME; при отказе остановиться, не переводить панель на публичный HTTP.
-2. Получить Caddy binary Linux amd64 из официального релиза и проверить SHA256 по официальным checksums. Хранить локально для bootstrap; не устанавливать глобальный пакет/не менять системный Caddy.
-3. Создать отдельную Ed25519 пару только для CI Stream Panel. Существующие пользовательские root-ключи не использовать для GitHub Actions. Публичный ключ — bootstrap, приватный — production secret GitHub.
-4. От root: `bash ops/bootstrap.sh PUBLIC_IPV4 DEPLOY_PUBLIC_KEY_FILE VERIFIED_CADDY_BINARY`. Скрипт откажется при существующих каталогах/пользователях/службах или занятых портах. Ничего не удаляет и не меняет firewall/прочие приложения. При сбое bootstrap проверить созданные объекты перед повторным запуском, не удалять каталоги вслепую.
-5. В GitHub environment `production` установить secrets: STREAM_PANEL_DEPLOY_HOST, STREAM_PANEL_DEPLOY_PORT, STREAM_PANEL_DEPLOY_KEY, STREAM_PANEL_DEPLOY_KNOWN_HOSTS. Последний — проверенный fingerprint из доверенного known_hosts; SSH не принимает новый ключ автоматически.
-6. После живых проверок connectivity/backup/restore/rollback включить repository variable `STREAM_PANEL_PRODUCTION_ENABLED=true`. Успешный Quality gate для текущего main активирует Deploy server; workflow_dispatch позволяет повторить тот же проверенный commit. Пропущенный/красный CI и устаревший commit не деплоятся.
-7. Создать аккаунты через `scripts/provision-accounts.mjs` из current release с DATA_DIR=/var/lib/stream-panel под пользователем stream-panel; JSON передать через stdin из закрытого файла. Файл затем удалить. Публичной регистрации нет; Гульназ может получить аккаунт сейчас и подключить свои сервисы позже.
-8. Проверить HTTPS, неверный пароль, два браузера, изоляцию, reboot и настоящий эфир каждого сервиса. Проверить конфигурацию OAuth redirects после выбора URL.
+1. Повторить preflight по ресурсам и проверить, что topology существующего Traefik не изменилась. Bootstrap добавляет отдельный маршрут в `/root/traefik/config/stream-panel.yml`; он не заменяет текущие proxy-конфигурацию, сеть или контейнер.
+2. Подготовить отдельный Ed25519 deploy key. В GitHub environment `production` задать `STREAM_PANEL_BOOTSTRAP_KEY`, `STREAM_PANEL_DEPLOY_HOST`, `STREAM_PANEL_DEPLOY_PORT`, `STREAM_PANEL_DEPLOY_KNOWN_HOSTS`, `STREAM_PANEL_DEPLOY_PUBLIC_KEY`, `STREAM_PANEL_BACKUP_KEY`, `STREAM_PANEL_ACCOUNTS`, а также variables `STREAM_PANEL_BRIDGE_IP=172.21.0.1` и `STREAM_PANEL_PROXY_IP=172.21.0.2`. Known hosts должен содержать проверенный ключ сервера.
+3. Дождаться зелёного Quality gate для точного SHA текущей `main`. Quality gate один раз собирает Linux amd64 server bundle, связывает его с SHA и публикует CI artifact на 30 дней. Bootstrap и последующий Deploy server получают тот же artifact и проверяют его checksum; они не собирают bundle повторно.
+4. Запустить workflow Bootstrap private server вручную на текущей `main`. Он проверит успешный gate этого SHA, состояние сервера и SSH-настройки до изменений, затем создаст изолированную службу и маршрут Traefik. При ошибке сверить вывод с текущей инфраструктурой; не удалять системные объекты вручную без проверки их владельца.
+5. Если облачные копии нужны при первичной настройке, задать repository variable `STREAM_PANEL_CLOUD_BACKUP_ENABLED=true`, variable `STREAM_PANEL_SUPABASE_URL` и secret `STREAM_PANEL_SUPABASE_KEY`. По умолчанию облачные копии выключены: аккаунты создаются, а зашифрованная резервная копия проверяется локально. URL и key задаются парой; частичная конфигурация блокирует bootstrap до SSH.
+6. Перед первым production deployment выполнить живые проверки HTTPS, закрытого API, учётных записей, резервной копии и восстановления. Только после этого включить `STREAM_PANEL_PRODUCTION_ENABLED=true`. Deploy server допускает только точный текущий SHA `main` с успешным Quality gate.
 
-Приложение живёт в /opt/stream-panel/releases/<sha>, current — атомарная ссылка. Секреты только /etc/stream-panel и /var/lib/stream-panel/profiles/<profile>/secrets.json. Данные только /var/lib/stream-panel/data.sqlite. Receiver /usr/local/sbin/stream-panel-receive — root-owned; deploy key ограничен единственным forced command и sudo без аргументов. Загруженный код никогда не исполняется как root.
+Аккаунты передаются в bootstrap через `STREAM_PANEL_ACCOUNTS` и provision-ятся из закрытого payload. Пароли не записывать в логи, argv или репозиторий. Служба использует `/opt/stream-panel/releases/<sha>` и атомарную ссылку `current`; SQLite и настройки профилей находятся в `/var/lib/stream-panel`. Загруженный код выполняется только от service user. Deploy key ограничен receiver-командой.
 
-## Что делает деплой
+## Деплой и откат
 
-SHA256 + ограничения размера + безопасное извлечение tar (никаких ../, абсолютных путей, устройств или внешних symlink). flock запрещает два деплоя одновременно. Бинарник Node и production dependencies находятся внутри версии; pnpm на VPS не нужен. Native SQLite проверяется от service user до остановки старого приложения.
+CI artifact содержит Node runtime и production dependencies. Receiver сверяет SHA256, ограничения размера и безопасно извлекает архив, отвергая абсолютные пути, `..`, устройства и внешние symlink. Параллельные операции блокируются через flock. До остановки текущей версии native SQLite проверяется от service user.
 
-Maintenance отклоняет новые API-запросы. После остановки сборщиков Python SQLite backup сохраняет базу и настройки. Новая версия мигрирует профили и отвечает healthz правильным release SHA. Пока healthcheck не прошёл, сборщики не запускаются. Ошибка откатывает БД, настройки и symlink. Если даже старая версия не проходит health, marker остаётся и запись закрыта; нужна диагностика.
+Deploy переводит API в maintenance, останавливает сборщики и сохраняет SQLite вместе с настройками. Новая версия должна мигрировать профили и ответить на healthcheck с правильным release SHA до запуска сборщиков. Ошибка возвращает БД, настройки и ссылку `current`. Если старая версия тоже не проходит healthcheck, maintenance marker остаётся на месте для диагностики.
 
-Физическую потерю питания, нехватку диска и недоступность провайдера нельзя исключить обещанием «всегда». Эти случаи должны оставлять проверяемую ошибку, а не тихо выдавать успех. На живом сервере дополнительно проверить искусственный неудачный healthcheck и очистку временных файлов. Bootstrap/receive проверены локальными сценариями; это не замена живого прогона.
+Почему такое решение, даже если кажется странным:
 
-## Supabase Storage
+Bootstrap и Deploy используют один архив Quality gate, потому что повторная сборка одного SHA не гарантирует тот же checksum. Использование проверенного артефакта связывает production с ровно теми байтами, которые прошли CI.
 
-В существующем проекте создать PRIVATE bucket stream-panel-backups; пример SQL: ops/supabase-backup.sql. Не добавлять публичные SELECT policies. Backend проверяет private перед каждой загрузкой и использует отдельный серверный service-role key. Supabase DB password для Storage не подходит.
+На живом сервере отдельно подтвердить обновление и rollback, восстановление backup в новый каталог, перезапуск службы и поведение при недоступности сети. Read-only инвентаризация и CI не подтверждают эти эксплуатационные сценарии.
 
-В /etc/stream-panel/server.env добавить STREAM_PANEL_SUPABASE_URL=https://PROJECT.supabase.co и STREAM_PANEL_SUPABASE_KEY_FILE=/etc/stream-panel/supabase-service-key. Файл ключа root:stream-panel 0640. Ключ AES из /etc/stream-panel/backup-key сохранить отдельно от VPS; без него восстановление невозможно. Никаких ключей в git/GitHub outputs/браузер.
+## Резервные копии
 
-Проверить удалённую загрузку, последние три объекта и восстановление в новый каталог. Не подключать другой проект автоматически: доступ к указанному пользователем проекту Stream Panel пока не подтверждён.
+Локальные encrypted backups включены всегда и проверяются при bootstrap. В них входят обе профильные схемы SQLite и настройки подключений; AES-256-GCM ключ хранится отдельно от данных. Потеря ключа делает восстановление невозможным.
+
+Supabase Storage подключается по желанию. Для включения создать PRIVATE bucket `stream-panel-backups`, настроить repository variable `STREAM_PANEL_CLOUD_BACKUP_ENABLED=true`, variable `STREAM_PANEL_SUPABASE_URL` и secret `STREAM_PANEL_SUPABASE_KEY`. Backend проверяет приватность bucket, загружает копию и проверяет её наличие; ошибка облачной загрузки завершает проверку bootstrap ошибкой, сохраняя локальную копию для диагностики. При выключенной опции URL и key не передаются в bootstrap.
+
+Ключ AES хранить отдельно от VPS. Service key хранится только как root-owned файл `/etc/stream-panel/supabase-key` и не передаётся браузеру, git или workflow output. Проверить загрузку, ротацию последних трёх объектов и restore на живой инфраструктуре до включения production deployment.

@@ -31,17 +31,16 @@ jobs:
           sha=$(git rev-parse HEAD)
           main_sha=$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha')
           test "$sha" = "$main_sha" || { echo 'Commit superseded on main'; exit 1; }
-          gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&per_page=20" --jq '.workflow_runs | any(.conclusion == "success" and .head_branch == "main")' | grep -qx true
+          ci_run=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&per_page=20" --jq '.workflow_runs | map(select(.conclusion == "success" and .head_branch == "main")) | first | .id // empty')
+          test -n "$ci_run"
+          printf 'STREAM_PANEL_CI_RUN=%s\n' "$ci_run" >> "$GITHUB_ENV"
           printf 'STREAM_PANEL_RELEASE=%s\n' "$sha" >> "$GITHUB_ENV"
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/download-artifact@v4
         with:
-          node-version-file: .node-version
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: pnpm prune --prod
-      - run: node scripts/server-bundle.mjs
+          name: server-bundle
+          path: artifacts
+          github-token: ${{ github.token }}
+          run-id: ${{ env.STREAM_PANEL_CI_RUN }}
       - name: Send immutable release over restricted SSH
         env:
           DEPLOY_HOST: ${{ secrets.STREAM_PANEL_DEPLOY_HOST }}
@@ -51,6 +50,8 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+          test "$(cut -d ' ' -f 1 artifacts/server.header)" = "$STREAM_PANEL_RELEASE"
+          test "$(sha256sum artifacts/server.tar.gz | cut -d ' ' -f 1)" = "$(cut -d ' ' -f 2 artifacts/server.header)"
           test -n "$DEPLOY_HOST" && test -n "$DEPLOY_PORT" && test -n "$DEPLOY_KEY" && test -n "$DEPLOY_KNOWN_HOSTS" || { echo 'Production SSH secrets not configured'; exit 1; }
           [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ && "$DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]] || exit 1
           key_file=$(mktemp)
