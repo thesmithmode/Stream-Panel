@@ -164,8 +164,8 @@
       try {
         const key = new URLSearchParams(location.hash.slice(1)).get("key");
         if (key) {
-          const response = await api("bootstrap", { key });
-          setCsrf(response.csrf);
+          try{const response=await api("bootstrap",{key});setCsrf(response.csrf);}
+          catch(bootstrapError){try{await api("status");}catch{throw bootstrapError;}}
           history.replaceState(null,"",location.pathname+location.search);
         }
         const auth=await api<any>("status");

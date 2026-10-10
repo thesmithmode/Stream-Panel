@@ -328,15 +328,7 @@
           {#if stats.estimatedChatMinutes != null && stats.estimatedChatMinutes > 0}
           <div class="kpi"><span>Оценка активности YouTube</span><strong>{formatDuration(stats.estimatedChatMinutes)}</strong></div>
           {/if}
-          <div class="kpi">
-            <span>Первое наблюдение</span><strong>{date(stats.watchingSinceMs)}</strong>
-          </div>
-          <div class="kpi">
-            <span>Подписан с</span><strong>{date(stats.followedAtMs)}</strong>
-          </div>
-          <div class="kpi">
-            <span>Время до подписки</span><strong>{formatDuration(stats.observedBeforeFollowMinutes)}</strong>
-          </div>
+
         </div>{/if}
       <div class="settings-body">
         <label

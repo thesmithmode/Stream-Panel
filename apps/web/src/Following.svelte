@@ -28,9 +28,9 @@
    {#if row.history.length}<details><summary>История проверок</summary><ul>{#each row.history as item}<li>{date(item.at)} · {status(item.status)}{#if item.followedAtMs!==null} · подписался {date(item.followedAtMs)}{/if}</li>{/each}</ul></details>{/if}
   </article>{:else}<p class="muted">Нет связанных аккаунтов Twitch или YouTube.</p>{/each}
  {:else}
-  <p>Новых подписок за стрим: <strong>{data.newFollowers.length}</strong></p>
-  {#if data.polls.length}<div class="follow-chart" aria-label="Число подписчиков по проверкам">{#each data.polls as poll}<div class="follow-poll"><span>{platform(poll.source)} · {date(poll.at)}</span><meter min="0" max={Math.max(1,...data.polls.map((p:any)=>p.total))} value={poll.total} aria-label={`${platform(poll.source)} ${poll.total}`}></meter><strong>{poll.total}{poll.source==='youtube'?' · доступных':''}{poll.complete?'':' · частично'}</strong></div>{/each}</div>{:else}<p class="muted">Проверок подписок во время стрима не было.</p>{/if}
-  <ul>{#each data.newFollowers as follower}<li>{platform(follower.source)} · {#if follower.personId}<button class="text-button" onclick={()=>onPerson(follower.personId)}>{follower.name}</button>{:else}{follower.name}{/if} · {date(follower.at)}</li>{:else}<li class="muted">Новых подписок не зафиксировано.</li>{/each}</ul>
+  {#if data.polls.length||data.newFollowers.length}<p>Новых подписок за стрим: <strong>{data.newFollowers.length}</strong></p>{:else}<p class="muted">Данных о подписках за этот стрим пока нет.</p>{/if}
+  {#if data.polls.length}<div class="follow-chart" aria-label="Число подписчиков по проверкам">{#each data.polls as poll}<div class="follow-poll"><span>{platform(poll.source)} · {date(poll.at)}</span><meter min="0" max={Math.max(1,...data.polls.map((p:any)=>p.total))} value={poll.total} aria-label={`${platform(poll.source)} ${poll.total}`}></meter><strong>{poll.total}{poll.source==='youtube'?' · доступных':''}{poll.complete?'':' · частично'}</strong></div>{/each}</div>{/if}
+  {#if data.newFollowers.length}<ul>{#each data.newFollowers as follower}<li>{platform(follower.source)} · {#if follower.personId}<button class="text-button" onclick={()=>onPerson(follower.personId)}>{follower.name}</button>{:else}{follower.name}{/if} · {date(follower.at)}</li>{/each}</ul>{/if}
  {/if}
 </section>
 <style>

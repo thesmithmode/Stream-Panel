@@ -1373,8 +1373,6 @@ td {
 .regular-badge { display: inline-block; background: #3b3016; color: #f0c44e; border-radius: 4px; padding: 2px 6px; margin-left: 8px; font-size: 11px; }
 .regular-summary { margin: 16px 0 0; }
 
-.trend-plot { max-width:100%; overflow-x:auto; }
-.trend-plot svg { min-width:560px; }
 
 .analytics-filter > details { padding:16px 20px; }
 .analytics-filter > details > .analytics-controls { padding:16px 0; }
