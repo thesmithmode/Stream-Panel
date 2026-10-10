@@ -264,6 +264,12 @@ function personStats(personId: string) {
     avgObservedMinutes: 36,
     avgFirstObservedOffsetMs: 4 * minute,
     sessionsWithObservation: 2,
+    totalObservedMinutes: 72,
+    recordedStreams: 3,
+    attendanceRatio: 2 / 3,
+    followedAtMs: null,
+    watchingSinceMs: now - 80 * minute,
+    observedBeforeFollowMinutes: null,
   };
 }
 
@@ -304,13 +310,25 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
   const p = basePath(path);
   const q = parseQuery(path);
   const isPost = body !== undefined;
-
-  if (p === "profile") return { profile: body && typeof body === "object" && "profile" in body ? (body as {profile:string}).profile : "ruslan" };
+  if(p === "persons" && isPost)throw new Error("Создание человека доступно после подключения к серверу");
+  if (/^persons\/[^/]+\/metadata$/.test(p)) {
+    if(isPost)throw new Error("Метки доступны после подключения к серверу");
+    return {revision:0,tags:[],manualCore:null};
+  }
+  if (/^persons\/[^/]+\/notes(?:\/[^/]+\/(?:update|delete))?$/.test(p)) {
+    if (isPost) throw new Error("Заметки доступны после подключения к серверу");
+    return [];
+  }
 
   if (p === "analytics") {
     const from=Number(q.get("from")),to=Number(q.get("to")),start=Math.max(from,to-2*hour),source=q.get("source")||"all";
     const regularThresholdPercent=Number(q.get("regularThresholdPercent")??50);
-    const rows=people.slice(0,3).map((p,i)=>{const attendanceSessionIds=i===0?[sessionLiveId,sessionPastId]:[sessionLiveId],attendanceRatio=attendanceSessionIds.length/2;return {id:p.id,name:p.display_name,source:"twitch",messages:20-i*5,observedMinutes:60-i*10,estimatedChatMinutes:0,sessionIds:attendanceSessionIds,attendanceSessionIds,attendanceRatio,regular:attendanceRatio*100>regularThresholdPercent,intervals:[{from:start,to:start+(60-i*10)*minute,session:sessionLiveId,kind:"observed"}],donations:{},core:attendanceSessionIds.length>=Number(q.get("minSessions")||3)};}).filter(()=>source!=="youtube");
+    const rows=people.slice(0,3).map((p,i)=>{
+      const attendanceSessionIds=i===0?[sessionLiveId,sessionPastId]:[sessionLiveId],attendanceRatio=attendanceSessionIds.length/2;
+      const messages=20-i*5,observedMinutes=60-i*10;
+      const core=attendanceSessionIds.length>=Number(q.get("minSessions")??3) && attendanceRatio*100>regularThresholdPercent && (observedMinutes>=Number(q.get("minMinutes")??30)||messages>=Number(q.get("minMessages")??5));
+      return {id:p.id,name:p.display_name,source:"twitch",sources:["twitch"],messages,observedMinutes,estimatedChatMinutes:0,sessionIds:attendanceSessionIds,attendanceSessionIds,attendanceRatio,regular:core,intervals:[{from:start,to:start+observedMinutes*minute,session:sessionLiveId,kind:"observed"}],donations:{},core};
+    }).filter(()=>source!=="youtube");
     const timeline=Array.from({length:90},(_,i)=>{const observed=Math.min(rows.length,1+i%3),regularObserved=rows.slice(0,observed).filter(r=>r.regular).length,messages=rows.length?i%4:0;return {at:Math.floor(start/minute)*minute+i*minute,messages,regularMessages:rows[0]?.regular?messages:0,observed,regularObserved,estimated:0,regularEstimated:0,viewers:8+i%5,presenceKnown:i%13!==0};});
     const regulars=rows.filter(r=>r.regular).length;
     return {filters:{regularThresholdPercent},summary:{entities:rows.length,attendees:rows.length,regulars,regularShare:rows.length?regulars/rows.length:null,core:rows.filter(r=>r.core).length,streams:2,messages:rows.reduce((a,r)=>a+r.messages,0)},audience:rows,timeline,hours:[{day:"пн",hour:20,observed:120,observedKnownMinutes:60,estimated:0,messages:40,sampleMinutes:60}],categories:[{id:"demo-game",name:"Демо-игра",minutes:120,sessions:2,audience:rows.length,core:rows.filter(r=>r.core).length,messagesPerHour:30,observedMinutes:150,estimatedChatMinutes:0}]};
@@ -341,6 +359,7 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
         daUtcOffsetMinutes: 180,
         daRedirectUri: "http://127.0.0.1:47831/oauth/donationalerts/callback",
       },
+      csrf: "demo-csrf",
       gaps: [
         {
           source: "twitch",
@@ -457,7 +476,12 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
     ];
   }
 
-  if (p === "merges") return [];
+  if (p === "donations") {
+    if(isPost)throw new Error("Изменения донатов доступны после подключения к серверу");
+    return {items:[],total:0,offset:0,limit:10};
+  }
+  if(p.startsWith("donations/"))throw new Error("Изменения донатов доступны после подключения к серверу");
+  if (p === "merges" || p === "splits") return [];
 
   if (p === "presence") {
     const from = Number(q.get("from") || now - 90 * minute);
@@ -472,7 +496,7 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
   // Block real credential / connection mutations in demo.
   if (
     isPost &&
-    /^(twitch\/|donationalerts\/|persons\/|merges\/)/.test(p)
+    /^(twitch\/|donationalerts\/|persons\/|merges\/|splits\/)/.test(p)
   ) {
     if (/\/rename$/.test(p)) {
       const m = /^persons\/([^/]+)\/rename$/.exec(p);

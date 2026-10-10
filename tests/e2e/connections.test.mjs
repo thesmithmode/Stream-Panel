@@ -81,7 +81,7 @@ test(
       const context = await browser.newContext(),
         page = await context.newPage();
       await startCoverage(page);
-      await goto(page, a.origin);
+      await goto(page, a.bootstrap());
       await page
         .getByRole("button", { name: "Открыть интеграции", exact: true })
         .click();
@@ -232,7 +232,7 @@ test(
   },
 );
 test(
-  "browser sessions, event filters, person links and platform recording",
+  "browser sessions, event filters, person links, automatic platform sessions and local login failure",
   { timeout: 30000 },
   async () => {
     const a = await application(),
@@ -244,38 +244,50 @@ test(
       await startCoverage(page);
       await goto(page, a.origin);
       await page
+        .getByRole("heading", { name: "Вход в Stream Panel" })
+        .waitFor();
+      await page.getByLabel("Логин", { exact: true }).fill("unknown-user");
+      await page.getByLabel("Пароль", { exact: true }).fill("invalid-password");
+      const localLogin = page.waitForResponse((response) =>
+        response.url().endsWith("/api/v1/auth/login"),
+      );
+      await page.getByRole("button", { name: "Войти", exact: true }).click();
+      const loginResponse = await localLogin;
+      assert.equal(loginResponse.status(), 401);
+      assert.deepEqual(await loginResponse.json(), { error: "LOCAL_LOGIN_REQUIRED" });
+      await page.getByRole("alert").filter({ hasText: "Войдите в свой профиль" }).waitFor();
+      await goto(page, a.bootstrap());
+      await page
         .getByRole("button", { name: "Открыть интеграции", exact: true })
         .waitFor();
-      await page.getByRole("button", { name: "Сессии", exact: true }).click();
-      await page.getByText("Записей пока нет", { exact: true }).waitFor();
-      await page.getByRole("button", { name: "Перейти к записи" }).click();
+      await page.getByRole("button", { name: "Стримы", exact: true }).click();
+      await page.getByText("Стримов пока нет", { exact: true }).waitFor();
       await page.getByRole("button", { name: "Люди", exact: true }).click();
       await page.getByText("Пока никого нет", { exact: true }).waitFor();
       const s = await seed(a);
       await reload(page);
-      await page
-        .getByRole("button", { name: "Эфир идёт", exact: true })
-        .waitFor();
-      assert.equal(
-        await page.getByRole("button", { name: "Эфир идёт" }).isDisabled(),
-        true,
-      );
+      assert.equal(await page.locator(".record-button").count(), 0);
+      assert.equal(await page.getByRole("button", { name: /запись/i }).count(), 0);
+      await page.getByRole("button", { name: "Стримы", exact: true }).click();
+      await page.getByText("Twitch", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "Обзор", exact: true }).click();
       await page.getByLabel("Фильтр событий").selectOption("donation");
       assert.equal(await page.locator(".event-row").count(), 1);
       await page.getByLabel("Фильтр событий").selectOption("chat.message");
       assert.equal(await page.locator(".event-row").count(), 8);
       await page.locator(".event-title button").first().click();
       await page.getByLabel("Имя группы").waitFor();
-      await page.getByRole("button", { name: "Сессии", exact: true }).click();
+      await page.getByRole("button", { name: "Стримы", exact: true }).click();
       await page.getByRole("button", { name: "Открыть", exact: true }).click();
-      assert.equal(await page.getByLabel("Период аналитики").inputValue(), s);
+      await page.getByRole("button", {name:"К списку стримов",exact:true}).waitFor();
+      assert.equal(await page.getByLabel("Период аналитики").count(), 0);
       await page.getByLabel("Фильтр событий").selectOption("donation");
       await page.getByText("Событий этого типа нет", { exact: true }).waitFor();
-      await page.getByLabel("Период аналитики").selectOption("");
+      await page.getByRole("button", {name:"Обзор",exact:true}).click();
       await page.getByLabel("Фильтр событий").selectOption("all");
       await a.db.call("endSession", s, Date.now(), "estimated");
       await reload(page);
-      await page.getByRole("button", { name: "Сессии", exact: true }).click();
+      await page.getByRole("button", { name: "Стримы", exact: true }).click();
       await page
         .getByText("Граница приблизительная", { exact: true })
         .waitFor();

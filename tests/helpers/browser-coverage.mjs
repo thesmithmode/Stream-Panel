@@ -25,9 +25,10 @@ export async function saveCoverage(page) {
       if (resolve(path).startsWith(root))
         result.addFileCoverage({ ...data, path: resolve(path) });
   }
-  await mkdir("coverage/browser", { recursive: true });
+  const directory=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR??"coverage/browser";
+  await mkdir(directory, { recursive: true });
   await writeFile(
-    `coverage/browser/${randomUUID()}.json`,
+    `${directory}/${randomUUID()}.json`,
     JSON.stringify(result.toJSON()),
   );
 }

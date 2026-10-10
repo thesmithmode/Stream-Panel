@@ -39,15 +39,16 @@ jobs:
           retention-days: 7
   operations:
     runs-on: ubuntu-22.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - run: python3 -m unittest discover -s tests/deploy -p '*test.py'
-      - run: bash -n ops/bootstrap.sh ops/preflight.sh
-  packaging:
-    name: Linux package upgrade checks
+      - run: for script in ops/*.sh; do bash -n "$script"; done
+      - run: bash ops/test-bootstrap-ci.sh
+  server-bundle:
+    name: Linux server bundle
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -58,12 +59,30 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm prune --prod
-      - run: node scripts/package-deb.mjs
-      - run: node --test tests/packaging/deb.test.mjs
-      - run: bash -n packaging/stream-panel
+      - run: node scripts/server-bundle.mjs
+        env:
+          STREAM_PANEL_RELEASE: ${{ github.sha }}
+      - name: Validate server bundle
+        run: |
+          set -euo pipefail
+          test "$(cut -d ' ' -f 1 artifacts/server.header)" = "$GITHUB_SHA"
+          test "$(sha256sum artifacts/server.tar.gz | cut -d ' ' -f 1)" = "$(cut -d ' ' -f 2 artifacts/server.header)"
+          tar -tzf artifacts/server.tar.gz > artifacts/server.contents
+          grep -qx 'dist/apps/daemon/src/index.js' artifacts/server.contents
+          grep -qx 'apps/web/dist/index.html' artifacts/server.contents
+          grep -qx 'bin/node' artifacts/server.contents
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-bundle
+          path: |
+            artifacts/server.header
+            artifacts/server.tar.gz
+          retention-days: 30
+          if-no-files-found: error
   check:
     name: Combined quality gate
-    needs: [segment, operations, packaging]
+    needs: [segment, operations, server-bundle]
+    if: always() && needs.segment.result == 'success' && needs.operations.result == 'success' && needs.server-bundle.result == 'success'
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:

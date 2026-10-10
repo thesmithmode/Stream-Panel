@@ -66,6 +66,34 @@ export class YouTubeConnection {
     if (!await this.db.call("youtubeQuota", day, this.profile, 1)) throw new Error("YOUTUBE_DAILY_BUDGET");
     return this.json(`https://www.googleapis.com/youtube/v3/${resource}?${new URLSearchParams(params)}`, { headers: { Authorization: `Bearer ${tokens.access}` } });
   }
+  private async activeBroadcasts(tokens: Tokens, valid: () => boolean) {
+    let page = "";
+    const seenPages = new Set<string>(), seenIds = new Set<string>(), broadcasts: Record<string, any>[] = [];
+    for (let n = 0; n < 5; n++) {
+      const response = await this.api("liveBroadcasts", { part: "snippet,status", broadcastStatus: "active", maxResults: "50", ...(page ? { pageToken: page } : {}) }, tokens);
+      if (!valid()) return null;
+      if (!Array.isArray(response.items) || response.items.length > 50) throw new Error("YOUTUBE_INVALID_BROADCASTS");
+      for (const value of response.items) {
+        let item: Record<string, unknown>, snippet: Record<string, unknown>;
+        try { item = object(value); snippet = object(item.snippet); }
+        catch { throw new Error("YOUTUBE_INVALID_BROADCASTS"); }
+        const id = string(item.id), channelId = string(snippet.channelId);
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(id) || !channelId || seenIds.has(id) ||
+            (snippet.liveChatId !== undefined && typeof snippet.liveChatId !== "string") ||
+            (snippet.title !== undefined && typeof snippet.title !== "string")) throw new Error("YOUTUBE_INVALID_BROADCASTS");
+        seenIds.add(id);
+        if (channelId === tokens.userId) broadcasts.push({ ...item, id, snippet });
+      }
+      const next = response.nextPageToken;
+      if (next !== undefined && (typeof next !== "string" || next.length > 512)) throw new Error("YOUTUBE_INVALID_BROADCASTS");
+      if (!next) return broadcasts;
+      if (seenPages.has(next)) throw new Error("YOUTUBE_INVALID_BROADCASTS");
+      if (n === 4) throw new Error("YOUTUBE_BROADCAST_PAGINATION_LIMIT");
+      seenPages.add(next);
+      page = next;
+    }
+    throw new Error("YOUTUBE_BROADCAST_PAGINATION_LIMIT");
+  }
   async collectOnce(): Promise<number> {
     const generation = this.generation, tokens = this.config.value.youtube;
     if (!tokens) return 300000;
@@ -79,42 +107,81 @@ export class YouTubeConnection {
     }
     const previous = await this.db.call<any>("youtubeData", tokens.userId);
     if (!valid()) return 300000;
+    let channelSnapshot: Record<string, unknown> | undefined;
     if (this.now() - (previous.snapshots.channel?.updatedAt ?? 0) >= 21600000) {
       const channel = await this.api("channels", { part: "snippet,statistics", mine: "true", maxResults: "50" }, tokens);
       if (!valid()) return 300000;
       const own = (Array.isArray(channel.items) ? channel.items : []).find((x: any) => x.id === tokens.userId);
       if (!own) throw new Error("YOUTUBE_CHANNEL_CHANGED");
-      await this.db.call("youtubeSnapshot", tokens.userId, "channel", own, this.now());
+      channelSnapshot = own;
     }
-    let page = "", broadcasts: any[] = [];
-    for (let n = 0; n < 5; n++) {
-      // broadcastStatus and mine are mutually exclusive filters.
-      const response = await this.api("liveBroadcasts", { part: "snippet,status", broadcastStatus: "active", maxResults: "50", ...(page ? { pageToken: page } : {}) }, tokens);
+    // Finish and validate every discovery page before changing session or snapshot state.
+    const discovered = await this.activeBroadcasts(tokens, valid);
+    if (!discovered || !valid()) return 300000;
+    const broadcasts = discovered;
+    const videoIds = broadcasts.map((broadcast) => string(broadcast.id));
+    const videoDetails = new Map<string, Record<string, any>>();
+    for (let offset = 0; offset < videoIds.length; offset += 50) {
+      const ids = videoIds.slice(offset, offset + 50);
+      const response = await this.api("videos", { part: "liveStreamingDetails", id: ids.join(",") }, tokens);
       if (!valid()) return 300000;
-      broadcasts.push(...(Array.isArray(response.items) ? response.items : []).filter((x: any) => x.snippet?.channelId === tokens.userId));
-      page = string(response.nextPageToken); if (!page) break;
+      if (!Array.isArray(response.items)) continue;
+      const batch = new Map<string, Record<string, any>>();
+      let malformed = false;
+      for (const value of response.items) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) { malformed = true; break; }
+        const item = value as Record<string, any>, id = string(item.id);
+        if (!ids.includes(id) || batch.has(id)) { malformed = true; break; }
+        batch.set(id, item);
+      }
+      if (malformed || batch.size !== ids.length || ids.some(id => !batch.has(id))) continue;
+      for (const [id, item] of batch) videoDetails.set(id, item);
     }
-    await this.db.call("youtubeSnapshot", tokens.userId, "broadcasts", broadcasts, this.now());
-    if (broadcasts.length) {
-      const counts = await this.api("videos", {part:"liveStreamingDetails",id:broadcasts.slice(0,2).map(x => string(x.id)).join(",")}, tokens);
+    const observedAt = this.now();
+    if (channelSnapshot) await this.db.call("youtubeSnapshot", tokens.userId, "channel", channelSnapshot, observedAt);
+    if (!valid()) return 300000;
+    await this.db.call("youtubeSnapshot", tokens.userId, "broadcasts", broadcasts, observedAt);
+    if (!valid()) return 300000;
+    const logicalViewers = new Map<string, string[]>();
+    await this.db.call("youtubeSnapshot", tokens.userId, "liveVideoDetails", Object.fromEntries(videoDetails), observedAt);
+    if (!valid()) return 300000;
+    for (const broadcast of broadcasts) {
+      const actualStartTime = videoDetails.get(broadcast.id)?.liveStreamingDetails?.actualStartTime;
+      if (typeof actualStartTime !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(actualStartTime)) continue;
+      const startedAt = Date.parse(actualStartTime);
+      if (!Number.isSafeInteger(startedAt) || startedAt < 0 || startedAt > observedAt) continue;
+      const url = `https://www.youtube.com/watch?v=${encodeURIComponent(broadcast.id)}`;
+      const sessionId = await this.db.call<string | null>("observePlatformStream", "youtube", tokens.userId, broadcast.id, startedAt, observedAt, url, string(broadcast.snippet?.title), videoIds);
+      if (sessionId) logicalViewers.set(sessionId, [...(logicalViewers.get(sessionId) ?? []), broadcast.id]);
       if (!valid()) return 300000;
-      const ids=broadcasts.slice(0,2).map(x=>string(x.id));
-      const items=Array.isArray(counts.items)?counts.items:[];
-      const numbers=ids.map(id=>{const item=items.find((x:any)=>x.id===id);return item?.liveStreamingDetails?.concurrentViewers;});
-      const complete=items.length===ids.length && new Set(items.map((x:any)=>x.id)).size===ids.length && ids.every(Boolean);
-      const validCounts=numbers.every((x:any)=>/^[0-9]+$/.test(String(x))&&Number.isSafeInteger(Number(x)));
-      const sum=numbers.reduce((a:number,b:any)=>a+Number(b),0);
-      const viewers=complete&&validCounts&&Number.isSafeInteger(sum)?sum:null;
-      await this.db.call("youtubeViewers",this.now(),viewers);
     }
+    const counts = (ids: string[]): number | null => {
+      const numbers = ids.map(id => videoDetails.get(id)?.liveStreamingDetails?.concurrentViewers);
+      const complete = ids.length > 0 && ids.every(id => videoDetails.has(id));
+      const validCounts = numbers.every(value => /^[0-9]+$/.test(String(value)) && Number.isSafeInteger(Number(value)));
+      const sum = numbers.reduce((total: number, value: any) => total + Number(value), 0);
+      return complete && validCounts && Number.isSafeInteger(sum) ? sum : null;
+    };
+    for (const [sessionId, ids] of logicalViewers) {
+      await this.db.call("youtubeViewers", observedAt, counts(ids), sessionId);
+      if (!valid()) return 300000;
+    }
+    if (broadcasts.length && !logicalViewers.size) {
+      await this.db.call("youtubeViewers", observedAt, counts(videoIds), null);
+      if (!valid()) return 300000;
+    }
+    await this.db.call("platformMissing", "youtube", tokens.userId, videoIds, observedAt);
+    if (!valid()) return 300000;
     let interval = broadcasts.length ? 60000 : 300000;
-    for (const broadcast of broadcasts.slice(0, 2)) {
+    for (const broadcast of broadcasts) {
       const chat = string(broadcast.snippet?.liveChatId); if (!chat) continue;
       const cursor = string(previous.snapshots[`cursor:${chat}`]?.data);
       const response = await this.api("liveChat/messages", { part: "id,snippet,authorDetails", liveChatId: chat, maxResults: "2000", ...(cursor ? { pageToken: cursor } : {}) }, tokens);
       if (!valid()) return 300000;
       await this.db.call("youtubeMessages", tokens.userId, chat, Array.isArray(response.items) ? response.items : []);
+      if (!valid()) return 300000;
       await this.db.call("youtubeSnapshot", tokens.userId, `cursor:${chat}`, string(response.nextPageToken), this.now());
+      if (!valid()) return 300000;
       interval = Math.max(interval, Number(response.pollingIntervalMillis) || 60000);
     }
     if (this.now() - (previous.snapshots.report?.updatedAt ?? 0) >= 21600000) {
@@ -122,6 +189,7 @@ export class YouTubeConnection {
       const report = await this.json(`https://youtubeanalytics.googleapis.com/v2/reports?${new URLSearchParams({ ids: `channel==${tokens.userId}`, startDate: start, endDate: end, metrics: "views,estimatedMinutesWatched,subscribersGained,subscribersLost", dimensions: "day", sort: "day" })}`, { headers: { Authorization: `Bearer ${tokens.access}` } });
       if (!valid()) return 300000;
       await this.db.call("youtubeSnapshot", tokens.userId, "report", { start, end, ...report }, this.now());
+      if (!valid()) return 300000;
     }
     this.status = { state: "connected", account: tokens.userId, detail: broadcasts.length ? "Чат активных эфиров собирается" : "Канал подключён; активных эфиров нет" };
     return Math.min(interval, 3600000);

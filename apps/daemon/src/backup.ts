@@ -1,13 +1,30 @@
 import Database from "better-sqlite3";
-import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
+import { randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
-import { mkdir, readFile, writeFile, readdir, rm, stat, rename } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile, readdir, rm, stat, lstat, rename, open } from "node:fs/promises";
+import {constants} from "node:fs";
+import { join,resolve } from "node:path";
+import { CURRENT_SCHEMA_VERSION } from "../../../packages/core/src/schema.js";
 const magic = Buffer.from("SPBK1");
 const maxSize = 48 * 1024 * 1024;
+const maxPayloadSize = 64 * 1024 * 1024;
 const profiles = ["ruslan", "gulnaz"] as const;
+const backupFilename=/^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/;
+type BackupChannelStatus = { state: string; lastSuccessAt: number; filename: string; error: string };
+type BackupStatus = { state: string; lastSuccessAt: number; filename: string; error: string; local: BackupChannelStatus; cloud: BackupChannelStatus };
+function validateSnapshot(db: Database.Database): void {
+  if (db.pragma("integrity_check", {simple:true}) !== "ok" ||
+      (db.pragma("foreign_key_check") as unknown[]).length)
+    throw new Error("BACKUP_INTEGRITY_FAILED");
+  const versions = [db.pragma("user_version", {simple:true})];
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sp_profile_schema'").get())
+    versions.push(...(db.prepare("SELECT version FROM sp_profile_schema").all() as {version:number}[]).map(row=>row.version));
+  if (versions.some(version => !Number.isInteger(version) || Number(version)<0 || Number(version)>CURRENT_SCHEMA_VERSION))
+    throw new Error("UNSUPPORTED_SCHEMA_VERSION");
+}
 export function sealBackup(payload: Buffer, key: Buffer): Buffer {
   if (key.length !== 32) throw new Error("INVALID_BACKUP_KEY");
+  if (payload.length > maxPayloadSize) throw new Error("BACKUP_SIZE_LIMIT");
   const iv = randomBytes(12), cipher = createCipheriv("aes-256-gcm", key, iv);
   const compressed = gzipSync(payload);
   return Buffer.concat([magic, iv, cipher.update(compressed), cipher.final(), cipher.getAuthTag()]);
@@ -16,18 +33,57 @@ export function openBackup(blob: Buffer, key: Buffer): Buffer {
   if (key.length !== 32 || blob.length < 33 || !blob.subarray(0, 5).equals(magic)) throw new Error("INVALID_BACKUP");
   const cipher = createDecipheriv("aes-256-gcm", key, blob.subarray(5, 17));
   cipher.setAuthTag(blob.subarray(-16));
-  return gunzipSync(Buffer.concat([cipher.update(blob.subarray(17, -16)), cipher.final()]), { maxOutputLength: 64 * 1024 * 1024 });
+  return gunzipSync(Buffer.concat([cipher.update(blob.subarray(17, -16)), cipher.final()]), { maxOutputLength: maxPayloadSize });
 }
 export class BackupService {
-  status = { state: "disabled", lastSuccessAt: 0, error: "" };
-  private active: Promise<{filename:string}> | undefined;
-  constructor(private dir: string, private options: { keyFile: string; url?: string; serviceKeyFile?: string; bucket?: string }, private request: typeof fetch = fetch) {
+  status: BackupStatus = {
+    state: "disabled", lastSuccessAt: 0, filename: "", error: "",
+    local: { state: "pending", lastSuccessAt: 0, filename: "", error: "" },
+    cloud: { state: "disabled", lastSuccessAt: 0, filename: "", error: "" },
+  };
+  private active: Promise<{filename:string;cloudError?:string}> | undefined;
+  constructor(private dir: string, private options: { keyFile: string; url?: string; serviceKeyFile?: string; bucket?: string }, private request: typeof fetch = fetch, private readPersistedBackup: (path:string)=>Promise<Buffer> = readFile) {
     this.status.state = options.url ? "pending" : "local";
+    this.status.local.state = "pending";
+    this.status.cloud.state = options.url ? "pending" : "disabled";
   }
   run() {
     if (this.active) return this.active;
-    this.active = this.perform().catch(error => { this.status.state = "error"; this.status.error = /^[A-Z_]+$/.test(error.message) ? error.message : "BACKUP_FAILED"; throw new Error(this.status.error); }).finally(() => { this.active = undefined; });
+    this.active = this.perform().catch(error => {
+      const code = /^[A-Z_]+$/.test(error.message) ? error.message : "BACKUP_FAILED";
+      this.status.state = "error";
+      this.status.error = code;
+      this.status.local = { ...this.status.local, state: "error", error: code };
+      throw new Error(code);
+    }).finally(() => { this.active = undefined; });
     return this.active;
+  }
+  async files() {
+    const directory=resolve(this.dir,"backups");
+    let entries;
+    try {entries=await readdir(directory,{withFileTypes:true});}
+    catch(error){if((error as NodeJS.ErrnoException).code==="ENOENT")return {directory,files:[],local:this.status.local,cloud:this.status.cloud};throw error;}
+    const files=[];
+    for(const entry of entries.filter(e=>e.isFile()&&backupFilename.test(e.name)).sort((a,b)=>b.name.localeCompare(a.name))){
+      try {
+        const info=await lstat(join(directory,entry.name));
+        if(info.isFile()&&info.size>=33&&info.size<=maxSize)files.push({filename:entry.name,size:info.size,createdAt:info.mtimeMs});
+      }catch(error){if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error;}
+    }
+    return {directory,files,local:this.status.local,cloud:this.status.cloud};
+  }
+  async file(filename:string):Promise<Buffer> {
+    if(!backupFilename.test(filename))throw new Error("BACKUP_NOT_FOUND");
+    try {
+      const handle=await open(join(this.dir,"backups",filename),constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+      try {
+        const info=await handle.stat();
+        if(!info.isFile()||info.size<33||info.size>maxSize)throw new Error("BACKUP_NOT_FOUND");
+        const blob=await handle.readFile();
+        if(blob.length>maxSize||!blob.subarray(0,5).equals(magic))throw new Error("BACKUP_NOT_FOUND");
+        return blob;
+      }finally{await handle.close();}
+    }catch(error){if(["ENOENT","ELOOP","ENOTDIR"].includes((error as NodeJS.ErrnoException).code??""))throw new Error("BACKUP_NOT_FOUND");throw error;}
   }
   private async perform() {
     const directory = join(this.dir, "backups"); await mkdir(directory, {recursive:true,mode:0o700});
@@ -40,25 +96,80 @@ export class BackupService {
       const db = new Database(join(this.dir, "data.sqlite"), {readonly:true});
       try { await db.backup(snapshot); } finally { db.close(); }
       const check = new Database(snapshot, {readonly:true});
-      try { if (check.pragma("integrity_check", {simple:true}) !== "ok") throw new Error("BACKUP_INTEGRITY_FAILED"); } finally { check.close(); }
+      try { validateSnapshot(check); } finally { check.close(); }
       const secrets: Record<string,unknown> = {};
       for (const profile of profiles) {
         try { secrets[profile] = JSON.parse(await readFile(join(this.dir,"profiles",profile,"secrets.json"), "utf8")); }
         catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
       }
       const metadata = Buffer.from(JSON.stringify({version:1,profiles:secrets}));
+      const snapshotSize = (await stat(snapshot)).size;
+      if (metadata.length + 4 + snapshotSize > maxPayloadSize) throw new Error("BACKUP_SIZE_LIMIT");
       const length = Buffer.alloc(4); length.writeUInt32BE(metadata.length);
-      const blob = sealBackup(Buffer.concat([length, metadata, await readFile(snapshot)]), key);
+      const payload = Buffer.concat([length, metadata, await readFile(snapshot)]);
+      const payloadHash = createHash("sha256").update(payload).digest("hex");
+      const blob = sealBackup(payload, key);
       if (blob.length > maxSize) throw new Error("BACKUP_SIZE_LIMIT");
       const filename = `stream-panel-${new Date().toISOString().replace(/[:.]/g,"-")}-${randomBytes(4).toString("hex")}.spbk`;
       const path = join(directory, filename);
-      await writeFile(path + ".tmp", blob, {mode:0o600}); await rename(path + ".tmp", path);
+      const temporary = path + ".tmp";
+      const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+      try {
+        await handle.writeFile(blob);
+        await handle.sync();
+      } catch (error) {
+        await rm(temporary, {force:true});
+        throw error;
+      } finally { await handle.close(); }
+      await rename(temporary, path);
+      const directoryHandle = await open(directory, constants.O_RDONLY);
+      try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
+      try {
+        const persisted = await this.readPersistedBackup(path);
+        const decoded = openBackup(persisted, key);
+        if (createHash("sha256").update(decoded).digest("hex") !== payloadHash)
+          throw new Error("BACKUP_LOCAL_VERIFY_FAILED");
+      } catch {
+        await rm(path, {force:true});
+        throw new Error("BACKUP_LOCAL_VERIFY_FAILED");
+      }
       const owned = (await readdir(directory)).filter(f => /^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/.test(f)).sort().reverse();
       for (const old of owned.slice(3)) await rm(join(directory,old));
-      if (this.options.url) await this.upload(filename, blob);
-      this.status = { state: this.options.url ? "uploaded" : "local", lastSuccessAt: Date.now(), error:"" };
-      return {filename};
-    } finally { await rm(snapshot, {force:true}); }
+      const localSuccessAt = Date.now();
+      this.status = {
+        ...this.status,
+        state: this.options.url ? "pending" : "local",
+        lastSuccessAt: localSuccessAt,
+        filename,
+        error: "",
+        local: { state: "success", lastSuccessAt: localSuccessAt, filename, error: "" },
+      };
+      if (!this.options.url) return {filename};
+      try {
+        await this.upload(filename, blob);
+        const cloudSuccessAt = Date.now();
+        this.status = {
+          ...this.status,
+          state: "uploaded",
+          lastSuccessAt: cloudSuccessAt,
+          error: "",
+          cloud: { state: "success", lastSuccessAt: cloudSuccessAt, filename, error: "" },
+        };
+        return {filename};
+      } catch (error) {
+        const cloudError = error instanceof Error && /^[A-Z_]+$/.test(error.message) ? error.message : "BACKUP_FAILED";
+        this.status = {
+          ...this.status,
+          state: "partial",
+          error: cloudError,
+          cloud: { ...this.status.cloud, state: "error", error: cloudError },
+        };
+        return {filename, cloudError};
+      }
+    } finally {
+      for (const path of [snapshot, snapshot + "-wal", snapshot + "-shm"])
+        await rm(path, {force:true});
+    }
   }
   private async upload(filename: string, blob: Buffer) {
     const url = new URL(this.options.url!);
@@ -75,6 +186,10 @@ export class BackupService {
     const info = await (await call(`bucket/${bucket}`)).json() as {public?:boolean};
     if (info.public !== false) throw new Error("BACKUP_BUCKET_MUST_BE_PRIVATE");
     await call(`object/${bucket}/stream-panel/${filename}`, "POST", new Uint8Array(blob), "application/octet-stream");
+    const downloaded = await call(`object/authenticated/${bucket}/stream-panel/${filename}`);
+    const remoteBlob = Buffer.from(await downloaded.arrayBuffer());
+    if (createHash("sha256").update(remoteBlob).digest("hex") !== createHash("sha256").update(blob).digest("hex"))
+      throw new Error("BACKUP_UPLOAD_VERIFY_FAILED");
     const listed = await (await call(`object/list/${bucket}`, "POST", JSON.stringify({prefix:"stream-panel",limit:1000,offset:0,sortBy:{column:"name",order:"desc"}}))).json() as {name:string}[];
     if (!Array.isArray(listed)) throw new Error("BACKUP_INVALID_LIST");
     const owned = listed.map(x => x.name).filter(x => /^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/.test(x)).sort().reverse();
@@ -94,10 +209,13 @@ export async function restoreBackup(blob: Buffer, key: Buffer, destination: stri
     const database = join(destination,"data.sqlite");
     await writeFile(database, payload.subarray(4+length), {mode:0o600,flag:"wx"});
     const db = new Database(database, {readonly:true});
-    try { if (db.pragma("integrity_check",{simple:true}) !== "ok" || (db.pragma("foreign_key_check") as unknown[]).length) throw new Error("BACKUP_INTEGRITY_FAILED"); } finally { db.close(); }
+    try { validateSnapshot(db); } finally { db.close(); }
     for (const profile of profiles) if (metadata.profiles[profile]) {
       const dir = join(destination,"profiles",profile); await mkdir(dir,{recursive:true,mode:0o700});
       await writeFile(join(dir,"secrets.json"),JSON.stringify(metadata.profiles[profile]),{mode:0o600,flag:"wx"});
     }
+    // A stolen old session must not regain access after a disaster restore.
+    const sessions = new Database(database);
+    try { sessions.exec("DELETE FROM sp_auth_sessions"); } finally { sessions.close(); }
   } catch (e) { await rm(destination,{recursive:true,force:true}); throw e; }
 }

@@ -1,15 +1,25 @@
-import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
+import Fastify, { type FastifyRequest, type FastifyReply } from "fastify";
+import cookie from "@fastify/cookie";
 import staticFiles from "@fastify/static";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { profiles, type Profile } from "./profiles.js";
+import { AccountStore, profiles, type Profile } from "./auth.js";
 import { BackupService } from "./backup.js";
 import { createApplication } from "./server.js";
+import {
+  DEFAULT_HOSTED_NETWORK_CONFIG,
+  type HostedNetworkConfig,
+} from "./hosted-network.js";
 
-export async function createHostedApplication(dir: string, publicOrigin: string, connect = true, backupOptions?: ConstructorParameters<typeof BackupService>[1]) {
+export async function createHostedApplication(
+  dir: string,
+  publicOrigin: string,
+  connect = true,
+  backupOptions?: ConstructorParameters<typeof BackupService>[1],
+  network: HostedNetworkConfig = DEFAULT_HOSTED_NETWORK_CONFIG,
+) {
   const origin = new URL(publicOrigin);
   if (origin.origin !== publicOrigin || origin.username || origin.password ||
     (origin.protocol !== "https:" && !(origin.protocol === "http:" && origin.hostname === "127.0.0.1")))
@@ -17,29 +27,32 @@ export async function createHostedApplication(dir: string, publicOrigin: string,
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const backup = backupOptions ? new BackupService(dir, backupOptions) : undefined;
   let lastBackupRequest = 0;
-  const activeProfileFile = join(dir, "active-profile.json");
-  let activeProfile: Profile = "ruslan";
-  try {
-    const saved = JSON.parse(await readFile(activeProfileFile, "utf8")) as {profile?: unknown};
-    if (typeof saved.profile !== "string" || !profiles.includes(saved.profile as Profile)) throw new Error("INVALID_ACTIVE_PROFILE");
-    activeProfile = saved.profile as Profile;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
+  const accounts = new AccountStore(join(dir, "data.sqlite"));
+  const selectedProfile = (request: FastifyRequest, fallback: Profile): Profile =>
+    request.headers["x-stream-panel-profile"] as Profile | undefined ?? fallback;
+  const oauthBindings = new Map<string, { profile: Profile; tokenHash: string; provider: string; expires: number }>();
   const runtimes = new Map<Profile, Awaited<ReturnType<typeof createApplication>>>();
-  const app = Fastify({ logger: false, bodyLimit: 32768, trustProxy: ["127.0.0.1", "::1"],
+  const app = Fastify({ logger: false, bodyLimit: 32768, trustProxy: [...network.trustedProxies],
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
+  await app.register(cookie);
+  // Provider configuration changes for one profile are serialized. Different
+  // profiles can act concurrently; SQLite worker queues serialize DB writes.
   const queues = new Map<Profile, { tail: Promise<void>; waiting: number }>();
   try {
     for (const profile of profiles) {
       const runtime = await createApplication(join(dir, "profiles", profile), 47831, connect, {}, {
         databasePath: join(dir, "data.sqlite"), profile, origin: publicOrigin, staticFiles: false,
+        session: (request) => {
+          const session = accounts.session(request.headers.cookie);
+          return session && selectedProfile(request, session.profile) === profile ? { csrf: session.csrf, expires: Number.MAX_SAFE_INTEGER } : null;
+        },
       });
       await runtime.app.ready();
       runtimes.set(profile, runtime);
     }
   } catch (error) {
     await Promise.all([...runtimes.values()].map((r) => r.app.close()));
+    accounts.close();
     throw error;
   }
   app.addHook("onRequest", async (request, reply) => {
@@ -47,29 +60,43 @@ export async function createHostedApplication(dir: string, publicOrigin: string,
       .header("Referrer-Policy", "no-referrer")
       .header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
     if (request.headers.host !== origin.host) return reply.code(403).send({ error: "INVALID_HOST" });
-    if (request.url.startsWith("/api/") && existsSync(join(dir, "deploying")))
+    const requestedProfile = request.headers["x-stream-panel-profile"];
+    if (requestedProfile !== undefined && (typeof requestedProfile !== "string" || !profiles.includes(requestedProfile as Profile)))
+      return reply.code(400).send({ error: "INVALID_PROFILE" });
+    if (request.url.startsWith("/api/") && ["deploying", "initializing"].some(marker=>existsSync(join(dir,marker))))
       return reply.header("Retry-After", "10").code(503).send({ error: "SERVER_UPDATING" });
     if (!["GET", "HEAD"].includes(request.method) && request.headers.origin !== publicOrigin)
       return reply.code(403).send({ error: "INVALID_ORIGIN" });
   });
   app.setErrorHandler((error, _request, reply) => {
     const e = error as Error & { statusCode?: number };
-    reply.code(e.statusCode && e.statusCode < 500 ? e.statusCode : 500)
-      .send({ error: e.statusCode && e.statusCode < 500 ? "INVALID_REQUEST" : "REQUEST_FAILED" });
+    const limit = /^(LOGIN_RATE_LIMIT|AUTH_BUSY|TOO_MANY_SESSIONS)$/.test(e.message);
+    if (limit) reply.header("Retry-After", "900");
+    reply.code(limit ? 429 : e.statusCode && e.statusCode < 500 ? e.statusCode : 500)
+      .send({ error: limit ? "LOGIN_RATE_LIMIT" : e.statusCode && e.statusCode < 500 ? "INVALID_REQUEST" : "REQUEST_FAILED" });
   });
-  app.get("/api/v1/profile", async () => ({ profile: activeProfile }));
-  app.post("/api/v1/profile", { schema: { body: {
-    type: "object", additionalProperties: false, required: ["profile"],
-    properties: { profile: { type: "string", enum: [...profiles] } },
-  } } }, async (request) => {
-    const next = (request.body as { profile: Profile }).profile;
-    if (next !== activeProfile) {
-      const temporary = `${activeProfileFile}.${randomBytes(8).toString("hex")}.tmp`;
-      await writeFile(temporary, JSON.stringify({ profile: next }), { mode: 0o600, flag: "wx" });
-      await rename(temporary, activeProfileFile);
-      activeProfile = next;
-    }
-    return { profile: activeProfile };
+  app.post("/api/v1/auth/login", { schema: { body: {
+    type: "object", additionalProperties: false, required: ["username", "password"],
+    properties: { username: { type: "string", minLength: 1, maxLength: 32 }, password: { type: "string", minLength: 1, maxLength: 256 } },
+  } } }, async (request, reply) => {
+    const body = request.body as { username: string; password: string };
+    const result = await accounts.login(body.username, body.password, request.ip);
+    if (!result) return reply.code(401).send({ error: "INVALID_LOGIN" });
+    reply.setCookie("sp_session", result.token, { httpOnly: true, secure: origin.protocol === "https:", sameSite: "lax", path: "/", maxAge: 86400 });
+    return { csrf: result.csrf, user: result.user };
+  });
+  app.get("/api/v1/auth/me", async (request, reply) => {
+    const user = accounts.session(request.headers.cookie);
+    if (!user) return reply.code(401).send({ error: "LOGIN_REQUIRED" });
+    return { csrf: user.csrf, user: { profile: user.profile, username: user.username, displayName: user.displayName } };
+  });
+  app.post("/api/v1/auth/logout", async (request, reply) => {
+    const user = accounts.session(request.headers.cookie);
+    if (!user) return reply.code(401).send({ error: "LOGIN_REQUIRED" });
+    if (!accounts.validCsrf(user, request.headers["x-csrf-token"])) return reply.code(403).send({ error: "CSRF_REQUIRED" });
+    accounts.revoke(user);
+    reply.clearCookie("sp_session", { path: "/", secure: origin.protocol === "https:", httpOnly: true, sameSite: "lax" });
+    return { ok: true };
   });
   app.get("/healthz", async (_request, reply) => {
     try {
@@ -78,7 +105,21 @@ export async function createHostedApplication(dir: string, publicOrigin: string,
     } catch { return reply.code(503).send({ ok: false }); }
   });
   const forward = async (request: FastifyRequest, reply: FastifyReply) => {
-    const profile = activeProfile;
+    const user = accounts.session(request.headers.cookie);
+    if (!user) return reply.code(401).send({ error: "LOGIN_REQUIRED" });
+    let profile = selectedProfile(request, user.profile);
+    const callback = new URL(request.url, publicOrigin);
+    if (callback.pathname.startsWith("/oauth/")) {
+      if (!/^\/oauth\/(youtube|donationalerts)\/callback$/.test(callback.pathname))
+        return reply.code(404).send({ error: "NOT_FOUND" });
+      const state = callback.searchParams.get("state") ?? "";
+      const binding = oauthBindings.get(state);
+      if (!binding || binding.expires <= Date.now() || callback.pathname !== `/oauth/${binding.provider}/callback`)
+        return reply.code(400).send({ error: "INVALID_OAUTH_STATE" });
+      if (binding.tokenHash !== user.tokenHash) return reply.code(403).send({ error: "INVALID_OAUTH_SESSION" });
+      profile = binding.profile;
+      oauthBindings.delete(state);
+    }
     const runtime = runtimes.get(profile)!;
     let release = () => {};
     let queue: { tail: Promise<void>; waiting: number } | undefined;
@@ -92,23 +133,50 @@ export async function createHostedApplication(dir: string, publicOrigin: string,
       await previous;
     }
     try {
+      // Recheck after waiting: logout can revoke a queued request's session.
+      if (!accounts.session(request.headers.cookie)) return reply.code(401).send({ error: "LOGIN_REQUIRED" });
       const headers = { ...request.headers };
+      headers["x-stream-panel-profile"] = profile;
       delete headers["content-length"];
       const result = await runtime.app.inject({ method: request.method as "GET" | "POST" | "HEAD" | "PUT" | "DELETE" | "PATCH" | "OPTIONS", url: request.url, headers,
         ...(request.body === undefined ? {} : { payload: JSON.stringify(request.body) }) });
+      if (result.statusCode === 200 && /^\/api\/v1\/(youtube|donationalerts)\/connect$/.test(callback.pathname)) {
+        const url = result.json().url;
+        if (typeof url === "string") {
+          const state = new URL(url).searchParams.get("state");
+          for (const [key, value] of oauthBindings) if (value.expires <= Date.now()) oauthBindings.delete(key);
+          if (state) oauthBindings.set(state, { profile, tokenHash: user.tokenHash, provider: callback.pathname.split("/")[3]!, expires: Date.now() + 600000 });
+        }
+      }
       const responseHeaders = { ...result.headers };
       delete responseHeaders["content-length"];
-      if (request.url.split("?")[0] === "/api/v1/status" && result.statusCode === 200) {
-        const status = result.json();
-        status.backup = backup?.status ?? {state:"disabled"};
-        status.profile = profile;
-        reply.code(result.statusCode).headers(responseHeaders).send(JSON.stringify(status));
-        return;
-      }
-      reply.code(result.statusCode).headers(responseHeaders).send(result.body);
+      const payload = request.url.split("?")[0] === "/api/v1/status" && result.statusCode === 200
+        ? JSON.stringify({ ...result.json(), backup: backup?.status ?? {state:"disabled"}, user: { profile, username: user.username, displayName: user.displayName } }) : result.body;
+      reply.code(result.statusCode).headers(responseHeaders).send(payload);
     } finally { release(); if (queue) queue.waiting--; }
   };
-  app.post("/api/v1/backup", async (_request, reply) => {
+  const canReadBackups=(request:FastifyRequest,reply:FastifyReply)=>{
+    if(!accounts.session(request.headers.cookie)){reply.code(401).send({error:"LOGIN_REQUIRED"});return false;}
+    if(request.headers["sec-fetch-site"]==="cross-site" || (request.headers.origin!==undefined&&request.headers.origin!==publicOrigin)){reply.code(403).send({error:"INVALID_ORIGIN"});return false;}
+    if(!backup){reply.code(503).send({error:"BACKUP_NOT_CONFIGURED"});return false;}
+    return true;
+  };
+  app.get("/api/v1/backups",async(request,reply)=>{
+    if(!canReadBackups(request,reply))return;
+    return backup!.files();
+  });
+  app.get("/api/v1/backups/:filename",async(request,reply)=>{
+    if(!canReadBackups(request,reply))return;
+    const filename=(request.params as {filename:string}).filename;
+    try {
+      const blob=await backup!.file(filename);
+      return reply.type("application/octet-stream").header("Content-Disposition",`attachment; filename="${filename}"`).send(blob);
+    }catch(error){if((error as Error).message==="BACKUP_NOT_FOUND")return reply.code(404).send({error:"BACKUP_NOT_FOUND"});throw error;}
+  });
+  app.post("/api/v1/backup", async (request, reply) => {
+    const user = accounts.session(request.headers.cookie);
+    if (!user) return reply.code(401).send({error:"LOGIN_REQUIRED"});
+    if (!accounts.validCsrf(user,request.headers["x-csrf-token"])) return reply.code(403).send({error:"CSRF_REQUIRED"});
     if (!backup) return reply.code(503).send({error:"BACKUP_NOT_CONFIGURED"});
     if (Date.now() - lastBackupRequest < 600000) return reply.code(429).send({error:"BACKUP_RATE_LIMIT"});
     lastBackupRequest = Date.now();
@@ -122,6 +190,7 @@ export async function createHostedApplication(dir: string, publicOrigin: string,
   app.addHook("onClose", async () => {
     await backup?.stop();
     await Promise.all([...runtimes.values()].map((r) => r.app.close()));
+    accounts.close();
   });
-  return { app, runtimes, backup, get activeProfile() { return activeProfile; } };
+  return { app, accounts, runtimes, backup };
 }

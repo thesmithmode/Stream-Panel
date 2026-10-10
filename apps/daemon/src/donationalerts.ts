@@ -102,7 +102,7 @@ export class DonationAlertsConnection {
   private socket: WebSocket | null = null;
   private retry: NodeJS.Timeout | null = null;
   private history: NodeJS.Timeout | null = null;
-  private scanning = false;
+  private scanTask:Promise<void>|null = null;
   private recipient = "";
   private generation = 0;
   private httpTail = Promise.resolve();
@@ -260,9 +260,9 @@ export class DonationAlertsConnection {
       this.status.account = string(profile.name);
       this.connect(string(profile.socket_connection_token), generation);
       // REST remains useful if realtime permission/protocol fails. State exposes each capability.
-      void this.scanHistory().catch((error) => this.report(error));
+      void this.scanHistory(true).catch((error) => this.report(error));
       this.history = setInterval(() => {
-        void this.scanHistory().catch((error) => this.report(error));
+        void this.scanHistory(true).catch((error) => this.report(error));
       }, 300000);
     } catch (error) {
       if (this.stopped || generation !== this.generation) return;
@@ -326,6 +326,7 @@ export class DonationAlertsConnection {
                 }),
               }),
             );
+            if (this.stopped || generation !== this.generation) return;
             const subscriptions = Array.isArray(response.channels)
               ? response.channels
               : [];
@@ -353,16 +354,18 @@ export class DonationAlertsConnection {
           }
           const donation = findDonation(message);
           if (donation) {
-            await this.db.call(
-              "ingest",
+            const active = await this.db.call<{id:string;started_at_ms:number} | null>("activeLogicalStream");
+            if (!active || this.stopped || generation !== this.generation) return;
+            const result = await this.db.call(
+              "ingestLiveDonation",
               normalizeDonation(
                 donation,
                 this.recipient,
                 "centrifugo",
                 this.config.value.daUtcOffsetMinutes,
-              ),
+              ), active.id, true,
             );
-            this.status.lastEventAt = Date.now();
+            if(result)this.status.lastEventAt = Date.now();
           }
         }
       })().catch((error) => this.report(error));
@@ -379,13 +382,22 @@ export class DonationAlertsConnection {
       this.status.capabilities.realtime = "Ошибка WebSocket";
     });
   }
-  async scanHistory(): Promise<void> {
-    if (this.scanning || this.stopped) return;
-    this.scanning = true;
+  async scanHistory(automatic = false): Promise<void> {
+    while(this.scanTask){if(automatic)return;await this.scanTask;}
+    if(this.stopped)return;
+    const task=this.scanHistoryNow(automatic);this.scanTask=task;
+    try{await task;}finally{if(this.scanTask===task)this.scanTask=null;}
+  }
+  private async scanHistoryNow(automatic:boolean): Promise<void> {
+    if (this.stopped) return;
     const generation = this.generation;
     this.status.capabilities.history = "Импорт…";
     try {
+      const active = automatic ? await this.db.call<{id:string;started_at_ms:number} | null>("activeLogicalStream") : null;
+      if (this.stopped || generation !== this.generation) return;
+      if (automatic && !active) { this.status.capabilities.history = "Ожидание эфира"; return; }
       let complete = false;
+      let skippedRows = 0;
       let knownStreak = 0;
       const stopAfterKnownPages = 3;
       for (
@@ -402,17 +414,19 @@ export class DonationAlertsConnection {
         let pageAllKnown = response.data.length > 0;
         for (const raw of response.data) {
           try {
-            const result = await this.db.call<{ inserted: boolean }>(
-              "ingest",
-              normalizeDonation(
-                raw,
-                this.recipient,
-                "rest",
-                this.config.value.daUtcOffsetMinutes,
-              ),
-            );
-            if (result.inserted) pageAllKnown = false;
+            const event = normalizeDonation(raw, this.recipient, "rest", this.config.value.daUtcOffsetMinutes);
+            if (automatic) {
+              const current = await this.db.call<{id:string;started_at_ms:number} | null>("activeLogicalStream");
+              if (this.stopped || generation !== this.generation || !current || current.id !== active!.id) return;
+              if (event.occurredAtMs === null || event.occurredAtMs < current.started_at_ms) continue;
+            }
+            const result = automatic
+              ? await this.db.call<{inserted:boolean}|null>("ingestLiveDonation",event,active!.id)
+              : await this.db.call<{inserted:boolean}>("ingest",event);
+            if (this.stopped || generation !== this.generation) return;
+            if (result?.inserted) pageAllKnown = false;
           } catch (error) {
+            skippedRows++;
             pageAllKnown = false;
             console.error(
               "DA history row skipped",
@@ -428,13 +442,13 @@ export class DonationAlertsConnection {
           break;
         }
         if (!string(links.next)) throw new Error("DA_PAGINATION_UNKNOWN");
-        if (knownStreak >= stopAfterKnownPages) {
+        if (automatic && knownStreak >= stopAfterKnownPages) {
           complete = true;
           break;
         }
       }
       this.status.capabilities.history = complete
-        ? "Импорт доступных страниц завершён"
+        ? skippedRows ? `Импорт неполный: пропущено записей ${skippedRows}` : "Импорт доступных страниц завершён"
         : "Импорт неполный (лимит/остановка)";
       if (this.status.state !== "connected") {
         this.status.state = "degraded";
@@ -443,8 +457,6 @@ export class DonationAlertsConnection {
     } catch (error) {
       this.status.capabilities.history = "Ошибка импорта";
       throw error;
-    } finally {
-      this.scanning = false;
     }
   }
   private report(error: unknown): void {

@@ -46,6 +46,8 @@ function fixture(t) {
   const calls = [],
     sockets = [];
   let sessions = [];
+  const platformLinks = [];
+  let nextSession = 0;
   const config = {
     value: {
       twitchClientId: "client123",
@@ -68,20 +70,56 @@ function fixture(t) {
   };
   const db = {
     call: async (method, ...args) => {
-      calls.push({ method, args });
+      const call = { method, args };
+      calls.push(call);
       if (method === "sessions") return sessions;
-      if (method === "startSession") {
-        sessions = [
-          {
-            id: "session-db",
-            account_id: "owner",
-            kind: args[3],
-            ended_at_ms: null,
-          },
-        ];
-        return "session-db";
+      if (method === "observePlatformStream") {
+        const [platform, account_id, external_id, started_at_ms, observed_at_ms] = args;
+        let link = platformLinks.find(row => row.platform === platform &&
+          row.account_id === account_id && row.external_id === external_id);
+        if (link?.ended_at_ms !== null && link) { call.result = null; return null; }
+        if (!link) {
+          const occupied = sessions.some(row => row.account_id === account_id && row.ended_at_ms === null);
+          const active = sessions.find(row => row.kind === "platform" && row.ended_at_ms === null &&
+            platformLinks.some(item => item.session_id === row.id && item.ended_at_ms === null));
+          if (occupied && !active) { call.result = null; return null; }
+          let session = active;
+          if (!session) {
+            session = { id: `session-db-${++nextSession}`, account_id, kind: "platform", started_at_ms, ended_at_ms: null };
+            sessions.push(session);
+          }
+          link = { session_id: session.id, platform, account_id, external_id,
+            started_at_ms, last_observed_at_ms: observed_at_ms, offline_checks: 0,
+            first_missing_at_ms: null, ended_at_ms: null };
+          platformLinks.push(link);
+        } else if (observed_at_ms > link.last_observed_at_ms) {
+          link.last_observed_at_ms = observed_at_ms;
+          link.offline_checks = 0;
+          link.first_missing_at_ms = null;
+        }
+        call.result = link.session_id;
+        return link.session_id;
       }
-      if (method === "endSession") sessions[0].ended_at_ms = args[1];
+      if (method === "platformMissing") {
+        const [platform, account_id, present_ids, observed_at_ms] = args;
+        for (const link of platformLinks.filter(row => row.platform === platform && row.account_id === account_id && row.ended_at_ms === null)) {
+          if (present_ids.includes(link.external_id) || observed_at_ms <= link.last_observed_at_ms) continue;
+          link.last_observed_at_ms = observed_at_ms;
+          link.first_missing_at_ms ??= observed_at_ms;
+          if (++link.offline_checks >= 2) {
+            link.ended_at_ms = link.first_missing_at_ms;
+            const session = sessions.find(row => row.id === link.session_id);
+            if (session && !platformLinks.some(row => row.session_id === session.id && row.ended_at_ms === null))
+              session.ended_at_ms = link.ended_at_ms;
+          }
+        }
+      }
+      if (method === "activeLogicalStream")
+        return sessions.filter(row => row.kind === "platform" && row.ended_at_ms === null &&
+          platformLinks.some(link => link.session_id === row.id && link.ended_at_ms === null))
+          .sort((a, b) => b.started_at_ms - a.started_at_ms)[0] ?? null;
+      if (method === "platformStreams") return platformLinks.filter(row => row.session_id === args[0]);
+      if (method === "streamSample") return null;
       return null;
     },
   };
@@ -98,6 +136,8 @@ function fixture(t) {
     calls,
     sockets,
     socket,
+    platformLinks,
+    getSessions: () => sessions,
     setSessions: (value) => (sessions = value),
     tick: async (ms) => {
       t.mock.timers.tick(ms);
@@ -166,6 +206,92 @@ function twitchRequest(f, options = {}) {
     throw new Error("unexpected " + url);
   };
 }
+
+test("Twitch polls offline every five minutes, reacts online immediately and never closes on malformed responses", async t => {
+  const f = fixture(t), opts = { offline: true };
+  let polls = 0, malformed = false;
+  const original = twitchRequest(f, opts);
+  const request = async (url, init) => {
+    if (new URL(url).pathname.endsWith("/streams")) {
+      polls++;
+      if (malformed) return response({ data: {} });
+    }
+    return original(url, init);
+  };
+  const c = new TwitchConnection(f.config, f.db, request, f.socket);
+  try {
+    await c.start();
+    f.sockets[0].push({ ...welcome, payload: { session: { id: "wire", keepalive_timeout_seconds: 3600 } } });
+    await flush();
+    assert.equal(polls, 1);
+    await f.tick(299999); assert.equal(polls, 1);
+    await f.tick(1); assert.equal(polls, 2);
+    opts.offline = false;
+    f.sockets[0].push(notification("stream.online", { broadcaster_user_id: "owner", id: "online", started_at: new Date().toISOString() }));
+    await flush(); assert.equal(polls, 3);
+    await f.tick(59999); assert.equal(polls, 3);
+    await f.tick(1); assert.equal(polls, 4);
+    const missingBefore = f.calls.filter(x => x.method === "platformMissing").length;
+    malformed = true;
+    await f.tick(60000);
+    assert.equal(f.calls.filter(x => x.method === "platformMissing").length, missingBefore);
+    assert.equal(c.status.detail, "INVALID_TWITCH_STREAMS");
+    malformed = false; opts.offline = true;
+    await f.tick(60000);
+    assert.equal(c.status.state, 'connected');
+    assert.equal(c.status.detail, 'Сбор событий включён', 'successful stream polling clears its own recovered error');
+    assert.equal(f.platformLinks[0].offline_checks, 1);
+    assert.equal(f.platformLinks[0].ended_at_ms, null);
+    await f.tick(60000);
+    assert.equal(f.platformLinks[0].offline_checks, 2);
+    assert.equal(f.platformLinks[0].ended_at_ms, f.platformLinks[0].first_missing_at_ms);
+    assert.equal(f.getSessions()[0].ended_at_ms, f.platformLinks[0].first_missing_at_ms);
+    const count = polls;
+    await f.tick(299999); assert.equal(polls, count);
+    await f.tick(1); assert.equal(polls, count + 1);
+    await c.stop();
+    await f.tick(300000); assert.equal(polls, count + 1);
+  } finally { await c.stop(); }
+});
+
+test('Twitch polling recovery preserves an independent revoked subscription warning',async t=>{
+ const f=fixture(t),original=twitchRequest(f);let fail=false;
+ const request=async(url,init)=>fail&&new URL(url).pathname.endsWith('/streams')?response({data:{}}):original(url,init);
+ const c=new TwitchConnection(f.config,f.db,request,f.socket);
+ try{
+  await c.start();f.sockets[0].push({...welcome,payload:{session:{id:'wire',keepalive_timeout_seconds:3600}}});await flush();
+  fail=true;await f.tick(60000);assert.equal(c.status.detail,'INVALID_TWITCH_STREAMS');
+  f.sockets[0].push({metadata:{message_type:'revocation'},payload:{subscription:{type:'channel.follow',status:'authorization_revoked'}}});await flush();
+  fail=false;await f.tick(60000);
+  assert.equal(c.status.detail,'Часть подписок отозвана');
+  assert.equal(c.status.capabilities['channel.follow'],'authorization_revoked');
+ }finally{await c.stop();}
+});
+test("Twitch restart does not let an old pending poll block or overwrite the new generation", async t => {
+  const f = fixture(t), options = { offline: true, scopes: ["user:read:chat"] };
+  let polls = 0, release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const original = twitchRequest(f, options);
+  const request = async (url, init) => {
+    if (new URL(url).pathname.endsWith("/streams")) {
+      if (++polls === 1) return pending;
+    }
+    return original(url, init);
+  };
+  const c = new TwitchConnection(f.config, f.db, request, f.socket);
+  try {
+    await c.start(); await flush(); assert.equal(polls, 1);
+    await c.start(); await flush(); assert.equal(polls, 2);
+    f.sockets.at(-1).push({ ...welcome, payload: { session: { id: "new", keepalive_timeout_seconds: 3600 } } });
+    await flush();
+    release(response({ data: [{ id: "stale", started_at: new Date().toISOString() }] }));
+    await flush();
+    assert.equal(f.calls.filter(x => x.method === "observePlatformStream").length, 0);
+    await f.tick(300000); assert.equal(polls, 3);
+    await c.stop(); await f.tick(300000); assert.equal(polls, 3);
+  } finally { release(response({ data: [] })); await c.stop(); }
+});
+
 test("Twitch lifecycle: full subscriptions, safe handoff, transient gap, offline confirmation and stop", async (t) => {
   const f = fixture(t),
     subs = [],
@@ -181,7 +307,8 @@ test("Twitch lifecycle: full subscriptions, safe handoff, transient gap, offline
     f.sockets[0].push(welcome);
     await flush();
     assert.equal(c.status.state, "connected");
-    assert.equal(subs.length, 12);
+    assert.equal(subs.length, 13);
+    assert.equal(subs.find((x) => x.type === "channel.update").version, "2");
     assert.equal(subs.find((x) => x.type === "channel.follow").version, "2");
     f.sockets[0].push({
       metadata: { message_type: "session_reconnect" },
@@ -200,7 +327,7 @@ test("Twitch lifecycle: full subscriptions, safe handoff, transient gap, offline
     f.sockets[1].push(welcome);
     await flush();
     assert.equal(f.sockets[0].closed, true);
-    assert.equal(subs.length, 12, "handoff must not duplicate subscriptions");
+    assert.equal(subs.length, 13, "handoff must not duplicate subscriptions");
     f.sockets[1].push("invalid json");
     await flush();
     assert.equal(c.status.state, "degraded");
@@ -219,9 +346,9 @@ test("Twitch lifecycle: full subscriptions, safe handoff, transient gap, offline
     assert.equal(c.status.state, "connected");
     opts.offline = true;
     await f.tick(60000);
-    assert.equal(f.calls.filter((x) => x.method === "endSession").length, 0);
+    assert.equal(f.platformLinks[0].offline_checks, 1);
     await f.tick(60000);
-    assert.equal(f.calls.filter((x) => x.method === "endSession").length, 1);
+    assert.equal(f.platformLinks[0].offline_checks, 2);
     await c.disconnect();
     assert.equal(c.status.state, "disconnected");
     assert.equal(f.config.value.twitch, undefined);
@@ -233,7 +360,7 @@ test("Twitch lifecycle: full subscriptions, safe handoff, transient gap, offline
 });
 test("Twitch partial poll and optional subscription rejection remain observable; manual session remains open", async (t) => {
   const f = fixture(t);
-  f.setSessions([{ id: "manual", kind: "manual", ended_at_ms: null }]);
+  f.setSessions([{ id: "manual", account_id: "owner", kind: "manual", ended_at_ms: null }]);
   const opts = { offline: true, badPoll: true, failType: "channel.cheer" };
   const c = new TwitchConnection(
     f.config,
@@ -245,15 +372,14 @@ test("Twitch partial poll and optional subscription rejection remain observable;
     await c.start();
     f.sockets[0].push(welcome);
     await flush();
-    assert.equal(c.status.capabilities.presence, "failed");
+    assert.equal(c.status.capabilities.presence, undefined);
     assert.equal(c.status.capabilities["channel.cheer"], "TWITCH_HTTP_403");
-    assert.ok(
-      f.calls.some(
-        (x) => x.method === "gap" && x.args[1] === "chatters_poll_incomplete",
-      ),
-    );
+    assert.equal(f.calls.filter(x => x.method === "recordPoll").length, 0, "manual sessions cannot collect presence while Twitch is offline");
     await f.tick(60000);
-    assert.equal(f.calls.filter((x) => x.method === "endSession").length, 0);
+    const manual = f.getSessions().find(row => row.id === "manual");
+    assert.equal(manual.ended_at_ms, null);
+    assert.equal(f.platformLinks.length, 0);
+    assert.equal(f.calls.filter(x => x.method === "observePlatformStream").length, 0);
     await f.tick(3600000);
     assert.equal(c.status.account, "Owner");
   } finally {
@@ -470,7 +596,7 @@ test("DA OAuth state is single use; handshake, history, rate limiting and discon
     s.emit("open");
     assert.equal(s.sent[0].params.token, "socket");
     await f.tick(1100);
-    assert.equal(c.status.state, "degraded");
+    assert.equal(c.status.state, "connecting");
     s.push({ id: 1, result: { client: "client" } });
     await f.tick(1100);
     assert.equal(s.sent[1].method, 1);
@@ -512,6 +638,8 @@ test("DA failed channel authorization preserves REST, missing history metadata f
     await f.tick(1100);
     await f.tick(1100);
     assert.equal(c.status.detail, "DA_CHANNEL_TOKEN_MISSING");
+    const initialImport = c.scanHistory();
+    await f.tick(1100); await initialImport;
     assert.equal(
       c.status.capabilities.history,
       "Импорт доступных страниц завершён",
@@ -595,8 +723,9 @@ test("DA API retries rotated token once, reports 429/403 and requires refresh cr
     await starting;
     assert.equal(f.config.value.daAccessToken, "rotated");
     mode = "429";
-    await f.tick(1100);
-    assert.equal(c.status.detail, "DA_RATE_LIMIT");
+    const limited = assert.rejects(c.scanHistory(), /DA_RATE_LIMIT/);
+    await f.tick(1100); await limited;
+    assert.equal(c.status.capabilities.history, "Ошибка импорта");
     await c.stop();
     mode = "403";
     const forbidden = c.start();
@@ -820,18 +949,14 @@ test("a stream poll from the previous account is never applied to the new login"
       }),
     );
     await starting;
-    assert.equal(
-      f.calls.filter((x) => x.method === "startSession").length,
-      0,
-      "a cancelled response must not attach the old stream to the new owner",
-    );
+    assert.equal(f.calls.filter(x => x.method === "observePlatformStream" && x.args[1] === "owner").length, 0, "a cancelled response must not attach the old stream to the new owner");
     f.sockets.at(-1).push(welcome);
     await flush();
     await f.tick(60000);
-    const sessions = f.calls.filter((x) => x.method === "startSession");
-    assert.equal(sessions.length, 1);
-    assert.equal(sessions[0].args[0], "new-owner");
-    assert.equal(sessions[0].args[1], "new-stream");
+    const sessions = f.calls.filter((x) => x.method === "observePlatformStream");
+    assert.equal(sessions.length, 2, "the new login checks immediately and again after one minute");
+    assert.ok(sessions.every(x => x.args[1] === "new-owner" && x.args[2] === "new-stream"));
+    assert.equal(sessions[0].result, sessions[1].result, "repeated observations of one stream reuse its logical session ID");
   } finally {
     await c.stop();
   }
@@ -892,4 +1017,127 @@ test("a validation response from the previous account cannot mutate or reconnect
   } finally {
     await c.stop();
   }
+});
+
+test("DA automatic history waits for a logical stream; explicit history import remains available offline", async t => {
+  const f = fixture(t); let historyRequests = 0;
+  const fallback = daRequest(f);
+  const request = async (url, init) => { if (url.includes('alerts/donations')) historyRequests++; return fallback(url, init); };
+  const c = new DonationAlertsConnection(f.config, f.db, request, f.socket);
+  try {
+    await c.start(); await flush();
+    assert.equal(historyRequests, 0);
+    await f.tick(300000); assert.equal(historyRequests, 0);
+    await c.scanHistory(); assert.equal(historyRequests, 1);
+    await f.db.call('observePlatformStream','youtube','yt','live',Date.now(),Date.now(),null,'Live');
+    const automatic = c.scanHistory(true); await f.tick(1100); await automatic;
+    assert.equal(historyRequests, 2);
+    f.setSessions([]);
+    await c.scanHistory(true); assert.equal(historyRequests, 2);
+  } finally { await c.stop(); }
+});
+
+test("Twitch channel.update v2 preserves category and title changes as timestamped raw events", async t => {
+ const f=fixture(t); const c=new TwitchConnection(f.config,f.db,twitchRequest(f),f.socket);
+ try {
+  await c.start();f.sockets[0].push(welcome);await flush();
+  const updated=f.calls.filter(row=>row.method==='ingest');
+  f.sockets[0].push(notification('channel.update',{broadcaster_user_id:'owner',title:'Second title',category_id:'wow',category_name:'World of Warcraft'}));
+  await flush();
+  const events=f.calls.filter(row=>row.method==='ingest');
+  assert.equal(events.length,updated.length+1);
+  assert.equal(events.at(-1).args[0].type,'channel.update');
+  assert.equal(events.at(-1).args[0].payload.categoryId,'wow');
+  assert.equal(events.at(-1).args[0].payload.categoryName,'World of Warcraft');
+  assert.equal(events.at(-1).args[0].payload.title,'Second title');
+ }finally{await c.stop();}
+});
+
+test('failed Twitch presence polls retain missing intervals and recover without bridging them', async t => {
+  const f=fixture(t), original=twitchRequest(f);
+  let fail=false;
+  const request=async(url,init)=>new URL(url).pathname.endsWith('/chatters')&&fail
+    ? response({message:'unavailable'},503) : original(url,init);
+  const c=new TwitchConnection(f.config,f.db,request,f.socket);
+  try {
+    await c.start();
+    f.sockets[0].push({...welcome,payload:{session:{id:'wire',keepalive_timeout_seconds:3600}}});
+    await flush();
+    const successful=f.calls.find(x=>x.method==='recordPoll').args[2];
+    fail=true;await f.tick(60000);
+    assert.equal(c.status.capabilities.presence,'failed');
+    let gaps=f.calls.filter(x=>x.method==='gap'&&x.args[1]==='chatters_poll_failed');
+    assert.equal(gaps.length,1);
+    assert.equal(gaps[0].args[2],successful.completedAtMs);
+    assert.equal(gaps[0].args[3],Date.now());
+    await f.tick(60000);
+    gaps=f.calls.filter(x=>x.method==='gap'&&x.args[1]==='chatters_poll_failed');
+    assert.equal(gaps.length,2);
+    assert.ok(gaps[1].args[2]>gaps[0].args[3]);
+    fail=false;await f.tick(60000);
+    assert.equal(c.status.capabilities.presence,'complete');
+    const recovered=f.calls.filter(x=>x.method==='recordPoll').at(-1).args[2];
+    assert.equal(recovered.startedAtMs,recovered.completedAtMs,'recovery does not invent observation through the outage');
+    assert.equal(f.calls.filter(x=>x.method==='gap'&&x.args[1]==='chatters_poll_failed').length,2);
+  } finally {await c.stop();}
+});
+
+test('a failed presence request after Twitch stop cannot append a stale gap',async t=>{
+  const f=fixture(t),original=twitchRequest(f);
+  let rejectPoll;
+  const pending=new Promise((_,reject)=>{rejectPoll=reject;});
+  const request=(url,init)=>new URL(url).pathname.endsWith('/chatters')?pending:original(url,init);
+  const c=new TwitchConnection(f.config,f.db,request,f.socket);
+  try {
+    await c.start();await flush();
+    await c.stop();rejectPoll(new Error('old request failed'));await flush();
+    assert.equal(f.calls.some(x=>x.method==='gap'),false);
+    assert.equal(c.status.capabilities.presence,undefined);
+  }finally{await c.stop();}
+});
+
+test('DA disconnect while subscribing ignores the late channel token and sends nothing to the closed socket',async t=>{
+ const f=fixture(t),original=daRequest(f);let release,requested=false;
+ const pending=new Promise(resolve=>{release=resolve;});
+ const request=async(url,init)=>{if(url.endsWith('/centrifuge/subscribe')){requested=true;return pending;}return original(url,init);};
+ const c=new DonationAlertsConnection(f.config,f.db,request,f.socket);
+ try{
+  await c.start();f.sockets[0].emit('open');f.sockets[0].push({id:1,result:{client:'client'}});await f.tick(1100);assert.equal(requested,true);
+  const sent=f.sockets[0].sent.length;await c.disconnect();release(response({channels:[{channel:'$alerts:donation_7',token:'late'}]}));await flush();
+  assert.equal(f.sockets[0].sent.length,sent);assert.equal(c.status.state,'disconnected');assert.equal(f.config.value.daAccessToken,'');
+ }finally{release(response({channels:[]}));await c.stop();}
+});
+
+test('DA history continues past an invalid row, stops at its page budget and never reports complete',async t=>{
+ const f=fixture(t);let pages=0,inserted=0;
+ const logs=t.mock.method(console,'error',()=>{});
+ const db={call:async(method,...args)=>{if(method==='ingest'){inserted++;return {inserted:true};}return f.db.call(method,...args);}};
+ const request=async()=>{pages++;t.mock.timers.tick(1100);return response({data:pages===1?[{id:'invalid'}, {id:2,amount:'1',currency:'RUB',created_at:'',username:'Valid'}]:[],links:{next:'next'}});};
+ const c=new DonationAlertsConnection(f.config,db,request,f.socket);c.stopped=false;c.recipient='7';
+ try{
+  await c.scanHistory();assert.equal(pages,1000);assert.equal(inserted,1);assert.equal(logs.mock.callCount(),1);
+  assert.equal(c.status.capabilities.history,'Импорт неполный (лимит/остановка)');assert.equal(c.status.state,'degraded');
+ }finally{await c.stop();}
+});
+
+test('DA automatic scan stops after three known pages and duplicate automatic calls share in-flight work',async t=>{
+ const f=fixture(t);await f.db.call('observePlatformStream','twitch','owner','live',Date.now()-60000,Date.now(),null,'Live');
+ let pages=0,release;const pending=new Promise(resolve=>{release=resolve;});
+ const row={id:1,amount:'1',currency:'RUB',created_at:'2026-10-10 07:00:00',username:'Known'};f.config.value.daUtcOffsetMinutes=0;
+ f.setSessions([{id:'live',kind:'platform',started_at_ms:0,ended_at_ms:null}]);
+ const db={call:async(method,...args)=>method==='activeLogicalStream'?{id:'live',started_at_ms:0}:method==='ingestLiveDonation'?{inserted:false}:f.db.call(method,...args)};
+ const request=async()=>{pages++;t.mock.timers.tick(1100);if(pages===1)return pending;return response({data:[row],links:{next:'next'}});};
+ const c=new DonationAlertsConnection(f.config,db,request,f.socket);c.stopped=false;c.recipient='7';
+ try{
+  const scan=c.scanHistory(true);await flush();await c.scanHistory(true);assert.equal(pages,1);
+  release(response({data:[row],links:{next:'next'}}));await scan;assert.equal(pages,3);assert.equal(c.status.capabilities.history,'Импорт доступных страниц завершён');
+ }finally{release(response({data:[],links:{next:null}}));await c.stop();}
+});
+
+test('DA a finished page with a rejected row stays incomplete while its valid donation survives',async t=>{
+ const f=fixture(t);let ingested=0;t.mock.method(console,'error',()=>{});
+ const db={call:async(method)=>{if(method==='ingest'){ingested++;return {inserted:true};}return null;}};
+ const request=async()=>response({data:[{id:'broken'},{id:2,amount:'2.90',currency:'RUB',created_at:'',username:'Valid'}],links:{next:null}});
+ const c=new DonationAlertsConnection(f.config,db,request,f.socket);c.stopped=false;c.recipient='7';
+ try{await c.scanHistory();assert.equal(ingested,1);assert.equal(c.status.capabilities.history,'Импорт неполный: пропущено записей 1');}finally{await c.stop();}
 });

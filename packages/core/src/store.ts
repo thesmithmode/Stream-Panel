@@ -1,4 +1,5 @@
-import { audienceAnalytics, type AnalyticsOptions } from "./analytics.js";
+import {DonationLedger,type DonationInput} from "./donations.js";
+import { audienceAnalytics, unionSpans, type AnalyticsOptions } from "./analytics.js";
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { openProfileDatabase } from "./profile-db.js";
@@ -11,7 +12,7 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { schemaV1, schemaV2, schemaV3, schemaV4, schemaV5 } from "./schema.js";
+import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
 import { presenceMinutes, pollCoveredMinutes, type PresencePoll } from "./presence.js";
 
@@ -50,7 +51,7 @@ export class StreamStore {
       this.db.pragma("foreign_keys = ON");
       this.db.pragma("busy_timeout = 5000");
       const version = this.db.pragma("user_version", { simple: true });
-      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5)
+      if (typeof version !== "number" || !Number.isInteger(version) || version < 0 || version > CURRENT_SCHEMA_VERSION)
         throw new Error("UNSUPPORTED_SCHEMA_VERSION");
       this.db.pragma("journal_mode = WAL");
       this.db.pragma("synchronous = FULL");
@@ -74,6 +75,18 @@ export class StreamStore {
         this.db.transaction(() => this.db.exec(schemaV4)).immediate();
       if ((this.db.pragma("user_version", { simple: true }) as number) < 5)
         this.db.transaction(() => this.db.exec(schemaV5)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 6)
+        this.db.transaction(() => this.db.exec(schemaV6)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 7)
+        this.db.transaction(() => this.db.exec(schemaV7)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 8)
+        this.db.transaction(() => this.db.exec(schemaV8)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 9)
+        this.db.transaction(() => this.db.exec(schemaV9)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 10)
+        this.db.transaction(() => this.db.exec(schemaV10)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 11)
+        this.db.transaction(() => this.db.exec(schemaV11)).immediate();
       this.db.exec("CREATE TABLE IF NOT EXISTS sp_youtube_quota (day TEXT NOT NULL, profile TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(day,profile)) WITHOUT ROWID");
       // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
@@ -88,14 +101,29 @@ export class StreamStore {
     this.db.close();
   }
 
+  donation(id:string) {return new DonationLedger(this.db).donation(id);}
+  donations(personId?:string,offset=0,limit=50,includeDeleted=false) {return new DonationLedger(this.db).list(personId,offset,limit,includeDeleted);}
+  createDonation(input:DonationInput,atMs:number) {return new DonationLedger(this.db).create(input,atMs);}
+  updateDonation(id:string,input:DonationInput,revision:number,atMs:number) {return new DonationLedger(this.db).update(id,input,revision,atMs);}
+  deleteDonation(id:string,revision:number,atMs:number):void {new DonationLedger(this.db).remove(id,revision,atMs);}
+  restoreDonation(id:string,revision:number,atMs:number) {return new DonationLedger(this.db).restore(id,revision,atMs);}
+  donationAudit(id:string) {return new DonationLedger(this.db).auditHistory(id);}
+
   streamSample(sessionId: string, at: number, categoryId: string, categoryName: string, title: string, twitchViewers: number | null): void {
     assertTimestamp(at);
     if ([categoryId,categoryName,title].some(s => s.length > 1000) || (twitchViewers !== null && (!Number.isSafeInteger(twitchViewers) || twitchViewers < 0))) throw new Error("INVALID_STREAM_SAMPLE");
     this.db.prepare("INSERT INTO stream_samples VALUES (?,?,?,?,?,?,NULL) ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET category_id=excluded.category_id,category_name=excluded.category_name,title=excluded.title,twitch_viewers=excluded.twitch_viewers").run(sessionId,at,categoryId,categoryName,title,twitchViewers);
   }
-  youtubeViewers(at: number, viewers: number | null): void {
+  youtubeViewers(at: number, viewers: number | null, sessionId?: string | null): void {
     assertTimestamp(at);
     if (viewers !== null && (!Number.isSafeInteger(viewers) || viewers < 0)) throw new Error("INVALID_VIEWER_COUNT");
+    if (sessionId === null) return; // Unknown start time: preserve raw details without attributing another stream.
+    if (sessionId !== undefined) {
+      const session = this.db.prepare("SELECT id FROM sessions WHERE id=? AND ended_at_ms IS NULL AND EXISTS(SELECT 1 FROM platform_streams WHERE session_id=sessions.id AND platform='youtube' AND ended_at_ms IS NULL)").get(sessionId);
+      if (!session) throw new Error("INVALID_YOUTUBE_SESSION");
+      this.db.prepare("INSERT INTO stream_samples(session_id,observed_at_ms,category_id,category_name,title,twitch_viewers,youtube_viewers) VALUES (?,?,'','','',NULL,?) ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET youtube_viewers=excluded.youtube_viewers").run(sessionId,at,viewers);
+      return;
+    }
     // Join only the latest contemporaneous Twitch sample; never borrow an old category.
     this.db.prepare("INSERT INTO stream_samples SELECT x.session_id,?,x.category_id,x.category_name,x.title,NULL,? FROM stream_samples x JOIN sessions s ON s.id=x.session_id WHERE s.ended_at_ms IS NULL AND x.twitch_viewers IS NOT NULL AND x.observed_at_ms<=? AND x.observed_at_ms>=? ORDER BY x.observed_at_ms DESC LIMIT 1 ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET youtube_viewers=excluded.youtube_viewers").run(at,viewers,at,at-180000);
   }
@@ -122,11 +150,36 @@ export class StreamStore {
       for (const m of messages) {
         const time = Date.parse(m.snippet?.publishedAt ?? "");
         if (!m.id || !Number.isFinite(time)) continue;
-        if (m.snippet.type === "messageDeletedEvent") this.db.prepare("DELETE FROM youtube_messages WHERE account_id=? AND id=?").run(account, m.snippet.messageDeletedDetails?.deletedMessageId ?? "");
-        if (m.snippet.type === "userBannedEvent") this.db.prepare("DELETE FROM youtube_messages WHERE account_id=? AND author_id=?").run(account, m.snippet.userBannedDetails?.bannedUserDetails?.channelId ?? "");
-        insert.run(m.id, account, chat, m.authorDetails?.channelId ?? "", time, JSON.stringify(m));
+        if (m.snippet.type === "messageDeletedEvent") {
+          const deletedMessageId = m.snippet.messageDeletedDetails?.deletedMessageId;
+          if (typeof deletedMessageId === "string" && deletedMessageId.trim())
+            this.db.prepare("DELETE FROM youtube_messages WHERE account_id=? AND id=?").run(account, deletedMessageId);
+        }
+        if (m.snippet.type === "userBannedEvent") {
+          const bannedChannelId = m.snippet.userBannedDetails?.bannedUserDetails?.channelId;
+          if (typeof bannedChannelId === "string" && bannedChannelId.trim())
+            this.db.prepare("DELETE FROM youtube_messages WHERE account_id=? AND author_id=?").run(account, bannedChannelId);
+        }
+        if (insert.run(m.id, account, chat, m.authorDetails?.channelId ?? "", time, JSON.stringify(m)).changes)
+          this.ensureYoutubeIdentity(account,m.authorDetails,time);
       }
     }).immediate();
+  }
+  private ensureYoutubeIdentity(account: string, author: any, at: number): void {
+    const externalId = author?.channelId;
+    if (typeof externalId !== "string" || !/^[A-Za-z0-9_-]{1,256}$/.test(externalId)) return;
+    const name = typeof author.displayName === "string" && author.displayName.trim()
+      ? author.displayName.trim().slice(0,200) : externalId;
+    let identity = this.db.prepare("SELECT id,person_id FROM youtube_identities WHERE account_id=? AND external_id=?").get(account,externalId) as {id:string;person_id:string}|undefined;
+    if (!identity) {
+      const prior = this.db.prepare("SELECT person_id FROM youtube_identities WHERE external_id=? ORDER BY id LIMIT 1").get(externalId) as {person_id:string}|undefined;
+      const personId = prior?.person_id ?? `youtube:${externalId}`;
+      this.db.prepare("INSERT OR IGNORE INTO persons VALUES (?,?,0)").run(personId,name);
+      identity = {id:`youtube:${account}:${externalId}`,person_id:personId};
+      this.db.prepare("INSERT INTO youtube_identities VALUES (?,?,?,?,?,?,?)").run(identity.id,account,externalId,name,matchKey(name),personId,Number(author.isChatOwner===true));
+      this.db.prepare("UPDATE persons SET revision=revision+1 WHERE id=?").run(personId);
+    } else this.db.prepare("UPDATE youtube_identities SET display_name=?,match_key=?,is_owner=MAX(is_owner,?) WHERE id=?").run(name,matchKey(name),Number(author.isChatOwner===true),identity.id);
+    this.db.prepare("INSERT INTO youtube_identity_aliases VALUES (?,?,?,?,?) ON CONFLICT(identity_id,name) DO UPDATE SET first_seen_ms=MIN(first_seen_ms,excluded.first_seen_ms),last_seen_ms=MAX(last_seen_ms,excluded.last_seen_ms)").run(identity.id,name,matchKey(name),at,at);
   }
   youtubeData(account: string) {
     const snapshots = this.db.prepare("SELECT key,payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=?").all(account) as {key:string;payload_json:string;updated_at_ms:number}[];
@@ -169,6 +222,7 @@ export class StreamStore {
           personId: identity?.person_id ?? null,
         };
       }
+      if(event.source==='donationalerts' && event.type==='donation' && (!event.actor || ["аноним","anonymous","anon"].includes(matchKey(event.actor.displayName))))new DonationLedger(this.db).ensureAnonymous(event.accountId);
       let identity: IdentityRow | null = null;
       let newIdentity = false;
       let autoLinked = false;
@@ -362,6 +416,11 @@ export class StreamStore {
         );
       if (event.occurredAtMs !== null)
         this.assignEvent(eventKey(event), event.accountId, event.occurredAtMs);
+      if (event.source === "twitch" && event.type === "channel.update" && event.occurredAtMs !== null) {
+        const categoryId = event.payload.categoryId, categoryName = event.payload.categoryName, title = event.payload.title;
+        if ([categoryId, categoryName, title].some(value => typeof value !== "string" || value.length > 1000)) throw new Error("INVALID_CHANNEL_UPDATE");
+        this.db.prepare("INSERT INTO stream_samples(session_id,observed_at_ms,category_id,category_name,title,twitch_viewers,youtube_viewers) SELECT session_id,?,?,?,?,NULL,NULL FROM event_sessions WHERE event_id=? ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET category_id=excluded.category_id,category_name=excluded.category_name,title=excluded.title").run(event.occurredAtMs,categoryId,categoryName,title,eventKey(event));
+      }
       // Membership changes invalidate outstanding undo revisions, including arrival of a new identity.
       // Auto-link already bumped revision when attaching to an existing person.
       if (identity && newIdentity && !autoLinked)
@@ -376,6 +435,89 @@ export class StreamStore {
     }).immediate();
   }
 
+  createPerson(name:string): Record<string,unknown> {
+    if(typeof name!=="string"||!name.trim()||name.length>200)throw new Error("INVALID_NAME");
+    return this.db.transaction(()=>{
+      const id=randomUUID();this.db.prepare("INSERT INTO persons(id,display_name) VALUES (?,?)").run(id,name.trim());
+      // An explicit card remains visible before its first identity/event arrives.
+      // Null keeps the normal automatic core criteria; no viewing fact is invented.
+      this.db.prepare("INSERT INTO person_preferences(person_id,manual_core) VALUES (?,NULL)").run(id);
+      return this.person(id);
+    }).immediate();
+  }
+
+  personMetadata(personId: string): {revision:number;tags:string[];manualCore:boolean|null} {
+    const revision = this.personRevision(personId);
+    const tags = this.db.prepare(`WITH RECURSIVE owners(id) AS (SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT t.label FROM person_tags t JOIN owners o ON t.person_id=o.id ORDER BY t.label`).all(personId) as {label:string}[];
+    const preference = this.db.prepare("SELECT manual_core FROM person_preferences WHERE person_id=?").get(personId) as {manual_core:number|null} | undefined;
+    return {revision,tags:tags.map(row=>row.label),manualCore:preference?.manual_core==null?null:preference.manual_core===1};
+  }
+
+  setPersonMetadata(personId: string, tags: string[], manualCore: boolean|null, revision: number): ReturnType<StreamStore['personMetadata']> {
+    if (!Array.isArray(tags) || tags.length>50 || tags.some(tag=>typeof tag!=="string" || !tag.trim() || tag.trim().length>64)) throw new Error("INVALID_PERSON_TAGS");
+    if (manualCore!==null && typeof manualCore!=="boolean") throw new Error("INVALID_MANUAL_CORE");
+    if (!Number.isSafeInteger(revision) || revision<0) throw new Error("INVALID_PERSON_REVISION");
+    const wanted=[...new Set(tags.map(tag=>tag.trim()))];
+    return this.db.transaction(() => {
+      const current=this.personMetadata(personId);
+      if (current.revision!==revision) throw new Error("REVISION_CONFLICT");
+      // Retain provenance of inherited tags; only explicit removals delete them.
+      this.db.prepare(`WITH RECURSIVE owners(id) AS (SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) DELETE FROM person_tags WHERE person_id IN(SELECT id FROM owners) AND label NOT IN(SELECT value FROM json_each(?))`).run(personId,JSON.stringify(wanted));
+      const insert=this.db.prepare("INSERT OR IGNORE INTO person_tags VALUES (?,?)");
+      for(const tag of wanted)if(!current.tags.includes(tag))insert.run(personId,tag);
+      this.db.prepare("INSERT INTO person_preferences VALUES (?,?) ON CONFLICT(person_id) DO UPDATE SET manual_core=excluded.manual_core").run(personId,manualCore===null?null:Number(manualCore));
+      this.db.prepare("UPDATE persons SET revision=revision+1 WHERE id=?").run(personId);
+      return this.personMetadata(personId);
+    }).immediate();
+  }
+
+  personNotes(personId: string): unknown[] {
+    this.personRevision(personId);
+    return this.db.prepare(`WITH RECURSIVE owners(id) AS (SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT n.* FROM person_notes n JOIN owners o ON n.person_id=o.id ORDER BY n.created_at_ms DESC,n.id`).all(personId);
+  }
+
+  createPersonNote(personId: string, body: string, nowMs = Date.now()): unknown {
+    assertTimestamp(nowMs);
+    const text = this.noteText(body);
+    return this.db.transaction(() => {
+      this.personRevision(personId);
+      const id = randomUUID();
+      this.db.prepare("INSERT INTO person_notes VALUES (?,?,?,?,?,0)").run(id,personId,text,nowMs,nowMs);
+      return this.db.prepare("SELECT * FROM person_notes WHERE id=?").get(id);
+    })();
+  }
+
+  updatePersonNote(personId: string, id: string, body: string, revision: number, nowMs = Date.now()): unknown {
+    assertTimestamp(nowMs);
+    const text = this.noteText(body);
+    return this.db.transaction(() => {
+      const note = this.requirePersonNote(personId,id,revision);
+      this.db.prepare("UPDATE person_notes SET body=?,updated_at_ms=?,revision=revision+1 WHERE id=?").run(text,Math.max(nowMs,note.updated_at_ms),id);
+      return this.db.prepare("SELECT * FROM person_notes WHERE id=?").get(id);
+    })();
+  }
+
+  deletePersonNote(personId: string, id: string, revision: number): void {
+    this.db.transaction(() => {
+      this.requirePersonNote(personId,id,revision);
+      this.db.prepare("DELETE FROM person_notes WHERE id=?").run(id);
+    })();
+  }
+
+  private noteText(body: string): string {
+    if (typeof body !== "string" || !body.trim() || body.length > 10000) throw new Error("INVALID_NOTE_BODY");
+    return body.trim();
+  }
+
+  private requirePersonNote(personId: string, id: string, revision: number): {updated_at_ms:number} {
+    this.personRevision(personId);
+    if (!Number.isSafeInteger(revision) || revision < 0) throw new Error("INVALID_NOTE_REVISION");
+    const note = this.db.prepare(`WITH RECURSIVE owners(id) AS (SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT n.revision,n.updated_at_ms FROM person_notes n JOIN owners o ON n.person_id=o.id WHERE n.id=?`).get(personId,id) as {revision:number;updated_at_ms:number} | undefined;
+    if (!note) throw new Error("NOTE_NOT_FOUND");
+    if (note.revision !== revision) throw new Error("NOTE_CONFLICT");
+    return note;
+  }
+
   personRevision(id: string): number {
     const person = this.db
       .prepare("SELECT id, revision FROM persons WHERE id = ?")
@@ -387,9 +529,9 @@ export class StreamStore {
   private memberships(personIds: string[]): Membership[] {
     return this.db
       .prepare(
-        `SELECT id, person_id AS personId FROM identities WHERE person_id IN (${personIds.map(() => "?").join(",")}) ORDER BY id`,
+        `SELECT id, person_id AS personId FROM identities WHERE person_id IN (${personIds.map(() => "?").join(",")}) UNION ALL SELECT id,person_id AS personId FROM youtube_identities WHERE person_id IN (${personIds.map(() => "?").join(",")}) ORDER BY id`,
       )
-      .all(...personIds) as Membership[];
+      .all(...personIds,...personIds) as Membership[];
   }
 
   merge(
@@ -416,6 +558,7 @@ export class StreamStore {
       this.db
         .prepare("UPDATE identities SET person_id = ? WHERE person_id = ?")
         .run(targetId, sourceId);
+      this.db.prepare("UPDATE youtube_identities SET person_id=? WHERE person_id=?").run(targetId,sourceId);
       this.db
         .prepare(
           "UPDATE persons SET revision = revision + 1 WHERE id IN (?, ?)",
@@ -468,6 +611,7 @@ export class StreamStore {
         this.db
           .prepare("UPDATE identities SET person_id = ? WHERE id = ?")
           .run(member.personId, member.id);
+        this.db.prepare("UPDATE youtube_identities SET person_id=? WHERE id=?").run(member.personId,member.id);
       }
       this.db
         .prepare(
@@ -494,7 +638,7 @@ export class StreamStore {
       .prepare(
         `SELECT account_id, match_key
          FROM identities
-         WHERE source = 'donationalerts' AND match_key != ''
+         WHERE source = 'donationalerts' AND match_key != '' AND external_id!='anonymous:donor'
          GROUP BY account_id, match_key
          HAVING COUNT(*) > 1`,
       )
@@ -699,6 +843,11 @@ export class StreamStore {
   ): { personId: string; how: string } | null {
     const key = matchKey(displayName);
     if (!key) return null;
+    if(["аноним","anonymous","anon"].includes(key)){
+      if(source!=="donationalerts")return null;
+      const anonymous=this.db.prepare('SELECT i.person_id FROM anonymous_donors a JOIN identities i ON i.id=a.identity_id WHERE a.account_id=?').get(accountId) as {person_id:string}|undefined;
+      return anonymous?{personId:anonymous.person_id,how:"anonymous_label"}:null;
+    }
     const other = source === "twitch" ? "donationalerts" : "twitch";
     const rows = this.db
       .prepare(
@@ -789,9 +938,9 @@ export class StreamStore {
     return (
       this.db
         .prepare(
-          "SELECT DISTINCT i.person_id FROM identities i LEFT JOIN identity_aliases a ON a.identity_id = i.id WHERE i.candidate_key = ? OR a.candidate_key = ? ORDER BY i.person_id",
+          "SELECT DISTINCT i.person_id FROM identities i LEFT JOIN identity_aliases a ON a.identity_id = i.id WHERE i.candidate_key = ? OR a.candidate_key = ? UNION SELECT DISTINCT y.person_id FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.match_key=? OR a.match_key=? ORDER BY person_id",
         )
-        .all(candidateKey(name), candidateKey(name)) as { person_id: string }[]
+        .all(candidateKey(name), candidateKey(name), matchKey(name), matchKey(name)) as { person_id: string }[]
     ).map((row) => row.person_id);
   }
 
@@ -825,10 +974,10 @@ export class StreamStore {
     ).source;
     const session = this.db
       .prepare(
-        `SELECT id FROM sessions WHERE (account_id = ? OR kind = 'manual' OR ? = 'donationalerts')
-      AND started_at_ms <= ? AND (ended_at_ms IS NULL OR ended_at_ms > ?) ORDER BY started_at_ms DESC LIMIT 1`,
+        `SELECT id FROM sessions WHERE (account_id = ? OR kind = 'manual' OR ? = 'donationalerts' OR EXISTS(SELECT 1 FROM platform_streams p WHERE p.session_id=sessions.id AND p.account_id=? AND p.platform=? AND p.started_at_ms<=? AND (p.ended_at_ms IS NULL OR p.ended_at_ms>?)))
+      AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id) AND started_at_ms <= ? AND (ended_at_ms IS NULL OR ended_at_ms > ?) ORDER BY kind='platform' DESC, started_at_ms DESC LIMIT 1`,
       )
-      .get(accountId, source, atMs, atMs) as { id: string } | undefined;
+      .get(accountId, source, accountId, source, atMs, atMs, atMs, atMs) as { id: string } | undefined;
     if (session)
       this.db
         .prepare("INSERT OR REPLACE INTO event_sessions VALUES (?, ?)")
@@ -850,21 +999,35 @@ export class StreamStore {
           "SELECT id FROM sessions WHERE account_id = ? AND stream_id = ?",
         )
         .get(accountId, streamId) as { id: string } | undefined;
-      if (prior) return prior.id;
-      this.db
+      if (prior) {
+        if (kind === "platform") this.db.prepare(`
+          INSERT OR IGNORE INTO platform_streams
+            (platform,account_id,external_id,session_id,started_at_ms,ended_at_ms,last_observed_at_ms)
+          SELECT 'twitch',account_id,stream_id,id,started_at_ms,ended_at_ms,recording_started_at_ms
+          FROM sessions WHERE id=? AND kind='platform'
+        `).run(prior.id);
+        return prior.id;
+      }
+      const closed = this.db
         .prepare(
           "UPDATE sessions SET ended_at_ms = ?, end_quality = 'estimated' WHERE account_id = ? AND ended_at_ms IS NULL",
         )
         .run(startedAtMs, accountId);
+      if (closed.changes) this.db.prepare("UPDATE platform_streams SET ended_at_ms=? WHERE session_id IN (SELECT id FROM sessions WHERE account_id=? AND ended_at_ms=? AND end_quality='estimated') AND ended_at_ms IS NULL").run(startedAtMs, accountId, startedAtMs);
       const id = randomUUID();
       this.db
         .prepare(
           "INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, NULL, 'unknown')",
         )
         .run(id, accountId, streamId, kind, startedAtMs, nowMs);
+      if (kind === "platform") this.db.prepare(`
+        INSERT OR IGNORE INTO platform_streams
+          (platform,account_id,external_id,session_id,started_at_ms,ended_at_ms,last_observed_at_ms)
+        VALUES ('twitch',?,?,?, ?,NULL,?)
+      `).run(accountId, streamId, id, startedAtMs, nowMs);
       const events = this.db
         .prepare(
-          "SELECT id, account_id, occurred_at_ms FROM events WHERE (account_id = ? OR source='donationalerts' OR ?='manual') AND occurred_at_ms >= ?",
+          "SELECT id, account_id, occurred_at_ms FROM effective_events WHERE (account_id = ? OR source='donationalerts' OR ?='manual') AND occurred_at_ms >= ?",
         )
         .all(accountId, kind, startedAtMs) as {
         id: string;
@@ -879,27 +1042,350 @@ export class StreamStore {
 
   endSession(id: string, atMs: number, quality = "observed"): void {
     assertTimestamp(atMs);
-    this.db.transaction(() => {
-      this.db
-        .prepare(
-          "UPDATE sessions SET ended_at_ms = ?, end_quality = ? WHERE id = ? AND ended_at_ms IS NULL AND started_at_ms <= ?",
-        )
-        .run(atMs, quality, id, atMs);
-      this.db
-        .prepare(
-          `DELETE FROM event_sessions WHERE session_id = ? AND event_id IN (SELECT id FROM events WHERE occurred_at_ms >= ?)`,
-        )
-        .run(id, atMs);
+    this.db.transaction(() => this.endSessionInTransaction(id, atMs, quality)).immediate();
+  }
+
+  private endSessionInTransaction(id: string, atMs: number, quality: string): void {
+    const ended = this.db
+      .prepare(
+        "UPDATE sessions SET ended_at_ms = ?, end_quality = ? WHERE id = ? AND ended_at_ms IS NULL AND started_at_ms <= ?",
+      )
+      .run(atMs, quality, id, atMs);
+    if (!ended.changes) return;
+    this.db.prepare("UPDATE platform_streams SET ended_at_ms=(SELECT ended_at_ms FROM sessions WHERE id=?) WHERE session_id=? AND ended_at_ms IS NULL").run(id, id);
+    this.db
+      .prepare(
+        `DELETE FROM event_sessions WHERE session_id = ? AND event_id IN (SELECT id FROM effective_events WHERE occurred_at_ms >= ?)`,
+      )
+      .run(id, atMs);
+  }
+
+  deleteManualSession(id: string, atMs: number): void {
+    assertTimestamp(atMs);
+    this.db.transaction(()=>{
+      const session=this.db.prepare("SELECT kind,started_at_ms FROM sessions WHERE id=?").get(id) as {kind:string;started_at_ms:number}|undefined;
+      if(!session)throw new Error("SESSION_NOT_FOUND");
+      if(session.kind!=="manual" || this.db.prepare("SELECT 1 FROM platform_streams WHERE session_id=?").get(id))throw new Error("PLATFORM_SESSION_MANAGED_AUTOMATICALLY");
+      if(this.db.prepare("SELECT 1 FROM session_tombstones WHERE session_id=?").get(id))return;
+      const events=this.db.prepare("SELECT e.id,e.source,e.account_id,e.occurred_at_ms FROM effective_events e JOIN event_sessions es ON es.event_id=e.id WHERE es.session_id=?").all(id) as {id:string;source:string;account_id:string;occurred_at_ms:number|null}[];
+      this.endSessionInTransaction(id,Math.max(atMs,session.started_at_ms),"manual");
+      this.db.prepare("INSERT INTO session_tombstones VALUES (?,?,?)").run(id,atMs,JSON.stringify(events.map(event=>event.id)));
+      this.db.prepare("DELETE FROM event_sessions WHERE session_id=?").run(id);
+      for(const event of events){
+        if(event.occurred_at_ms===null)continue;
+        const candidates=this.db.prepare(`SELECT DISTINCT ps.session_id FROM platform_streams ps JOIN sessions s ON s.id=ps.session_id
+          WHERE s.kind='platform' AND ps.started_at_ms<=?
+           AND (ps.ended_at_ms IS NULL OR ps.ended_at_ms>?) AND (s.ended_at_ms IS NULL OR s.ended_at_ms>?)
+           AND (?='donationalerts' OR (ps.platform=? AND ps.account_id=?)) LIMIT 2`).all(event.occurred_at_ms,event.occurred_at_ms,event.occurred_at_ms,event.source,event.source,event.account_id) as {session_id:string}[];
+        if(candidates.length===1)this.db.prepare("INSERT INTO event_sessions VALUES (?,?)").run(event.id,candidates[0]!.session_id);
+      }
     }).immediate();
   }
 
   sessions(): Record<string, unknown>[] {
-    return this.db
+    const rows = this.db
       .prepare(
-        `SELECT s.*, (SELECT count(*) FROM event_sessions e WHERE e.session_id=s.id) event_count
-      FROM sessions s ORDER BY started_at_ms DESC LIMIT 100`,
+        `SELECT s.*,
+          (SELECT count(*) FROM event_sessions es WHERE es.session_id=s.id) AS event_count,
+          (SELECT title FROM platform_streams p WHERE p.session_id=s.id AND trim(title)<>'' ORDER BY last_observed_at_ms DESC,platform,account_id,external_id LIMIT 1) AS primaryTitle,
+          (SELECT json_group_array(platform) FROM (SELECT DISTINCT platform FROM platform_streams p WHERE p.session_id=s.id ORDER BY platform)) AS platforms_json,
+          (SELECT json_group_array(json_object('platform',platform,'url',url)) FROM (SELECT DISTINCT platform,url FROM platform_streams p WHERE p.session_id=s.id AND url IS NOT NULL ORDER BY platform,url)) AS urls_json
+        FROM sessions s WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) ORDER BY started_at_ms DESC,s.id DESC LIMIT 100`,
       )
       .all() as Record<string, unknown>[];
+    return rows.map(({platforms_json, urls_json, ...row}) => ({
+      ...row,
+      platforms: JSON.parse(platforms_json as string) as string[],
+      confirmedUrls: (JSON.parse(urls_json as string) as {platform:"twitch"|"youtube";url:string}[])
+        .filter(link=>this.validPlatformStreamUrl(link.platform,link.url)),
+    }));
+  }
+
+  platformStreams(sessionId: string): Record<string, unknown>[] {
+    return this.db.prepare(`
+      SELECT * FROM platform_streams WHERE session_id=?
+      ORDER BY platform,account_id,external_id
+    `).all(sessionId) as Record<string, unknown>[];
+  }
+
+  platformMissing(platform: "twitch" | "youtube", accountId: string, presentIds: string[], observedAtMs: number): void {
+    if (
+      (platform !== "twitch" && platform !== "youtube") ||
+      typeof accountId !== "string" || !accountId.trim() || accountId.length > 256 ||
+      !Array.isArray(presentIds) || presentIds.length > 1000 ||
+      presentIds.some(id => typeof id !== "string" || !id.trim() || id.length > 256) ||
+      new Set(presentIds).size !== presentIds.length
+    ) throw new Error("INVALID_PLATFORM_MISSING");
+    assertTimestamp(observedAtMs);
+    const present = new Set(presentIds);
+    this.db.transaction(() => {
+      const open = this.db.prepare(`
+        SELECT external_id,session_id,started_at_ms,last_observed_at_ms,offline_checks,first_missing_at_ms
+        FROM platform_streams WHERE platform=? AND account_id=? AND ended_at_ms IS NULL
+      `).all(platform, accountId) as {external_id:string;session_id:string;started_at_ms:number;last_observed_at_ms:number;offline_checks:number;first_missing_at_ms:number|null}[];
+      const affected = new Set<string>();
+      for (const link of open) {
+        if (present.has(link.external_id) || observedAtMs <= link.last_observed_at_ms) continue;
+        const firstMissingAtMs = link.first_missing_at_ms ?? observedAtMs;
+        const checks = link.offline_checks + 1;
+        this.db.prepare(`
+          UPDATE platform_streams SET last_observed_at_ms=?,offline_checks=?,first_missing_at_ms=?
+          WHERE platform=? AND account_id=? AND external_id=? AND ended_at_ms IS NULL AND last_observed_at_ms<?
+        `).run(observedAtMs, checks, firstMissingAtMs, platform, accountId, link.external_id, observedAtMs);
+        if (checks >= 2) {
+          this.db.prepare(`
+            UPDATE platform_streams SET ended_at_ms=?
+            WHERE platform=? AND account_id=? AND external_id=? AND ended_at_ms IS NULL
+          `).run(firstMissingAtMs, platform, accountId, link.external_id);
+          affected.add(link.session_id);
+        }
+      }
+      for (const sessionId of affected) {
+        const state = this.db.prepare(`
+          SELECT MAX(ended_at_ms) AS ended_at_ms,
+            SUM(CASE WHEN ended_at_ms IS NULL THEN 1 ELSE 0 END) AS open_links
+          FROM platform_streams WHERE session_id=?
+        `).get(sessionId) as {ended_at_ms:number|null;open_links:number};
+        if (state.open_links === 0 && state.ended_at_ms !== null)
+          this.endSessionInTransaction(sessionId, state.ended_at_ms, "estimated");
+      }
+    }).immediate();
+  }
+
+  attachPlatformStream(
+    sessionId: string,
+    platform: "twitch" | "youtube",
+    accountId: string,
+    externalId: string,
+    startedAtMs: number,
+    observedAtMs: number,
+    url: string | null,
+    title: string,
+  ): void {
+    if (typeof sessionId !== "string" || !sessionId.trim() || sessionId.length > 256)
+      throw new Error("INVALID_PLATFORM_STREAM");
+    this.validatePlatformStreamInput(platform, accountId, externalId, startedAtMs, observedAtMs, url, title);
+    this.db.transaction(() => this.attachPlatformStreamInTransaction(sessionId, platform, accountId, externalId, startedAtMs, observedAtMs, url, title)).immediate();
+  }
+
+  observePlatformStream(
+    platform: "twitch" | "youtube",
+    accountId: string,
+    externalId: string,
+    startedAtMs: number,
+    observedAtMs: number,
+    url: string | null,
+    title: string,
+    confirmedPresentIds?: string[],
+  ): string | null {
+    this.validatePlatformStreamInput(platform, accountId, externalId, startedAtMs, observedAtMs, url, title);
+    if (confirmedPresentIds !== undefined && (!Array.isArray(confirmedPresentIds) ||
+      confirmedPresentIds.length > 1000 || new Set(confirmedPresentIds).size !== confirmedPresentIds.length ||
+      !confirmedPresentIds.includes(externalId) ||
+      confirmedPresentIds.some(id=>typeof id!=="string" || !id.trim() || id.length>256)))
+      throw new Error("INVALID_PLATFORM_STREAM");
+    return this.db.transaction(() => {
+      const existing = this.db.prepare(`
+        SELECT session_id,ended_at_ms,last_observed_at_ms,first_missing_at_ms
+        FROM platform_streams WHERE platform=? AND account_id=? AND external_id=?
+      `).get(platform, accountId, externalId) as {session_id:string;ended_at_ms:number|null;last_observed_at_ms:number;first_missing_at_ms:number|null} | undefined;
+      if (existing?.ended_at_ms !== null && existing !== undefined) return null;
+
+      let sessionId = existing?.session_id;
+      if (sessionId === undefined) {
+        // YouTube supports concurrent broadcasts. A new ID alone cannot prove
+        // another broadcast ended; only a complete confirmed set can do that.
+        const confirmed = confirmedPresentIds ?? (platform === "twitch" ? [externalId] : undefined);
+        if (confirmed && !this.supersedeProviderLinks(platform, accountId, externalId, startedAtMs, observedAtMs, confirmed)) return null;
+        const active = this.db.prepare(`
+          SELECT s.id,s.started_at_ms FROM sessions s
+          WHERE s.kind='platform' AND s.ended_at_ms IS NULL
+            AND EXISTS (SELECT 1 FROM platform_streams p WHERE p.session_id=s.id AND p.ended_at_ms IS NULL)
+          ORDER BY s.started_at_ms DESC,s.id DESC LIMIT 1
+        `).get() as {id:string;started_at_ms:number} | undefined;
+        if (startedAtMs <= observedAtMs && active && observedAtMs >= active.started_at_ms)
+          sessionId = active.id;
+        else {
+          // Do not close or reuse an unrelated open session for this provider account.
+          const occupied = this.db.prepare("SELECT 1 FROM sessions WHERE account_id=? AND ended_at_ms IS NULL LIMIT 1").get(accountId);
+          const streamId = `${platform}:${externalId}`;
+          const prior = this.db.prepare("SELECT 1 FROM sessions WHERE account_id=? AND stream_id=? LIMIT 1").get(accountId, streamId);
+          if (occupied || prior) return null;
+          sessionId = randomUUID();
+          this.db.prepare("INSERT INTO sessions VALUES (?,?,?,?,?,?,NULL,'unknown')")
+            .run(sessionId, accountId, streamId, "platform", startedAtMs, observedAtMs);
+        }
+      }
+      this.attachPlatformStreamInTransaction(sessionId, platform, accountId, externalId, startedAtMs, observedAtMs, url, title);
+      this.backfillPlatformEvents(sessionId, observedAtMs);
+      return sessionId;
+    }).immediate();
+  }
+
+  private supersedeProviderLinks(
+    platform: "twitch" | "youtube", accountId: string, externalId: string,
+    startedAtMs: number, observedAtMs: number,
+    confirmedPresentIds: string[],
+  ): boolean {
+    const oldLinks = this.db.prepare(`
+      SELECT external_id,session_id,started_at_ms,last_observed_at_ms
+      FROM platform_streams
+      WHERE platform=? AND account_id=? AND external_id<>? AND ended_at_ms IS NULL
+        AND external_id NOT IN (SELECT value FROM json_each(?))
+    `).all(platform, accountId, externalId, JSON.stringify(confirmedPresentIds)) as {external_id:string;session_id:string;started_at_ms:number;last_observed_at_ms:number}[];
+    if (oldLinks.some(link => observedAtMs <= link.last_observed_at_ms)) return false;
+    const affected = new Set<string>();
+    for (const link of oldLinks) {
+      const endAtMs = Math.max(startedAtMs, link.started_at_ms, link.last_observed_at_ms);
+      this.db.prepare(`
+        UPDATE platform_streams SET ended_at_ms=?
+        WHERE platform=? AND account_id=? AND external_id=? AND ended_at_ms IS NULL
+      `).run(endAtMs, platform, accountId, link.external_id);
+      affected.add(link.session_id);
+    }
+    for (const oldSessionId of affected) {
+      const state = this.db.prepare(`
+        SELECT MAX(ended_at_ms) AS ended_at_ms,
+          SUM(CASE WHEN ended_at_ms IS NULL THEN 1 ELSE 0 END) AS open_links
+        FROM platform_streams WHERE session_id=?
+      `).get(oldSessionId) as {ended_at_ms:number|null;open_links:number};
+      if (state.open_links === 0 && state.ended_at_ms !== null)
+        this.endSessionInTransaction(oldSessionId, state.ended_at_ms, "estimated");
+    }
+    return true;
+  }
+
+  private validatePlatformStreamInput(
+    platform: "twitch" | "youtube", accountId: string, externalId: string,
+    startedAtMs: number, observedAtMs: number, url: string | null, title: string,
+  ): void {
+    if (
+      (platform !== "twitch" && platform !== "youtube") ||
+      typeof accountId !== "string" || !accountId.trim() || accountId.length > 256 ||
+      typeof externalId !== "string" || !externalId.trim() || externalId.length > 256 ||
+      typeof title !== "string" || title.length > 1000 ||
+      (url !== null && (typeof url !== "string" || url.length > 2048))
+    ) throw new Error("INVALID_PLATFORM_STREAM");
+    assertTimestamp(startedAtMs);
+    assertTimestamp(observedAtMs);
+    if (observedAtMs < startedAtMs || (url !== null && !this.validPlatformStreamUrl(platform, url)))
+      throw new Error("INVALID_PLATFORM_STREAM");
+  }
+
+  private attachPlatformStreamInTransaction(
+    sessionId: string, platform: "twitch" | "youtube", accountId: string,
+    externalId: string, startedAtMs: number, observedAtMs: number, url: string | null, title: string,
+  ): void {
+    const existing = this.db.prepare(`
+      SELECT session_id,ended_at_ms,last_observed_at_ms,first_missing_at_ms
+      FROM platform_streams WHERE platform=? AND account_id=? AND external_id=?
+    `).get(platform, accountId, externalId) as {session_id:string;ended_at_ms:number|null;last_observed_at_ms:number;first_missing_at_ms:number|null} | undefined;
+    if (existing && (existing.session_id !== sessionId || existing.ended_at_ms !== null))
+      throw new Error("PLATFORM_STREAM_CONFLICT");
+    const session = this.db.prepare("SELECT kind,ended_at_ms FROM sessions WHERE id=?")
+      .get(sessionId) as {kind:string;ended_at_ms:number|null} | undefined;
+    if (!session || session.kind !== "platform" || session.ended_at_ms !== null)
+      throw new Error(existing ? "PLATFORM_STREAM_CONFLICT" : "PLATFORM_STREAM_SESSION");
+    if (existing) {
+      if (observedAtMs < existing.last_observed_at_ms ||
+        (existing.first_missing_at_ms !== null && observedAtMs < existing.first_missing_at_ms)) return;
+      this.db.prepare(`
+        UPDATE platform_streams SET
+          last_observed_at_ms=MAX(last_observed_at_ms,?),
+          offline_checks=0,first_missing_at_ms=NULL,
+          url=CASE WHEN ?>=last_observed_at_ms THEN ? ELSE url END,
+          title=CASE WHEN ?>=last_observed_at_ms THEN ? ELSE title END
+        WHERE platform=? AND account_id=? AND external_id=?
+      `).run(observedAtMs, observedAtMs, url, observedAtMs, title, platform, accountId, externalId);
+    } else {
+      this.db.prepare(`
+        INSERT INTO platform_streams
+          (platform,account_id,external_id,session_id,started_at_ms,last_observed_at_ms,url,title)
+        VALUES (?,?,?,?,?,?,?,?)
+      `).run(platform, accountId, externalId, sessionId, startedAtMs, observedAtMs, url, title);
+    }
+    this.db.prepare(`
+      UPDATE sessions SET started_at_ms=MIN(started_at_ms,(
+        SELECT MIN(started_at_ms) FROM platform_streams WHERE session_id=?
+      )) WHERE id=?
+    `).run(sessionId, sessionId);
+  }
+
+  private backfillPlatformEvents(sessionId: string, observedAtMs: number): void {
+    // Events already assigned to a manual or other session are never stolen.
+    // This schema currently has Twitch and donation-alert events; YouTube chat is stored separately.
+    this.db.prepare(`
+      INSERT OR IGNORE INTO event_sessions(event_id,session_id)
+      SELECT e.id,? FROM effective_events e JOIN sessions s ON s.id=?
+      WHERE e.occurred_at_ms IS NOT NULL
+        AND e.occurred_at_ms>=s.recording_started_at_ms AND e.occurred_at_ms<=?
+        AND ((e.source='twitch' AND EXISTS (
+          SELECT 1 FROM platform_streams ps WHERE ps.session_id=s.id
+            AND ps.platform='twitch' AND ps.account_id=e.account_id
+        )) OR e.source='donationalerts')
+        AND NOT EXISTS (SELECT 1 FROM event_sessions es WHERE es.event_id=e.id)
+        AND NOT EXISTS (
+          SELECT 1 FROM sessions m WHERE m.kind='manual' AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=m.id) AND m.started_at_ms<=e.occurred_at_ms
+            AND (m.ended_at_ms IS NULL OR m.ended_at_ms>e.occurred_at_ms)
+        )
+    `).run(sessionId, sessionId, observedAtMs);
+    // EventSub can arrive before Helix discovers the stream. Category facts
+    // may precede recording coverage, but must belong to a confirmed Twitch
+    // broadcast. Do not fabricate viewers or take events from another session.
+    this.db.prepare(`
+      INSERT INTO stream_samples(session_id,observed_at_ms,category_id,category_name,title,twitch_viewers,youtube_viewers)
+      SELECT ?,e.occurred_at_ms,json_extract(e.payload_json,'$.categoryId'),
+        json_extract(e.payload_json,'$.categoryName'),json_extract(e.payload_json,'$.title'),NULL,NULL
+      FROM platform_streams ps JOIN events e ON e.account_id=ps.account_id
+        AND e.source='twitch' AND e.type='channel.update'
+      WHERE ps.session_id=? AND ps.platform='twitch' AND e.occurred_at_ms<=?
+        AND e.occurred_at_ms>=ps.started_at_ms
+        AND (ps.ended_at_ms IS NULL OR e.occurred_at_ms<ps.ended_at_ms)
+        AND NOT EXISTS (SELECT 1 FROM event_sessions es WHERE es.event_id=e.id AND es.session_id<>?)
+        AND json_type(e.payload_json,'$.categoryId')='text'
+        AND json_type(e.payload_json,'$.categoryName')='text'
+        AND json_type(e.payload_json,'$.title')='text'
+        AND length(json_extract(e.payload_json,'$.categoryId'))<=1000
+        AND length(json_extract(e.payload_json,'$.categoryName'))<=1000
+        AND length(json_extract(e.payload_json,'$.title'))<=1000
+      ORDER BY e.occurred_at_ms,e.received_at_ms,e.id
+      ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET
+        category_id=excluded.category_id,category_name=excluded.category_name,title=excluded.title
+    `).run(sessionId,sessionId,observedAtMs,sessionId);
+  }
+
+  private validPlatformStreamUrl(platform: "twitch" | "youtube", value: string): boolean {
+    try {
+      const url = new URL(value);
+      if (url.protocol !== "https:" || url.username || url.password || url.port || url.hash) return false;
+      if (platform === "youtube")
+        return (url.hostname === "youtube.com" || url.hostname === "www.youtube.com") &&
+          url.pathname === "/watch" && Boolean(url.searchParams.get("v"));
+      return (url.hostname === "twitch.tv" || url.hostname === "www.twitch.tv") &&
+        /^\/[A-Za-z0-9_]+(?:\/.*)?$/.test(url.pathname);
+    } catch { return false; }
+  }
+
+  ingestLiveDonation(event: EventInput, expectedSessionId: string, allowUnknownTime = false): ReturnType<StreamStore['ingest']>|null {
+    if(event.source!=="donationalerts" || event.type!=="donation")throw new Error("INVALID_LIVE_DONATION");
+    return this.db.transaction(()=>{
+      const active=this.activeLogicalStream() as {id:string;started_at_ms:number}|null;
+      if(!active || active.id!==expectedSessionId || event.receivedAtMs<active.started_at_ms)return null;
+      if(event.occurredAtMs===null ? !allowUnknownTime : event.occurredAtMs<active.started_at_ms)return null;
+      return this.ingest(event);
+    }).immediate();
+  }
+
+  activeLogicalStream(): Record<string, unknown> | null {
+    return (this.db.prepare(`
+      SELECT s.* FROM sessions s
+      WHERE s.kind='platform' AND s.ended_at_ms IS NULL
+        AND EXISTS (
+          SELECT 1 FROM platform_streams p
+          WHERE p.session_id=s.id AND p.ended_at_ms IS NULL
+        )
+      ORDER BY s.started_at_ms DESC,s.id DESC LIMIT 1
+    `).get() as Record<string, unknown> | undefined) ?? null;
   }
 
   recordPoll(sessionId: string, accountId: string, poll: PresencePoll): void {
@@ -998,32 +1484,32 @@ export class StreamStore {
     return this.db
       .prepare(
         `SELECT p.id, p.display_name, p.revision,
-          coalesce(ec.event_count, 0) AS event_count,
-          (SELECT group_concat(DISTINCT i2.source) FROM identities i2 WHERE i2.person_id=p.id) AS sources,
+          coalesce(ec.event_count, 0) + (SELECT count(*) FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE y.person_id=p.id) AS event_count,
+          (SELECT group_concat(DISTINCT source) FROM (SELECT source FROM identities WHERE person_id=p.id UNION ALL SELECT 'youtube' AS source FROM youtube_identities WHERE person_id=p.id)) AS sources,
           CASE WHEN EXISTS(
             SELECT 1 FROM identities ib
             WHERE ib.person_id=p.id AND ib.match_key IN (SELECT value FROM json_each(?))
-          ) THEN 1 ELSE 0 END AS is_bot
+          ) OR EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?)))) THEN 1 ELSE 0 END AS is_bot
         FROM persons p
         LEFT JOIN (
           SELECT i.person_id, count(e.id) AS event_count
           FROM identities i
-          LEFT JOIN events e ON e.identity_id = i.id
+          LEFT JOIN effective_events e ON e.identity_id = i.id
           GROUP BY i.person_id
         ) ec ON ec.person_id = p.id
-        WHERE EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id)
+        WHERE (EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id) OR EXISTS(SELECT 1 FROM youtube_identities y WHERE y.person_id=p.id) OR (NOT EXISTS(SELECT 1 FROM person_merges m WHERE m.source_person_id=p.id AND m.undone_at_ms IS NULL) AND (EXISTS(SELECT 1 FROM person_notes n WHERE n.person_id=p.id) OR EXISTS(SELECT 1 FROM person_tags t WHERE t.person_id=p.id) OR EXISTS(SELECT 1 FROM person_preferences pref WHERE pref.person_id=p.id))))
           AND (
             ? = '' OR instr(lower(p.display_name), lower(?)) > 0
             OR EXISTS(
               SELECT 1 FROM identities i
               LEFT JOIN identity_aliases a ON a.identity_id=i.id
               WHERE i.person_id=p.id AND instr(a.candidate_key, ?) > 0
-            )
+            ) OR EXISTS(SELECT 1 FROM youtube_identities y JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND instr(a.match_key,?)>0)
           )
         ORDER BY event_count DESC, p.display_name
         LIMIT 500`,
       )
-      .all(botJson, term, term, key) as Record<string, unknown>[];
+      .all(botJson, botJson, botJson, term, term, key, key) as Record<string, unknown>[];
   }
 
   person(id: string): Record<string, unknown> {
@@ -1034,13 +1520,13 @@ export class StreamStore {
     return {
       ...row,
       identities: this.db
-        .prepare("SELECT * FROM identities WHERE person_id=?")
-        .all(id),
+        .prepare("SELECT * FROM identities WHERE person_id=? UNION ALL SELECT id,'youtube' AS source,account_id,external_id,display_name,match_key AS candidate_key,person_id,match_key FROM youtube_identities WHERE person_id=?")
+        .all(id,id),
       aliases: this.db
         .prepare(
-          "SELECT a.* FROM identity_aliases a JOIN identities i ON i.id=a.identity_id WHERE i.person_id=?",
+          "SELECT a.* FROM identity_aliases a JOIN identities i ON i.id=a.identity_id WHERE i.person_id=? UNION ALL SELECT a.identity_id,a.name,a.match_key AS candidate_key,a.first_seen_ms,a.last_seen_ms FROM youtube_identity_aliases a JOIN youtube_identities y ON y.id=a.identity_id WHERE y.person_id=?",
         )
-        .all(id),
+        .all(id,id),
       events: this.events(undefined, id),
     };
   }
@@ -1055,9 +1541,9 @@ export class StreamStore {
     if (toMs !== undefined) assertTimestamp(toMs);
     if (fromMs !== undefined && toMs !== undefined && toMs <= fromMs)
       throw new Error("INVALID_EVENT_WINDOW");
-    return this.db
+    const events: Record<string,unknown>[] = this.db
       .prepare(
-        `SELECT e.*, i.display_name, i.person_id FROM events e LEFT JOIN identities i ON i.id=e.identity_id
+        `SELECT e.*, i.display_name, i.person_id FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id
       WHERE (? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?)) AND (? IS NULL OR i.person_id=?)
       AND (? IS NULL OR e.occurred_at_ms>=?) AND (? IS NULL OR e.occurred_at_ms<?)
       ORDER BY coalesce(e.occurred_at_ms,e.received_at_ms) DESC, e.id DESC LIMIT 200`,
@@ -1080,6 +1566,21 @@ export class StreamStore {
           payload_json: undefined,
         };
       });
+    const yt = this.db.prepare(`SELECT m.*,y.person_id,y.display_name,
+      (SELECT s.id FROM sessions s JOIN platform_streams ps ON ps.session_id=s.id
+       WHERE ps.platform='youtube' AND ps.account_id=m.account_id
+       AND m.published_at_ms>=ps.started_at_ms AND (ps.ended_at_ms IS NULL OR m.published_at_ms<ps.ended_at_ms)
+       ORDER BY s.started_at_ms DESC LIMIT 1) AS session_id
+      FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id
+      WHERE (? IS NULL OR y.person_id=?) AND (? IS NULL OR m.published_at_ms>=?) AND (? IS NULL OR m.published_at_ms<?)
+      AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
+      AND (? IS NULL OR session_id=?)
+      ORDER BY m.published_at_ms DESC,m.id DESC LIMIT 200`).all(personId??null,personId??null,fromMs??null,fromMs??null,toMs??null,toMs??null,sessionId??null,sessionId??null) as any[];
+    return [...events,...yt.filter(row=>!sessionId||row.session_id===sessionId).map(row=>({
+      id:`youtube:${row.account_id}:${row.id}`,type:'chat.message',source:'youtube',account_id:row.account_id,
+      display_name:row.display_name,person_id:row.person_id,session_id:row.session_id,occurred_at_ms:row.published_at_ms,received_at_ms:row.published_at_ms,
+      time_quality:'provider',payload:{text:JSON.parse(row.payload_json).snippet.displayMessage??'',originChannelId:row.account_id},
+    }))].sort((a,b)=>Number(b.occurred_at_ms??b.received_at_ms)-Number(a.occurred_at_ms??a.received_at_ms)||String(b.id).localeCompare(String(a.id))).slice(0,200);
   }
 
   summary(
@@ -1096,8 +1597,8 @@ export class StreamStore {
     const counts = this.db
       .prepare(
         `SELECT
-        (SELECT count(*) FROM events e WHERE ${inSession}) AS event_count,
-        (SELECT count(*) FROM events e
+        (SELECT count(*) FROM effective_events e WHERE ${inSession}) AS event_count,
+        (SELECT count(*) FROM effective_events e
           LEFT JOIN identities i ON i.id = e.identity_id
           WHERE ${inSession}
           AND e.type = 'chat.message'
@@ -1110,18 +1611,31 @@ export class StreamStore {
             OR i.match_key NOT IN (SELECT value FROM json_each(?))
           )
         ) AS messages,
-        (SELECT count(*) FROM events e LEFT JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))) AS donations`,
+        (SELECT count(*) FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))) AS donations`,
       )
       .get(sid, sid, sid, sid, botJson, sid, sid, botJson) as {
       event_count: number;
       messages: number;
       donations: number;
     };
+    const youtubeParticipants=this.db.prepare(`SELECT y.person_id,y.display_name,count(*) AS messages
+      FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id
+      WHERE json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
+        AND y.is_owner=0 AND y.external_id<>y.account_id AND y.match_key NOT IN(SELECT value FROM json_each(?))
+        AND (? IS NULL OR EXISTS(SELECT 1 FROM platform_streams ps WHERE ps.session_id=? AND ps.platform='youtube' AND ps.account_id=m.account_id AND m.published_at_ms>=ps.started_at_ms AND (ps.ended_at_ms IS NULL OR m.published_at_ms<ps.ended_at_ms)))
+      GROUP BY y.person_id`).all(botJson,sid,sid) as {person_id:string;display_name:string;messages:number}[];
+    const participants=this.db.prepare(`SELECT i.person_id,i.display_name,count(*) AS messages FROM effective_events e JOIN identities i ON i.id=e.identity_id
+      WHERE ${inSession} AND e.type='chat.message' AND i.match_key NOT IN(SELECT value FROM json_each(?))
+        AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id)
+      GROUP BY i.person_id`).all(sid,sid,botJson) as {person_id:string;display_name:string;messages:number}[];
+    const combinedParticipants=new Map(participants.map(row=>[row.person_id,{personId:row.person_id,name:row.display_name,messages:row.messages}]));
+    for(const row of youtubeParticipants){const previous=combinedParticipants.get(row.person_id);if(previous)previous.messages+=row.messages;else combinedParticipants.set(row.person_id,{personId:row.person_id,name:row.display_name,messages:row.messages});}
+    const youtubeMessageCount=youtubeParticipants.reduce((sum,row)=>sum+row.messages,0);
     const donationRows = this.db
       .prepare(
         `SELECT json_extract(e.payload_json, '$.currency') AS currency,
                 json_extract(e.payload_json, '$.amountMinor') AS amount_minor
-         FROM events e LEFT JOIN identities i ON i.id=e.identity_id
+         FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id
          WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))
            AND json_extract(e.payload_json, '$.currency') IS NOT NULL
            AND json_extract(e.payload_json, '$.amountMinor') IS NOT NULL`,
@@ -1156,12 +1670,12 @@ export class StreamStore {
     const unique = this.db
       .prepare(
         `SELECT
-          (SELECT count(DISTINCT i.person_id) FROM events e
+          (SELECT count(DISTINCT i.person_id) FROM effective_events e
             JOIN identities i ON i.id = e.identity_id
             WHERE ${inSession}
               AND i.match_key NOT IN (SELECT value FROM json_each(?))
           ) AS unique_persons_events,
-          (SELECT count(DISTINCT i.id) FROM events e
+          (SELECT count(DISTINCT i.id) FROM effective_events e
             JOIN identities i ON i.id = e.identity_id
             WHERE ${inSession}
               AND i.match_key NOT IN (SELECT value FROM json_each(?))
@@ -1196,7 +1710,7 @@ export class StreamStore {
         const durationMin = sessionDurationMs / 60_000;
         messagesPerMinuteOfSession =
           durationMin > 0
-            ? Math.round((counts.messages / durationMin) * 1000) / 1000
+            ? Math.round(((counts.messages + youtubeMessageCount) / durationMin) * 1000) / 1000
             : null;
         const cov = this.sessionCoverage(sessionId, fromMs, toMs);
         coverage = cov;
@@ -1228,7 +1742,7 @@ export class StreamStore {
           .prepare(
             `SELECT p.id, p.completed_at_ms FROM presence_polls p
              WHERE p.session_id = ? AND p.status = 'complete'
-             ORDER BY p.completed_at_ms ASC LIMIT 200`,
+             ORDER BY p.completed_at_ms ASC`,
           )
           .all(sessionId) as { id: string; completed_at_ms: number }[];
         const chatterStmt = this.db.prepare(
@@ -1258,15 +1772,18 @@ export class StreamStore {
         }
       ).n;
     }
+    const uniquePeople=new Set((this.db.prepare(`SELECT DISTINCT i.person_id FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND i.match_key NOT IN(SELECT value FROM json_each(?))`).all(sid,sid,botJson) as {person_id:string}[]).map(row=>row.person_id));
+    for(const row of youtubeParticipants)uniquePeople.add(row.person_id);
     return {
-      messages: counts.messages,
+      messages: counts.messages + youtubeMessageCount,
+      participants:[...combinedParticipants.values()].sort((a,b)=>b.messages-a.messages||a.name.localeCompare(b.name)),
       donations: counts.donations,
       totals,
       chatters,
       lastPollAtMs: latest?.completed_at_ms ?? null,
-      events: counts.event_count,
+      events: counts.event_count + youtubeMessageCount,
       excludedBots: botKeys.length,
-      uniquePersons: unique.unique_persons_events,
+      uniquePersons: uniquePeople.size,
       uniqueIdentities: unique.unique_identities_events,
       uniquePersonsObserved,
       uniqueIdentitiesObserved,
@@ -1360,9 +1877,9 @@ export class StreamStore {
     return this.db.transaction(() => {
       const all = this.db
         .prepare(
-          `SELECT id, person_id AS personId FROM identities WHERE id IN (${ids.map(() => "?").join(",")}) ORDER BY id`,
+          `SELECT id, person_id AS personId FROM identities WHERE id IN (${ids.map(() => "?").join(",")}) UNION ALL SELECT id,person_id AS personId FROM youtube_identities WHERE id IN (${ids.map(() => "?").join(",")}) ORDER BY id`,
         )
-        .all(...ids) as Membership[];
+        .all(...ids,...ids) as Membership[];
       if (
         all.length !== ids.length ||
         new Set(all.map((row) => row.personId)).size !== 1
@@ -1375,23 +1892,48 @@ export class StreamStore {
       this.db
         .prepare("INSERT INTO persons VALUES (?, ?, 1)")
         .run(target, name.trim());
-      for (const identity of all)
+      for (const identity of all) {
         this.db
           .prepare("UPDATE identities SET person_id=? WHERE id=?")
           .run(target, identity.id);
+        this.db.prepare("UPDATE youtube_identities SET person_id=? WHERE id=?").run(target,identity.id);
+      }
       this.db
         .prepare("UPDATE persons SET revision=revision+1 WHERE id=?")
         .run(source);
+      const operationId=randomUUID();
       this.db
         .prepare("INSERT INTO membership_operations VALUES (?, ?, ?, ?, ?)")
         .run(
-          randomUUID(),
+          operationId,
           "split",
           JSON.stringify(all),
           JSON.stringify(all.map((row) => ({ ...row, personId: target }))),
           nowMs,
         );
+      this.db.prepare("INSERT INTO split_guards VALUES (?,?,?,?,NULL)").run(operationId,source,target,JSON.stringify({members:this.memberships([source,target]),sourceRevision:this.personRevision(source),targetRevision:this.personRevision(target)}));
       return target;
+    }).immediate();
+  }
+
+  splits(): Record<string,unknown>[] {
+    return this.db.prepare("SELECT g.operation_id AS id,g.source_person_id,g.target_person_id,o.created_at_ms,g.undone_at_ms FROM split_guards g JOIN membership_operations o ON o.id=g.operation_id ORDER BY o.created_at_ms DESC,g.operation_id LIMIT 100").all() as Record<string,unknown>[];
+  }
+
+  undoSplit(id: string, atMs: number): void {
+    assertTimestamp(atMs);
+    this.db.transaction(()=>{
+      const operation=this.db.prepare("SELECT g.*,o.before_json FROM split_guards g JOIN membership_operations o ON o.id=g.operation_id WHERE g.operation_id=? AND o.kind='split'").get(id) as {source_person_id:string;target_person_id:string;expected_json:string;before_json:string;undone_at_ms:number|null}|undefined;
+      if(!operation)throw new Error("SPLIT_NOT_FOUND");
+      if(operation.undone_at_ms!==null)throw new Error("ALREADY_UNDONE");
+      const expected=JSON.parse(operation.expected_json) as {members:Membership[];sourceRevision:number;targetRevision:number};
+      if(this.personRevision(operation.source_person_id)!==expected.sourceRevision || this.personRevision(operation.target_person_id)!==expected.targetRevision || JSON.stringify(this.memberships([operation.source_person_id,operation.target_person_id]))!==JSON.stringify(expected.members))throw new Error("UNDO_CONFLICT");
+      for(const member of JSON.parse(operation.before_json) as Membership[]){
+        this.db.prepare("UPDATE identities SET person_id=? WHERE id=?").run(member.personId,member.id);
+        this.db.prepare("UPDATE youtube_identities SET person_id=? WHERE id=?").run(member.personId,member.id);
+      }
+      this.db.prepare("UPDATE persons SET revision=revision+1 WHERE id IN(?,?)").run(operation.source_person_id,operation.target_person_id);
+      this.db.prepare("UPDATE split_guards SET undone_at_ms=? WHERE operation_id=?").run(atMs,id);
     }).immediate();
   }
 
@@ -1511,11 +2053,16 @@ export class StreamStore {
   private analyticsExclusions(excludedBotLogins: readonly string[] = []): ReadonlySet<string> {
     const keys=new Set(botExclusionSet(["fullrandomname_twitch",...excludedBotLogins]));
     const json=JSON.stringify([...keys]);
-    const rows=this.db.prepare(`SELECT DISTINCT linked.match_key FROM identities linked WHERE EXISTS(
-      SELECT 1 FROM identities i WHERE i.person_id=linked.person_id AND (
-        i.match_key IN(SELECT value FROM json_each(?)) OR (i.source='twitch' AND i.external_id=i.account_id) OR
-        EXISTS(SELECT 1 FROM identity_aliases a WHERE a.identity_id=i.id AND ltrim(a.candidate_key,'@#') IN(SELECT value FROM json_each(?)))
-      ))`).all(json,json) as {match_key:string}[];
+    const rows=this.db.prepare(`WITH excluded_people AS (
+      SELECT i.person_id FROM identities i WHERE i.match_key IN(SELECT value FROM json_each(?))
+       OR (i.source='twitch' AND i.external_id=i.account_id)
+       OR EXISTS(SELECT 1 FROM identity_aliases a WHERE a.identity_id=i.id AND ltrim(a.candidate_key,'@#') IN(SELECT value FROM json_each(?)))
+      UNION
+      SELECT y.person_id FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id
+       WHERE y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))
+    ) SELECT DISTINCT match_key FROM identities WHERE person_id IN(SELECT person_id FROM excluded_people)
+      UNION SELECT DISTINCT match_key FROM youtube_identities WHERE person_id IN(SELECT person_id FROM excluded_people)
+    `).all(json,json,json,json) as {match_key:string}[];
     for(const row of rows)keys.add(row.match_key);
     return keys;
   }
@@ -1525,6 +2072,21 @@ export class StreamStore {
 
   private notBotClause(alias = "i"): string {
     return `${alias}.match_key NOT IN (SELECT value FROM json_each(?))`;
+  }
+  private youtubePersonActivity(personId: string, sessionId?: string, botJson = this.botJson()) {
+    const excluded = this.db.prepare(`SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=? AND (y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))) LIMIT 1`).get(personId,botJson,botJson);
+    if (excluded) return {messageCount:0,estimatedChatMinutes:0,sessionIds:new Set<string>(),firstSeenMs:null};
+    const now = Date.now();
+    const rows = this.db.prepare(`SELECT m.id,m.published_at_ms FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE y.person_id=? AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(personId) as {id:string;published_at_ms:number}[];
+    const matched = this.db.prepare(`SELECT DISTINCT m.id,m.published_at_ms,s.id AS session_id,s.started_at_ms,coalesce(s.ended_at_ms,?) AS ended_at_ms
+      FROM youtube_identities y JOIN youtube_messages m ON m.account_id=y.account_id AND m.author_id=y.external_id
+      JOIN platform_streams ps ON ps.platform='youtube' AND ps.account_id=m.account_id AND m.published_at_ms>=ps.started_at_ms AND (ps.ended_at_ms IS NULL OR m.published_at_ms<ps.ended_at_ms)
+      JOIN sessions s ON s.id=ps.session_id
+      WHERE y.person_id=? AND (? IS NULL OR s.id=?) AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(now,personId,sessionId??null,sessionId??null) as {id:string;published_at_ms:number;session_id:string;started_at_ms:number;ended_at_ms:number}[];
+    const spans = unionSpans(matched.map(row=>({session:row.session_id,kind:'chat_proxy' as const,from:Math.max(row.started_at_ms,row.published_at_ms),to:Math.min(row.ended_at_ms,row.published_at_ms+5*60000)})));
+    return {messageCount:sessionId?new Set(matched.map(row=>row.id)).size:rows.length,
+      estimatedChatMinutes:spans.reduce((total,span)=>total+(span.to-span.from)/60000,0),
+      sessionIds:new Set(matched.map(row=>row.session_id)),firstSeenMs:rows.length?rows.reduce((first,row)=>Math.min(first,row.published_at_ms),Infinity):null};
   }
 
   personStats(
@@ -1537,13 +2099,15 @@ export class StreamStore {
       .get(personId) as { id: string; display_name: string } | undefined;
     if (!person) throw new Error("PERSON_NOT_FOUND");
     const botJson = this.botJson(excludedBotLogins);
+    const excludedPerson=Boolean(this.db.prepare(`SELECT 1 FROM identities WHERE person_id=? AND match_key IN(SELECT value FROM json_each(?)) UNION ALL SELECT 1 FROM youtube_identities WHERE person_id=? AND (is_owner=1 OR external_id=account_id OR match_key IN(SELECT value FROM json_each(?))) LIMIT 1`).get(personId,botJson,personId,botJson));
     const sid = sessionId ?? null;
     const inSession =
       "(? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?))";
-    const messageCount = (
+    const youtube = this.youtubePersonActivity(personId,sessionId,botJson);
+    const messageCount = youtube.messageCount + (
       this.db
         .prepare(
-          `SELECT count(*) AS n FROM events e
+          `SELECT count(*) AS n FROM effective_events e
            JOIN identities i ON i.id = e.identity_id
            WHERE i.person_id = ? AND ${inSession}
              AND e.type = 'chat.message'
@@ -1559,13 +2123,13 @@ export class StreamStore {
       .prepare(
         `SELECT json_extract(e.payload_json, '$.currency') AS currency,
                 json_extract(e.payload_json, '$.amountMinor') AS amount_minor
-         FROM events e
+         FROM effective_events e
          JOIN identities i ON i.id = e.identity_id
-         WHERE i.person_id = ? AND ${inSession} AND e.type = 'donation'
+         WHERE i.person_id = ? AND ${inSession} AND e.type = 'donation' AND ${this.notBotClause('i')}
            AND json_extract(e.payload_json, '$.currency') IS NOT NULL
            AND json_extract(e.payload_json, '$.amountMinor') IS NOT NULL`,
       )
-      .all(personId, sid, sid) as { currency: string; amount_minor: string }[];
+      .all(personId, sid, sid,botJson) as { currency: string; amount_minor: string }[];
     const donationTotals: Record<string, string> = {};
     for (const row of donationRows) {
       donationTotals[row.currency] = (
@@ -1578,7 +2142,7 @@ export class StreamStore {
         `SELECT
            min(coalesce(e.occurred_at_ms, e.received_at_ms)) AS first_event_ms,
            max(coalesce(e.occurred_at_ms, e.received_at_ms)) AS last_event_ms
-         FROM events e
+         FROM effective_events e
          JOIN identities i ON i.id = e.identity_id
          WHERE i.person_id = ? AND ${inSession}`,
       )
@@ -1616,18 +2180,21 @@ export class StreamStore {
     const sessions = this.db
       .prepare(
         `SELECT id, started_at_ms, ended_at_ms FROM sessions
-         ORDER BY started_at_ms DESC LIMIT 50`,
+         WHERE kind='platform' ORDER BY started_at_ms DESC`,
       )
       .all() as {
       id: string;
       started_at_ms: number;
       ended_at_ms: number | null;
     }[];
+    const followedAtMs = (this.db.prepare("SELECT min(e.occurred_at_ms) AS at FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id=? AND e.type='follow'").get(personId) as {at:number|null}).at;
+    let observedBeforeFollowMinutes = 0;
     let observedSum = 0;
     let observedSessions = 0;
+    const attended = new Set(youtube.sessionIds);
     let offsetSum = 0;
     let offsetSessions = 0;
-    for (const session of sessions) {
+    for (const session of excludedPerson?[]:sessions) {
       const fromMs = Math.floor(session.started_at_ms / 60_000) * 60_000;
       const endMs = session.ended_at_ms ?? Date.now();
       let toMs = Math.ceil(endMs / 60_000) * 60_000;
@@ -1639,7 +2206,11 @@ export class StreamStore {
         fromMs,
         toMs,
       );
+      if (followedAtMs !== null && followedAtMs > fromMs) {
+        observedBeforeFollowMinutes += this.observedMinutesForPerson(session.id, personId, fromMs, Math.min(toMs, followedAtMs)).observedMinutes;
+      }
       if (obs.observedMinutes > 0) {
+        attended.add(session.id);
         observedSum += obs.observedMinutes;
         observedSessions += 1;
         if (obs.firstObservedMs !== null) {
@@ -1657,9 +2228,9 @@ export class StreamStore {
       donationTotals,
       firstEventMs: eventBounds.first_event_ms,
       lastEventMs: eventBounds.last_event_ms,
-      firstObservedMs,
-      lastObservedMs,
-      observedMinutesThisSession,
+      firstObservedMs:excludedPerson?null:firstObservedMs,
+      lastObservedMs:excludedPerson?null:lastObservedMs,
+      observedMinutesThisSession:excludedPerson?0:observedMinutesThisSession,
       avgObservedMinutes:
         observedSessions > 0
           ? Math.round((observedSum / observedSessions) * 1000) / 1000
@@ -1669,6 +2240,18 @@ export class StreamStore {
           ? Math.round(offsetSum / offsetSessions)
           : null,
       sessionsWithObservation: observedSessions,
+      sessionsWithAttendance: attended.size,
+      estimatedChatMinutes: youtube.estimatedChatMinutes,
+      totalObservedMinutes: observedSum,
+      recordedStreams: sessions.length,
+      attendanceRatio: sessions.length ? attended.size / sessions.length : null,
+      followedAtMs,
+      watchingSinceMs: excludedPerson?null:(this.db.prepare(`SELECT min(at) AS at FROM (
+        SELECT min(p.completed_at_ms) AS at FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id WHERE i.person_id=? AND p.status='complete'
+        UNION ALL SELECT min(e.occurred_at_ms) AS at FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id=? AND e.type='chat.message' AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id)
+        UNION ALL SELECT ? AS at
+      )`).get(personId,personId,youtube.firstSeenMs) as {at:number|null}).at,
+      observedBeforeFollowMinutes: followedAtMs === null ? null : observedBeforeFollowMinutes,
     };
   }
 
@@ -1687,8 +2270,7 @@ export class StreamStore {
       "(? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?))";
     if (sortBy === "observed_minutes") {
       if (!sessionId) {
-        // All-time: sum observed minutes across recent sessions is expensive;
-        // rank by distinct complete polls instead as a proxy, then attach minutes for top candidates.
+        // Rank exact lifetime minutes across all confirmed observations.
         const rows = this.db
           .prepare(
             `SELECT p.id, p.display_name, p.revision,
@@ -1700,18 +2282,16 @@ export class StreamStore {
              JOIN presence_polls poll ON poll.id = m.poll_id AND poll.status='complete'
              WHERE ${this.notBotClause("i")}
              GROUP BY p.id
-             ORDER BY poll_count DESC, p.display_name
-             LIMIT ?`,
+             ORDER BY poll_count DESC, p.display_name`,
           )
-          .all(botJson, capped) as Record<string, unknown>[];
+          .all(botJson) as Record<string, unknown>[];
         return rows.map((row) => {
           const sessions = this.db
             .prepare(
               `SELECT DISTINCT poll.session_id AS id FROM presence_polls poll
                JOIN presence_members m ON m.poll_id = poll.id
                JOIN identities i ON i.id = m.identity_id
-               WHERE i.person_id = ? AND poll.status='complete'
-               LIMIT 20`,
+               WHERE i.person_id = ? AND poll.status='complete'`,
             )
             .all(row.id) as { id: string }[];
           let minutes = 0;
@@ -1738,7 +2318,7 @@ export class StreamStore {
             donationTotals: {},
             observedMinutes: minutes,
           };
-        }).sort((a, b) => (b.observedMinutes as number) - (a.observedMinutes as number));
+        }).sort((a, b) => (b.observedMinutes as number) - (a.observedMinutes as number)).slice(0,capped);
       }
       const window = this.sessionMinuteWindow(sessionId);
       const candidates = this.db
@@ -1785,14 +2365,26 @@ export class StreamStore {
                OR json_extract(e.payload_json, '$.originChannelId') = e.account_id
              )`
         : `e.type = 'donation'`;
-    const rows = this.db
+    const rows = sortBy === "messages" ? this.db.prepare(`WITH message_counts AS (
+      SELECT i.person_id,count(*) AS n FROM effective_events e JOIN identities i ON i.id=e.identity_id
+      WHERE ${inSession} AND ${typeFilter} AND ${this.notBotClause("i")} GROUP BY i.person_id
+      UNION ALL
+      SELECT y.person_id,count(*) AS n FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id
+      WHERE json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
+       AND (? IS NULL OR EXISTS(SELECT 1 FROM platform_streams ps JOIN sessions ss ON ss.id=ps.session_id WHERE ps.platform='youtube' AND ps.account_id=m.account_id AND ps.session_id=? AND ps.started_at_ms<=m.published_at_ms AND coalesce(ps.ended_at_ms,ss.ended_at_ms,?)>m.published_at_ms))
+       AND NOT EXISTS(SELECT 1 FROM youtube_identities z LEFT JOIN youtube_identity_aliases a ON a.identity_id=z.id WHERE z.person_id=y.person_id AND (z.is_owner=1 OR z.external_id=z.account_id OR z.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))))
+      GROUP BY y.person_id
+    ) SELECT p.id,p.display_name,p.revision,sum(c.n) AS metric_count,
+      (SELECT group_concat(DISTINCT source) FROM (SELECT source FROM identities WHERE person_id=p.id UNION ALL SELECT 'youtube' AS source FROM youtube_identities WHERE person_id=p.id)) AS sources
+      FROM persons p JOIN message_counts c ON c.person_id=p.id GROUP BY p.id ORDER BY metric_count DESC,p.display_name LIMIT ?
+    `).all(sid,sid,botJson,sid,sid,Date.now(),botJson,botJson,capped) as Record<string,unknown>[] : this.db
       .prepare(
         `SELECT p.id, p.display_name, p.revision,
            (SELECT group_concat(DISTINCT i2.source) FROM identities i2 WHERE i2.person_id=p.id) AS sources,
            count(e.id) AS metric_count
          FROM persons p
          JOIN identities i ON i.person_id = p.id
-         JOIN events e ON e.identity_id = i.id
+         JOIN effective_events e ON e.identity_id = i.id
          WHERE ${inSession} AND ${typeFilter}
            AND ${this.notBotClause("i")}
          GROUP BY p.id
@@ -1806,7 +2398,7 @@ export class StreamStore {
         .prepare(
           `SELECT json_extract(e.payload_json, '$.currency') AS currency,
                   json_extract(e.payload_json, '$.amountMinor') AS amount_minor
-           FROM events e
+           FROM effective_events e
            JOIN identities i ON i.id = e.identity_id
            WHERE i.person_id = ? AND ${inSession} AND e.type = 'donation'
              AND json_extract(e.payload_json, '$.currency') IS NOT NULL
@@ -1825,7 +2417,7 @@ export class StreamStore {
           : (
               this.db
                 .prepare(
-                  `SELECT count(*) AS n FROM events e
+                  `SELECT count(*) AS n FROM effective_events e
                    JOIN identities i ON i.id = e.identity_id
                    WHERE i.person_id = ? AND ${inSession}
                      AND e.type = 'chat.message'
@@ -1937,7 +2529,7 @@ export class StreamStore {
     const msgRows = this.db
       .prepare(
         `SELECT i.person_id AS id, max(p.display_name) AS display_name, count(*) AS messages
-         FROM events e
+         FROM effective_events e
          JOIN identities i ON i.id = e.identity_id
          JOIN persons p ON p.id = i.person_id
          WHERE ${inSession} AND e.type = 'chat.message'
@@ -2010,7 +2602,7 @@ export class StreamStore {
            EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND i.source='donationalerts') AS has_da
          FROM persons p
          WHERE EXISTS(
-           SELECT 1 FROM events e
+           SELECT 1 FROM effective_events e
            JOIN identities i ON i.id = e.identity_id
            WHERE i.person_id = p.id AND e.type = 'donation' AND ${inSession} AND ${this.notBotClause("i")}
          )`,
@@ -2041,7 +2633,7 @@ export class StreamStore {
          JOIN persons p ON p.id = i.person_id
          WHERE ${this.notBotClause("i")} AND (
            EXISTS(
-             SELECT 1 FROM events e WHERE e.identity_id = i.id AND ${inSession}
+             SELECT 1 FROM effective_events e WHERE e.identity_id = i.id AND ${inSession}
            ) OR EXISTS(
              SELECT 1 FROM presence_members m
              JOIN presence_polls poll ON poll.id = m.poll_id
@@ -2054,7 +2646,7 @@ export class StreamStore {
       const prior = this.db
         .prepare(
           `SELECT 1 AS ok WHERE EXISTS(
-             SELECT 1 FROM events e
+             SELECT 1 FROM effective_events e
              JOIN identities i ON i.id = e.identity_id
              WHERE i.person_id = ? AND e.id NOT IN (
                SELECT event_id FROM event_sessions WHERE session_id = ?
@@ -2116,7 +2708,7 @@ export class StreamStore {
         .prepare(
           `SELECT max(ts) AS last_ms FROM (
              SELECT coalesce(e.occurred_at_ms, e.received_at_ms) AS ts
-             FROM events e JOIN identities i ON i.id = e.identity_id
+             FROM effective_events e JOIN identities i ON i.id = e.identity_id
              WHERE i.person_id = ? AND e.id NOT IN (
                SELECT event_id FROM event_sessions WHERE session_id = ?
              )
@@ -2183,7 +2775,7 @@ export class StreamStore {
       if (
         snapshot.pragma("integrity_check", { simple: true }) !== "ok" ||
         (snapshot.pragma("foreign_key_check") as unknown[]).length ||
-        (this.profile ? (snapshot.prepare("SELECT version FROM sp_profile_schema WHERE profile=?").get(this.profile) as {version:number} | undefined)?.version : snapshot.pragma("user_version", { simple: true })) !== 5
+        (this.profile ? (snapshot.prepare("SELECT version FROM sp_profile_schema WHERE profile=?").get(this.profile) as {version:number} | undefined)?.version : snapshot.pragma("user_version", { simple: true })) !== CURRENT_SCHEMA_VERSION
       )
         throw new Error("BACKUP_VALIDATION_FAILED");
     } finally {

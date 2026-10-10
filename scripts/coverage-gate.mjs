@@ -25,7 +25,7 @@ async function collect(directory) {
   }
 }
 if(process.argv[2]==="segments")await collect("coverage/segments");
-else {await collect("coverage/node");try{await collect("coverage/browser");}catch(e){if(e.code!=="ENOENT")throw e;}}
+else {const root=process.argv[2]??"coverage";await collect(join(root,"node"));try{await collect(join(root,"browser"));}catch(e){if(e.code!=="ENOENT")throw e;}}
 const violations = failures(map, expected);
 const summary = map.getCoverageSummary();
 console.log("Combined Node + browser coverage:", summary.data);

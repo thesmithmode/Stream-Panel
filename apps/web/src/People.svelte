@@ -9,8 +9,13 @@
     type PersonStats,
     type PersonTop,
   } from "./api";
+  import { formatDuration } from "./duration";
   import EventList from "./EventList.svelte";
   import Icon from "./Icon.svelte";
+  import Help from "./Help.svelte";
+  import PersonNotes from "./PersonNotes.svelte";
+  import PersonDonations from "./PersonDonations.svelte";
+  import PersonMetadata from "./PersonMetadata.svelte";
   let {
     people,
     sessions,
@@ -24,6 +29,8 @@
     initialId?: string;
     onChange: () => Promise<void>;
   } = $props();
+  let createOpen=$state(false),newPersonName=$state("");
+  async function createPerson(){await operation(async()=>{const person=await api<{id:string}>("persons",{name:newPersonName});createOpen=false;newPersonName="";await select(person.id);});}
   let search = $state(""),
     selectedId = $state(""),
     detail = $state<any>(null),
@@ -120,25 +127,38 @@
   }
   async function loadStats(id: string) {
     const q = sessionFilter ? `?session=${sessionFilter}` : "";
-    stats = await api<PersonStats>(`persons/${id}/stats${q}`);
+    const value = await api<PersonStats>(`persons/${id}/stats${q}`);
+    if (selectedId === id) stats = value;
+  }
+  async function refreshPerson(id:string) {
+    const person=await api(`persons/${id}`);
+    if(selectedId===id){detail=person;await loadStats(id);}
+    await onChange();
   }
   async function select(id: string) {
     selectedId = id;
     error = "";
     stats = null;
+    detail = null;
     try {
-      detail = await api(`persons/${id}`);
+      const [person, matches] = await Promise.all([api(`persons/${id}`),api<string[]>(`persons/${id}/candidates`)]);
+      if (selectedId !== id) return;
+      detail = person;
       name = detail.display_name;
       selectedIdentities = [];
       target = "";
       grid = [];
       gridLoaded = false;
       minute = null;
-      candidates = await api(`persons/${id}/candidates`);
+      candidates = matches;
       await loadStats(id);
     } catch (e) {
-      error = (e as Error).message;
+      if (selectedId === id) error = (e as Error).message;
     }
+  }
+  async function loadAudit() {
+    const [joined,separated]=await Promise.all([api<any[]>("merges"),api<any[]>("splits")]);
+    merges=[...joined.map(row=>({...row,kind:"merge"})),...separated.map(row=>({...row,kind:"split"}))].sort((a,b)=>b.created_at_ms-a.created_at_ms);
   }
   async function operation(action: () => Promise<void>) {
     busy = true;
@@ -146,7 +166,7 @@
     try {
       await action();
       await onChange();
-      merges = await api("merges");
+      await loadAudit();
     } catch (e) {
       error = (e as Error).message;
     } finally {
@@ -198,23 +218,17 @@
   });
   import { onMount } from "svelte";
   onMount(() => {
-    void api<any[]>("merges")
-      .then((v) => (merges = v))
-      .catch((e) => (error = e.message));
+    void loadAudit().catch((e) => (error = e.message));
   });
-  function formatOffset(ms: number | null) {
-    if (ms === null) return "—";
-    const min = Math.round(ms / 60000);
-    return `${min.toLocaleString("ru-RU")} мин`;
-  }
 </script>
 
 <div class="people-grid">
   <section class="panel">
     <header>
       <h2>Люди</h2>
-      <span class="muted small">{people.length}</span>
+      <button class="outline small" disabled={busy} onclick={()=>createOpen=!createOpen}>Добавить человека</button>
     </header>
+    {#if createOpen}<form class="new-person" onsubmit={e=>{e.preventDefault();void createPerson();}}><label>Имя человека<input bind:value={newPersonName} required maxlength="200" disabled={busy}/></label><button class="primary" disabled={busy}>Создать человека</button><button type="button" class="outline" disabled={busy} onclick={()=>createOpen=false}>Отмена</button></form>{/if}
     <div class="tops-tabs" role="tablist" aria-label="Сортировка людей">
       {#each [
         ["default", "Все"],
@@ -293,37 +307,30 @@
             >
           </div>
           <div class="kpi">
-            <span>Набл. минуты (сессия)</span><strong
-              >{stats.observedMinutesThisSession === null
-                ? "—"
-                : stats.observedMinutesThisSession.toLocaleString(
-                    "ru-RU",
-                  )}</strong
+            <span>{sessionFilter ? "Время в этом стриме" : "Всего наблюдаемого времени"}</span><strong
+              >{formatDuration(sessionFilter ? stats.observedMinutesThisSession : stats.totalObservedMinutes)}</strong
             >
           </div>
           <div class="kpi">
-            <span>Сред. набл. мин / сессия</span><strong
-              >{stats.avgObservedMinutes === null
-                ? "—"
-                : stats.avgObservedMinutes.toLocaleString("ru-RU")}</strong
+            <span>Среднее за посещённый стрим</span><strong
+              >{formatDuration(stats.avgObservedMinutes)}</strong
             >
           </div>
           <div class="kpi">
-            <span>Первое / последнее событие</span><strong class="kpi-dates"
-              >{date(stats.firstEventMs)} → {date(stats.lastEventMs)}</strong
-            >
+            <span>Посещаемость</span><strong>{stats.attendanceRatio == null ? "—" : `${Math.round(stats.attendanceRatio * 100)}%`}</strong>
+            <small>{stats.sessionsWithAttendance ?? stats.sessionsWithObservation} из {stats.recordedStreams} стримов</small>
+          </div>
+          {#if stats.estimatedChatMinutes != null && stats.estimatedChatMinutes > 0}
+          <div class="kpi"><span>Оценка активности YouTube</span><strong>{formatDuration(stats.estimatedChatMinutes)}</strong></div>
+          {/if}
+          <div class="kpi">
+            <span>Первое наблюдение</span><strong>{date(stats.watchingSinceMs)}</strong>
           </div>
           <div class="kpi">
-            <span>Первое / последнее наблюдение</span><strong class="kpi-dates"
-              >{date(stats.firstObservedMs)} → {date(
-                stats.lastObservedMs,
-              )}</strong
-            >
+            <span>Подписан с</span><strong>{date(stats.followedAtMs)}</strong>
           </div>
           <div class="kpi">
-            <span>Сред. сдвиг до первого наблюдения</span><strong
-              >{formatOffset(stats.avgFirstObservedOffsetMs)}</strong
-            >
+            <span>Время до подписки</span><strong>{formatDuration(stats.observedBeforeFollowMinutes)}</strong>
           </div>
         </div>{/if}
       <div class="settings-body">
@@ -341,21 +348,19 @@
             >
           </div></label
         >
-        <h3>Зрители и донатеры</h3>
-        <p class="small muted">
-          Person — связка. Twitch login = один зритель; одно имя DA = один
-          донатер. Одинаковое имя между платформами не доказывает, что это один
-          человек, пока нет авто-связи или ручного объединения.
-        </p>
+        {#key detail.id}
+          <PersonMetadata personId={detail.id} onChange={()=>refreshPerson(detail.id)} />
+          <PersonDonations personId={detail.id} {people} onChange={()=>detail?refreshPerson(detail.id):Promise.resolve()} />
+          <PersonNotes personId={detail.id} />
+        {/key}
+        <h3>Связанные аккаунты <Help id="person-identities-help" label="О связях аккаунтов" text="Здесь собраны аккаунты одного человека. Совпадение имени служит подсказкой для проверки. YouTube связывается вручную; выбранный аккаунт можно разъединить, сохранив события." /></h3>
         {#each detail.identities as identity}<label class="identity-row"
             ><input
               type="checkbox"
               bind:group={selectedIdentities}
               value={identity.id}
             /><strong>{identity.display_name}</strong><span class="small muted"
-              >{identity.source === "twitch"
-                ? "Зритель"
-                : "Донатер"} · {identity.source} · {identity.external_id}</span
+              >{identity.source === "donationalerts" ? "Донатер" : "Участник"} · {identity.source === "twitch" ? "Twitch" : identity.source === "youtube" ? "YouTube" : "DonationAlerts"}</span
             ></label
           >{/each}
         {#if selectedIdentities.length}<div class="inline">
@@ -435,7 +440,7 @@
         {:else if gridLoaded}
           <p class="empty-small presence-empty">нет данных — эфир не идёт</p>
         {/if}
-        <h3>Последние события <span class="small muted">до 200</span></h3>
+        <h3>События</h3>
         <EventList
           events={minute === null ? (detail.events as Event[]) : minuteEvents}
         />
@@ -443,21 +448,23 @@
   </section>
 </div>
 {#if merges.length}<section class="panel audit">
-    <header><h2>История объединений</h2></header>
+    <header><h2>История связей</h2></header>
     {#each merges as merge}<div class="capability">
         <span
           >{date(merge.created_at_ms)} · {merge.undone_at_ms
             ? "Отменено"
-            : "Объединение"}</span
+            : merge.kind === "split" ? "Разъединение" : "Объединение"}</span
         ><button
           class="outline small"
           disabled={busy || merge.undone_at_ms !== null}
           onclick={() =>
             operation(async () => {
-              await api(`merges/${merge.id}/undo`, {});
+              await api(`${merge.kind === "split" ? "splits" : "merges"}/${merge.id}/undo`, {});
               detail = null;
             })}>Отменить</button
         >
       </div>{/each}
   </section>{/if}
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
+
+<style>.new-person{display:grid;gap:.7rem;padding:1rem;}.new-person label{display:grid;gap:.4rem;}.new-person input{min-width:0;max-width:100%;box-sizing:border-box;}</style>

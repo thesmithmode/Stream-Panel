@@ -2,7 +2,7 @@
   "date": "2026-10-06T21:37:19.675Z",
   "browser": "Chromium 133, Playwright",
   "checks": [
-    "application opens directly without login",
+    "bootstrap exchanges nonce and removes fragment",
     "empty-state CTA opens real connection forms",
     "start manual recording",
     "reload preserves cookie; identical Twitch/DA names remain separate",

@@ -5,8 +5,30 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApplication } from "../src/server.js";
 async function fixture() {
-  const dir=await mkdtemp(join(tmpdir(),"sp-http-")),a=await createApplication(dir,47831,false),headers={host:"127.0.0.1:47831"};
-  return {a,headers,dir,close:async()=>{await a.app.close();await rm(dir,{recursive:true,force:true});}};
+  const dir = await mkdtemp(join(tmpdir(), "sp-http-"));
+  const a = await createApplication(dir, 47831, false);
+  const host = { host: "127.0.0.1:47831" };
+  const key = new URLSearchParams(a.bootstrap().split("#")[1]).get("key");
+  const login = await a.app.inject({
+    method: "POST",
+    url: "/api/v1/bootstrap",
+    headers: host,
+    payload: { key },
+  });
+  const headers = {
+    ...host,
+    cookie: String(login.headers["set-cookie"]).split(";")[0]!,
+    "x-csrf-token": login.json().csrf,
+  };
+  return {
+    a,
+    headers,
+    dir,
+    close: async () => {
+      await a.app.close();
+      await rm(dir, { recursive: true, force: true });
+    },
+  };
 }
 test("mutation API rejects extra properties and number/boolean coercion before side effects", async () => {
   const f = await fixture();
@@ -133,6 +155,40 @@ test("HTTP contracts: missing entities, conflicts, bounded grids, callback rejec
     await f.close();
   }
 });
+test("bootstrap expires, invalidates previous nonce and bounds local sessions; expired sessions are evicted", async (t) => {
+  const f = await fixture();
+  try {
+    const bootstrap = () =>
+      new URLSearchParams(f.a.bootstrap().split("#")[1]).get("key");
+    const login = (key: string | null) =>
+      f.a.app.inject({
+        method: "POST",
+        url: "/api/v1/bootstrap",
+        headers: { host: "127.0.0.1:47831" },
+        payload: { key },
+      });
+    let key = bootstrap();
+    bootstrap();
+    assert.equal((await login(key)).statusCode, 401);
+    t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+    key = bootstrap();
+    t.mock.timers.tick(600001);
+    assert.equal((await login(key)).statusCode, 401);
+    for (let i = 0; i < 20; i++)
+      assert.equal((await login(bootstrap())).statusCode, 200);
+    assert.equal((await login(bootstrap())).statusCode, 429);
+    t.mock.timers.tick(86400001);
+    assert.equal(
+      (await f.a.app.inject({ url: "/api/v1/status", headers: f.headers }))
+        .statusCode,
+      401,
+    );
+    assert.equal((await login(bootstrap())).statusCode, 200);
+  } finally {
+    t.mock.timers.reset();
+    await f.close();
+  }
+});
 test("unexpected internal errors return 500, filesystem failures return 503 and body limit remains 413", async (t) => {
   const f = await fixture();
   try {
@@ -253,4 +309,78 @@ test("person stats, tops and insights endpoints return shaped aggregates", async
   } finally {
     await f.close();
   }
+});
+
+
+test("manual stream deletion requires authentication, CSRF and strict payload, and preserves automatic streams",async()=>{
+ const f=await fixture();
+ try{
+  const now=Date.now(),manual=await f.a.db.call<string>('startSession','local','mistake',now,'manual',now);
+  const url=`/api/v1/sessions/${manual}/delete`;
+  const inject=(headers:Record<string,string>,payload:Record<string,unknown>={})=>f.a.app.inject({method:'POST',url,headers,payload});
+  assert.equal((await inject({host:f.headers.host})).statusCode,401);
+  assert.equal((await inject({...f.headers,'x-csrf-token':'wrong'})).statusCode,403);
+  assert.equal((await inject(f.headers,{unexpected:true})).statusCode,400);
+  assert.equal((await f.a.db.call<any[]>('sessions')).length,1);
+  assert.equal((await inject(f.headers)).statusCode,200);
+  assert.equal((await inject(f.headers)).statusCode,200);
+  assert.equal((await f.a.db.call<any[]>('sessions')).length,0);
+  const real=await f.a.db.call<string>('observePlatformStream','twitch','channel','real',now,now,null,'Actual stream');
+  const denied=await f.a.app.inject({method:'POST',url:`/api/v1/sessions/${real}/delete`,headers:f.headers,payload:{}});
+  assert.equal(denied.statusCode,400);assert.equal(denied.json().error,'PLATFORM_SESSION_MANAGED_AUTOMATICALLY');
+  assert.equal((await f.a.db.call<any[]>('sessions')).length,1);
+ }finally{await f.close();}
+});
+
+test('split history and guarded undo are available only through protected API',async()=>{
+ const f=await fixture();
+ try{
+  const now=Date.now();await f.a.db.call('youtubeMessages','channel','chat',[{id:'message',snippet:{type:'textMessageEvent',publishedAt:new Date(now).toISOString()},authorDetails:{channelId:'author',displayName:'Author'}}]);
+  const person=await f.a.db.call<any>('person','youtube:author'),identity=person.identities[0];
+  const split=await f.a.app.inject({method:'POST',url:'/api/v1/persons/split',headers:f.headers,payload:{identityIds:[identity.id],name:'Separate',revision:person.revision}});assert.equal(split.statusCode,200);
+  const audit=await f.a.app.inject({url:'/api/v1/splits',headers:f.headers});assert.equal(audit.statusCode,200);const id=audit.json()[0].id;
+  const url=`/api/v1/splits/${id}/undo`;
+  assert.equal((await f.a.app.inject({method:'POST',url,headers:{host:f.headers.host},payload:{}})).statusCode,401);
+  assert.equal((await f.a.app.inject({method:'POST',url,headers:{...f.headers,'x-csrf-token':'wrong'},payload:{}})).statusCode,403);
+  assert.equal((await f.a.app.inject({method:'POST',url,headers:f.headers,payload:{unexpected:true}})).statusCode,400);
+  assert.equal((await f.a.app.inject({method:'POST',url,headers:f.headers,payload:{}})).statusCode,200);
+  assert.equal((await f.a.db.call<any>('person','youtube:author')).identities.length,1);
+  assert.equal((await f.a.app.inject({method:'POST',url,headers:f.headers,payload:{}})).statusCode,400);
+ }finally{await f.close();}
+});
+
+test('donation API enforces auth, CSRF, strict exact-money payloads and optimistic revisions',async()=>{
+ const f=await fixture();
+ try{
+  const now=Date.now();await f.a.db.call('youtubeMessages','channel','chat',[{id:'viewer',snippet:{type:'textMessageEvent',publishedAt:new Date(now).toISOString()},authorDetails:{channelId:'author',displayName:'Author'}}]);
+  const input={personId:'youtube:author',amount:'12.34',currency:'RUB',occurredAtMs:now,message:'Manual donation',sourceName:'Cash'};
+  const post=(url:string,payload:Record<string,unknown>)=>f.a.app.inject({method:'POST',url,headers:f.headers,payload});
+  assert.equal((await f.a.app.inject({method:'POST',url:'/api/v1/donations',headers:{host:f.headers.host},payload:input})).statusCode,401);
+  assert.equal((await f.a.app.inject({method:'POST',url:'/api/v1/donations',headers:{...f.headers,'x-csrf-token':'wrong'},payload:input})).statusCode,403);
+  for(const body of [{...input,amount:12.34},{...input,amount:'1e3'},{...input,amount:'12.345'},{...input,currency:'XXX'},{...input,occurredAtMs:null},{...input,extra:true}])assert.equal((await post('/api/v1/donations',body)).statusCode,400);
+  const made=await post('/api/v1/donations',input);assert.equal(made.statusCode,200);assert.equal(made.json().amountMinor,'1234');
+  const id=encodeURIComponent(made.json().id);
+  const updated=await post(`/api/v1/donations/${id}/update`,{...input,amount:'5.00',revision:0});assert.equal(updated.statusCode,200);assert.equal(updated.json().revision,1);
+  assert.equal((await post(`/api/v1/donations/${id}/delete`,{revision:0})).statusCode,409);
+  assert.equal((await post(`/api/v1/donations/${id}/delete`,{revision:1})).statusCode,200);
+  assert.equal((await f.a.app.inject({url:'/api/v1/donations?person=youtube%3Aauthor',headers:f.headers})).json().total,0);
+  assert.equal((await f.a.app.inject({url:'/api/v1/donations?person=youtube%3Aauthor&includeDeleted=true',headers:f.headers})).json().total,1);
+  assert.equal((await post(`/api/v1/donations/${id}/restore`,{revision:2})).json().revision,3);
+  assert.equal((await f.a.app.inject({url:`/api/v1/donations/${id}/audit`,headers:f.headers})).json().length,4);
+  assert.equal((await f.a.app.inject({url:'/api/v1/donations?limit=101',headers:f.headers})).statusCode,400);
+  assert.equal((await f.a.app.inject({url:'/api/v1/donations?includeDeleted=yes',headers:f.headers})).statusCode,400);
+ }finally{await f.close();}
+});
+
+
+test('manual Person creation is protected, strict and does not invent attendance or link same names',async()=>{
+ const f=await fixture();try{
+  const post=(headers:Record<string,string>,payload:Record<string,unknown>)=>f.a.app.inject({method:'POST',url:'/api/v1/persons',headers,payload});
+  assert.equal((await post({host:f.headers.host},{name:'Manual person'})).statusCode,401);
+  assert.equal((await post({...f.headers,'x-csrf-token':'wrong'},{name:'Manual person'})).statusCode,403);
+  for(const payload of [{name:1},{name:''},{name:'   '},{name:'x',extra:true},{name:'x'.repeat(201)}])assert.equal((await post(f.headers,payload)).statusCode,400);
+  const person=(await post(f.headers,{name:' Manual person '})).json();assert.equal(person.display_name,'Manual person');assert.deepEqual(person.identities,[]);
+  assert.notEqual((await post(f.headers,{name:'Manual person'})).json().id,person.id);
+  const stats=(await f.a.app.inject({url:`/api/v1/persons/${person.id}/stats`,headers:f.headers})).json();assert.equal(stats.messageCount,0);assert.equal(stats.watchingSinceMs,null);assert.equal(stats.donationCount,0);
+ }finally{await f.close();}
 });

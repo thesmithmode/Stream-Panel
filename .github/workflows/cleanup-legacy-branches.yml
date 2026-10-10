@@ -1,0 +1,46 @@
+name: Archive verified legacy branches
+on:
+  push:
+    branches: [dev]
+    paths: [.github/workflows/cleanup-legacy-branches.yml]
+permissions:
+  contents: write
+concurrency:
+  group: stream-panel-branch-cleanup
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preserve exact snapshots and delete only verified branch heads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/dev
+          while read -r branch expected; do
+            current=$(gh api "repos/$REPO/git/ref/heads/$branch" --jq '.object.sha')
+            test "$current" = "$expected"
+            if test "$branch" = feat/product-completion; then
+              git merge-base --is-ancestor "$expected" HEAD
+            fi
+            tag="archive/2026-10-09/$branch"
+            if archived=$(gh api "repos/$REPO/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null); then
+              test "$archived" = "$expected"
+            else
+              gh api --method POST "repos/$REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$expected" > /dev/null
+            fi
+            test "$(gh api "repos/$REPO/git/ref/tags/$tag" --jq '.object.sha')" = "$expected"
+            test "$(gh api "repos/$REPO/git/ref/heads/$branch" --jq '.object.sha')" = "$expected"
+            gh api --method DELETE "repos/$REPO/git/refs/heads/$branch"
+          done <<'BRANCHES'
+          feat/da-redirect-host-env c73e5f2203b8873ec2350f155f2ae6dba98d84f8
+          fix/no-login-profile-switcher 5111f5a7a747afe6775ebf226004106b7701f58f
+          release-assets-slim b3dd0bd912f2a79bcf9334aab8c07cf0b1458160
+          feat/product-completion 06380c07071c713f369c228d18afd99ecacc9c57
+          BRANCHES

@@ -4,17 +4,17 @@
 
 ## Вход и защита
 
-Панель не требует логина. GET /profile возвращает выбранный профиль (`ruslan` по умолчанию); POST /profile `{profile}` переключает его и сохраняет выбор локально. Данные профилей изолированы пространствами имён в SQLite и отдельными файлами `profiles/<profile>/secrets.json`. Записи требуют точный Origin; точный Host проверяется для всех запросов. Браузер не может переключить профиль межсайтовым POST.
+Серверный вход: POST /auth/login {username,password} → {csrf,user}; публичной регистрации и /bootstrap нет. Secure HttpOnly SameSite=Lax cookie sp_session на / действует 24 часа, хранится в SQLite в виде хэша. GET /auth/me возвращает свой профиль; POST /auth/logout требует CSRF и отзывает текущую сессию. Перезапуск не отзывает сессии автоматически. Все записи требуют точный Origin и X-CSRF-Token, точный Host проверяется для всех запросов. Оба аккаунта могут выбрать любой из двух профилей: клиент передаёт X-Stream-Panel-Profile, сервер проверяет допустимое значение. Данные и OAuth state остаются изолированными по профилю.
 
-Публичный URL — HTTPS за reverse proxy; backend слушает только 127.0.0.1. GET /healthz проверяет workers и возвращает ok и release. Во время maintenance API возвращает 503 SERVER_UPDATING. OAuth callbacks DA/YouTube проверяют short-lived одноразовый state.
+Публичный URL — HTTPS за reverse proxy; backend слушает только 127.0.0.1. GET /healthz проверяет workers без токенов/учётных данных, возвращает ok и release. Во время maintenance API возвращает 503 SERVER_UPDATING. OAuth callbacks DA/YouTube требуют ту же парольную сессию и short-lived одноразовый state. Утилита createApplication сохраняет старый локальный bootstrap только для низкоуровневых fixture-тестов; production entrypoint использует createHostedApplication.
 
-YouTube: POST /youtube/connect {clientId,clientSecret?} → {url}, GET /oauth/youtube/callback, POST /youtube/disconnect {}, GET /youtube/data → {snapshots,messages}. Секреты и токены никогда не выдаются; snapshots/report, channel, broadcasts и ограниченные последние 200 сообщений принадлежат подключённому каналу текущего профиля. Денежные значения YouTube amountMicros хранятся в исходном строковом формате, не суммируются с minor units DA. POST /backup — общий шифрованный снимок обоих профилей, возвращает только имя закрытого серверного файла. Не чаще 1 запроса/10 минут, без настроенного backup key — 503 BACKUP_NOT_CONFIGURED; скачивания базы через API нет.
+YouTube: POST /youtube/connect {clientId,clientSecret?} → {url}, GET /oauth/youtube/callback, POST /youtube/disconnect {}, GET /youtube/data → {snapshots,messages}. Секреты и токены никогда не выдаются; snapshots/report, channel, broadcasts и ограниченные последние 200 сообщений принадлежат подключённому каналу текущего профиля. Денежные значения YouTube amountMicros хранятся в исходном строковом формате, не суммируются с minor units DA. POST /backup — общий шифрованный снимок обоих профилей, возвращает только имя закрытого серверного файла. Не чаще 1 запроса/10 минут, без настроенного backup key — 503 BACKUP_NOT_CONFIGURED; GET /backups возвращает каталог и список зашифрованных файлов, раздельные local/cloud статусы; GET /backups/:filename скачивает только .spbk с Content-Disposition attachment. Оба маршрута требуют действующую сессию; чужой Origin, cross-site, обход пути и симлинки запрещены. Ключ расшифрования через API не передаётся.
 
 ## Чтение
 
 | GET path                  | Параметры                             | Ответ                                                                                                                                      |
 | ------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/status`                 | —                                     | Twitch/DA `{state,detail,account?,capabilities,lastEventAt?}`, device, публичная config, gaps. Секретов нет                         |
+| `/status`                 | —                                     | Twitch/DA `{state,detail,account?,capabilities,lastEventAt?}`, device, публичная config, csrf и gaps. Секретов нет                         |
 | `/sessions`               | —                                     | До100 последних: id, account_id, stream_id, kind, started_at_ms, recording_started_at_ms, ended_at_ms, end_quality, event_count            |
 | `/summary`                | `session?`                            | Базовые KPI + uniquePersons/Identities, messagesPerMinuteOfSession, coverage, chattersOverTime, gapCount, uniquePersonsObserved. Chatters — из последнего complete poll, не Twitch view count |
 | `/events`                 | `session?`, `person?`, `from?`, `to?` | До200 событий, по времени убывание. `[from,to)` фильтрует known occurred_at; unknown не попадает в time range                              |
@@ -50,7 +50,7 @@ DA OAuth callback: `GET /oauth/donationalerts/callback?code=…&state=…`. От
 
 ## Ошибки и ограничения
 
-`{error:"UPPERCASE_CODE"}`:403 неверный Host/Origin,409 конфликт,404 не найдено,400 некорректный запрос,413 превышение body limit,503 недоступность worker/хранилища,500 неизвестный внутренний отказ. Ошибки валидации Fastify не выводят тело/секреты; UI показывает ошибку, не подменяет её успехом.
+`{error:"UPPERCASE_CODE"}`:401 вход,403Host/Origin/CSRF,409 конфликт,404 не найдено,400 некорректный запрос,413 превышение body limit,503 недоступность worker/хранилища,500 неизвестный внутренний отказ. Ошибки валидации Fastify не выводят тело/секреты; UI показывает ошибку, не подменяет её успехом.
 
 Нет cursor pagination, общего currency/excluded-identity фильтра, экспорта и durable rejection/owner rules. Лента честно показывает лимит 200. Для выбранной минуты UI делает отдельный запрос к базе, поэтому старые минуты доступны независимо от последних 200 глобальных событий. Person-list ограничен 500, поиск выполняется сервером.
 
@@ -77,3 +77,19 @@ Twitch категория привязана ко времени, включая
 Участник возвращает `attendanceSessionIds`, `attendanceRatio`, `regular`; существующие `sessionIds` описывают всю активность, включая донаты. Summary: `attendees`, `regulars`, `regularShare` (0–1 или null). Timeline: `regularObserved`, `regularEstimated`, `regularMessages` — подмножества соответствующих полных показателей. Один участник учитывается в минуте один раз даже при смене и возврате категории внутри минуты. Владельцы/боты исключены до классификации.
 
 График усредняет полную и регулярную аудиторию по одному набору известных минут; сообщения суммирует. Жёлтый сегмент занимает пропорциональную часть полной высоты снизу, не прибавляется к ней. Общий счётчик площадки не имеет персональной разбивки. Twitch и YouTube accounts не считаются одним человеком без подтверждённой связи; оценки YouTube не становятся доказанным временем просмотра.
+
+## Заметки, теги и ручное ядро
+
+- GET /persons/:id/notes → записи {id,person_id,body,created_at_ms,updated_at_ms,revision}. POST того же пути {body} создаёт отдельную запись. POST /persons/:id/notes/:noteId/update {body,revision}; POST .../delete {revision}. body 1–10000 символов; createdAt не меняется, updatedAt не уменьшается. Несовпадение revision — 409 NOTE_CONFLICT.
+- GET /persons/:id/metadata → {revision,tags,manualCore}. POST того же пути {revision,tags,manualCore}; максимум 50 тегов по 64 символа, пустые запрещены, пробелы по краям убираются, повторы удаляются. manualCore = null/true/false. Изменение атомарно повышает Person revision; устаревшая revision — 409 REVISION_CONFLICT.
+- Все записи требуют парольную/локальную fixture-сессию, CSRF и Origin. Данные изолированы по выбранному профилю. Заметки и теги учитывают активные цепочки merge без потери исходного владельца. Ручное ядро применяется к целевой карточке; raw events и подтверждение attendance не изменяет.
+
+
+## Исправления и ручные донаты — schema11
+
+GET /donations?person=<id>&offset=0&limit=50&includeDeleted=false возвращает items/total/offset/limit; limit 1–100. GET /donations/:id и /donations/:id/audit возвращают текущую запись и историю исправлений. POST /donations принимает personId, amount (точная десятичная строка до двух знаков), currency, occurredAtMs, message, sourceName. Ручное создание требует известной даты. POST /donations/:id/update принимает те же поля плюс revision; неизвестная исходная дата может оставаться null. POST /donations/:id/delete и /restore принимают только revision. Конфликт возвращает 409; все мутации защищены auth/CSRF/Origin и строгой схемой.
+
+Исходные события неизменны. Поправки, tombstone и аудит сохраняются отдельно; отчёты читают effective_events. Повторный импорт не возвращает удалённый донат. Переназначение одного доната не меняет остальные донаты одноимённого автора. DonationAlerts anonymous без actor получают отдельную сущность Аноним в пределах account/profile; одноимённый Twitch не связывается автоматически. Валюты RUB/USD/EUR/BYN/KZT/UAH/BRL/TRY не суммируются между собой.
+
+
+POST /persons {name} создаёт отдельную ручную карточку без платформенной identity и событий. name 1–200 символов после обязательной проверки непустого trimmed значения; одноимённые люди не объединяются автоматически. Карточка доступна для донатов/заметок/меток, дата просмотра/follow/attendance остаются неизвестными. Endpoint защищён теми же auth/CSRF/Origin/body guards.

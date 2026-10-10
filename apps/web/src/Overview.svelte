@@ -1,6 +1,8 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
+  import Help from "./Help.svelte";
   import EventList from "./EventList.svelte";
+  import TrendChart from "./TrendChart.svelte";
   import { onMount } from "svelte";
   import {
     api,
@@ -13,14 +15,12 @@
   let {
     summary,
     events,
-    status,
     sessionFilter = "",
     connect,
     onPerson,
   }: {
     summary: Summary;
     events: Event[];
-    status: any;
     sessionFilter?: string;
     connect: () => void;
     onPerson: (id: string) => void;
@@ -32,9 +32,6 @@
   let insightsError = $state("");
   const visible = $derived(
     events.filter((e) => filter === "all" || e.type === filter),
-  );
-  const maxChatters = $derived(
-    Math.max(1, ...(summary.chattersOverTime ?? []).map((p) => p.chatters)),
   );
   async function loadInsights() {
     insightsOpen = !insightsOpen;
@@ -87,7 +84,7 @@
       >
       {#if summary.messagesPerMinuteOfSession != null}<small
           >{summary.messagesPerMinuteOfSession.toLocaleString("ru-RU")} сообщ./мин
-          сессии</small
+          эфира</small
         >{/if}
     </div>
   </div>
@@ -102,7 +99,7 @@
           >Опрос: {date(summary.lastPollAtMs)}</small
         >{:else}<small>эфир не идёт / нет опросов присутствия</small>{/if}
       {#if summary.uniquePersonsObserved != null}<small
-          >Уникальных за сессию: {summary.uniquePersonsObserved}</small
+          >За стрим: {summary.uniquePersonsObserved}</small
         >{/if}
     </div>
   </div>
@@ -122,14 +119,14 @@
 <section class="metrics secondary-metrics">
   <div class="metric">
     <div>
-      <span>Уникальные люди (события)</span><strong
+      <span>Участники</span><strong
         >{(summary.uniquePersons ?? 0).toLocaleString("ru-RU")}</strong
       >
     </div>
   </div>
   <div class="metric">
     <div>
-      <span>Покрытие опросов</span><strong>{coverageLabel()}</strong>
+      <span>Полнота наблюдений</span><strong>{coverageLabel()}</strong>
       {#if (summary.gapCount ?? 0) > 0}<small class="gap-badge"
           >Пропуски сбора: {summary.gapCount}</small
         >{/if}
@@ -168,21 +165,8 @@
   </div>
 </section>
 <section class="panel series-panel">
-  <header>
-    <h2>Наблюдаемые участники по опросам</h2>
-    <span class="small muted">Не просмотры Twitch — только chatters poll</span>
-  </header>
-  {#if summary.chattersOverTime?.length}
-    <div class="spark-bars" aria-label="Ряд наблюдаемых участников">
-      {#each summary.chattersOverTime as point}<div
-          class="spark-bar"
-          title={`${date(point.atMs)}: ${point.chatters}`}
-          style={`height:${Math.max(8, Math.round((point.chatters / maxChatters) * 64))}px`}
-        ></div>{/each}
-    </div>
-  {:else}
-    <p class="empty-small presence-empty">нет данных — эфир не идёт</p>
-  {/if}
+  <header><h2>Аудитория в чате <Help id="stream-presence" label="Об аудитории стрима" text="График показывает наблюдения присутствия в чате Twitch. Это не подтверждение просмотра видео; неизвестные промежутки не считаются нулём." /></h2></header>
+  <TrendChart points={(summary.chattersOverTime??[]).map(p=>({at:p.atMs,observed:p.chatters,presenceKnown:true}))} metric="observed" showRegulars={false}/>
 </section>
 <div class="overview-grid">
   <section class="panel feed">
@@ -206,45 +190,10 @@
         <button class="primary" onclick={connect}>Открыть интеграции</button>
       </div>{/if}
   </section>
-  <aside class="right-rail">
-    <section class="panel">
-      <header><h2>Источники</h2></header>
-      {#each [["twitch", "Twitch", "TW"], ["donationalerts", "DonationAlerts", "DA"]] as const as [key, label, mark]}<div
-          class="source-row"
-        >
-          <div class:da={key === "donationalerts"} class="source-mark">
-            {mark}
-          </div>
-          <div class="source-content">
-            <strong>{label}</strong>
-            {#if status?.[key]?.state === "error"}<span
-                role="alert"
-                class="notice error"
-                >Войди снова — {status?.[key]?.detail || "авторизация сброшена"}</span
-              >{:else}<span class="small muted"
-                >{status?.[key]?.detail || "Не подключён"}</span
-              >{/if}
-          </div>
-          <button class="outline small" onclick={connect}
-            >{status?.[key]?.state === "error"
-              ? "Войти снова"
-              : status?.[key]?.state === "connected"
-                ? "Интеграции"
-                : "Подключить"}</button
-          >
-        </div>{/each}
-    </section>
-    <section class="panel presence-explain">
-      <header><h2>Присутствие в чате</h2></header>
-      <div>
-        <Icon name="people" size={42} />
-        {#if summary.chatters == null && !summary.lastPollAtMs}
-          <p><strong>нет данных</strong></p>
-          <p class="small muted">эфир не идёт — опросы присутствия появятся после начала стрима.</p>
-        {:else}
-          <p>Наблюдение в чате не подтверждает просмотр видео.</p>
-        {/if}
-      </div>
-    </section>
+  <aside class="right-rail"><section class="panel"><header><h2>Участники чата</h2></header>
+  {#each summary.participants??[] as person}<div class="chat-participant"><button class="outline small" onclick={()=>onPerson(person.personId)}>{person.name}</button><strong>{person.messages} сообщений</strong></div>{:else}<p class="empty-small">Сообщений пока нет</p>{/each}
+  </section>
   </aside>
 </div>
+
+<style>.chat-participant{display:flex;align-items:center;justify-content:space-between;gap:.6rem;padding:.7rem;}.chat-participant button{overflow-wrap:anywhere;white-space:normal;text-align:left;}.chat-participant strong{font-size:.85rem;white-space:nowrap;}</style>

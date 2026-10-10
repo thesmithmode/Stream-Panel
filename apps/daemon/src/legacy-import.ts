@@ -3,8 +3,9 @@ import {mkdir,readFile,writeFile,copyFile,rename,rm,access,chmod} from 'node:fs/
 import {join,dirname,resolve} from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {StreamStore} from '../../../packages/core/src/store.js';
-import {schemaV1,schemaV2,schemaV3,schemaV4,schemaV5} from '../../../packages/core/src/schema.js';
-const tables=[...`${schemaV1}\n${schemaV2}\n${schemaV3}\n${schemaV4}\n${schemaV5}`.matchAll(/CREATE TABLE (\w+)/g)].map(m=>m[1]!);
+import {schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11} from '../../../packages/core/src/schema.js';
+import {AccountStore} from './auth.js';
+const tables=[...`${schemaV1}\n${schemaV2}\n${schemaV3}\n${schemaV4}\n${schemaV5}\n${schemaV6}\n${schemaV7}\n${schemaV8}\n${schemaV9}\n${schemaV10}\n${schemaV11}`.matchAll(/CREATE TABLE (\w+)/g)].map(m=>m[1]!);
 async function exists(path:string){try{await access(path);return true;}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return false;throw e;}}
 export async function migrateLegacy(source:string,destination:string) {
  if(await exists(destination))throw new Error('DESTINATION_EXISTS');
@@ -52,12 +53,18 @@ export async function migrateLegacy(source:string,destination:string) {
   await rename(staging,destination);return {tables:counts};
  }catch(e){await rm(staging,{recursive:true,force:true});throw e;}
 }
-export async function prepareLocal(dir:string,legacy:string) {
+export async function prepareLocal(dir:string,legacy:string,password?:string) {
  if(!await exists(join(dir,'data.sqlite'))){
+  if(!password)throw new Error('LOCAL_PASSWORD_REQUIRED');
+  if(password.length<14||password.length>256)throw new Error('INVALID_PASSWORD');
   if(await exists(join(legacy,'data.sqlite')))await migrateLegacy(legacy,dir);
   else await mkdir(dir,{recursive:true,mode:0o700});
  }
+ const accounts=new AccountStore(join(dir,'data.sqlite'));
+ try{if(!accounts.users().length){if(!password)throw new Error('LOCAL_PASSWORD_REQUIRED');await accounts.createUser('ruslan','ruslan','Руслан',password);}}
+ finally{accounts.close();}
  const key=join(dir,'backup-key');
  if(!await exists(key))await writeFile(key,randomBytes(32).toString('hex'),{mode:0o600,flag:'wx'});
  if(!/^[a-f0-9]{64}$/.test((await readFile(key,'utf8')).trim()))throw new Error('INVALID_BACKUP_KEY');
+ await writeFile(join(dir,'local-ready'),'1',{mode:0o600});
 }

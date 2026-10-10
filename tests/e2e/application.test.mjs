@@ -26,7 +26,7 @@ test(
         if (m.type() === "error") errors.push(m.text());
       });
       await startCoverage(page);
-      await goto(page, a.origin);
+      await goto(page, a.bootstrap());
       await page
         .getByRole("button", { name: "Открыть интеграции", exact: true })
         .waitFor();
@@ -34,7 +34,7 @@ test(
       await page.getByRole("button", { name: "Демо", exact: true }).click();
       await page.getByText("Алиса").first().waitFor({ state: "visible", timeout: 5000 });
       await page.getByRole("button", { name: "Реальные", exact: true }).click();
-      checks.push("application opens directly without login");
+      checks.push("bootstrap exchanges nonce and removes fragment");
 
       await page
         .getByRole("button", { name: "Открыть интеграции", exact: true })
@@ -42,13 +42,18 @@ test(
       await page.getByLabel("Client secret", { exact: true }).waitFor();
       checks.push("empty-state CTA opens real connection forms");
       await page.getByRole("button", { name: "Обзор", exact: true }).click();
-      await page
-        .getByRole("button", { name: "Начать запись", exact: true })
-        .click();
-      await page
-        .getByRole("button", { name: "Завершить запись", exact: true })
-        .waitFor();
-      checks.push("start manual recording");
+      assert.equal(await page.locator(".record-button").count(), 0);
+      assert.equal(await page.getByRole("button", { name: /запись/i }).count(), 0);
+      checks.push("manual recording controls are absent");
+      const sessionStartedAt = Date.now() - 600000;
+      const sessionId = await a.db.call(
+        "startSession",
+        "test-channel",
+        "test-stream",
+        sessionStartedAt,
+        "platform",
+        sessionStartedAt,
+      );
       await seed(a);
       await reload(page);
       await page
@@ -59,7 +64,7 @@ test(
       );
       assert.equal(persons.length, 3);
       checks.push(
-        "reload preserves data; distinct Twitch/DA names stay separate until merge (auto-link covered in unit tests)",
+        "reload preserves cookie; distinct Twitch/DA names stay separate until merge (auto-link covered in unit tests)",
       );
 
       await page.getByRole("button", { name: "Люди", exact: true }).click();
@@ -138,14 +143,12 @@ test(
       await page.getByText("Выбрана минута:", { exact: false }).waitFor();
       checks.push("presence grid and persisted minute event query");
 
-      await page.getByRole("button", { name: "Обзор", exact: true }).click();
-      await page
-        .getByRole("button", { name: "Завершить запись", exact: true })
-        .click();
-      await page
-        .getByRole("button", { name: "Начать запись", exact: true })
-        .waitFor();
-      checks.push("stop manual recording");
+      await a.db.call("endSession", sessionId, Date.now(), "observed");
+      await reload(page);
+      await page.getByRole("button", { name: "Стримы", exact: true }).click();
+      await page.getByText("Twitch", { exact: true }).waitFor();
+      await page.getByText("Запись не закрыта", { exact: true }).waitFor({ state: "hidden" });
+      checks.push("automatic stream session remains in history after DB close");
       await page
         .getByRole("navigation").getByRole("button", { name: "Интеграции", exact: true })
         .click();

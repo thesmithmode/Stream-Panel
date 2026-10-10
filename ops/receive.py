@@ -1,12 +1,13 @@
 #!/usr/bin/python3
 """Root-owned, argument-free forced-command receiver. Never executes uploaded code as root."""
-import fcntl, hashlib, json, os, pathlib, pwd, re, shutil, sqlite3, subprocess, sys, tarfile, tempfile, time, urllib.request
+import fcntl, hashlib, ipaddress, json, os, pathlib, pwd, re, shutil, sqlite3, subprocess, sys, tarfile, tempfile, time, urllib.request
 BASE = pathlib.Path('/opt/stream-panel')
 DATA = pathlib.Path('/var/lib/stream-panel')
 STATE = pathlib.Path('/var/lib/stream-panel-deploy')
 SERVICE = 'stream-panel.service'
 MAX_ARCHIVE = 100 * 1024 * 1024
 MAX_EXPANDED = 450 * 1024 * 1024
+BIND_HOST_FILE = pathlib.Path('/etc/stream-panel/bind-host')
 
 def unpack(archive, destination):
     if not hasattr(tarfile, 'data_filter'):
@@ -37,8 +38,28 @@ def atomic_link(target):
 
 def health(origin, release):
     from urllib.parse import urlparse
+    try:
+        raw_host = BIND_HOST_FILE.read_bytes()
+        if len(raw_host) > 15:
+            raise RuntimeError('Invalid configured health host')
+        configured = raw_host.decode('ascii')
+    except FileNotFoundError:
+        configured = '127.0.0.1'
+    except (OSError, UnicodeDecodeError) as error:
+        raise RuntimeError('Invalid configured health host') from error
+    if not configured or '\n' in configured or '\r' in configured:
+        raise RuntimeError('Invalid configured health host')
+    try:
+        address = ipaddress.ip_address(configured)
+    except ValueError as error:
+        raise RuntimeError('Invalid configured health host') from error
+    allowed = address.is_loopback or any(address in ipaddress.ip_network(network) for network in (
+        '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16',
+    ))
+    if not isinstance(address, ipaddress.IPv4Address) or not allowed or str(address) != configured:
+        raise RuntimeError('Invalid configured health host')
     host = urlparse(origin).netloc
-    request = urllib.request.Request('http://127.0.0.1:47831/healthz', headers={'Host':host})
+    request = urllib.request.Request(f'http://{address}:47831/healthz', headers={'Host':host})
     for _ in range(30):
         try:
             with urllib.request.urlopen(request, timeout=2) as response:
@@ -51,10 +72,27 @@ def health(origin, release):
 def service(action):
     subprocess.run(['/usr/bin/systemctl', action, SERVICE], check=True, timeout=20)
 
+def rotate_snapshots():
+    directory = STATE / 'snapshots'
+    if not directory.exists(): return
+    snapshots = sorted((path for path in directory.iterdir() if re.fullmatch(r'[a-f0-9]{40}-[0-9]{15,20}', path.name) and path.is_dir() and not path.is_symlink()), key=lambda p:p.stat().st_mtime, reverse=True)
+    for path in snapshots[3:]: shutil.rmtree(path)
+
+def discard_failed_release(release):
+    # A failed rollback keeps maintenance and all evidence for recovery.
+    if (DATA / 'deploying').exists(): return
+    current = BASE / 'current'
+    if current.is_symlink() and current.resolve() == release: return
+    if release.parent == BASE / 'releases' and re.fullmatch(r'[a-f0-9]{40}', release.name) and release.is_dir() and not release.is_symlink():
+        shutil.rmtree(release)
+    rotate_snapshots()
+
 def activate(release, origin, user):
     current = BASE / 'current'
     old = current.resolve() if current.is_symlink() else None
-    if old == release: return
+    if old == release:
+        if not health(origin, release.name): raise RuntimeError('Active release failed health check')
+        return
     marker = DATA / 'deploying'
     snapshot = STATE / 'snapshots' / (release.name + '-' + str(time.time_ns()))
     snapshot.mkdir(parents=True, mode=0o700, exist_ok=False)
@@ -69,6 +107,7 @@ def activate(release, origin, user):
             try:
                 source.backup(target)
                 if target.execute('PRAGMA integrity_check').fetchone()[0] != 'ok': raise RuntimeError('Snapshot integrity failed')
+                if target.execute('PRAGMA foreign_key_check').fetchall(): raise RuntimeError('Snapshot foreign keys failed')
             finally: target.close(); source.close()
             if (DATA / 'profiles').exists(): shutil.copytree(DATA / 'profiles', snapshot / 'profiles')
             saved = True
@@ -78,11 +117,19 @@ def activate(release, origin, user):
     except Exception:
         service('stop')
         if saved:
-            for suffix in ['', '-wal', '-shm']:
+            check = sqlite3.connect(f'file:{snapshot / "data.sqlite"}?mode=ro', uri=True)
+            try:
+                if check.execute('PRAGMA integrity_check').fetchone()[0] != 'ok' or check.execute('PRAGMA foreign_key_check').fetchall(): raise RuntimeError('Rollback snapshot invalid; maintenance retained')
+            finally: check.close()
+            # Prepare and sync the replacement before replacing the current database.
+            restored = DATA / 'rollback.next.sqlite'
+            shutil.copy2(snapshot / 'data.sqlite', restored)
+            os.chown(restored, user.pw_uid, user.pw_gid)
+            os.chmod(restored, 0o600)
+            with restored.open('rb') as handle: os.fsync(handle.fileno())
+            for suffix in ['-wal', '-shm']:
                 (DATA / ('data.sqlite' + suffix)).unlink(missing_ok=True)
-            shutil.copy2(snapshot / 'data.sqlite', DATA / 'data.sqlite')
-            os.chown(DATA / 'data.sqlite', user.pw_uid, user.pw_gid)
-            os.chmod(DATA / 'data.sqlite', 0o600)
+            os.replace(restored, DATA / 'data.sqlite')
             if (snapshot / 'profiles').exists():
                 shutil.rmtree(DATA / 'profiles', ignore_errors=True)
                 shutil.copytree(snapshot / 'profiles', DATA / 'profiles')
@@ -103,9 +150,7 @@ def activate(release, origin, user):
     keep = protected | set([path for path in releases if path not in protected][:max(0,3-len(protected))])
     for path in releases:
         if path not in keep: shutil.rmtree(path)
-    snapshots = sorted((STATE/'snapshots').iterdir(), key=lambda p:p.stat().st_mtime, reverse=True)
-    for path in snapshots[3:]:
-        if re.fullmatch(r'[a-f0-9]{40}-[0-9]{15,20}',path.name) and not path.is_symlink(): shutil.rmtree(path)
+    rotate_snapshots()
 
 def main():
     if os.geteuid() != 0 or len(sys.argv) != 1: raise RuntimeError('Root forced command only')
@@ -129,6 +174,7 @@ def main():
                 output.flush();os.fsync(output.fileno())
             if digest.hexdigest() != expected: raise RuntimeError('Bundle checksum mismatch')
             release = BASE/'releases'/sha
+            created = False
             if release.exists():
                 if (release/'.bundle-sha256').read_text().strip() != expected: raise RuntimeError('Existing release differs')
             else:
@@ -139,8 +185,13 @@ def main():
                     if not path.is_symlink(): os.chmod(path, 0o755 if path.is_dir() or path.stat().st_mode & 0o111 else 0o644)
                 os.chmod(temp/'unpacked',0o755)
                 os.rename(temp/'unpacked',release)
-            subprocess.run(['/usr/sbin/runuser','-u','stream-panel','--',str(release/'bin/node'),'-e',"new (require('better-sqlite3'))(':memory:').close()"],cwd=release,check=True,timeout=15,stdout=subprocess.DEVNULL)
-            activate(release,origin,user)
+                created = True
+            try:
+                subprocess.run(['/usr/sbin/runuser','-u','stream-panel','--',str(release/'bin/node'),'-e',"new (require('better-sqlite3'))(':memory:').close()"],cwd=release,check=True,timeout=15,stdout=subprocess.DEVNULL)
+                activate(release,origin,user)
+            except Exception:
+                if created: discard_failed_release(release)
+                raise
         print('Stream Panel release healthy: '+sha)
 if __name__ == '__main__':
     try: main()

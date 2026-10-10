@@ -20,6 +20,12 @@ test("isAudioDonation detects message_type and media URLs", () => {
   assert.equal(isAudioDonation({}), false);
 });
 
+test("audio suffix fallback requires HTTP after a WAV query marker",()=>{
+  assert.equal(isAudioDonation({text:"https://cdn.example/alert.wav?token=x space"}),true);
+  assert.equal(isAudioDonation({text:"ftp://cdn.example/alert.wav?token=x space"}),false);
+  assert.equal(isAudioDonation({text:"https://cdn.example/alert.wav#player"}),false);
+});
+
 test("audioUrl returns http(s) text only", () => {
   assert.equal(audioUrl({ text: "https://x/a.mp3" }), "https://x/a.mp3");
   assert.equal(audioUrl({ text: "not-url" }), null);

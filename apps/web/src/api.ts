@@ -1,16 +1,23 @@
 import { demoApi, getDataMode, setDataMode, type DataMode } from "./demo-data";
+import { createProfileSelection } from "./profile";
 export { getDataMode, setDataMode, type DataMode };
 
+let csrf = "";
+export type { Profile } from "./profile";
+const selection = createProfileSelection(() => localStorage);
+export const getProfile = selection.get;
+export const setProfile = selection.set;
+export const setCsrf = (value: string) => (csrf = value);
 export async function api<T = any>(path: string, body?: unknown): Promise<T> {
-  if (getDataMode() === "demo") {
+  if (getDataMode() === "demo" && !path.startsWith("auth/")) {
     return (await demoApi(path, body)) as T;
   }
   const response = await fetch(`/api/v1/${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers:
       body === undefined
-        ? {}
-        : { "Content-Type": "application/json" },
+        ? { "X-Stream-Panel-Profile": getProfile() }
+        : { "Content-Type": "application/json", "X-CSRF-Token": csrf, "X-Stream-Panel-Profile": getProfile() },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const data = await response.json();
@@ -61,6 +68,9 @@ export interface Session {
   ended_at_ms: number | null;
   event_count: number;
   end_quality: string;
+  platforms?: Array<"twitch" | "youtube">;
+  primaryTitle?: string | null;
+  confirmedUrls?: Array<{ platform: "twitch" | "youtube"; url: string }>;
 }
 export interface Summary {
   messages: number;
@@ -80,6 +90,7 @@ export interface Summary {
     totalMinutes: number;
     ratio: number | null;
   } | null;
+  participants?: {personId:string;name:string;messages:number}[];
   chattersOverTime?: { atMs: number; chatters: number }[];
   gapCount?: number;
 }
@@ -98,6 +109,14 @@ export interface PersonStats {
   avgObservedMinutes: number | null;
   avgFirstObservedOffsetMs: number | null;
   sessionsWithObservation: number;
+  sessionsWithAttendance?: number;
+  estimatedChatMinutes?: number;
+  totalObservedMinutes: number;
+  recordedStreams: number;
+  attendanceRatio: number | null;
+  followedAtMs: number | null;
+  watchingSinceMs: number | null;
+  observedBeforeFollowMinutes: number | null;
 }
 export interface PersonTop {
   id: string;

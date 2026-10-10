@@ -1,6 +1,7 @@
-import Fastify from "fastify";
+import Fastify, { type FastifyRequest } from "fastify";
+import cookie from "@fastify/cookie";
 import staticFiles from "@fastify/static";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +29,7 @@ export async function createApplication(
     databasePath?: string;
     profile?: string;
     origin?: string;
+    session?: (request: FastifyRequest) => { csrf: string; expires: number } | null;
     staticFiles?: boolean;
   } = {},
 ) {
@@ -52,6 +54,7 @@ export async function createApplication(
     bodyLimit: 32768,
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
   });
+  await app.register(cookie);
   app.setErrorHandler((error, _request, reply) => {
     const code = error instanceof Error ? error.message : "INTERNAL_ERROR";
     const detail = error as { code?: string; statusCode?: number };
@@ -97,9 +100,21 @@ export async function createApplication(
     properties,
     required,
   });
+  const donationFields={personId:{type:"string",minLength:1,maxLength:512},amount:{type:"string",minLength:1,maxLength:50,pattern:"^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$"},currency:{type:"string",enum:["RUB","USD","EUR","BYN","KZT","UAH","BRL","TRY"]},occurredAtMs:{type:["integer","null"],minimum:0},message:{type:"string",maxLength:10000},sourceName:{type:"string",minLength:1,maxLength:200}};
+  const donationRequired=["personId","amount","currency","occurredAtMs","message","sourceName"];
   const schemaBodies: Record<string, Record<string, unknown>> = {
+    "/api/v1/persons":body({name:{type:"string",minLength:1,maxLength:200}},["name"]),
+    "/api/v1/donations":body({...donationFields,occurredAtMs:{type:"integer",minimum:0}},donationRequired),
+    "/api/v1/donations/:id/update":body({...donationFields,revision},[...donationRequired,"revision"]),
+    "/api/v1/donations/:id/delete":body({revision},["revision"]),
+    "/api/v1/donations/:id/restore":body({revision},["revision"]),
+    "/api/v1/persons/:id/metadata": body({tags:{type:"array",maxItems:50,items:{type:"string",minLength:1,maxLength:64}},manualCore:{type:["boolean","null"]},revision},["tags","manualCore","revision"]),
+    "/api/v1/persons/:id/notes": body({body:{type:"string",minLength:1,maxLength:10000}},["body"]),
+    "/api/v1/persons/:id/notes/:noteId/update": body({body:{type:"string",minLength:1,maxLength:10000},revision},["body","revision"]),
+    "/api/v1/persons/:id/notes/:noteId/delete": body({revision},["revision"]),
     "/api/v1/sessions/start": body(),
     "/api/v1/sessions/:id/stop": body(),
+    "/api/v1/sessions/:id/delete": body(),
     "/api/v1/persons/:id/rename": body(
       { name: { type: "string", minLength: 1, maxLength: 200 } },
       ["name"],
@@ -128,6 +143,7 @@ export async function createApplication(
       ["identityIds", "name", "revision"],
     ),
     "/api/v1/merges/:id/undo": body(),
+    "/api/v1/splits/:id/undo": body(),
     "/api/v1/youtube/connect": body({clientId:text,clientSecret:{type:"string",maxLength:256}},["clientId"]),
     "/api/v1/youtube/disconnect": body(),
     "/api/v1/twitch/connect": body(
@@ -158,9 +174,22 @@ export async function createApplication(
     if (route.method === "POST" && schemaBodies[route.url])
       route.schema = { ...route.schema, body: schemaBodies[route.url] };
   });
+  let nonce = randomBytes(32).toString("hex");
+  let nonceExpiry = Date.now() + 600000;
+  const sessions = new Map<string, { csrf: string; expires: number }>();
   const origin = options.origin ?? `http://127.0.0.1:${port}`;
   const callback = `${origin}/oauth/donationalerts/callback`;
   const youtube = new YouTubeConnection(configuration, db, `${origin}/oauth/youtube/callback`, options.profile ?? "local", transports.youtube?.request);
+  const same = (a: string, b: string) => {
+    const left = Buffer.from(a),
+      right = Buffer.from(b);
+    return left.length === right.length && timingSafeEqual(left, right);
+  };
+  const bootstrap = () => {
+    nonce = randomBytes(32).toString("hex");
+    nonceExpiry = Date.now() + 600000;
+    return `${origin}/#key=${nonce}`;
+  };
   app.addHook("onRequest", async (request, reply) => {
     if (
       !(options.origin ? [new URL(origin).host] : [`127.0.0.1:${port}`, `localhost:${port}`]).includes(
@@ -176,22 +205,58 @@ export async function createApplication(
       "Content-Security-Policy",
       "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
     );
-    if (!request.url.startsWith("/api/")) return;
+    const path = request.url.split("?")[0]!;
+    if (!path.startsWith("/api/")) return;
     if (
       request.headers.origin &&
       request.headers.origin !== origin &&
       request.headers.origin !== `http://localhost:${port}`
     )
       return reply.code(403).send({ error: "INVALID_ORIGIN" });
-    if (!["GET", "HEAD"].includes(request.method) &&
-      !request.headers["content-type"]?.startsWith("application/json"))
-      return reply.code(415).send({ error: "JSON_REQUIRED" });
+    if (path === "/api/v1/bootstrap") return;
+    const session = options.session ? options.session(request) : sessions.get(request.cookies.sp_session ?? "");
+    if (!session || session.expires < Date.now())
+      return reply.code(401).send({ error: "LOCAL_LOGIN_REQUIRED" });
+    if (
+      !["GET", "HEAD"].includes(request.method) &&
+      (!same(string(request.headers["x-csrf-token"]), session.csrf) ||
+        !request.headers["content-type"]?.startsWith("application/json"))
+    )
+      return reply.code(403).send({ error: "CSRF_REQUIRED" });
   });
-  app.get("/api/v1/profile", async () => ({ profile: options.profile ?? "ruslan" }));
-  app.post("/api/v1/profile", { schema: { body: {
-    type: "object", additionalProperties: false, required: ["profile"],
-    properties: { profile: { type: "string", enum: ["ruslan"] } },
-  } } }, async () => ({ profile: options.profile ?? "ruslan" }));
+  if (!options.session) app.post(
+    "/api/v1/bootstrap",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["key"],
+          additionalProperties: false,
+          properties: { key: { type: "string", maxLength: 128 } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const key = string(object(request.body).key);
+      if (!nonce || nonceExpiry < Date.now() || !same(key, nonce))
+        return reply.code(401).send({ error: "BOOTSTRAP_EXPIRED" });
+      nonce = "";
+      for (const [id, s] of sessions)
+        if (s.expires < Date.now()) sessions.delete(id);
+      if (sessions.size > 20)
+        return reply.code(429).send({ error: "TOO_MANY_SESSIONS" });
+      const id = randomBytes(32).toString("hex"),
+        csrf = randomBytes(32).toString("hex");
+      sessions.set(id, { csrf, expires: Date.now() + 86400000 });
+      reply.setCookie("sp_session", id, {
+        httpOnly: true,
+        sameSite: "strict",
+        path: "/api",
+        maxAge: 86400,
+      });
+      return { csrf };
+    },
+  );
   app.get("/api/v1/analytics", async request => {
     const q=object(request.query);
     return db.call("analytics", {
@@ -201,12 +266,14 @@ export async function createApplication(
       excludedLogins:configuration.value.excludedBotLogins,ownerId:configuration.value.twitch?.userId??"",youtubeAccount:configuration.value.youtube?.userId??configuration.value.youtubeAccountId??"",
     });
   });
-  app.get("/api/v1/status", async () => ({
+  app.get("/api/v1/status", async (request) => ({
     youtube: youtube.status,
     twitch: twitch.status,
     donationalerts: da.status,
     device: twitch.device,
     config: { ...configuration.publicView(), daRedirectUri: callback, youtubeRedirectUri: `${origin}/oauth/youtube/callback` },
+    csrf: (options.session ? options.session(request) : sessions.get(request.cookies.sp_session ?? ""))?.csrf,
+    serverMode: Boolean(options.session),
     profile: options.profile ?? null,
     gaps: await db.call("gaps"),
   }));
@@ -236,6 +303,10 @@ export async function createApplication(
       throw new Error("PLATFORM_SESSION_MANAGED_AUTOMATICALLY");
     await db.call("endSession", id, Date.now(), "manual");
     return { ok: true };
+  });
+  app.post("/api/v1/sessions/:id/delete",async request=>{
+    await db.call("deleteManualSession",string(object(request.params).id),Date.now());
+    return {ok:true};
   });
   app.get("/api/v1/summary", async (request) =>
     db.call(
@@ -283,9 +354,26 @@ export async function createApplication(
       configuration.value.excludedBotLogins,
     ),
   );
+  app.post("/api/v1/persons",async request=>db.call("createPerson",string(object(request.body).name)));
   app.get("/api/v1/persons/:id", async (request) =>
     db.call("person", string(object(request.params).id)),
   );
+  app.get("/api/v1/persons/:id/metadata", async request => db.call("personMetadata",string(object(request.params).id)));
+  app.post("/api/v1/persons/:id/metadata", async request => {
+    const b=object(request.body);
+    return db.call("setPersonMetadata",string(object(request.params).id),b.tags,b.manualCore,Number(b.revision));
+  });
+  app.get("/api/v1/persons/:id/notes", async request => db.call("personNotes",string(object(request.params).id)));
+  app.post("/api/v1/persons/:id/notes", async request => db.call("createPersonNote",string(object(request.params).id),string(object(request.body).body)));
+  app.post("/api/v1/persons/:id/notes/:noteId/update", async request => {
+    const p=object(request.params), b=object(request.body);
+    return db.call("updatePersonNote",string(p.id),string(p.noteId),string(b.body),Number(b.revision));
+  });
+  app.post("/api/v1/persons/:id/notes/:noteId/delete", async request => {
+    const p=object(request.params);
+    await db.call("deletePersonNote",string(p.id),string(p.noteId),Number(object(request.body).revision));
+    return {ok:true};
+  });
   app.get("/api/v1/persons/:id/stats", async (request) => {
     const id = string(object(request.params).id);
     const session = string(object(request.query).session) || undefined;
@@ -338,6 +426,20 @@ export async function createApplication(
       ),
     };
   });
+  app.get("/api/v1/splits",async()=>db.call("splits"));
+  app.post("/api/v1/splits/:id/undo",async request=>{await db.call("undoSplit",string(object(request.params).id),Date.now());return {ok:true};});
+  const donationInput=(b:Record<string,unknown>)=>({personId:string(b.personId),amount:string(b.amount),currency:string(b.currency),occurredAtMs:b.occurredAtMs===null?null:Number(b.occurredAtMs),message:string(b.message),sourceName:string(b.sourceName)});
+  app.get("/api/v1/donations",async request=>{
+    const q=object(request.query);
+    if(q.includeDeleted!==undefined && !["true","false"].includes(string(q.includeDeleted)))throw new Error("INVALID_DONATION_PAGE");
+    return db.call("donations",q.person===undefined?undefined:string(q.person),q.offset===undefined?0:Number(q.offset),q.limit===undefined?50:Number(q.limit),q.includeDeleted==="true");
+  });
+  app.get("/api/v1/donations/:id",async request=>db.call("donation",string(object(request.params).id)));
+  app.get("/api/v1/donations/:id/audit",async request=>db.call("donationAudit",string(object(request.params).id)));
+  app.post("/api/v1/donations",async request=>db.call("createDonation",donationInput(object(request.body)),Date.now()));
+  app.post("/api/v1/donations/:id/update",async request=>{const b=object(request.body);return db.call("updateDonation",string(object(request.params).id),donationInput(b),Number(b.revision),Date.now());});
+  app.post("/api/v1/donations/:id/restore",async request=>db.call("restoreDonation",string(object(request.params).id),Number(object(request.body).revision),Date.now()));
+  app.post("/api/v1/donations/:id/delete",async request=>{await db.call("deleteDonation",string(object(request.params).id),Number(object(request.body).revision),Date.now());return {ok:true};});
   app.get("/api/v1/merges", async () => db.call("merges"));
   app.post("/api/v1/merges/:id/undo", async (request) => {
     await db.call("undoMerge", string(object(request.params).id), Date.now());
@@ -447,5 +549,5 @@ export async function createApplication(
     void twitch.start();
     void da.start(); void youtube.start();
   }
-  return { app, db, configuration, twitch, da, youtube };
+  return { app, db, configuration, twitch, da, youtube, bootstrap };
 }

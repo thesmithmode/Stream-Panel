@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {mkdtemp,readFile,writeFile,mkdir,rm,stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import Database from 'better-sqlite3';
 import {schemaV1} from '../../../packages/core/src/schema.js';
 import {StreamStore} from '../../../packages/core/src/store.js';
@@ -29,7 +31,7 @@ test('legacy import keeps every table, WAL events and credentials, leaves source
  await writeFile(join(source,'secrets.json'),JSON.stringify(secrets));
  try{
  const result=await migrateLegacy(source,dest);assert.equal(result.tables.persons,1);
- for(const n of Object.values(result.tables))assert.equal(n,1);
+ for(const [table,n] of Object.entries(result.tables))assert.equal(n,(old.prepare(`SELECT count(*) AS n FROM ${table}`).get() as {n:number}).n);
  const migrated=new Database(join(dest,'data.sqlite'));
  try{
  for(const table of Object.keys(result.tables))assert.deepEqual(migrated.prepare(`SELECT * FROM p_ruslan_${table}`).all(),old.prepare(`SELECT * FROM ${table}`).all());
@@ -53,10 +55,12 @@ test('migration rejects active or corrupt locks, bad configs and broken database
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
-test('local preparation starts without credentials and validates the persistent backup key',async()=>{
+test('local preparation requires a password, provisions once, preserves it and validates the backup key',async()=>{
  const root=await mkdtemp(join(tmpdir(),'sp-local-')),dir=join(root,'local'),old=join(root,'absent');
  try{
- await prepareLocal(dir,old);
+ await assert.rejects(prepareLocal(dir,old),/LOCAL_PASSWORD_REQUIRED/);
+ await assert.rejects(prepareLocal(dir,old,'short'),/INVALID_PASSWORD/);
+ await prepareLocal(dir,old,'local-password-for-tests');
  assert.match(await readFile(join(dir,'backup-key'),'utf8'),/^[a-f0-9]{64}$/);
  assert.equal((await stat(join(dir,'backup-key'))).mode&0o777,0o600);
  const key=await readFile(join(dir,'backup-key'));await prepareLocal(dir,old);assert.deepEqual(await readFile(join(dir,'backup-key')),key);
@@ -68,9 +72,49 @@ test('old schema is upgraded only in the copy and missing config is supported',a
  const root=await mkdtemp(join(tmpdir(),'sp-old-schema-')),source=join(root,'old'),dest=join(root,'new');await mkdir(source);
  const old=new Database(join(source,'data.sqlite'));old.exec(schemaV1);old.exec("INSERT INTO persons VALUES ('p','Old Viewer',0)");old.close();
  try{
- await prepareLocal(dest,source);
+ await prepareLocal(dest,source,'local-password-for-tests');
  const imported=new Database(join(dest,'data.sqlite'));assert.equal(imported.prepare('SELECT * FROM p_ruslan_persons').all().length,1);imported.close();
  const original=new Database(join(source,'data.sqlite'));assert.equal(original.pragma('user_version',{simple:true}),1);original.close();
  await assert.rejects(readFile(join(dest,'profiles/ruslan/secrets.json')),/ENOENT/);
  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('current schema import preserves notes, deleted donation audit, stream categories and source bytes',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'sp-import-current-')),source=join(root,'old'),dest=join(root,'new');
+ await mkdir(source);
+ const path=join(source,'data.sqlite'),store=new StreamStore(path);
+ try {
+  const person=store.ingest({source:'twitch',accountId:'channel',externalId:'chat-message',type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:1000,receivedAtMs:1000,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}}).personId!;
+  store.createPersonNote(person,'Keep this note',1001);
+  const stream=store.observePlatformStream('twitch','channel','live-stream',900,1000,'https://www.twitch.tv/channel','Live')!;
+  store.streamSample(stream,1002,'game-42','Game 42','Live title',17);
+  const donation=store.createDonation({personId:person,amount:'12.34',currency:'USD',occurredAtMs:1003,message:'Original donation',sourceName:'Cash'},1004);
+  const updated=store.updateDonation(String(donation.id),{personId:person,amount:'15.00',currency:'USD',occurredAtMs:1005,message:'Corrected donation',sourceName:'Cash'},Number(donation.revision),1006);
+  store.deleteDonation(String(donation.id),Number(updated.revision),1007);
+ } finally {store.close();}
+
+ try {
+  const sourceHash=()=>createHash('sha256').update(readFileSync(path)).digest('hex');
+  const before=sourceHash();
+  const result=await migrateLegacy(source,dest);
+  const after=sourceHash();
+  assert.equal(after,before);
+  for(const table of ['person_notes','donation_corrections','donation_audit','stream_samples','platform_streams','youtube_identities','session_tombstones','split_guards','anonymous_donors'])
+   assert.ok(table in result.tables,`missing inventory table ${table}`);
+  assert.equal(result.tables.person_notes,1);
+  assert.equal(result.tables.donation_corrections,1);
+  assert.equal(result.tables.donation_audit,3);
+  assert.equal(result.tables.stream_samples,1);
+
+  const imported=new Database(join(dest,'data.sqlite'));
+  try {
+   assert.equal((imported.prepare('SELECT body FROM p_ruslan_person_notes').get() as any).body,'Keep this note');
+   assert.equal((imported.prepare('SELECT deleted FROM p_ruslan_donation_corrections').get() as any).deleted,1);
+   assert.deepEqual((imported.prepare('SELECT kind FROM p_ruslan_donation_audit ORDER BY revision').all() as any[]).map(row=>row.kind),['create','update','delete']);
+   assert.equal((imported.prepare('SELECT category_id FROM p_ruslan_stream_samples').get() as any).category_id,'game-42');
+   assert.equal(imported.pragma('integrity_check',{simple:true}),'ok');
+   assert.equal((imported.pragma('foreign_key_check') as unknown[]).length,0);
+  } finally {imported.close();}
+  await assert.rejects(migrateLegacy(source,dest),/DESTINATION_EXISTS/);
+ } finally {await rm(root,{recursive:true,force:true});}
 });

@@ -99,7 +99,7 @@ test(
       const subs = p.requests
         .filter((r) => r.url.includes("/subscriptions"))
         .map((r) => JSON.parse(r.body));
-      assert.equal(subs.length, 7);
+      assert.equal(subs.length, 8);
       assert.equal(subs[0].transport.session_id, "session");
       assert.equal(c.status.capabilities["channel.cheer"], "Нет разрешения");
       p.sockets[0].send(JSON.stringify(chat()));
@@ -121,7 +121,7 @@ test(
           c.status.capabilities["channel.chat.message"] ===
           "authorization_revoked",
       );
-      assert.equal((await f.db.call("sessions"))[0].stream_id, "live-stream");
+      assert.equal((await f.db.call("sessions"))[0].stream_id, "twitch:live-stream");
     } finally {
       await c.stop();
       await p.close();
@@ -214,6 +214,8 @@ test(
     try {
       await c.start();
       assert.equal(factories, 1);
+      await until(() => c.status.capabilities.history === "Ожидание эфира");
+      await c.scanHistory();
       await until(
         () =>
           c.status.capabilities.history === "Импорт доступных страниц завершён",
