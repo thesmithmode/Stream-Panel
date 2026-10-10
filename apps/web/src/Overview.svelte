@@ -37,7 +37,7 @@
     const current=sessionFilter;void summary;
     if(current===lastAudienceSession&&barOpen)return;
     const id=++audienceRequest;audienceBusy=true;audienceError='';
-    if(current!==lastAudienceSession){audienceData=null;lastAudienceSession=current;}
+    if(current!==lastAudienceSession){audienceData=null;metadata=[];lastAudienceSession=current;}
     if(!current){audienceData=null;audienceBusy=false;return;}
     void Promise.all([api(`analytics?${new URLSearchParams({session:current,source:'all',timezone:'Europe/Moscow'})}`),api<Array<{at:number;title:string;categoryName:string}>>(`sessions/${current}/metadata`)]).then(([result,history])=>{
       if(id===audienceRequest){audienceData=result;metadata=history.filter((row,i)=>!i||row.title!==history[i-1]!.title||row.categoryName!==history[i-1]!.categoryName);}
@@ -94,7 +94,7 @@
   }
 </script>
 {#if session}<section class="panel stream-facts">
- <header><h2>{session.primaryTitle||'Стрим'}</h2><span>{streamRange(session.started_at_ms,session.ended_at_ms)} МСК</span></header>
+ <header><h2>{session.primaryTitle||'Описание стрима'}</h2><span>{streamRange(session.started_at_ms,session.ended_at_ms)} МСК</span></header>
  {#each session.breaks??[] as pause}<p class="small">Перерыв: {streamRange(pause.from,pause.to)} МСК</p>{/each}
  <details class="compact-details"><summary>История названий и категорий</summary>
   {#each metadata as row}<p class="small">{streamTime(row.at)} · {row.categoryName||'Категория неизвестна'} · {row.title||'Без названия'}</p>{:else}<p class="small muted">Нет сохранённых метаданных.</p>{/each}
