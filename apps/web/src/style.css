@@ -908,12 +908,21 @@ select:focus-visible {
     left: 0;
   }
   .sidebar-bottom {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
     display: flex;
-    margin-top: 8px;
-    padding-top: 8px;
+    margin: 0;
+    padding: 10px 16px;
+    background: var(--sidebar);
+  }
+  .sidebar-bottom .sidebar-hint {
+    display: none;
   }
   main {
-    padding: 28px 18px;
+    padding: 28px 18px 88px;
   }
   .page-heading {
     margin-bottom: 26px;
