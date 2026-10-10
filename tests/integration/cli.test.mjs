@@ -6,6 +6,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import net from "node:net";
 const freePort = () => new Promise((resolve) => { const s = net.createServer(); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => resolve(p)); }); });
+test('production serves UI through a separate process and closes both processes cleanly',{timeout:20000},async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-split-cli-')),port=await freePort(),collectorPort=await freePort();let c;
+ try{
+  c=start(dir,port,{NODE_ENV:'production',STREAM_PANEL_COLLECTOR_PORT:String(collectorPort)});await c.ready();
+  assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status,200);
+  assert.match(await(await fetch(`http://127.0.0.1:${port}/`)).text(),/Stream Panel/);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/api/v1/events`)).status,401);
+  assert.equal((await fetch(`http://127.0.0.1:${collectorPort}/`)).status,403,'collector rejects the internal Host header');
+  c.child.kill('SIGTERM');assert.equal((await c.exit).code,0);
+  await assert.rejects(fetch(`http://127.0.0.1:${port}/healthz`));
+ }finally{if(c){c.child.kill();await c.exit;}await rm(dir,{recursive:true,force:true});}
+});
 function start(dir, port, extra = {}) {
   const child = spawn(process.execPath, ["dist/apps/daemon/src/index.js"], { env: { ...process.env, STREAM_PANEL_DATA_DIR: dir, STREAM_PANEL_PORT: String(port), STREAM_PANEL_PUBLIC_ORIGIN: `http://127.0.0.1:${port}`, ...extra }, stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "", stderr = "";

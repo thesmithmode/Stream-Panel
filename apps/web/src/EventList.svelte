@@ -15,6 +15,9 @@
     raid: "Рейд",
     "stream.online": "Начало эфира",
     "stream.offline": "Конец эфира",
+    "channel_points_custom_reward_redemption.add":"Награда за баллы",
+    "channel_points_custom_reward_redemption.update":"Статус награды",
+    "channel_points_automatic_reward_redemption.add":"Награда Twitch за баллы",
   };
 </script>
 

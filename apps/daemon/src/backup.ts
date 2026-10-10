@@ -61,7 +61,21 @@ export class BackupService {
     }).finally(() => { this.active = undefined; });
     return this.active;
   }
+  async purgeLocal(now=Date.now()):Promise<void>{
+    const directory=join(this.dir,'backups');
+    let entries;
+    try{entries=await readdir(directory,{withFileTypes:true});}
+    catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return;throw error;}
+    for(const entry of entries){
+      if(!entry.isFile()||!backupFilename.test(entry.name))continue;
+      const match=/^stream-panel-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z-/.exec(entry.name);
+      if(!match)continue;
+      const created=Date.parse(`${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}Z`);
+      if(Number.isFinite(created)&&created<now-2*86400000)await rm(join(directory,entry.name),{force:true});
+    }
+  }
   async files() {
+    await this.purgeLocal();
     const directory=resolve(this.dir,"backups");
     let entries;
     try {entries=await readdir(directory,{withFileTypes:true});}
@@ -106,6 +120,7 @@ export class BackupService {
   }
   private async perform() {
     const directory = join(this.dir, "backups"); await mkdir(directory, {recursive:true,mode:0o700});
+    await this.purgeLocal();
     const encodedKey = (await readFile(this.options.keyFile, "utf8")).trim();
     if (!/^[a-fA-F0-9]{64}$/.test(encodedKey)) throw new Error("INVALID_BACKUP_KEY");
     const key = Buffer.from(encodedKey, "hex");

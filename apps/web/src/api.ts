@@ -31,7 +31,7 @@ export function money(minor: string, currency: string) {
 export function date(at: number | null) {
   return at === null
     ? "Время неизвестно"
-    : new Date(at).toLocaleString("ru-RU");
+    : new Date(at).toLocaleString("ru-RU",{timeZone:'Europe/Moscow'});
 }
 export interface Event {
   id: string;
@@ -70,6 +70,7 @@ export interface Session {
   end_quality: string;
   platforms?: Array<"twitch" | "youtube">;
   primaryTitle?: string | null;
+  breaks?:Array<{from:number;to:number}>;
   confirmedUrls?: Array<{ platform: "twitch" | "youtube"; url: string }>;
 }
 export interface Summary {

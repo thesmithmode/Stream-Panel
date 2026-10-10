@@ -134,10 +134,10 @@ test('repeated corrections move only one donation and invalidate Person membersh
 test('editing donation time moves its stream attribution, and unknown time removes attribution without losing history',()=>{
  const s=new StreamStore(':memory:');try{
   const first=s.observePlatformStream('youtube','channel','one',at,at,null,'First')!;s.endSession(first,at+5*60000);
-  const second=s.observePlatformStream('youtube','channel','two',at+10*60000,at+10*60000,null,'Second')!;s.endSession(second,at+15*60000);
+  const second=s.observePlatformStream('youtube','channel','two',at+40*60000,at+40*60000,null,'Second')!;s.endSession(second,at+45*60000);
   const person=String(s.createPerson('Offline donor').id),input={personId:person,amount:'1',currency:'RUB',occurredAtMs:at+60000,message:'',sourceName:'Cash'};
   const donation=s.createDonation(input,at+20*60000);assert.equal(s.summary(first).donations,1);assert.equal(s.summary(second).donations,0);
-  s.updateDonation(donation.id,{...input,occurredAtMs:at+11*60000},0,at+21*60000);assert.equal(s.summary(first).donations,0);assert.equal(s.summary(second).donations,1);
+  s.updateDonation(donation.id,{...input,occurredAtMs:at+41*60000},0,at+21*60000);assert.equal(s.summary(first).donations,0);assert.equal(s.summary(second).donations,1);
   s.deleteDonation(donation.id,1,at+22*60000);assert.equal(s.summary(second).donations,0);s.restoreDonation(donation.id,2,at+23*60000);assert.equal(s.summary(second).donations,1);
   s.updateDonation(donation.id,{...input,occurredAtMs:null},3,at+24*60000);assert.equal(s.summary(second).donations,0);assert.equal(s.summary().donations,1);assert.equal(s.personStats(person).watchingSinceMs,null);
  }finally{s.close();}

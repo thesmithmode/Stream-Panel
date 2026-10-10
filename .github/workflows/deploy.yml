@@ -35,6 +35,22 @@ jobs:
           test -n "$ci_run"
           printf 'STREAM_PANEL_CI_RUN=%s\n' "$ci_run" >> "$GITHUB_ENV"
           printf 'STREAM_PANEL_RELEASE=%s\n' "$sha" >> "$GITHUB_ENV"
+      - name: Update trusted deployment receiver without restarting collection
+        env:
+          BOOTSTRAP_KEY: ${{ secrets.STREAM_PANEL_BOOTSTRAP_KEY }}
+          DEPLOY_HOST: ${{ secrets.STREAM_PANEL_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.STREAM_PANEL_DEPLOY_PORT }}
+          KNOWN_HOSTS: ${{ secrets.STREAM_PANEL_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$BOOTSTRAP_KEY" && test -n "$KNOWN_HOSTS" || { echo 'Receiver update credentials not configured'; exit 1; }
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ && "$DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]] || exit 1
+          task_dir=$(mktemp -d)
+          trap 'rm -rf "$task_dir"' EXIT
+          printf '%s\n' "$BOOTSTRAP_KEY" > "$task_dir/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$task_dir/known-hosts"
+          ssh -i "$task_dir/key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$task_dir/known-hosts" -o ConnectTimeout=15 "root@$DEPLOY_HOST" 'set -eu; test -f /usr/local/sbin/stream-panel-receive; test ! -L /usr/local/sbin/stream-panel-receive; temporary=$(mktemp /usr/local/sbin/.stream-panel-receive.XXXXXXXX); trap '\''rm -f "$temporary"'\'' EXIT; cat > "$temporary"; python3 -c '\''import pathlib,sys; compile(pathlib.Path(sys.argv[1]).read_bytes(), "receiver", "exec")'\'' "$temporary"; chown root:root "$temporary"; chmod 755 "$temporary"; mv -f "$temporary" /usr/local/sbin/stream-panel-receive' < ops/receive.py
       - uses: actions/download-artifact@v4
         with:
           name: server-bundle

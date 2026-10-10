@@ -29,6 +29,14 @@ test('channel overview filters whole history while stream details and profile da
   assert.equal(await page.getByLabel('Период аналитики').count(),0);
   await page.getByRole('button',{name:'Вся история',exact:true}).click();await count('Стримы').filter({hasText:'2'}).waitFor();assert.equal(await count('Сообщения').textContent(),'2');
   await page.getByRole('button',{name:'7 дней',exact:true}).click();await count('Стримы').filter({hasText:'1'}).waitFor();
+  await page.locator('.stream-list .stream').first().click();
+  await page.getByRole('heading',{name:'Стрим',exact:true}).waitFor();
+  const rank=page.getByRole('region',{name:'Рейтинг участников'});
+  await rank.getByLabel('Рейтинг по').selectOption('messages');
+  await rank.getByRole('button',{name:'Overview Viewer',exact:true}).click();
+  await page.getByRole('heading',{name:'Overview Viewer',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Обзор',exact:true}).click();
+  await count('Стримы').filter({hasText:'1'}).waitFor();
   await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`tr[data-session-id="${streams[0]}"]`).getByRole('button',{name:'Открыть',exact:true}).click();
   await page.getByRole('heading',{name:'Стрим',exact:true}).waitFor();await page.getByRole('heading',{name:'Участники чата',exact:true}).waitFor();
   await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.getByRole('heading',{name:'Обзор канала',exact:true}).waitFor();await count('Стримы').filter({hasText:'1'}).waitFor();

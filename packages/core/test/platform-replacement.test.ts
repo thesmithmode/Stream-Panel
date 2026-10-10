@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {StreamStore} from '../src/store.js';
 
-test('confirmed next Twitch or YouTube stream ends the old standalone logical session',async()=>{
+test('confirmed next Twitch or YouTube stream continues the recording and retains the old provider segment',async()=>{
  for(const platform of ['twitch','youtube'] as const) {
   const dir=await mkdtemp(join(tmpdir(),`sp-platform-replace-${platform}-`));
   const path=join(dir,'data.sqlite');
@@ -21,16 +21,16 @@ test('confirmed next Twitch or YouTube stream ends the old standalone logical se
    const newUrl=platform==='twitch'?'https://twitch.tv/channel':'https://youtube.com/watch?v=new-video';
    const newId=store.observePlatformStream(platform,account,'new-stream',2000,2100,newUrl,'New',['new-stream']);
    assert.ok(newId);
-   assert.notEqual(newId,oldId);
+   assert.equal(newId,oldId);
    const rows=store.sessions();
-   assert.equal(rows.length,2);
-   assert.equal(rows.find(row=>row.id===oldId)!.ended_at_ms,2000);
-   assert.equal(rows.find(row=>row.id===oldId)!.end_quality,'estimated');
+   assert.equal(rows.length,1);
+   assert.equal(rows.find(row=>row.id===oldId)!.ended_at_ms,null);
+   assert.equal(rows.find(row=>row.id===oldId)!.end_quality,'unknown');
    assert.equal(rows.find(row=>row.id===newId)!.ended_at_ms,null);
-   assert.equal(store.platformStreams(oldId!).find(row=>row.external_id==='old-stream')!.ended_at_ms,2000);
+   assert.equal(store.platformStreams(oldId!).find(row=>row.external_id==='old-stream')!.ended_at_ms,1100);
    assert.equal(store.platformStreams(newId!).find(row=>row.external_id==='new-stream')!.ended_at_ms,null);
    assert.equal(store.observePlatformStream(platform,account,'new-stream',1900,2200,newUrl,'Same stream'),newId);
-   assert.equal(store.sessions().length,2);
+   assert.equal(store.sessions().length,1);
   } finally {store.close();await rm(dir,{recursive:true,force:true});}
  }
 });
@@ -58,7 +58,7 @@ test('Twitch replacement continues a shared logical session while another provid
   assert.equal(store.observePlatformStream('twitch','twitch-account','twitch-old',1050,1200,'https://twitch.tv/channel','Twitch old'),session);
   assert.equal(store.observePlatformStream('twitch','twitch-account','twitch-new',1300,1400,'https://twitch.tv/channel','Twitch new'),session);
   const links=store.platformStreams(session!);
-  assert.equal(links.find(row=>row.external_id==='twitch-old')!.ended_at_ms,1300);
+  assert.equal(links.find(row=>row.external_id==='twitch-old')!.ended_at_ms,1200);
   assert.equal(links.find(row=>row.external_id==='twitch-new')!.ended_at_ms,null);
   assert.equal(links.find(row=>row.external_id==='youtube-video')!.ended_at_ms,null);
   assert.equal(store.sessions().length,1);

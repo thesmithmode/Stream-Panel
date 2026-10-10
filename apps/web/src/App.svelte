@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Icon from "./Icon.svelte";
+  import {streamRange} from "./stream-time";
   import Overview from "./Overview.svelte";
   import ChannelOverview from "./ChannelOverview.svelte";
   import Analytics from "./Analytics.svelte";
@@ -283,7 +284,7 @@
             >
           </div>{/if}{/if}
       {#if tab === "overview"}<ChannelOverview {events} onPerson={openPerson} onStream={id=>{sessionFilter=id;navigate("stream");}} connect={()=>navigate("connections")} />
-      {:else if tab === "stream"}<button class="outline" onclick={()=>navigate("sessions")}>К списку стримов</button><Overview
+      {:else if tab === "stream"}<button class="outline" onclick={()=>navigate("sessions")}>К списку стримов</button><Overview session={sessions.find(s=>s.id===sessionFilter)}
           {summary}
           {events}
           {sessionFilter}
@@ -317,19 +318,15 @@
               <table>
                 <thead
                   ><tr
-                    ><th>Начало</th><th>Конец / состояние</th><th>Площадки</th
+                    ><th>Период · МСК</th><th>Площадки</th
                     ><th>Название и ссылка</th><th>События</th><th></th></tr
                   ></thead
                 ><tbody
                   >{#each sessions as session}<tr data-session-id={session.id}
-                      ><td>{date(session.started_at_ms)}</td><td
-                        >{session.ended_at_ms === null
-                          ? "Запись не закрыта"
-                          : date(session.ended_at_ms)}<small
-                          >{session.end_quality === "estimated"
-                            ? "Граница приблизительная"
-                            : ""}</small
-                        ></td
+                      > <td>{streamRange(session.started_at_ms,session.ended_at_ms)}
+                        {#each session.breaks??[] as pause}<small>Перерыв: {streamRange(pause.from,pause.to)}</small>{/each}
+                        {#if session.end_quality==='estimated'}<small>Граница приблизительная</small>{/if}
+                        </td
                       ><td class="platform-labels"
                         >{session.platforms?.length
                           ? session.platforms.map((platform) => platform === "twitch" ? "Twitch" : "YouTube").join(", ")

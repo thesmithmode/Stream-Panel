@@ -19,6 +19,7 @@ export class AccountStore {
     this.db = new Database(path);
     this.db.pragma("busy_timeout = 5000");
     this.db.pragma("journal_mode = WAL");
+    this.db.pragma("synchronous = FULL");
     this.db.pragma("foreign_keys = ON");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS sp_users (

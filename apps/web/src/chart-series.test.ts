@@ -28,7 +28,7 @@ test('YouTube estimate segments remain bounded by the total and tolerate legacy 
 
 test('known legacy sample without the selected metric contributes a zero instead of NaN',()=>{
  const [point]=chartSeries([{at:0,presenceKnown:true}],'observed');
- assert.deepEqual(point,{at:0,known:true,value:0,regularValue:0,width:60000});
+ assert.deepEqual(point,{at:0,known:true,isBreak:false,value:0,regularValue:0,width:60000});
 });
 
  test('requested chart resolution aggregates accurately and caps long periods',()=>{
@@ -41,3 +41,10 @@ test('known legacy sample without the selected metric contributes a zero instead
  assert.ok(chartSeries(long,'messages',1).length<=601);
  assert.equal(chartSeries(points,'messages',NaN)[0]?.width,60000);
  });
+
+test('break buckets exclude presence and messages and mixed live buckets retain live values',()=>{
+ const points=[{at:0,isBreak:true,observed:99,messages:99,presenceKnown:false},{at:60000,observed:4,messages:2,presenceKnown:true}];
+ assert.equal(chartSeries(points,'observed')[0]?.isBreak,true);
+ assert.equal(chartSeries(points,'messages')[0]?.value,0);
+ const mixed=chartSeries(points,'observed',5)[0]!;assert.equal(mixed.isBreak,false);assert.equal(mixed.value,4);
+});

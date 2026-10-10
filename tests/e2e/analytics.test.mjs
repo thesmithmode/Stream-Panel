@@ -42,7 +42,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
     return url.pathname==='/api/v1/analytics'&&response.status()===status&&Object.entries(query).every(([key,value])=>url.searchParams.get(key)===String(value))&&extra(url);
    });
    const advanceAutoFilter=async(response)=>{await page.clock.fastForward(300);return response;};
-   const openAnalytics=async(query)=>{const response=watchAnalytics(query);await page.getByRole('button',{name:'Аналитика',exact:true}).click();return await advanceAutoFilter(response);};
+   const openAnalytics=async(query)=>{const response=watchAnalytics(query);await page.getByRole('button',{name:'Аналитика',exact:true}).click();const result=await advanceAutoFilter(response);await page.getByText('Сравнения и отчёты',{exact:true}).click();return result;};
    const currentPeriod=async(values)=>page.evaluate(inputs=>Object.fromEntries(inputs.map(([key,value])=>[key,String(new Date(value).getTime())])),values);
    const presetPeriod=async(days)=>page.evaluate(span=>{
     const localInput=at=>{const d=new Date(at);return new Date(at-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
@@ -67,9 +67,25 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    assert.ok(await page.getByRole('row').filter({hasText:`Regular ${profile}`}).locator('.core-badge').count()>0);
    assert.equal(await page.getByRole('row').filter({hasText:`Occasional ${profile}`}).locator('.core-badge').count(),0);
    await page.getByLabel('Метрика графика').selectOption('viewers');assert.equal(await page.locator('.trend-chart rect.regular-segment').count(),0);await page.getByLabel('Метрика графика').selectOption('observed');
+   const firstBar=page.locator('.trend-chart .chart-bar').first();
+   await firstBar.click();
+   const barDetail=page.getByRole('region',{name:'Детали выбранного столбца'});
+   await barDetail.waitFor();
+   assert.equal(await barDetail.getByRole('button',{name:`Regular ${profile}`,exact:true}).count(),1);
+   assert.equal(await barDetail.getByRole('button',{name:`Regular ${profile==='ruslan'?'gulnaz':'ruslan'}`,exact:true}).count(),0);
+   assert.equal(await barDetail.getByRole('button',{name:'RenamedOwner',exact:true}).count(),0);
+   await page.getByRole('button',{name:'Закрыть детализацию',exact:true}).click();
+   await firstBar.focus();await page.keyboard.press('Enter');await barDetail.waitFor();
+   await page.getByLabel('Метрика графика').selectOption('viewers');assert.equal(await barDetail.count(),0);
+   await firstBar.click();await barDetail.waitFor();
+   await barDetail.getByRole('button',{name:'О детализации минуты',exact:true}).click();assert.ok((await page.getByRole('dialog',{name:'О детализации минуты',exact:true}).textContent()).includes('не раскрывает личности'));await page.keyboard.press('Escape');
+   await page.getByRole('button',{name:'Закрыть детализацию',exact:true}).click();
+   await page.getByLabel('Метрика графика').selectOption('observed');
+   assert.ok((await page.locator('.trend-chart svg text').allTextContents()).some(text=>/^\d{2}:(00|15|30|45)$/.test(text)));
    await page.getByText('Настроить отображение',{exact:true}).click();
    await page.getByLabel('Детализация графика').selectOption('15');
    assert.ok((await page.locator('.trend-chart .chart-bar title').first().textContent()).includes('15 мин'));
+   await page.locator('.trend-chart .chart-bar').first().click();await barDetail.waitFor();await barDetail.getByLabel('Минута столбца').selectOption({index:1});assert.equal(await barDetail.getByLabel('Минута столбца').count(),1);await page.getByRole('button',{name:'Закрыть детализацию',exact:true}).click();
    await page.getByLabel('Жёлтая доля ядра').uncheck();assert.equal(await page.locator('.regular-segment').count(),0);
    await page.getByLabel('Только ядро').check();assert.equal(await page.getByRole('button',{name:`Occasional ${profile}`,exact:true}).count(),0);
    await page.getByLabel('Сортировка').selectOption('attendanceRatio');
@@ -162,11 +178,17 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    const monthRange=await presetPeriod(30),presetFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...monthRange});
    await page.getByRole('button',{name:'30 дней',exact:true}).click();await advanceAutoFilter(presetFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);await page.setViewportSize({width:1280,height:800});
-   await page.getByRole('button',{name:'Демо',exact:true}).click();await page.clock.fastForward(300);await page.getByRole('cell',{name:'Демо-игра',exact:true}).waitFor();
+   await page.getByRole('button',{name:'Демо',exact:true}).click();await page.clock.fastForward(300);await page.getByText('Сравнения и отчёты',{exact:true}).click();await page.getByRole('cell',{name:'Демо-игра',exact:true}).waitFor();
    const realFilter=watchAnalytics({source:'all',category:'',timezone:'UTC'});
    await page.getByRole('button',{name:'Реальные',exact:true}).click();await advanceAutoFilter(realFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    await page.evaluate(()=>{Storage.prototype.getItem=()=>{throw new Error('storage unavailable');};Storage.prototype.setItem=()=>{throw new Error('storage unavailable');};});
    await page.getByRole('button',{name:'Обзор',exact:true}).click();await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
+   await page.getByRole('button',{name:'О данных отчёта YouTube',exact:true}).click();
+   assert.ok((await page.getByRole('dialog',{name:'О данных отчёта YouTube',exact:true}).textContent()).includes('Отчёт охватывает весь канал'));
+   await page.keyboard.press('Escape');
+   await page.locator('.trend-chart .chart-bar').first().click();await barDetail.waitFor();
+   await barDetail.getByRole('button',{name:`Regular ${profile}`,exact:true}).click();
+   await page.getByRole('heading',{name:`Regular ${profile}`,exact:true}).waitFor();
    assert.deepEqual(errors,[]);await saveCoverage(page);await context.close();
   }
  }finally{await browser.close();await h.app.close();await rm(dir,{recursive:true,force:true});}

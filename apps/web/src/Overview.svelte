@@ -2,7 +2,10 @@
   import Icon from "./Icon.svelte";
   import Help from "./Help.svelte";
   import EventList from "./EventList.svelte";
-  import TrendChart from "./TrendChart.svelte";
+  import AudienceChart from "./AudienceChart.svelte";
+  import AudienceRanking from "./AudienceRanking.svelte";
+  import {streamRange,streamTime} from './stream-time';
+  import type {Session} from './api';
   import { onMount } from "svelte";
   import {
     api,
@@ -18,13 +21,29 @@
     sessionFilter = "",
     connect,
     onPerson,
+    session,
   }: {
     summary: Summary;
     events: Event[];
     sessionFilter?: string;
     connect: () => void;
     onPerson: (id: string) => void;
+    session?:Session|undefined;
   } = $props();
+  let audienceData=$state<any>(null),audienceError=$state(''),audienceBusy=$state(false),barOpen=$state(false);
+  let metadata=$state<Array<{at:number;title:string;categoryName:string}>>([]);
+  let audienceRequest=0,lastAudienceSession='';
+  $effect(()=>{
+    const current=sessionFilter;void summary;
+    if(current===lastAudienceSession&&barOpen)return;
+    const id=++audienceRequest;audienceBusy=true;audienceError='';
+    if(current!==lastAudienceSession){audienceData=null;metadata=[];lastAudienceSession=current;}
+    if(!current){audienceData=null;audienceBusy=false;return;}
+    void Promise.all([api(`analytics?${new URLSearchParams({session:current,source:'all',timezone:'Europe/Moscow'})}`),api<Array<{at:number;title:string;categoryName:string}>>(`sessions/${current}/metadata`)]).then(([result,history])=>{
+      if(id===audienceRequest){audienceData=result;metadata=history.filter((row,i)=>!i||row.title!==history[i-1]!.title||row.categoryName!==history[i-1]!.categoryName);}
+    }).catch(error=>{if(id===audienceRequest){audienceError=(error as Error).message;audienceData=null;}}).finally(()=>{if(id===audienceRequest)audienceBusy=false;});
+    return()=>{audienceRequest++;};
+  });
   let filter = $state("all");
   let insightsOpen = $state(false);
   let insights = $state<InsightCard[]>([]);
@@ -74,7 +93,14 @@
     return `${Math.round(c.ratio * 100)}% (${c.knownMinutes}/${c.totalMinutes} мин)`;
   }
 </script>
-
+{#if session}<section class="panel stream-facts">
+ <header><h2>{session.primaryTitle||'Описание стрима'}</h2><span>{streamRange(session.started_at_ms,session.ended_at_ms)} МСК</span></header>
+ {#each session.breaks??[] as pause}<p class="small">Перерыв: {streamRange(pause.from,pause.to)} МСК</p>{/each}
+ <details class="compact-details"><summary>История названий и категорий</summary>
+  {#each metadata as row}<p class="small">{streamTime(row.at)} · {row.categoryName||'Категория неизвестна'} · {row.title||'Без названия'}</p>{:else}<p class="small muted">Нет сохранённых метаданных.</p>{/each}
+  <p class="small muted">Текст уведомления о начале эфира публичный Twitch API не отдаёт.</p>
+ </details>
+</section>{/if}
 <section class="metrics">
   <div class="metric">
     <Icon name="chat" size={27} />
@@ -165,9 +191,12 @@
   </div>
 </section>
 <section class="panel series-panel">
-  <header><h2>Аудитория в чате <Help id="stream-presence" label="Об аудитории стрима" text="График показывает наблюдения присутствия в чате Twitch. Это не подтверждение просмотра видео; неизвестные промежутки не считаются нулём." /></h2></header>
-  <TrendChart points={(summary.chattersOverTime??[]).map(p=>({at:p.atMs,observed:p.chatters,presenceKnown:true}))} metric="observed" showRegulars={false}/>
+  <header><h2>Аудитория в чате <Help id="stream-presence" label="Об аудитории стрима" text="График показывает наблюдения присутствия в чате Twitch. Это не подтверждение просмотра видео; неизвестные промежутки не считаются нулём. Нажмите столбец, чтобы увидеть участников за минуту." /></h2></header>
+  {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceData}
+    <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric="observed" resolution={1} showRegulars={false} {onPerson} onselection={(open)=>barOpen=open}/>
+  {:else}<p class="empty-small" role="status">{audienceBusy?'Загружаем присутствие…':'Выберите стрим'}</p>{/if}
 </section>
+<AudienceRanking people={audienceData?.audience??[]} {onPerson} showIntervals/>
 <div class="overview-grid">
   <section class="panel feed">
     <header>
@@ -190,10 +219,7 @@
         <button class="primary" onclick={connect}>Открыть интеграции</button>
       </div>{/if}
   </section>
-  <aside class="right-rail"><section class="panel"><header><h2>Участники чата</h2></header>
-  {#each summary.participants??[] as person}<div class="chat-participant"><button class="outline small" onclick={()=>onPerson(person.personId)}>{person.name}</button><strong>{person.messages} сообщений</strong></div>{:else}<p class="empty-small">Сообщений пока нет</p>{/each}
-  </section>
-  </aside>
+
 </div>
 
-<style>.chat-participant{display:flex;align-items:center;justify-content:space-between;gap:.6rem;padding:.7rem;}.chat-participant button{overflow-wrap:anywhere;white-space:normal;text-align:left;}.chat-participant strong{font-size:.85rem;white-space:nowrap;}</style>
+<style>.overview-grid{display:block;}</style>

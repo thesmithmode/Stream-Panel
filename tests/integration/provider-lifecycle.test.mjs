@@ -307,7 +307,7 @@ test("Twitch lifecycle: full subscriptions, safe handoff, transient gap, offline
     f.sockets[0].push(welcome);
     await flush();
     assert.equal(c.status.state, "connected");
-    assert.equal(subs.length, 13);
+    assert.equal(subs.length, 20);
     assert.equal(subs.find((x) => x.type === "channel.update").version, "2");
     assert.equal(subs.find((x) => x.type === "channel.follow").version, "2");
     f.sockets[0].push({
@@ -327,7 +327,7 @@ test("Twitch lifecycle: full subscriptions, safe handoff, transient gap, offline
     f.sockets[1].push(welcome);
     await flush();
     assert.equal(f.sockets[0].closed, true);
-    assert.equal(subs.length, 13, "handoff must not duplicate subscriptions");
+    assert.equal(subs.length, 20, "handoff must not duplicate subscriptions");
     f.sockets[1].push("invalid json");
     await flush();
     assert.equal(c.status.state, "degraded");

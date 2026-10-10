@@ -27,11 +27,11 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
  await page.route('**/api/v1/analytics?*',route=>route.fulfill({json:data}));
  page.setDefaultTimeout(8000);
  const response=()=>page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/analytics');
- const renderNextHistory=async()=>{assert.deepEqual(errors,[]);await page.getByRole('button',{name:'Обзор',exact:true}).click();const received=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await received;};
+ const renderNextHistory=async()=>{assert.deepEqual(errors,[]);await page.getByRole('button',{name:'Обзор',exact:true}).click();const received=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await received;await page.getByText('Сравнения и отчёты',{exact:true}).click();};
  try {
   await goto(page,`http://127.0.0.1:${port}`);
   await page.getByLabel('Логин',{exact:true}).fill('fixture');await page.getByLabel('Пароль',{exact:true}).fill('fixture-missing-data-password');await page.getByRole('button',{name:'Войти',exact:true}).click();
-  const first=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await first;
+  const first=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await first;await page.getByText('Сравнения и отчёты',{exact:true}).click();
   await page.getByRole('button',{name:person.name,exact:true}).waitFor();
   assert.ok(await page.getByText('0 из 1 (нет данных)',{exact:true}).count());
   const report=page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).locator('..').locator('..');

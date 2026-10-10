@@ -259,8 +259,9 @@ export async function createApplication(
   );
   app.get("/api/v1/analytics", async request => {
     const q=object(request.query);
+    const sessionId=string(q.session);
     return db.call("analytics", {
-      fromMs:Number(q.from),toMs:Math.min(Number(q.to),Date.now()),source:string(q.source)||"all",category:string(q.category),
+      sessionId:sessionId||undefined,fromMs:sessionId?0:Number(q.from),toMs:sessionId?Date.now():Math.min(Number(q.to),Date.now()),source:string(q.source)||"all",category:string(q.category),
       regularThresholdPercent:q.regularThresholdPercent===undefined?50:Number(q.regularThresholdPercent),minSessions:q.minSessions===undefined?3:Number(q.minSessions),minMinutes:q.minMinutes===undefined?30:Number(q.minMinutes),minMessages:q.minMessages===undefined?5:Number(q.minMessages),
       chatWindowMinutes:q.chatWindowMinutes===undefined?5:Number(q.chatWindowMinutes),coreRule:string(q.coreRule)||"either",timezone:string(q.timezone)||"Europe/Moscow",
       excludedLogins:configuration.value.excludedBotLogins,ownerId:configuration.value.twitch?.userId??"",youtubeAccount:configuration.value.youtube?.userId??configuration.value.youtubeAccountId??"",
@@ -278,6 +279,7 @@ export async function createApplication(
     gaps: await db.call("gaps"),
   }));
   app.get("/api/v1/sessions", async () => db.call("sessions"));
+  app.get("/api/v1/sessions/:id/metadata",async(request)=>db.call('streamMetadata',string(object(request.params).id)));
   app.post("/api/v1/sessions/start", async () => {
     const existing = await db.call<Record<string, unknown>[]>("sessions");
     if (existing.some((s) => s.ended_at_ms === null))

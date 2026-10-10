@@ -83,7 +83,8 @@ def rotate_snapshots():
     directory = STATE / 'snapshots'
     if not directory.exists(): return
     snapshots = sorted((path for path in directory.iterdir() if re.fullmatch(r'[a-f0-9]{40}-[0-9]{15,20}', path.name) and path.is_dir() and not path.is_symlink()), key=lambda p:p.stat().st_mtime, reverse=True)
-    for path in snapshots[3:]: shutil.rmtree(path)
+    for i,path in enumerate(snapshots):
+        if i>=3 or path.stat().st_mtime<time.time()-2*86400: shutil.rmtree(path)
 
 def discard_failed_release(release):
     # A failed rollback keeps maintenance and all evidence for recovery.

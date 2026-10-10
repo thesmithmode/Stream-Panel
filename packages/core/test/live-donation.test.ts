@@ -18,7 +18,7 @@ test('live donation ingestion atomically rejects closed/replaced streams and old
   assert.equal(s.ingestLiveDonation(event('now',at),id)?.inserted,false);
   s.platformMissing('youtube','yt',[],at+m);s.platformMissing('youtube','yt',[],at+2*m);
   assert.equal(s.ingestLiveDonation(event('late',at),id),null);
-  const next=s.observePlatformStream('youtube','yt','second',at+3*m,at+3*m,null,'Next')!;
+  const next=s.observePlatformStream('youtube','yt','second',at+32*m,at+32*m,null,'Next')!;
   assert.notEqual(next,id);assert.equal(s.ingestLiveDonation(event('replaced',at),id),null);
   assert.throws(()=>s.ingestLiveDonation({...event('bad source',at),source:'twitch'},next),/INVALID_LIVE_DONATION/);
   assert.equal(s.events().length,2);
