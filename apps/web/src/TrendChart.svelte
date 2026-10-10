@@ -1,5 +1,7 @@
 <script lang="ts">
   import {chartSeries, type ChartMetric, type ChartPoint} from './chart-series';
+  import Help from './Help.svelte';
+  const id=$props.id();
   import {timelineTicks} from './chart-detail';
   let {points,metric,resolution=0,showRegulars=true,timezone='Europe/Moscow',onselect}:{points:ChartPoint[];metric:ChartMetric;resolution?:number;showRegulars?:boolean;timezone?:string;onselect?:(point:ReturnType<typeof chartSeries>[number])=>void}=$props();
   const buckets=$derived(chartSeries(points,metric,resolution));
@@ -39,11 +41,12 @@
         <text x={x} y="231" text-anchor="middle" fill="currentColor" font-size="10">{new Date(at).toLocaleDateString('ru-RU',{timeZone:timezone,day:'2-digit',month:'2-digit'})}</text>
       {/each}
     </svg></div>
-    <p class="small muted">Нажмите столбец для детализации. Шкала — каждые 15 минут (для периодов длиннее суток шаг укрупняется). Часовой пояс: {timezone}. Столбец — {Math.round((buckets[0]?.width??60000)/60000)} мин. Детализация автоматически укрупняется до 600 столбцов для длинного периода. Для участников — среднее по сигналам, для сообщений — сумма. {split?'Жёлтая часть входит в общую высоту; наведите, чтобы увидеть её долю.':'Персональная подсветка выключена или недоступна для агрегатного счётчика.'}</p>
+    <div class="chart-caption"><span>Столбец: {Math.round((buckets[0]?.width??60000)/60000)} мин · {timezone}</span><Help id={`${id}-help`} label="Как читать график" text="Нажмите столбец для детализации. Шкала — каждые 15 минут; для периодов длиннее суток шаг укрупняется. На длинном периоде столбцы объединяются. Для участников высота — среднее по известным сигналам, для сообщений — сумма. Жёлтый сегмент — ядро аудитории. Серые отметки — нет данных."/></div>
   {/if}
 </div>
 
 <style>
+  .chart-caption{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:8px;}
   .trend-plot{overflow-x:auto;}
   .chart-bar{cursor:pointer;}
   .chart-bar:focus{outline:2px solid currentColor;}

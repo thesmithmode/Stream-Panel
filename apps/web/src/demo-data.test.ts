@@ -132,3 +132,12 @@ test('demo blocks mutations and handles empty lookups without changing real data
  await assert.rejects(demoApi('sessions/missing/stop',{}),/SESSION_NOT_FOUND/);
  await assert.rejects(demoApi(`sessions/${sessions[0].id}/stop`,{}),/PLATFORM_SESSION_MANAGED_AUTOMATICALLY/);
 });
+
+test('demo single-stream analytics accepts stream scope without date filters',async()=>{
+ const streams=await demoApi('sessions') as any[];
+ const result=await demoApi(`analytics?session=${streams[0].id}`) as any;
+ assert.equal(result.summary.streams,1);
+ assert.ok(Number.isFinite(result.timeline[0].at));
+ assert.ok(result.audience.every((p:any)=>p.intervals.every((i:any)=>i.session===streams[0].id)));
+ await assert.rejects(demoApi('analytics?session=missing'),/SESSION_NOT_FOUND/);
+});

@@ -321,17 +321,19 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
   }
 
   if (p === "analytics") {
-    const from=Number(q.get("from")),to=Number(q.get("to")),start=Math.max(from,to-2*hour),source=q.get("source")||"all";
+    const session=q.get("session")?sessions.find(s=>s.id===q.get("session")):undefined;
+    if(q.get("session")&&!session)throw new Error("SESSION_NOT_FOUND");
+    const from=session?.started_at_ms??Number(q.get("from")),to=session?(session.ended_at_ms??now):Number(q.get("to")),start=Math.max(from,to-2*hour),source=q.get("source")||"all";
     const regularThresholdPercent=Number(q.get("regularThresholdPercent")??50);
     const rows=people.slice(0,3).map((p,i)=>{
-      const attendanceSessionIds=i===0?[sessionLiveId,sessionPastId]:[sessionLiveId],attendanceRatio=attendanceSessionIds.length/2;
+      const attendanceSessionIds=session?[session.id]:i===0?[sessionLiveId,sessionPastId]:[sessionLiveId],attendanceRatio=attendanceSessionIds.length/(session?1:2);
       const messages=20-i*5,observedMinutes=60-i*10;
       const core=attendanceSessionIds.length>=Number(q.get("minSessions")??3) && attendanceRatio*100>regularThresholdPercent && (observedMinutes>=Number(q.get("minMinutes")??30)||messages>=Number(q.get("minMessages")??5));
-      return {id:p.id,name:p.display_name,source:"twitch",sources:["twitch"],messages,observedMinutes,estimatedChatMinutes:0,sessionIds:attendanceSessionIds,attendanceSessionIds,attendanceRatio,regular:core,intervals:[{from:start,to:start+observedMinutes*minute,session:sessionLiveId,kind:"observed"}],donations:{},core};
+      return {id:p.id,name:p.display_name,source:"twitch",sources:["twitch"],messages,observedMinutes,estimatedChatMinutes:0,sessionIds:attendanceSessionIds,attendanceSessionIds,attendanceRatio,regular:core,intervals:[{from:start,to:start+observedMinutes*minute,session:session?.id??sessionLiveId,kind:"observed"}],donations:{},core};
     }).filter(()=>source!=="youtube");
     const timeline=Array.from({length:90},(_,i)=>{const observed=Math.min(rows.length,1+i%3),regularObserved=rows.slice(0,observed).filter(r=>r.regular).length,messages=rows.length?i%4:0;return {at:Math.floor(start/minute)*minute+i*minute,messages,regularMessages:rows[0]?.regular?messages:0,observed,regularObserved,estimated:0,regularEstimated:0,viewers:8+i%5,presenceKnown:i%13!==0};});
     const regulars=rows.filter(r=>r.regular).length;
-    return {filters:{regularThresholdPercent},summary:{entities:rows.length,attendees:rows.length,regulars,regularShare:rows.length?regulars/rows.length:null,core:rows.filter(r=>r.core).length,streams:2,messages:rows.reduce((a,r)=>a+r.messages,0)},audience:rows,timeline,hours:[{day:"пн",hour:20,observed:120,observedKnownMinutes:60,estimated:0,messages:40,sampleMinutes:60}],categories:[{id:"demo-game",name:"Демо-игра",minutes:120,sessions:2,audience:rows.length,core:rows.filter(r=>r.core).length,messagesPerHour:30,observedMinutes:150,estimatedChatMinutes:0}]};
+    return {filters:{regularThresholdPercent},summary:{entities:rows.length,attendees:rows.length,regulars,regularShare:rows.length?regulars/rows.length:null,core:rows.filter(r=>r.core).length,streams:session?1:2,messages:rows.reduce((a,r)=>a+r.messages,0)},audience:rows,timeline,hours:[{day:"пн",hour:20,observed:120,observedKnownMinutes:60,estimated:0,messages:40,sampleMinutes:60}],categories:[{id:"demo-game",name:"Демо-игра",minutes:120,sessions:2,audience:rows.length,core:rows.filter(r=>r.core).length,messagesPerHour:30,observedMinutes:150,estimatedChatMinutes:0}]};
   }
 
   if (p === "status") {

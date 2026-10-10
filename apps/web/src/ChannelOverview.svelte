@@ -2,9 +2,12 @@
  import {untrack,onMount} from 'svelte';
  import {api,money,date,type Event} from './api';
  import {formatDuration} from './duration';
- import TrendChart from './TrendChart.svelte';
+ import AudienceChart from './AudienceChart.svelte';
+ import AudienceRanking from './AudienceRanking.svelte';
  import EventList from './EventList.svelte';
  import Help from './Help.svelte';
+ import type {ChartMetric} from './chart-series';
+ let metric=$state<ChartMetric>('observed');
  let {events,onPerson,onStream,connect}:{events:Event[];onPerson:(id:string)=>void;onStream:(id:string)=>void;connect:()=>void}=$props();
  const local=(at:number)=>{const d=new Date(at);return new Date(at-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
  let from=$state(local(Date.now()-30*86400000)),to=$state(local(Date.now())),data=$state<any>(null),error=$state(''),busy=$state(false),filter=$state('all'),endNow=$state(true);
@@ -31,8 +34,8 @@ onMount(()=>{const timer=setInterval(()=>{if(endNow&&!busy)void refresh();},6000
   <div class="metric"><div><span>Ядро аудитории</span><strong>{data.summary.core}</strong></div></div>
   <div class="metric"><div><span>Донаты</span>{#each Object.entries(totals) as [currency,amount]}<strong>{money(amount,currency)}</strong>{:else}<strong>—</strong>{/each}</div></div>
  </section>
- <section class="panel"><header><h2>Активность чата</h2></header><TrendChart points={data.timeline} metric="messages"/></section>
- <section class="panel"><header><h2>Аудитория в чате <Help id="channel-presence" label="О данных аудитории" text="Twitch показывает наблюдения присутствия, YouTube — активность сообщений. Эти сигналы не подтверждают просмотр видео. Неизвестные периоды не считаются нулём."/></h2></header><TrendChart points={data.timeline} metric="observed"/>{#if data.timeline.some((p:any)=>p.estimated>0)}<h3>Активность YouTube</h3><TrendChart points={data.timeline} metric="estimated"/>{/if}</section>
+ <section class="panel"><header><h2>Аудитория в чате <Help id="channel-presence" label="О данных аудитории" text="Twitch показывает наблюдения присутствия, YouTube — активность сообщений. Эти сигналы не подтверждают просмотр видео. Нажмите столбец, чтобы увидеть участников; неизвестные периоды не считаются нулём."/></h2><label>Метрика графика<select bind:value={metric}><option value="observed">Участники Twitch</option><option value="estimated">Оценка YouTube</option><option value="messages">Сообщения</option><option value="viewers">Счётчик площадки</option></select></label></header><AudienceChart points={data.timeline} audience={data.audience} {metric} resolution={0} {onPerson}/></section>
+ <AudienceRanking people={data.audience} {onPerson}/>
  <section class="panel"><header><h2>Стримы за период</h2></header><div class="stream-list">{#each [...data.streamComparison].reverse() as stream}<button class="outline stream" onclick={()=>onStream(stream.id)}><span>{stream.title||'Стрим'}</span><span class="small muted">{date(stream.startedAt)} · {stream.messages} сообщений</span></button>{:else}<p class="muted">Стримов за этот период нет</p>{/each}</div></section>
 {/if}
 <section class="panel"><header><h2>Последние события</h2><select aria-label="Фильтр событий" bind:value={filter}><option value="all">Все события</option><option value="chat.message">Сообщения</option><option value="donation">Донаты</option></select></header>{#if visible.length}<EventList events={visible} {onPerson}/>{:else if events.length}<p>Событий этого типа нет</p>{:else}<p>Новые события появятся после подключения площадок.</p><button class="primary" onclick={connect}>Открыть интеграции</button>{/if}</section>

@@ -2,7 +2,8 @@
   import Icon from "./Icon.svelte";
   import Help from "./Help.svelte";
   import EventList from "./EventList.svelte";
-  import TrendChart from "./TrendChart.svelte";
+  import AudienceChart from "./AudienceChart.svelte";
+  import AudienceRanking from "./AudienceRanking.svelte";
   import { onMount } from "svelte";
   import {
     api,
@@ -25,6 +26,18 @@
     connect: () => void;
     onPerson: (id: string) => void;
   } = $props();
+  let audienceData=$state<any>(null),audienceError=$state(''),audienceBusy=$state(false);
+  let audienceRequest=0,lastAudienceSession='';
+  $effect(()=>{
+    const current=sessionFilter;void summary;
+    const id=++audienceRequest;audienceBusy=true;audienceError='';
+    if(current!==lastAudienceSession){audienceData=null;lastAudienceSession=current;}
+    if(!current){audienceData=null;audienceBusy=false;return;}
+    void api(`analytics?${new URLSearchParams({session:current,source:'all',timezone:'Europe/Moscow'})}`).then(result=>{
+      if(id===audienceRequest)audienceData=result;
+    }).catch(error=>{if(id===audienceRequest){audienceError=(error as Error).message;audienceData=null;}}).finally(()=>{if(id===audienceRequest)audienceBusy=false;});
+    return()=>{audienceRequest++;};
+  });
   let filter = $state("all");
   let insightsOpen = $state(false);
   let insights = $state<InsightCard[]>([]);
@@ -165,9 +178,12 @@
   </div>
 </section>
 <section class="panel series-panel">
-  <header><h2>Аудитория в чате <Help id="stream-presence" label="Об аудитории стрима" text="График показывает наблюдения присутствия в чате Twitch. Это не подтверждение просмотра видео; неизвестные промежутки не считаются нулём." /></h2></header>
-  <TrendChart points={(summary.chattersOverTime??[]).map(p=>({at:p.atMs,observed:p.chatters,presenceKnown:true}))} metric="observed" showRegulars={false}/>
+  <header><h2>Аудитория в чате <Help id="stream-presence" label="Об аудитории стрима" text="График показывает наблюдения присутствия в чате Twitch. Это не подтверждение просмотра видео; неизвестные промежутки не считаются нулём. Нажмите столбец, чтобы увидеть участников за минуту." /></h2></header>
+  {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceData}
+    <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric="observed" resolution={1} showRegulars={false} {onPerson}/>
+  {:else}<p class="empty-small" role="status">{audienceBusy?'Загружаем присутствие…':'Выберите стрим'}</p>{/if}
 </section>
+<AudienceRanking people={audienceData?.audience??[]} {onPerson}/>
 <div class="overview-grid">
   <section class="panel feed">
     <header>
@@ -190,10 +206,7 @@
         <button class="primary" onclick={connect}>Открыть интеграции</button>
       </div>{/if}
   </section>
-  <aside class="right-rail"><section class="panel"><header><h2>Участники чата</h2></header>
-  {#each summary.participants??[] as person}<div class="chat-participant"><button class="outline small" onclick={()=>onPerson(person.personId)}>{person.name}</button><strong>{person.messages} сообщений</strong></div>{:else}<p class="empty-small">Сообщений пока нет</p>{/each}
-  </section>
-  </aside>
+
 </div>
 
-<style>.chat-participant{display:flex;align-items:center;justify-content:space-between;gap:.6rem;padding:.7rem;}.chat-participant button{overflow-wrap:anywhere;white-space:normal;text-align:left;}.chat-participant strong{font-size:.85rem;white-space:nowrap;}</style>
+<style>.overview-grid{display:block;}</style>

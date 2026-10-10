@@ -42,7 +42,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
     return url.pathname==='/api/v1/analytics'&&response.status()===status&&Object.entries(query).every(([key,value])=>url.searchParams.get(key)===String(value))&&extra(url);
    });
    const advanceAutoFilter=async(response)=>{await page.clock.fastForward(300);return response;};
-   const openAnalytics=async(query)=>{const response=watchAnalytics(query);await page.getByRole('button',{name:'Аналитика',exact:true}).click();return await advanceAutoFilter(response);};
+   const openAnalytics=async(query)=>{const response=watchAnalytics(query);await page.getByRole('button',{name:'Аналитика',exact:true}).click();const result=await advanceAutoFilter(response);await page.getByText('Сравнения и отчёты',{exact:true}).click();return result;};
    const currentPeriod=async(values)=>page.evaluate(inputs=>Object.fromEntries(inputs.map(([key,value])=>[key,String(new Date(value).getTime())])),values);
    const presetPeriod=async(days)=>page.evaluate(span=>{
     const localInput=at=>{const d=new Date(at);return new Date(at-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
@@ -78,13 +78,14 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await firstBar.focus();await page.keyboard.press('Enter');await barDetail.waitFor();
    await page.getByLabel('Метрика графика').selectOption('viewers');assert.equal(await barDetail.count(),0);
    await firstBar.click();await barDetail.waitFor();
-   assert.ok((await barDetail.textContent()).includes('не список всех смотревших видео'));
+   await barDetail.getByRole('button',{name:'О детализации минуты',exact:true}).click();assert.ok((await page.getByRole('dialog',{name:'О детализации минуты',exact:true}).textContent()).includes('не раскрывает личности'));await page.keyboard.press('Escape');
    await page.getByRole('button',{name:'Закрыть детализацию',exact:true}).click();
    await page.getByLabel('Метрика графика').selectOption('observed');
    assert.ok((await page.locator('.trend-chart svg text').allTextContents()).some(text=>/^\d{2}:(00|15|30|45)$/.test(text)));
    await page.getByText('Настроить отображение',{exact:true}).click();
    await page.getByLabel('Детализация графика').selectOption('15');
    assert.ok((await page.locator('.trend-chart .chart-bar title').first().textContent()).includes('15 мин'));
+   await page.locator('.trend-chart .chart-bar').first().click();await barDetail.waitFor();await barDetail.getByLabel('Минута столбца').selectOption({index:1});assert.equal(await barDetail.getByLabel('Минута столбца').count(),1);await page.getByRole('button',{name:'Закрыть детализацию',exact:true}).click();
    await page.getByLabel('Жёлтая доля ядра').uncheck();assert.equal(await page.locator('.regular-segment').count(),0);
    await page.getByLabel('Только ядро').check();assert.equal(await page.getByRole('button',{name:`Occasional ${profile}`,exact:true}).count(),0);
    await page.getByLabel('Сортировка').selectOption('attendanceRatio');
