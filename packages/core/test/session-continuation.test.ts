@@ -50,3 +50,11 @@ test('continuing YouTube keeps the logical stream live without a break during a 
   assert.deepEqual(store.sessions()[0]!.breaks,[]);
  }finally{store.close();}
 });
+
+test('a new provider ID after a long collector outage does not invent a zero-length break',()=>{
+ const s=new StreamStore(':memory:');try{
+  const first=s.observePlatformStream('twitch','owner','old',0,60000,null,'')!;
+  const next=s.observePlatformStream('twitch','owner','next',31*60000,32*60000,null,'',['next'])!;
+  assert.notEqual(next,first);assert.equal(s.sessions().find(row=>row.id===first)!.ended_at_ms,60000);
+ }finally{s.close();}
+});

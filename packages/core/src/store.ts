@@ -103,6 +103,20 @@ export class StreamStore {
   close(): void {
     this.db.close();
   }
+  collectionLifecycle(action:'start'|'heartbeat'|'stop',at:number):void{
+    assertTimestamp(at);
+    if(!['start','heartbeat','stop'].includes(action))throw new Error('INVALID_COLLECTION_ACTION');
+    this.db.transaction(()=>{
+      const previous=this.db.prepare('SELECT last_seen_ms,running FROM collector_state WHERE id=1').get() as {last_seen_ms:number;running:number}|undefined;
+      if(previous&&at<previous.last_seen_ms)throw new Error('STALE_COLLECTION_STATE');
+      if(action==='start'&&previous){
+        const open=this.db.prepare("UPDATE collection_gaps SET ended_at_ms=? WHERE source='collector' AND reason='collector_stopped' AND ended_at_ms IS NULL").run(at);
+        if(!open.changes&&previous.running)this.gap('collector','collector_restarted',previous.last_seen_ms,at);
+      }
+      if(action==='stop'&&previous?.running)this.gap('collector','collector_stopped',at,null);
+      this.db.prepare('INSERT INTO collector_state VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET last_seen_ms=excluded.last_seen_ms,running=excluded.running').run(at,Number(action!=='stop'));
+    }).immediate();
+  }
 
   donation(id:string) {return new DonationLedger(this.db).donation(id);}
   donations(personId?:string,offset=0,limit=50,includeDeleted=false) {return new DonationLedger(this.db).list(personId,offset,limit,includeDeleted);}
@@ -162,6 +176,7 @@ export class StreamStore {
   youtubeMessages(account: string, chat: string, messages: any[]): void {
     if (!account || !chat || messages.length > 2000) throw new Error("INVALID_YOUTUBE_MESSAGES");
     this.db.transaction(() => {
+      if(messages.length)this.providerSnapshot('youtube',account,`chat:${chat}`,messages,Date.now());
       const insert = this.db.prepare("INSERT OR IGNORE INTO youtube_messages VALUES (?,?,?,?,?,?)");
       for (const m of messages) {
         const time = Date.parse(m.snippet?.publishedAt ?? "");
@@ -1103,7 +1118,7 @@ export class StreamStore {
       .prepare(
         `SELECT s.*,
           (SELECT count(*) FROM event_sessions es WHERE es.session_id=s.id) AS event_count,
-          (SELECT title FROM platform_streams p WHERE p.session_id=s.id AND trim(title)<>'' ORDER BY last_observed_at_ms DESC,platform,account_id,external_id LIMIT 1) AS primaryTitle,
+          (SELECT title FROM platform_streams p WHERE p.session_id=s.id AND trim(title)<>'' ORDER BY CASE platform WHEN 'twitch' THEN 0 ELSE 1 END,last_observed_at_ms DESC,account_id,external_id LIMIT 1) AS primaryTitle,
           (SELECT json_group_array(platform) FROM (SELECT DISTINCT platform FROM platform_streams p WHERE p.session_id=s.id ORDER BY platform)) AS platforms_json,
           (SELECT json_group_array(json_object('platform',platform,'url',url)) FROM (SELECT DISTINCT platform,url FROM platform_streams p WHERE p.session_id=s.id AND url IS NOT NULL ORDER BY platform,url)) AS urls_json
         FROM sessions s WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) ORDER BY started_at_ms DESC,s.id DESC LIMIT 100`,
@@ -1213,7 +1228,7 @@ export class StreamStore {
         // YouTube supports concurrent broadcasts. A new ID alone cannot prove
         // another broadcast ended; only a complete confirmed set can do that.
         const confirmed = confirmedPresentIds ?? (platform === "twitch" ? [externalId] : undefined);
-        if (confirmed && !this.supersedeProviderLinks(platform, accountId, externalId, startedAtMs, observedAtMs, confirmed)) return null;
+        if (confirmed && !this.supersedeProviderLinks(platform, accountId, externalId, observedAtMs, confirmed)) return null;
         const active = this.db.prepare(`
           SELECT s.id,s.started_at_ms FROM sessions s
           WHERE s.kind='platform' AND s.ended_at_ms IS NULL
@@ -1252,19 +1267,21 @@ export class StreamStore {
 
   private supersedeProviderLinks(
     platform: "twitch" | "youtube", accountId: string, externalId: string,
-    startedAtMs: number, observedAtMs: number,
+    observedAtMs: number,
     confirmedPresentIds: string[],
   ): boolean {
     const oldLinks = this.db.prepare(`
-      SELECT external_id,session_id,started_at_ms,last_observed_at_ms
+      SELECT external_id,session_id,started_at_ms,last_observed_at_ms,first_missing_at_ms
       FROM platform_streams
       WHERE platform=? AND account_id=? AND external_id<>? AND ended_at_ms IS NULL
         AND external_id NOT IN (SELECT value FROM json_each(?))
-    `).all(platform, accountId, externalId, JSON.stringify(confirmedPresentIds)) as {external_id:string;session_id:string;started_at_ms:number;last_observed_at_ms:number}[];
+    `).all(platform, accountId, externalId, JSON.stringify(confirmedPresentIds)) as {external_id:string;session_id:string;started_at_ms:number;last_observed_at_ms:number;first_missing_at_ms:number|null}[];
     if (oldLinks.some(link => observedAtMs <= link.last_observed_at_ms)) return false;
     const affected = new Set<string>();
     for (const link of oldLinks) {
-      const endAtMs = Math.max(startedAtMs, link.started_at_ms, link.last_observed_at_ms);
+      // Do not invent continuous coverage across a collector outage. The old
+      // stream end is estimated from its last observation / first missing poll.
+      const endAtMs = Math.max(link.started_at_ms, link.first_missing_at_ms??link.last_observed_at_ms);
       this.db.prepare(`
         UPDATE platform_streams SET ended_at_ms=?
         WHERE platform=? AND account_id=? AND external_id=? AND ended_at_ms IS NULL

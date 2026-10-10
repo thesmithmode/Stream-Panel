@@ -418,7 +418,7 @@
         {#if grid.length}<div class="legend">
             <span><i class="observed"></i>Наблюдался</span><span
               ><i class="not_observed"></i>Не наблюдался</span
-            ><span><i class="unknown"></i>Нет данных</span>
+            ><span><i class="unknown"></i>Нет данных</span><span><i class="break"></i>Перерыв</span>
           </div>
           <div class="minute-grid">
             {#each grid as cell}<button

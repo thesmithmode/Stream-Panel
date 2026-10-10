@@ -91,5 +91,14 @@
 - Twitch definitive auth failure HTTP **400/401** → clear tokens + `TWITCH_REAUTH_REQUIRED`; UI must show **explicit** reauth («Войди снова»), not a silent/connected look. Do **not** advance-warn about ~30-day public refresh expiry (useless beforehand).
 - Старое ограничение Twitch + DA заменено требованием Twitch + DA + YouTube от 2026-10-07.
 - Bot filter in analytics (configurable + well-known); Litestream path documented; Streamer.bot stub only until P3.
+
+### Уточнения 2026-10-10
+
+- Перезапуск трансляции того же аккаунта с перерывом строго менее 30 минут продолжает прежнюю логическую запись. Исходные части, события и метаданные сохраняются; общий перерыв исключается из длительности и наблюдений. Работающая вторая площадка означает отсутствие общего перерыва.
+- В истории стримов показывать единый период `YYYY-MM-DD HH:mm — YYYY-MM-DD HH:mm`, всегда Europe/Moscow. В аналитике стрима — персональные интервалы присутствия и история названий/категорий Twitch.
+- Сохранять полные получаемые события и историю ответов API, в том числе награды за баллы, опросы, прогнозы, цели, Hype Train, рекламу и другие поддерживаемые события канала. Разрешения выдаёт владелец; недоступные функции показываются явно. Текст Twitch go-live notification публичный API не предоставляет.
+- Для каждой интеграции нужна отдельная кнопка «Инструкция» с регистрацией приложения, точным callback и шагами авторизации для выбранного профиля.
+- Локальные плановые бэкапы хранить два дня независимо от успеха облачной загрузки; облачные копии остаются самостоятельными. Остановки и аварийные рестарты сборщика фиксировать в истории пропусков.
+- В production веб-интерфейс и сборщик работают отдельными процессами. Перезапуск интерфейса не прерывает сбор; полный деплой с миграциями по-прежнему останавливает сервис ради согласованного снимка и отката.
 - Durable rejection of merge candidates and scoped owner rules with TTL stay **P1** (not implemented in this readiness tick): needs schema + API + UI + coverage; offline suggestions + manual merge are enough to start live validation. See tech-spec Implementation decisions §16.
 

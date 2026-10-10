@@ -24,6 +24,8 @@ export function groupCollectionGaps(gaps: readonly CollectionGap[]) {
 
 export function gapReasonLabel(reason: string): string {
   const labels: Record<string, string> = {
+    collector_stopped:"Сборщик остановлен",
+    collector_restarted:"Перезапуск сборщика",
     connection_lost_no_replay: "Разрыв соединения; события за это время недоступны",
     chatters_poll_incomplete: "Неполный опрос участников чата",
     chatters_poll_failed: "Не удалось опросить участников чата",

@@ -187,7 +187,7 @@ export class TwitchConnection {
     const generation = this.authGeneration;
     this.config.value.twitchClientId = clientId;
     await this.config.save();
-    const scopes = [...baseScopes, ...(extended ? optionalScopes : [])];
+    const scopes = [...new Set([...baseScopes, ...(extended ? optionalScopes : [])])];
     const response = await this.request("https://id.twitch.tv/oauth2/device", {
       method: "POST",
       body: new URLSearchParams({
@@ -709,6 +709,7 @@ export class TwitchConnection {
                 : poll.startedAtMs,
           };
           await this.db.call("recordPoll", sessionId, accountId, windowed);
+          if(current())await this.db.call('providerSnapshot','twitch',accountId,'chatters',{...windowed,users},poll.completedAtMs,sessionId);
           if (!current()) return;
           await this.db.call("updateChatterNames", accountId, users, Date.now());
           if (!current()) return;

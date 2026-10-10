@@ -50,7 +50,7 @@ export class YouTubeConnection {
     if (!scopes.every(s => granted.includes(s)) || !string(data.access_token) || !string(data.refresh_token)) throw new Error("YOUTUBE_SCOPES_REQUIRED");
     const tokens: Tokens = { access: string(data.access_token), refresh: string(data.refresh_token), expiresAt: this.now() + Number(data.expires_in) * 1000, userId: "", scopes: granted };
     if (!Number.isFinite(tokens.expiresAt) || tokens.expiresAt <= this.now()) throw new Error("YOUTUBE_INVALID_TOKEN");
-    const channels = await this.api("channels", { part: "snippet,statistics", mine: "true", maxResults: "50" }, tokens);
+    const channels = await this.api("channels", { part: "snippet,statistics,brandingSettings,contentDetails,topicDetails", mine: "true", maxResults: "50" }, tokens);
     if (generation !== this.generation) return;
     const items = Array.isArray(channels.items) ? channels.items : [];
     if (items.length !== 1 || channels.nextPageToken || !string(object(items[0]).id)) throw new Error("YOUTUBE_SELECT_ONE_CHANNEL");
@@ -70,7 +70,7 @@ export class YouTubeConnection {
     let page = "";
     const seenPages = new Set<string>(), seenIds = new Set<string>(), broadcasts: Record<string, any>[] = [];
     for (let n = 0; n < 5; n++) {
-      const response = await this.api("liveBroadcasts", { part: "snippet,status", broadcastStatus: "active", maxResults: "50", ...(page ? { pageToken: page } : {}) }, tokens);
+      const response = await this.api("liveBroadcasts", { part: "snippet,status,contentDetails", broadcastStatus: "active", maxResults: "50", ...(page ? { pageToken: page } : {}) }, tokens);
       if (!valid()) return null;
       if (!Array.isArray(response.items) || response.items.length > 50) throw new Error("YOUTUBE_INVALID_BROADCASTS");
       for (const value of response.items) {
@@ -109,7 +109,7 @@ export class YouTubeConnection {
     if (!valid()) return 300000;
     let channelSnapshot: Record<string, unknown> | undefined;
     if (this.now() - (previous.snapshots.channel?.updatedAt ?? 0) >= 21600000) {
-      const channel = await this.api("channels", { part: "snippet,statistics", mine: "true", maxResults: "50" }, tokens);
+      const channel = await this.api("channels", { part: "snippet,statistics,brandingSettings,contentDetails,topicDetails", mine: "true", maxResults: "50" }, tokens);
       if (!valid()) return 300000;
       const own = (Array.isArray(channel.items) ? channel.items : []).find((x: any) => x.id === tokens.userId);
       if (!own) throw new Error("YOUTUBE_CHANNEL_CHANGED");
@@ -123,7 +123,7 @@ export class YouTubeConnection {
     const videoDetails = new Map<string, Record<string, any>>();
     for (let offset = 0; offset < videoIds.length; offset += 50) {
       const ids = videoIds.slice(offset, offset + 50);
-      const response = await this.api("videos", { part: "liveStreamingDetails", id: ids.join(",") }, tokens);
+      const response = await this.api("videos", { part: "snippet,statistics,contentDetails,liveStreamingDetails", id: ids.join(",") }, tokens);
       if (!valid()) return 300000;
       if (!Array.isArray(response.items)) continue;
       const batch = new Map<string, Record<string, any>>();

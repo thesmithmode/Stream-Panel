@@ -19,6 +19,7 @@ export async function createHostedApplication(
   connect = true,
   backupOptions?: ConstructorParameters<typeof BackupService>[1],
   network: HostedNetworkConfig = DEFAULT_HOSTED_NETWORK_CONFIG,
+  serveStatic=true,
 ) {
   const origin = new URL(publicOrigin);
   if (origin.origin !== publicOrigin || origin.username || origin.password ||
@@ -184,9 +185,11 @@ export async function createHostedApplication(
   });
   app.all("/api/v1/*", forward);
   app.get("/oauth/:provider/callback", forward);
-  await app.register(staticFiles, { root: join(dirname(fileURLToPath(import.meta.url)), "../../../../apps/web/dist"), prefix: "/" });
-  app.setNotFoundHandler((request, reply) => request.url.startsWith("/api/") || request.url.startsWith("/oauth/")
-    ? reply.code(404).send({ error: "NOT_FOUND" }) : reply.sendFile("index.html"));
+  if(serveStatic){
+    await app.register(staticFiles, { root: join(dirname(fileURLToPath(import.meta.url)), "../../../../apps/web/dist"), prefix: "/" });
+    app.setNotFoundHandler((request, reply) => request.url.startsWith("/api/") || request.url.startsWith("/oauth/")
+      ? reply.code(404).send({ error: "NOT_FOUND" }) : reply.sendFile("index.html"));
+  }
   app.addHook("onClose", async () => {
     await backup?.stop();
     await Promise.all([...runtimes.values()].map((r) => r.app.close()));

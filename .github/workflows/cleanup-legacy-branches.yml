@@ -26,10 +26,8 @@ jobs:
           while read -r branch expected; do
             current=$(gh api "repos/$REPO/git/ref/heads/$branch" --jq '.object.sha')
             test "$current" = "$expected"
-            if test "$branch" = feat/product-completion; then
-              git merge-base --is-ancestor "$expected" HEAD
-            fi
-            tag="archive/2026-10-09/$branch"
+            git merge-base --is-ancestor "$expected" HEAD
+            tag="archive/2026-10-10/$branch"
             if archived=$(gh api "repos/$REPO/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null); then
               test "$archived" = "$expected"
             else
@@ -39,8 +37,5 @@ jobs:
             test "$(gh api "repos/$REPO/git/ref/heads/$branch" --jq '.object.sha')" = "$expected"
             gh api --method DELETE "repos/$REPO/git/refs/heads/$branch"
           done <<'BRANCHES'
-          feat/da-redirect-host-env c73e5f2203b8873ec2350f155f2ae6dba98d84f8
-          fix/no-login-profile-switcher 5111f5a7a747afe6775ebf226004106b7701f58f
-          release-assets-slim b3dd0bd912f2a79bcf9334aab8c07cf0b1458160
-          feat/product-completion 06380c07071c713f369c228d18afd99ecacc9c57
+          feat/viewer-timeline 0cc1c1612a9c72f05c20784134e37dd56579b76b
           BRANCHES

@@ -241,6 +241,7 @@ PRAGMA user_version = 11;
 `;
 
 export const schemaV12 = `
+CREATE TABLE collector_state (id INTEGER PRIMARY KEY CHECK(id=1),last_seen_ms INTEGER NOT NULL,running INTEGER NOT NULL CHECK(running IN(0,1))) STRICT;
 CREATE TABLE provider_snapshots (
  id TEXT PRIMARY KEY, source TEXT NOT NULL, account_id TEXT NOT NULL, key TEXT NOT NULL,
  observed_at_ms INTEGER NOT NULL, session_id TEXT REFERENCES sessions(id),

@@ -27,7 +27,7 @@ test('confirmed next Twitch or YouTube stream continues the recording and retain
    assert.equal(rows.find(row=>row.id===oldId)!.ended_at_ms,null);
    assert.equal(rows.find(row=>row.id===oldId)!.end_quality,'unknown');
    assert.equal(rows.find(row=>row.id===newId)!.ended_at_ms,null);
-   assert.equal(store.platformStreams(oldId!).find(row=>row.external_id==='old-stream')!.ended_at_ms,2000);
+   assert.equal(store.platformStreams(oldId!).find(row=>row.external_id==='old-stream')!.ended_at_ms,1100);
    assert.equal(store.platformStreams(newId!).find(row=>row.external_id==='new-stream')!.ended_at_ms,null);
    assert.equal(store.observePlatformStream(platform,account,'new-stream',1900,2200,newUrl,'Same stream'),newId);
    assert.equal(store.sessions().length,1);
@@ -58,7 +58,7 @@ test('Twitch replacement continues a shared logical session while another provid
   assert.equal(store.observePlatformStream('twitch','twitch-account','twitch-old',1050,1200,'https://twitch.tv/channel','Twitch old'),session);
   assert.equal(store.observePlatformStream('twitch','twitch-account','twitch-new',1300,1400,'https://twitch.tv/channel','Twitch new'),session);
   const links=store.platformStreams(session!);
-  assert.equal(links.find(row=>row.external_id==='twitch-old')!.ended_at_ms,1300);
+  assert.equal(links.find(row=>row.external_id==='twitch-old')!.ended_at_ms,1200);
   assert.equal(links.find(row=>row.external_id==='twitch-new')!.ended_at_ms,null);
   assert.equal(links.find(row=>row.external_id==='youtube-video')!.ended_at_ms,null);
   assert.equal(store.sessions().length,1);

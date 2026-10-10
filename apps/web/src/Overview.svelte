@@ -196,7 +196,7 @@
     <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric="observed" resolution={1} showRegulars={false} {onPerson} onselection={(open)=>barOpen=open}/>
   {:else}<p class="empty-small" role="status">{audienceBusy?'Загружаем присутствие…':'Выберите стрим'}</p>{/if}
 </section>
-<AudienceRanking people={audienceData?.audience??[]} {onPerson}/>
+<AudienceRanking people={audienceData?.audience??[]} {onPerson} showIntervals/>
 <div class="overview-grid">
   <section class="panel feed">
     <header>

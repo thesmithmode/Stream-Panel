@@ -26,12 +26,12 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   await page.locator(`tr[data-session-id="${first}"]`).getByRole('button',{name:'Открыть',exact:true}).click();
   const rank=page.getByRole('region',{name:'Рейтинг участников'});
   await rank.getByRole('button',{name:'Silent Viewer',exact:true}).waitFor();
-  assert.equal(await rank.locator('li').first().textContent(),'Silent Viewer5 мин');
+  assert.equal(await rank.locator('li strong').first().textContent(),'5 мин');
   assert.ok((await rank.locator('li').nth(1).textContent()).includes('3 мин'));
   assert.equal(await rank.getByRole('button',{name:'Other Stream Viewer',exact:true}).count(),0);
   assert.equal(await rank.getByRole('button',{name:'streamelements',exact:true}).count(),0);
   await rank.getByLabel('Рейтинг по').selectOption('messages');
-  assert.equal(await rank.locator('li').first().textContent(),'Talkative Viewer4 сообщ.');
+  assert.equal(await rank.locator('li strong').first().textContent(),'4 сообщ.');
   assert.equal(await rank.getByRole('button',{name:'Silent Viewer',exact:true}).count(),0);
   await rank.getByLabel('Рейтинг по').selectOption('observedMinutes');
   const bars=page.locator('.series-panel .chart-bar');
