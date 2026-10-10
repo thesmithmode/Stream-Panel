@@ -53,7 +53,7 @@
   function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile,mode:dataMode});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
   function clearScope(){busy=false;scopeReady=false;events=[];summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
   function restoreRoute(){const route=readRoute(location.search,getProfile());epoch++;tab=route.view;sessionFilter=route.session;personId=route.person;setProfile(route.profile);profile=route.profile;setDataMode(route.mode);dataMode=route.mode;clearScope();}
-  function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}error=authMessage((e as Error).message);}
+  function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}connectionLost=!navigator.onLine;error=authMessage((e as Error).message);}
 
   const authMessage = (code: string) => ({ INVALID_LOGIN: "Неверный логин или пароль", LOGIN_RATE_LIMIT: "Слишком много попыток. Попробуйте позже.", LOGIN_REQUIRED: "Войдите в свой профиль", LOCAL_LOGIN_REQUIRED: "Войдите в свой профиль" }[code] ?? code);
   async function login() {
@@ -115,7 +115,7 @@
       const values=await Promise.all([api('status'),api<Session[]>('sessions'),api<Person[]>('persons'),api<Event[]>(`events${query}`),api<Summary>(`summary${query}`)]);
       if(current!==epoch)return;
       status=values[0];if(dataMode==='real'){setCsrf(status.csrf);user=status.user??user;}
-      sessions=values[1];people=values[2];events=values[3];summary=values[4];scopeReady=true;connectionLost=false;error='';
+      sessions=values[1];people=values[2];events=values[3];summary=values[4];scopeReady=true;connectionLost=!navigator.onLine;error='';
     })();refreshTask={epoch:current,task};
     try{await task;}finally{if(refreshTask?.task===task)refreshTask=null;}
   }
@@ -251,9 +251,9 @@
           <label>Пароль<input type="password" autocomplete="current-password" bind:value={password} required maxlength="256" /></label>
           <button class="primary" disabled={busy}>{busy ? "Входим…" : "Войти"}</button>
         </form>
-        {#if connectionLost}<p role="status" class="notice">Связь прервана. Показываем последние загруженные данные.</p>{/if}
       {#if error}<p role="alert" class="small notice error">{error}</p>{/if}
       </section>{:else}
+      {#if connectionLost}<p role="status" class="notice">Связь прервана. Показываем последние загруженные данные.</p>{/if}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}
       {#if dataMode === "demo"}<p class="demo-banner" role="status">
           Режим <strong>Демо</strong>: показаны фикстуры. Запись в SQLite и
