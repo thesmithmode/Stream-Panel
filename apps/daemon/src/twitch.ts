@@ -155,6 +155,8 @@ export class TwitchConnection {
   private reconcilingGeneration: number | null = null;
   private reconcileRequested = false;
   private platformLive = false;
+  private eventSubReady = false;
+  private reconcileError: string | null = null;
   private reconnectAttempt = 0;
   private sessionId: string | null = null;
   private lastSuccessfulPollAt: number | null = null;
@@ -478,6 +480,7 @@ export class TwitchConnection {
           } else await this.subscribe(string(session.id));
           this.status.state = "connected";
           this.status.detail = "Сбор событий включён";
+          this.eventSubReady = true;
           this.reconnectAttempt = 0;
           if (this.gapStart !== null) {
             await this.db.call(
@@ -524,6 +527,7 @@ export class TwitchConnection {
         generation === this.authGeneration &&
         (this.socket === socket || (handoff && this.socket === old))
       ) {
+        this.eventSubReady = false;
         this.status.state = "degraded";
         this.status.detail = "Соединение потеряно; повторное подключение";
         this.gapStart ??= Date.now();
@@ -724,6 +728,16 @@ export class TwitchConnection {
           // Isolate from EventSub — do not rethrow into start()/reconnect.
         }
       }
+      if (current() && this.reconcileError !== null) {
+        if (this.eventSubReady && this.status.detail === this.reconcileError) {
+          this.status.state = "connected";
+          this.status.detail = "Сбор событий включён";
+        }
+        this.reconcileError = null;
+      }
+    } catch (error) {
+      if (current()) this.reconcileError = error instanceof Error ? error.message : "TWITCH_ERROR";
+      throw error;
     } finally {
       // A response from an old login must not release a newer login's poll.
       if (this.reconcilingGeneration === generation) this.reconcilingGeneration = null;
@@ -756,6 +770,8 @@ export class TwitchConnection {
   }
   async stop(): Promise<void> {
     this.stopped = true;
+    this.eventSubReady = false;
+    this.reconcileError = null;
     ++this.authGeneration;
     for (const timer of [this.retry, this.tick, this.hourly])
       if (timer) clearTimeout(timer);

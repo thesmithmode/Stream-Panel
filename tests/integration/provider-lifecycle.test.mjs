@@ -238,6 +238,8 @@ test("Twitch polls offline every five minutes, reacts online immediately and nev
     assert.equal(c.status.detail, "INVALID_TWITCH_STREAMS");
     malformed = false; opts.offline = true;
     await f.tick(60000);
+    assert.equal(c.status.state, 'connected');
+    assert.equal(c.status.detail, 'Сбор событий включён', 'successful stream polling clears its own recovered error');
     assert.equal(f.platformLinks[0].offline_checks, 1);
     assert.equal(f.platformLinks[0].ended_at_ms, null);
     await f.tick(60000);
@@ -250,6 +252,20 @@ test("Twitch polls offline every five minutes, reacts online immediately and nev
     await c.stop();
     await f.tick(300000); assert.equal(polls, count + 1);
   } finally { await c.stop(); }
+});
+
+test('Twitch polling recovery preserves an independent revoked subscription warning',async t=>{
+ const f=fixture(t),original=twitchRequest(f);let fail=false;
+ const request=async(url,init)=>fail&&new URL(url).pathname.endsWith('/streams')?response({data:{}}):original(url,init);
+ const c=new TwitchConnection(f.config,f.db,request,f.socket);
+ try{
+  await c.start();f.sockets[0].push({...welcome,payload:{session:{id:'wire',keepalive_timeout_seconds:3600}}});await flush();
+  fail=true;await f.tick(60000);assert.equal(c.status.detail,'INVALID_TWITCH_STREAMS');
+  f.sockets[0].push({metadata:{message_type:'revocation'},payload:{subscription:{type:'channel.follow',status:'authorization_revoked'}}});await flush();
+  fail=false;await f.tick(60000);
+  assert.equal(c.status.detail,'Часть подписок отозвана');
+  assert.equal(c.status.capabilities['channel.follow'],'authorization_revoked');
+ }finally{await c.stop();}
 });
 test("Twitch restart does not let an old pending poll block or overwrite the new generation", async t => {
   const f = fixture(t), options = { offline: true, scopes: ["user:read:chat"] };

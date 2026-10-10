@@ -105,9 +105,12 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await page.getByLabel('Поиск участника').fill('');
    for(const metric of ['estimated','messages','viewers','observed']){await page.getByLabel('Метрика графика').selectOption(metric);await page.getByLabel('Метрика карты').selectOption(metric);if(metric==='observed'||metric==='messages')assert.ok(await page.locator('.trend-chart rect.regular-segment').count()>0);else assert.equal(await page.locator('.trend-chart rect.regular-segment').count(),0);}
    assert.equal(await page.getByLabel('Обновлять каждую минуту').count(),0);
+   const previousEnd=await page.getByLabel('Конец периода').inputValue();
    const refreshed=page.waitForResponse(r=>r.url().includes('/api/v1/analytics?')&&r.status()===200);await page.clock.fastForward(60300);await refreshed;
+   assert.ok(await page.getByLabel('Конец периода').inputValue()>previousEnd,'live analytics must include newly recorded minutes');
    await page.getByRole('button',{name:`YT ${profile}`,exact:true}).click();await page.getByText('Оценка по чату YouTube',{exact:true}).first().waitFor();await page.getByRole('button',{name:'Закрыть детализацию'}).click();
    const autoFilter=watchAnalytics({source:'all',category:'game',timezone:'UTC'});
+   if(await page.locator('.analytics-thresholds').getAttribute('open')===null)await page.getByText('Настроить отображение',{exact:true}).click();
    await page.getByLabel('Часовой пояс сравнения').selectOption('UTC');await page.getByLabel('Категория Twitch').selectOption('game');await advanceAutoFilter(autoFilter);
    await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
    const youtubeFilter=watchAnalytics({source:'youtube',category:'game',timezone:'UTC'});
