@@ -48,6 +48,8 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
   assert.equal((await streams.locator('tbody tr td').nth(6).textContent()).trim(),'— / —');
   assert.equal((await streams.locator('tbody tr td').nth(7).textContent()).trim(),'— / —');
   await page.getByRole('button',{name:person.name,exact:true}).click();
+  await page.getByRole('heading',{name:`Активность: ${person.name}`,exact:true}).waitFor();
+  await page.locator('.minute-dot.unknown').first().waitFor();
   assert.equal(await page.locator('.minute-dot.unknown').count(),1440);
   await page.getByRole('button',{name:'Закрыть детализацию'}).click();
   data={summary:{entities:205,core:0,streams:0,messages:0,regulars:0,regularShare:0},audience:Array.from({length:205},(_,i)=>({...person,id:`legacy-${i}`,name:`Архив ${i}`,source:'youtube',tags:['архив'],attendanceSessionIds:[],attendanceRatio:0,observedMinutesPerSession:0})),categories:[],hours:[],timeline:[]};
