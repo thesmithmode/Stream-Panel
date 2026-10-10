@@ -2,6 +2,7 @@
   import { onMount, untrack } from "svelte";
   import { api, date, money } from "./api";
   import {analyticsView} from "./analytics-view";
+  import {participantsAt} from "./chart-detail";
   import TrendChart from "./TrendChart.svelte";
   let { profile = "local", mode = "real", onPerson }: {profile?:string;mode?:string;onPerson:(id:string)=>void} = $props();
   let view=$state(analyticsView(null));
@@ -9,6 +10,10 @@
   let from=$state(localInput(Date.now()-30*86400000)),to=$state(localInput(Date.now())),source=$state("all"),category=$state("");
   let timezone=$state("Europe/Moscow");
   let search=$state(""),liveEnd=$state(true),data=$state<any>(null),error=$state(""),busy=$state(false),selected=$state<any>(null),day=$state("");
+  let selectedBar=$state<{at:number;width:number;value:number;known:boolean}|null>(null);
+  const barParticipants=$derived(selectedBar?participantsAt(data?.audience??[],selectedBar.at,selectedBar.at+selectedBar.width):[]);
+  const barDate=(at:number)=>new Date(at).toLocaleString("ru-RU",{timeZone:timezone});
+  $effect(()=>{void data;void view.metric;void view.resolution;selectedBar=null;});
   let requestId=0, mounted=$state(false);
   $effect(()=>{
     const filters=[mounted,mode,from,to,source,category,timezone].join("|");
@@ -57,7 +62,7 @@
   onMount(()=>{
     try{const saved=JSON.parse(localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved?.timezone)timezone=saved.timezone;}catch{/* private browser may deny storage */}
     try{view=analyticsView(JSON.parse(localStorage.getItem(`sp-analytics-view-${profile}`)??"null"));}catch{/* storage is optional */}
-    mounted=true;const timer=setInterval(()=>{if(!busy&&!selected){if(liveEnd){const next=localInput(Date.now());if(next===to)void refresh();else to=next;}else void refresh();}},60000);return ()=>{requestId++;clearInterval(timer);};
+    mounted=true;const timer=setInterval(()=>{if(!busy&&!selected&&!selectedBar){if(liveEnd){const next=localInput(Date.now());if(next===to)void refresh();else to=next;}else void refresh();}},60000);return ()=>{requestId++;clearInterval(timer);};
   });
 </script>
 <section class="panel analytics-filter">
@@ -95,7 +100,16 @@
   {#if view.report&&data.youtubeReport}<section class="panel"><header><h2>Агрегатный отчёт YouTube: все видео канала</h2></header><p class="small muted">Период отчёта платформы: {data.youtubeReport.data.start} — {data.youtubeReport.data.end}; обновлён {date(data.youtubeReport.updatedAt)}. Данные с задержкой, охватывают весь канал и не фильтруются по категории Twitch. Это минуты просмотра из YouTube Analytics; персональные исключения к этому агрегату неприменимы.</p><div class="table-wrap"><table class="analytics-table"><thead><tr>{#each data.youtubeReport.data.columnHeaders??[] as column}<th>{({day:"Дата",views:"Просмотры",estimatedMinutesWatched:"Минуты просмотра",subscribersGained:"Новые подписчики",subscribersLost:"Отписки"} as Record<string,string>)[column.name]??column.name}</th>{/each}</tr></thead><tbody>{#each data.youtubeReport.data.rows??[] as row}<tr>{#each row as value}<td>{value}</td>{/each}</tr>{/each}</tbody></table></div></section>{/if}
   {#if view.trend}<section class="panel analytics-chart"><header><h2>Активность по времени</h2><label>Метрика графика<select bind:value={view.metric}><option value="observed">Наблюдаемые участники Twitch</option><option value="estimated">Оценка активности YouTube</option><option value="messages">Сообщения</option><option value="viewers">Счётчик зрителей площадки</option></select></label></header>
     <p class="small regular-summary">Ядро аудитории: <strong>{data.summary.regulars??0} из {data.summary.entities??0} ({data.summary.regularShare==null?"нет данных":(data.summary.regularShare*100).toFixed(1)+"%"})</strong></p>
-    <TrendChart points={data.timeline} metric={view.metric} resolution={view.resolution} showRegulars={view.showRegulars} />
+    <TrendChart points={data.timeline} metric={view.metric} resolution={view.resolution} showRegulars={view.showRegulars} {timezone} onselect={(point)=>selectedBar=point} />
+    {#if selectedBar}
+      <section class="bar-detail" aria-label="Детали выбранного столбца">
+        <header><h3>{barDate(selectedBar.at)} — {barDate(selectedBar.at+selectedBar.width)}</h3><button class="outline small" onclick={()=>selectedBar=null}>Закрыть детализацию</button></header>
+        <p>Значение столбца: {selectedBar.known?selectedBar.value.toFixed(1):"нет данных"}. Участников с сигналами в интервале: {barParticipants.length}.</p>
+        <p class="small muted">Счётчик площадки не раскрывает личности зрителей. Ниже — присутствие в чате Twitch и оценка по сообщениям YouTube; это не список всех смотревших видео. Для широкого столбца показаны уникальные участники за весь интервал, а высота — среднее (для сообщений — сумма).</p>
+        {#if view.metric==='messages'}<p class="small muted">Список показывает сигналы присутствия; авторы отдельных сообщений в этой детализации не определяются.</p>{/if}
+        <ul>{#each barParticipants as person}<li><button class="text-button" onclick={()=>onPerson(person.id)}>{person.name}</button> — {person.observed?"Twitch: наблюдение чата":""}{person.observed&&person.estimated?"; ":""}{person.estimated?"YouTube: оценка по чату":""}{person.core?" · ядро":""}</li>{:else}<li>Нет сохранённых персональных сигналов в этом интервале.</li>{/each}</ul>
+      </section>
+    {/if}
     <p class="small muted">Twitch — присутствие в опросах чата. YouTube — окно после сообщения, оценка, а не время просмотра. Серые отметки — неизвестные данные. Счётчик площадки агрегатный, персональные исключения к нему неприменимы.</p>
   </section>
   {/if}
