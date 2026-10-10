@@ -27,7 +27,7 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
  await page.route('**/api/v1/analytics?*',route=>route.fulfill({json:data}));
  page.setDefaultTimeout(8000);
  const response=()=>page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/analytics');
- const changeSource=async(source)=>{const received=response();await page.getByLabel('Площадка',{exact:true}).selectOption(source);await received;};
+ const renderNextHistory=async()=>{assert.deepEqual(errors,[]);await page.getByRole('button',{name:'Обзор',exact:true}).click();const received=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await received;};
  try {
   await goto(page,`http://127.0.0.1:${port}`);
   await page.getByLabel('Логин',{exact:true}).fill('fixture');await page.getByLabel('Пароль',{exact:true}).fill('fixture-missing-data-password');await page.getByRole('button',{name:'Войти',exact:true}).click();
@@ -52,7 +52,7 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
   assert.equal(await page.locator('.minute-dot.unknown').count(),1440);
   await page.getByRole('button',{name:'Закрыть детализацию'}).click();
   data={summary:{entities:205,core:0,streams:0,messages:0,regulars:0,regularShare:0},audience:Array.from({length:205},(_,i)=>({...person,id:`legacy-${i}`,name:`Архив ${i}`,source:'youtube',tags:['архив'],attendanceSessionIds:[],attendanceRatio:0,observedMinutesPerSession:0})),categories:[],hours:[],timeline:[]};
-  await changeSource('youtube');
+  await renderNextHistory();
   await page.getByText('Показаны первые 200; используйте поиск или меньший период.',{exact:true}).waitFor();
   const audience=page.getByRole('heading',{name:'Состав аудитории',exact:true}).locator('..').locator('..');
   assert.equal(await audience.locator('tbody tr').count(),200);
@@ -60,7 +60,7 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
   assert.equal(await audience.locator('tbody tr').count(),1);
   assert.equal(await audience.getByText('архив',{exact:true}).count(),1);
   data={summary:{entities:0,core:0,streams:0,messages:0,regulars:0,regularShare:null},audience:[],categories:[],hours:[],timeline:[]};
-  await changeSource('all');
+  await renderNextHistory();
   await page.getByText('Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.',{exact:true}).waitFor();
   assert.deepEqual(errors,[]);
  } finally {await saveCoverage(page);await context.close();await browser.close();await hosted.app.close();await rm(dir,{recursive:true,force:true});}
