@@ -1,4 +1,6 @@
 import test from 'node:test';
+import {mkdir} from 'node:fs/promises';
+import {join} from 'node:path';
 import assert from 'node:assert/strict';
 import {application} from '../helpers/application.mjs';
 import {launchBrowser} from '../helpers/browser.mjs';
@@ -35,7 +37,10 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   const bars=page.locator('.series-panel .chart-bar');
   await bars.first().click();
   const detail=page.getByRole('region',{name:'Детали выбранного столбца'});
-  await detail.waitFor();assert.equal(await detail.getByRole('button',{name:'Silent Viewer',exact:true}).count(),1);
+  await detail.waitFor();
+  const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;
+  if(evidence){await mkdir(evidence,{recursive:true});await page.screenshot({path:join(evidence,'stream-audience-desktop.png'),fullPage:true});}
+  assert.equal(await detail.getByRole('button',{name:'Silent Viewer',exact:true}).count(),1);
   assert.equal(await detail.getByRole('button',{name:'Talkative Viewer',exact:true}).count(),1);
   assert.equal(await detail.getByRole('button',{name:'Other Stream Viewer',exact:true}).count(),0);
   await page.getByRole('button',{name:'Закрыть детализацию',exact:true}).click();
@@ -52,6 +57,7 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   const help=page.getByRole('dialog',{name:'О детализации минуты'});await help.waitFor();
   const box=await help.boundingBox();assert.ok(box.x>=0&&box.x+box.width<=390);
   await page.keyboard.press('Escape');assert.equal(await help.count(),0);
+  if(evidence)await page.screenshot({path:join(evidence,'stream-audience-mobile.png'),fullPage:true});
   await assertUiLayout(page);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await detail.getByRole('button',{name:'Silent Viewer',exact:true}).click();
   await page.getByRole('heading',{name:'Silent Viewer',exact:true}).waitFor();
