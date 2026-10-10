@@ -9,6 +9,7 @@ data_dir=${STREAM_PANEL_DATA_DIR:-${system_root}/var/lib/stream-panel}
 current_dir=${STREAM_PANEL_CURRENT_DIR:-${system_root}/opt/stream-panel/current}
 lock_file=${STREAM_PANEL_LOCK_FILE:-${system_root}/run/lock/stream-panel-configure.lock}
 receive_cmd=${STREAM_PANEL_RECEIVE:-${system_root}/usr/local/sbin/stream-panel-receive}
+installed_receiver=${STREAM_PANEL_INSTALLED_RECEIVER:-/usr/local/sbin/stream-panel-receive}
 bootstrap_cmd=${STREAM_PANEL_BOOTSTRAP_TRAEFIK:-$PWD/bootstrap-traefik.sh}
 systemctl_cmd=${STREAM_PANEL_SYSTEMCTL:-systemctl}
 runuser_cmd=${STREAM_PANEL_RUNUSER:-${system_root}/usr/sbin/runuser}
@@ -49,6 +50,22 @@ PY
 else
   bash "$bootstrap_cmd" "${network[0]}" deploy.pub backup-key "${network[1]}" "${network[2]}"
 fi
+# Resume may find an installation marker written before an interrupted bootstrap
+# installed the current receiver. Refresh it only after identity validation.
+python3 - "$installed_receiver" <<'PY'
+import os,pathlib,stat,sys
+target=pathlib.Path(sys.argv[1])
+parent=target.parent
+info=parent.lstat()
+assert stat.S_ISDIR(info.st_mode) and info.st_uid==0, 'Receiver directory must be a root-owned real directory'
+assert parent.resolve(strict=True)==parent.absolute(), 'Receiver directory path must not traverse symlinks'
+try: current=target.lstat()
+except FileNotFoundError: pass
+else: assert stat.S_ISREG(current.st_mode) and current.st_uid==0, 'Existing receiver must be a root-owned regular file'
+source=pathlib.Path('receive.py'); source_info=source.lstat()
+assert stat.S_ISREG(source_info.st_mode), 'Trusted receiver payload must be a regular file'
+PY
+install -m 755 -o root -g root receive.py "$installed_receiver"
 if [[ $cloud_url_present == 1 ]]; then
   install -m 640 -o root -g stream-panel supabase-key "$config_dir/supabase-key"
 fi

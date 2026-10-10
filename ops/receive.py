@@ -7,7 +7,14 @@ STATE = pathlib.Path('/var/lib/stream-panel-deploy')
 SERVICE = 'stream-panel.service'
 MAX_ARCHIVE = 100 * 1024 * 1024
 MAX_EXPANDED = 450 * 1024 * 1024
+HEADER_BYTES = 106
 BIND_HOST_FILE = pathlib.Path('/etc/stream-panel/bind-host')
+
+def read_header(stream):
+    raw = stream.readline(HEADER_BYTES + 1)
+    match = re.fullmatch(rb'([a-f0-9]{40}) ([a-f0-9]{64})\n', raw)
+    if not match: raise RuntimeError('Invalid bundle header')
+    return tuple(part.decode('ascii') for part in match.groups())
 
 def unpack(archive, destination):
     if not hasattr(tarfile, 'data_filter'):
@@ -157,10 +164,7 @@ def main():
     STATE.mkdir(mode=0o700,exist_ok=True)
     with (STATE/'deploy.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        header = sys.stdin.buffer.readline(100).decode('ascii').strip()
-        match = re.fullmatch(r'([a-f0-9]{40}) ([a-f0-9]{64})',header)
-        if not match: raise RuntimeError('Invalid bundle header')
-        sha, expected = match.groups()
+        sha, expected = read_header(sys.stdin.buffer)
         origin = pathlib.Path('/etc/stream-panel/public-origin').read_text().strip()
         user = pwd.getpwnam('stream-panel')
         (BASE/'releases').mkdir(parents=True,exist_ok=True)
