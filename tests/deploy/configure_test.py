@@ -38,6 +38,8 @@ class ConfigureInitialTest(unittest.TestCase):
         subprocess.run(["sudo", "-n", "chown", "root:root", str(self.installed_sbin)], check=True)
         self.write_command("configure-bootstrap", "mkdir -p \"$TEST_CONFIG_DIR\"; test -e \"$TEST_CONFIG_DIR/server.env\" || printf 'STREAM_PANEL_BACKUP_KEY_FILE=%s/backup-key\\n' \"$TEST_DATA_DIR\" > \"$TEST_CONFIG_DIR/server.env\"")
         self.write_command("configure-receive", "echo receive >> \"$TEST_COMMAND_LOG\"")
+        self.write_command("ufw", """echo \"ufw $*\" >> \"$TEST_COMMAND_LOG\"
+if [[ $1 == status ]]; then printf '%s\\n' \"${MOCK_UFW_STATUS:-Status: inactive}\"; fi""")
         self.write_command("configure-systemctl", "echo \"systemctl $*\" >> \"$TEST_COMMAND_LOG\"")
         self.write_command("configure-runuser", """echo \"runuser $*\" >> \"$TEST_COMMAND_LOG\"
 case \" $* \" in
@@ -175,6 +177,30 @@ os.chown(root,uid,gid,follow_symlinks=False)
         result = self.run_configure()
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(target.read_text(), "old receiver")
+        self.assertFalse(self.log.exists() and "ufw " in self.log.read_text())
+
+    def test_active_ufw_allows_only_private_proxy_to_backend(self):
+        self.seed_identity()
+        result = self.run_configure(MOCK_UFW_STATUS="Status: active")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = self.log.read_text().splitlines()
+        self.assertIn("ufw allow from 172.21.0.2 to 172.21.0.1 port 47831 proto tcp comment Stream Panel private proxy", lines)
+        self.assertFalse(any("ufw allow" in line and "0.0.0.0" in line for line in lines))
+
+    def test_inactive_ufw_is_not_changed(self):
+        self.seed_identity()
+        result = self.run_configure(MOCK_UFW_STATUS="Status: inactive")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = self.log.read_text().splitlines()
+        self.assertIn("ufw status", lines)
+        self.assertFalse(any(line.startswith("ufw allow") for line in lines))
+
+    def test_existing_exact_ufw_rule_is_not_duplicated(self):
+        self.seed_identity()
+        status = "Status: active\nTo Action From\n-- ------ ----\n172.21.0.1 47831/tcp ALLOW IN 172.21.0.2 # Stream Panel private proxy"
+        result = self.run_configure(MOCK_UFW_STATUS=status)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(line.startswith("ufw allow") for line in self.log.read_text().splitlines()))
 
 
 if __name__ == "__main__":
