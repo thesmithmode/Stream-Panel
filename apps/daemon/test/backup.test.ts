@@ -86,7 +86,7 @@ test('corrupt cloud download keeps previous remote copies and skips cloud rotati
   if(url.pathname.includes('/bucket/'))return Response.json({public:false});
   if(url.pathname.includes('/object/authenticated/')){const corrupt=Buffer.from(uploaded!);corrupt[corrupt.length-1]=corrupt.at(-1)!^1;return new Response(new Uint8Array(corrupt));}
   if(url.pathname.includes('/object/list/')){listed++;return Response.json(previous.map(name=>({name})));}
-  if(init?.method==='DELETE'){deleted++;return Response.json({ok:true});}
+  if(init?.method==='DELETE'){deleted++;const removed=JSON.parse(String(init.body)).prefixes;assert.ok(removed.every((name:string)=>!previous.includes(name.split('/').at(-1)!)));return Response.json({ok:true});}
   uploaded=Buffer.from(init!.body as Uint8Array);cloudObjects.push(url.pathname.split('/').at(-1)!);return Response.json({ok:true});
  };
  const backup=new BackupService(dir,{keyFile:key,url:'https://test.supabase.co',serviceKeyFile:serviceKey},request);
@@ -94,7 +94,7 @@ test('corrupt cloud download keeps previous remote copies and skips cloud rotati
   const result=await backup.run();
   assert.equal(result.cloudError,'BACKUP_UPLOAD_VERIFY_FAILED');
   assert.deepEqual(cloudObjects.slice(0,previous.length),previous);assert.equal(cloudObjects.length,previous.length+1);
-  assert.equal(listed,0);assert.equal(deleted,0);
+  assert.equal(listed,0);assert.equal(deleted,1);
   assert.ok(await readFile(join(dir,'backups',result.filename)));
   assert.equal(backup.status.local.filename,result.filename);
  }finally{await backup.stop();store.close();await rm(dir,{recursive:true,force:true});}
