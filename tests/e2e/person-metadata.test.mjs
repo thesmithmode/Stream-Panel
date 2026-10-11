@@ -21,7 +21,7 @@ test('tags and manual core work on mobile, persist, reject stale changes and agr
   const denied=await page.evaluate(async id=>(await fetch(`/api/v1/persons/${id}/metadata`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tags:[],manualCore:false,revision:0})})).status,person.id);assert.equal(denied,403);
   await page.getByRole('button',{name:'Аналитика',exact:true}).click();
   const row=page.getByRole('row').filter({hasText:'Тестовый зритель'});await row.locator('.core-badge').filter({hasText:'Ядро'}).waitFor();
-  assert.equal(await row.locator('.core-badge').filter({hasText:'Друг'}).count(),1);
+  assert.equal(await row.locator('.person-tag').filter({hasText:'Друг'}).count(),1);
   await page.getByLabel('Только ядро').check();assert.equal(await page.getByRole('button',{name:'Другой зритель',exact:true}).count(),0);
   await open();await form.getByRole('button',{name:'Удалить тег Друг',exact:true}).waitFor();
   await form.getByLabel('Новый тег').fill('Собственный черновик');

@@ -1382,3 +1382,5 @@ td {
 .platform-details a{display:inline-block;margin-right:12px;margin-top:6px}.platform-details>span{display:block}.people-page .page-heading{margin-bottom:16px}@media(min-width:761px){main.people-page{padding-top:24px;padding-bottom:16px;}}
 
 .trend-chart rect.follower-segment,.follower-swatch{fill:#5a9ee6;background:#5a9ee6}.other-swatch{background:#5fc4aa}.legend .follower-swatch{display:inline-block;width:10px;height:10px;border-radius:2px}
+
+.follower-badge,.person-tag{display:inline-block;border-radius:4px;padding:2px 6px;margin-left:8px;font-size:11px}.follower-badge{background:#172b47;color:#6ab3ff}.person-tag{background:#2b2939;color:#ccc3e7}

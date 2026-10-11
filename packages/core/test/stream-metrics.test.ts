@@ -15,3 +15,10 @@ test('known zero viewers differ from unknown and category segments exclude unrel
  assert.equal(data.viewers.youtube.mean,null);assert.equal(data.viewers.youtube.peak,null);assert.equal(data.viewers.youtube.viewerMinutes,null);assert.equal(data.viewers.youtube.coverageRatio,0);assert.equal(data.meanChatters,0);
  const empty=streamMetrics([],[],new Map());assert.equal(empty.meanChatters,null);assert.equal(empty.viewers.twitch.coverageRatio,null);
 });
+
+test('combined viewer counts require only active providers and retain unknown active samples',()=>{
+ const segments=[{from:0,to:3*minute}],samples=[{observed_at_ms:0,twitch_viewers:10,youtube_viewers:null},{observed_at_ms:minute,twitch_viewers:20,youtube_viewers:4},{observed_at_ms:2*minute,twitch_viewers:30,youtube_viewers:null}];
+ const data=streamMetrics(segments,samples,new Map(),[{platform:'twitch',from:0,to:3*minute},{platform:'youtube',from:minute,to:3*minute}]);
+ assert.equal(data.viewers.all.peak,24);assert.equal(data.viewers.all.mean,17);assert.equal(data.viewers.all.knownMinutes,2);assert.equal(data.viewers.all.coverageRatio,2/3);
+ const yt=streamMetrics([{from:0,to:minute}],[{observed_at_ms:0,twitch_viewers:null,youtube_viewers:7}],new Map(),[{platform:'youtube',from:0,to:minute}]);assert.equal(yt.viewers.all.mean,7);
+});

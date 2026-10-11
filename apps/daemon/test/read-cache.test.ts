@@ -12,7 +12,7 @@ test('a slow pre-mutation read cannot repopulate the cache or overwrite a new re
  cache.invalidate();assert.equal(await cache.read('key',async()=>2),2);resolve(1);assert.equal(await old,1);assert.equal(await cache.read('key',async()=>3),2);cache.close();
 });
 test('failed reads are not cached; unavailable Redis falls back to SQLite',async()=>{
- const cache=new ReadCache('redis://127.0.0.1:1');await assert.rejects(cache.read('bad',async()=>{throw new Error('failure');}));assert.equal(await cache.read('bad',async()=>4),4);cache.close();
+ const malformed=new ReadCache('not a redis URL');assert.equal(await malformed.read('key',async()=>undefined),undefined);malformed.close();const cache=new ReadCache('redis://127.0.0.1:1');await assert.rejects(cache.read('bad',async()=>{throw new Error('failure');}));assert.equal(await cache.read('bad',async()=>4),4);cache.close();
 });
 test('Redis cache handles hits, corrupt values, deadlines and bounded local eviction',async t=>{
  const values=new Map<string,string>();let mode='normal';const sockets=new Set<net.Socket>();
@@ -37,8 +37,8 @@ test('Redis cache handles hits, corrupt values, deadlines and bounded local evic
   for(let n=0;n<129;n++)await cache.read(`other-${n}`,async()=>n);
   assert.equal(await cache.read('key',async()=>++loads),1);assert.equal(loads,1);
   mode='corrupt';assert.equal(await cache.read('corrupt',async()=>8),8);
-  mode='timeout';const start=Date.now();assert.equal(await cache.read('deadline',async()=>9),9);assert.ok(Date.now()-start<500);
   mode='normal';assert.equal((await cache.read('large',async()=> 'x'.repeat(2_000_001))).length,2_000_001);
+  mode='timeout';const start=Date.now();assert.equal(await cache.read('deadline',async()=>9),9);assert.ok(Date.now()-start<500);assert.equal(await cache.read('after-timeout',async()=>10),10);
   await tick();assert.ok([...values.values()].every(value=>value.length<2_000_000));
  }finally{cache.close();for(const socket of sockets)socket.destroy();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });

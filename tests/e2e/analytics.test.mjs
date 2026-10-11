@@ -26,15 +26,16 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
   for(let n=0;n<3;n++){
    const base=Math.floor((Date.now()-(4-n)*86400000)/minute)*minute,sid=await db.call('startSession','channel',`stream-${n}`,base,'platform',base);
    await db.call('streamSample',sid,base,'game','Game A','Game A title',12);await db.call('streamSample',sid,base+10*minute,'talk','Just Chatting','Talk title',15);await db.call('youtubeViewers',base,4);
-   for(const [actor,name] of [['regular',`Regular ${profile}`],...(n===0?[['casual',`Occasional ${profile}`]]:[]),['owner','RenamedOwner'],['bot','jeetbot'],['self','fullrandomname_twitch'],['typo','streemelements']])await db.call('ingest',{source:'twitch',accountId:'channel',externalId:`${n}-${actor}`,type:'chat.message',actor:{externalId:actor,displayName:name},occurredAtMs:base+minute,receivedAtMs:base+minute,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
+   for(const [actor,name] of [['regular',`Regular ${profile}`],...(n===0?[['casual',`Occasional ${profile}`]]:[]),['owner','RenamedOwner'],['bot','jeetbot'],['self','fullrandomname_twitch'],['typo','streemelements'],['creatis','CreatisBot'],['night','Nightbot'],['franky','franky_showman']])await db.call('ingest',{source:'twitch',accountId:'channel',externalId:`${n}-${actor}`,type:'chat.message',actor:{externalId:actor,displayName:name},occurredAtMs:base+minute,receivedAtMs:base+minute,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
    await db.call('ingest',{source:'donationalerts',accountId:'da',externalId:`tip-${n}`,type:'donation',actor:{externalId:`name:regular ${profile}`,displayName:`Regular ${profile}`},occurredAtMs:base+minute,receivedAtMs:base+minute,sourceTime:null,timeQuality:'configured',transport:'rest',payload:{amountMinor:'100',currency:'RUB'}});
-   await db.call('recordPoll',sid,'channel',{startedAtMs:base,completedAtMs:base+9*minute,status:'complete',userIds:['regular','owner','bot','self','typo',...(n===0?['casual']:[])]});
+   await db.call('recordPoll',sid,'channel',{startedAtMs:base,completedAtMs:base+9*minute,status:'complete',userIds:['regular','owner','bot','self','typo','creatis','night','franky',...(n===0?['casual']:[])]});
    await db.call('recordPoll',sid,'channel',{startedAtMs:base+12*minute,completedAtMs:base+15*minute,status:'complete',userIds:['regular']});
    await db.call('observePlatformStream','youtube','yt-owner',`video-${n}`,base,base,null,'YouTube stream');
    await db.call('youtubeMessages','yt-owner',`chat-${n}`,[{id:`yt-${n}`,snippet:{type:'textMessageEvent',publishedAt:new Date(base+minute).toISOString(),displayMessage:'hello'},authorDetails:{channelId:'yt-regular',displayName:`YT ${profile}`}}]);
    await db.call('endSession',sid,base+20*minute,'observed');
   }
  }
+ for(const profile of ['ruslan','gulnaz'])await h.runtimes.get(profile).db.call('followingSnapshot','youtube','yt-owner',[{id:'yt-regular',name:`YT ${profile}`,followedAtMs:null}],true,Date.now(),1);
  const browser=await launchBrowser();
  try{
   for(const profile of ['ruslan','gulnaz']){
@@ -62,9 +63,9 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    assert.equal(await page.getByRole('button',{name:'Применить',exact:true}).count(),0);
    for(const label of ['Порог постоянника, % посещений','Минимум эфиров','Минимум минут активности','Минимум сообщений','Правило ядра','Окно активности YouTube, мин'])assert.equal(await page.getByLabel(label,{exact:true}).count(),0,label);
    assert.equal(await page.getByText('Как определять ядро аудитории',{exact:true}).count(),0);
-   for(const name of ['RenamedOwner','jeetbot','fullrandomname_twitch','streemelements',`Regular ${profile==='ruslan'?'gulnaz':'ruslan'}`])assert.equal(await page.getByRole('button',{name,exact:true}).count(),0);
+   for(const name of ['RenamedOwner','jeetbot','fullrandomname_twitch','streemelements','CreatisBot','Nightbot','franky_showman',`Regular ${profile==='ruslan'?'gulnaz':'ruslan'}`])assert.equal(await page.getByRole('button',{name,exact:true}).count(),0);
    await page.getByLabel('Метрика графика').selectOption('observed');await page.getByText('Настроить отображение',{exact:true}).click();await page.getByLabel('Детализация графика').selectOption('1');await page.locator('.regular-segment').first().waitFor();await page.getByText('Настроить отображение',{exact:true}).click();
-   await page.getByRole('button',{name:'Раньше',exact:true}).click();await page.getByRole('button',{name:'Позже',exact:true}).click();assert.ok(await page.locator('.trend-chart rect.regular-segment').count()>0);
+   await page.getByRole('button',{name:'Раньше',exact:true}).click();await page.getByRole('button',{name:'Позже',exact:true}).click();await page.getByLabel('Метрика графика').selectOption('participants');assert.ok(await page.locator('.follower-segment').count()>0);assert.ok(await page.locator('.follower-badge').count()>0);await page.getByLabel('Метрика графика').selectOption('observed');assert.ok(await page.locator('.trend-chart rect.regular-segment').count()>0);
    const effectiveMinutes=Number((await page.locator('.chart-caption').first().textContent()).match(/Столбец: (\d+) мин/)[1]);
    const expectedBars=chartSeries(chartPages(analyticsData.timeline)[0],'observed',effectiveMinutes);
    const geometry=await page.locator('.trend-chart .chart-bar').evaluateAll(groups=>groups.map(group=>{const full=group.querySelector('.total-segment'),regular=group.querySelector('.regular-segment');return {ratio:regular?Number(regular.getAttribute('height'))/Number(full.getAttribute('height')):0,bottom:regular?Number(regular.getAttribute('y'))+Number(regular.getAttribute('height')):190};}));

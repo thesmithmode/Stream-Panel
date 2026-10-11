@@ -12,6 +12,8 @@ test('person activity stays isolated, deduplicates overlapping observations and 
   await db.call('youtubeMessages','yt-owner','chat',[{id:'yt-message',snippet:{type:'textMessageEvent',publishedAt:new Date(at).toISOString()},authorDetails:{channelId:'author',displayName:'YT viewer'}}]);
   await db.call('endSession',yt,at+3*60000);
   const activity=await db.call<any>('personActivity','youtube:author');assert.equal(activity.hasEstimatedActivity,true);assert.equal(activity.hours[15].minutes,3);assert.equal(activity.visits.length,1);assert.equal(activity.rewards.length,0);
+  for(const [externalId,payload] of [['raw-reward',{raw:{payload:{event:{reward:{title:'Raw reward',cost:50}}}}}],['missing-reward',{}],['unknown-cost',{reward:{title:'Unknown cost',cost:'private'}}]] as const)await db.call('ingest',{source:'twitch',accountId:'owner',externalId,type:'channel_points_custom_reward_redemption.add',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:at+2000,receivedAtMs:at+2000,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload});
+  const rewards=(await db.call<any>('personActivity',person.personId)).rewards;assert.equal(rewards.length,4);assert.equal(rewards.find((r:any)=>r.title==='Raw reward').cost,50);assert.equal(rewards.find((r:any)=>r.title==='Награда').status,'UNKNOWN');assert.equal(rewards.find((r:any)=>r.title==='Unknown cost').cost,null);
   await assert.rejects(db.call('personActivity','missing'),/PERSON_NOT_FOUND/);
  }finally{await db.stop();await rm(dir,{recursive:true,force:true});}
 });

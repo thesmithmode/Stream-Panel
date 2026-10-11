@@ -8,7 +8,7 @@ export class ReadCache {
  private local=new Map<string,{until:number;value:unknown}>();
  private redis:ReturnType<typeof createClient>|undefined;
  constructor(url=process.env.STREAM_PANEL_REDIS_URL){
-  if(url){this.redis=createClient({url,disableOfflineQueue:true,socket:{connectTimeout:300,reconnectStrategy:false}});this.redis.on('error',()=>{});void this.redis.connect().catch(()=>{});}
+  if(url){try{this.redis=createClient({url,disableOfflineQueue:true,socket:{connectTimeout:300,reconnectStrategy:false}});this.redis.on('error',()=>{});void this.redis.connect().catch(()=>{});}catch{this.redis=undefined;}}
  }
  invalidate(){this.version++;this.local.clear();this.pending.clear();}
  async read<T>(key:string,load:()=>Promise<T>):Promise<T>{
@@ -18,13 +18,19 @@ export class ReadCache {
   const task=(async()=>{
    const redisKey=this.prefix+createHash('sha256').update(cacheKey).digest('hex');
    let value:T|undefined;
-   if(this.redis?.isReady){try{const raw=await Promise.race([this.redis.get(redisKey),new Promise<null>(resolve=>setTimeout(()=>resolve(null),100))]);if(raw!==null)value=JSON.parse(raw);}catch{/* Read from SQLite. */}}
+   if(this.redis?.isReady){
+    let timer:ReturnType<typeof setTimeout>|undefined;
+    try{
+     const raw=await Promise.race([this.redis.get(redisKey),new Promise<null>(resolve=>{timer=setTimeout(()=>{this.redis?.destroy();this.redis=undefined;resolve(null);},100);})]);
+     if(raw!==null)value=JSON.parse(raw);
+    }catch{/* Read from SQLite. */}finally{clearTimeout(timer);}
+   }
    value??=await load();
    if(version===this.version){
     if(this.local.size>=128)this.local.delete(this.local.keys().next().value!);
     this.local.set(cacheKey,{until:Date.now()+3000,value:structuredClone(value)});
     const raw=JSON.stringify(value);
-    if(this.redis?.isReady&&Buffer.byteLength(raw)<=2_000_000)void this.redis.set(redisKey,raw,{PX:3000}).catch(()=>{});
+    if(this.redis?.isReady&&raw!==undefined&&Buffer.byteLength(raw)<=2_000_000)void this.redis.set(redisKey,raw,{PX:3000}).catch(()=>{});
    }
    return value;
   })();
