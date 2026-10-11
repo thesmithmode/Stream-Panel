@@ -1,6 +1,8 @@
+import {ReadCache,cachedReads} from "./read-cache.js";
 import { Worker } from "node:worker_threads";
 export class StoreClient {
   private worker: Worker;
+  private cache=new ReadCache();
   private sequence = 0;
   private dead = false;
   private pending = new Map<
@@ -40,6 +42,13 @@ export class StoreClient {
   }
   async call<T = unknown>(method: string, ...args: unknown[]): Promise<T> {
     await this.ready;
+    if(this.dead)throw new Error("DB_WORKER_STOPPED");
+    if(cachedReads.has(method))return this.cache.read(JSON.stringify([method,args]),()=>this.execute<T>(method,...args));
+    this.cache.invalidate();
+    try{return await this.execute<T>(method,...args);}finally{this.cache.invalidate();}
+  }
+  private async execute<T = unknown>(method: string, ...args: unknown[]): Promise<T> {
+    await this.ready;
     if (this.dead) throw new Error("DB_WORKER_STOPPED");
     if (this.pending.size >= 10_000) throw new Error("QUEUE_OVERFLOW");
     return new Promise((resolve, reject) => {
@@ -54,6 +63,7 @@ export class StoreClient {
     });
   }
   async stop(): Promise<void> {
+    this.cache.close();
     if (this.dead) return;
     await this.call("close");
     await this.worker.terminate();

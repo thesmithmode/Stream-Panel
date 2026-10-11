@@ -22,7 +22,7 @@ const allowed = new Set([
   "person",
   "personNotes", "createPersonNote", "updatePersonNote", "deletePersonNote",
   "personMetadata", "setPersonMetadata",
-  "donation", "donations", "createDonation", "updateDonation", "deleteDonation", "restoreDonation", "donationAudit",
+  "reassignDonation", "donation", "donations", "createDonation", "updateDonation", "deleteDonation", "restoreDonation", "donationAudit",
   "events",
   "summary",
   "grid",
@@ -38,7 +38,7 @@ const allowed = new Set([
   "candidatePersons",
   "insights",
   "personsTop",
-  "personStats",
+  "personStats", "personActivity",
   "ensureOwnerIdentity",
 ]);
 parentPort!.on(

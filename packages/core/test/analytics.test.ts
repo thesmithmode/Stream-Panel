@@ -343,7 +343,7 @@ test('comparison deduplicates linked Twitch/YouTube chatters and exposes indepen
   const tw=s.ingest({source:'twitch',accountId:'channel',externalId:'metric-tw',type:'chat.message',actor:{externalId:'metric-author',displayName:'Linked'},occurredAtMs:base,receivedAtMs:base,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
   s.youtubeMessages('yt-owner','metric-chat',[{id:'metric-yt',snippet:{type:'textMessageEvent',publishedAt:new Date(base).toISOString(),displayMessage:'hello'},authorDetails:{channelId:'metric-author-yt',displayName:'Linked'}}]);
   const yp=s.persons().find(p=>String(p.sources).includes('youtube'))!;
-  s.merge(String(yp.id),tw.personId!,s.personRevision(String(yp.id)),s.personRevision(tw.personId!),base+minute);
+  assert.equal(yp.id,tw.personId);
   s.endSession(sid,base+2*minute);
   const comparison=s.analytics({fromMs:base,toMs:base+2*minute,youtubeAccount:'yt-owner'}).streamComparison[0]!;
   assert.equal(comparison.uniqueChatters,1);assert.equal(comparison.peakChatters,1);assert.equal(comparison.meanChatters,.5);assert.equal(comparison.messages,2);

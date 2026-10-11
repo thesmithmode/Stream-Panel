@@ -86,7 +86,7 @@ test("worker RPC rejects unsupported operations and oversubscription but remains
     await db.ready;
     await assert.rejects(db.call("not-an-operation"), /UNKNOWN_OPERATION/);
     const results = await Promise.allSettled(
-      Array.from({ length: 10002 }, () => db.call("persons")),
+      Array.from({ length: 10002 }, (_,index) => db.call("persons",String(index))),
     );
     assert.equal(results.filter((x) => x.status === "rejected").length, 2);
     for (const x of results)

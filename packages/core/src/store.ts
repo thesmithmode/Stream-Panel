@@ -1,3 +1,5 @@
+import {streamMetrics} from "./stream-metrics.js";
+import {personActivity} from "./person-activity.js";
 import {DonationLedger,type DonationInput} from "./donations.js";
 import { audienceAnalytics, unionSpans, type AnalyticsOptions } from "./analytics.js";
 import Database from "better-sqlite3";
@@ -94,7 +96,7 @@ export class StreamStore {
       this.db.exec("CREATE TABLE IF NOT EXISTS sp_youtube_quota (day TEXT NOT NULL, profile TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(day,profile)) WITHOUT ROWID");
       // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
-      this.db.transaction(() => this.collapseDuplicateDaDonors()).immediate();
+      this.db.transaction(() => {this.collapseDuplicateDaDonors();this.reconcileNicknameLinks();}).immediate();
     } catch (error) {
       this.db.close();
       throw error;
@@ -119,12 +121,14 @@ export class StreamStore {
     }).immediate();
   }
 
+  personActivity(id:string){return personActivity(this.db,id);}
   donation(id:string) {return new DonationLedger(this.db).donation(id);}
   donations(personId?:string,offset=0,limit=50,includeDeleted=false) {return new DonationLedger(this.db).list(personId,offset,limit,includeDeleted);}
   createDonation(input:DonationInput,atMs:number) {return new DonationLedger(this.db).create(input,atMs);}
   updateDonation(id:string,input:DonationInput,revision:number,atMs:number) {return new DonationLedger(this.db).update(id,input,revision,atMs);}
   deleteDonation(id:string,revision:number,atMs:number):void {new DonationLedger(this.db).remove(id,revision,atMs);}
   restoreDonation(id:string,revision:number,atMs:number) {return new DonationLedger(this.db).restore(id,revision,atMs);}
+  reassignDonation(id:string,personId:string|null,revision:number,atMs:number) {return new DonationLedger(this.db).reassign(id,personId,revision,atMs);}
   donationAudit(id:string) {return new DonationLedger(this.db).auditHistory(id);}
 
   streamSample(sessionId: string, at: number, categoryId: string, categoryName: string, title: string, twitchViewers: number | null): void {
@@ -212,7 +216,8 @@ export class StreamStore {
     let identity = this.db.prepare("SELECT id,person_id FROM youtube_identities WHERE account_id=? AND external_id=?").get(account,externalId) as {id:string;person_id:string}|undefined;
     if (!identity) {
       const prior = this.db.prepare("SELECT person_id FROM youtube_identities WHERE external_id=? ORDER BY id LIMIT 1").get(externalId) as {person_id:string}|undefined;
-      const personId = prior?.person_id ?? `youtube:${externalId}`;
+      const linked=this.resolveAutoLinkPerson("youtube",account,externalId,name);
+      const personId = prior?.person_id ?? linked?.personId ?? `youtube:${externalId}`;
       this.db.prepare("INSERT OR IGNORE INTO persons VALUES (?,?,0)").run(personId,name);
       identity = {id:`youtube:${account}:${externalId}`,person_id:personId};
       this.db.prepare("INSERT INTO youtube_identities VALUES (?,?,?,?,?,?,?)").run(identity.id,account,externalId,name,matchKey(name),personId,Number(author.isChatOwner===true));
@@ -875,7 +880,7 @@ export class StreamStore {
    * (historical repair path). Prefer one Donor identity per name going forward.
    */
   private resolveAutoLinkPerson(
-    source: Source,
+    source: Source | "youtube",
     accountId: string,
     _externalId: string,
     displayName: string,
@@ -887,13 +892,14 @@ export class StreamStore {
       const anonymous=this.db.prepare('SELECT i.person_id FROM anonymous_donors a JOIN identities i ON i.id=a.identity_id WHERE a.account_id=?').get(accountId) as {person_id:string}|undefined;
       return anonymous?{personId:anonymous.person_id,how:"anonymous_label"}:null;
     }
-    const other = source === "twitch" ? "donationalerts" : "twitch";
+    const other = source;
     const rows = this.db
       .prepare(
         `SELECT DISTINCT person_id FROM identities
-         WHERE source = ? AND match_key = ?`,
+         WHERE source != ? AND match_key = ? AND account_id NOT LIKE 'correction:%' AND account_id NOT LIKE 'manual:%'
+         UNION SELECT person_id FROM youtube_identities WHERE ? != 'youtube' AND match_key = ?`,
       )
-      .all(other, key) as { person_id: string }[];
+      .all(other, key,other,key) as { person_id: string }[];
     if (rows.length === 1) return { personId: rows[0]!.person_id, how: "login_match" };
     // DA actor external_id is the donation occurrence id, so reuse by name.
     if (source === "donationalerts") {
@@ -908,6 +914,19 @@ export class StreamStore {
         return { personId: same[0]!.person_id, how: "da_name_attach" };
     }
     return null;
+  }
+
+  private reconcileNicknameLinks(onlyKey?:string):void {
+    const donors=this.db.prepare("SELECT DISTINCT person_id,match_key FROM identities WHERE source='donationalerts' AND match_key!='' AND external_id!='anonymous:donor' AND account_id NOT LIKE 'manual:%' AND account_id NOT LIKE 'correction:%' AND (? IS NULL OR match_key=?)").all(onlyKey??null,onlyKey??null) as {person_id:string;match_key:string}[];
+    for(const donor of donors){
+      const protectedGroup=this.db.prepare("SELECT 1 FROM identities WHERE person_id=? AND (source!='donationalerts' OR account_id LIKE 'manual:%' OR account_id LIKE 'correction:%') UNION SELECT 1 FROM youtube_identities WHERE person_id=? UNION SELECT 1 FROM person_merges WHERE source_person_id=? OR target_person_id=? UNION SELECT 1 FROM membership_operations o,json_each(o.before_json) b WHERE o.kind!='auto_link' AND CASE WHEN b.type='object' THEN json_extract(b.value,'$.personId') END=? LIMIT 1").get(donor.person_id,donor.person_id,donor.person_id,donor.person_id,donor.person_id);
+      if(protectedGroup)continue;
+      const targets=this.db.prepare("SELECT DISTINCT person_id FROM identities WHERE source='twitch' AND match_key=? AND person_id!=? UNION SELECT person_id FROM youtube_identities WHERE match_key=? AND person_id!=?").all(donor.match_key,donor.person_id,donor.match_key,donor.person_id) as {person_id:string}[];
+      if(targets.length!==1)continue;
+      const target=targets[0]!.person_id;
+      if(this.db.prepare("SELECT 1 FROM identities WHERE person_id=? AND source='donationalerts' AND match_key=?").get(target,donor.match_key))continue;
+      this.merge(donor.person_id,target,this.personRevision(donor.person_id),this.personRevision(target),Date.now());
+    }
   }
 
   /** Ensure the broadcaster Twitch identity/person exists (owner auto-bind). */
@@ -1132,13 +1151,24 @@ export class StreamStore {
         FROM sessions s WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) ORDER BY started_at_ms DESC,s.id DESC LIMIT 100`,
       )
       .all() as Record<string, unknown>[];
-    return rows.map(({platforms_json, urls_json, ...row}) => ({
-      ...row,
+    const ids=JSON.stringify(rows.map(row=>row.id));
+    const samples=this.db.prepare('SELECT session_id,observed_at_ms,twitch_viewers,youtube_viewers FROM stream_samples WHERE session_id IN(SELECT value FROM json_each(?)) ORDER BY observed_at_ms').all(ids) as {session_id:string;observed_at_ms:number;twitch_viewers:number|null;youtube_viewers:number|null}[];
+    const platforms=this.db.prepare('SELECT session_id,platform,started_at_ms AS "from",coalesce(ended_at_ms,?) AS "to" FROM platform_streams WHERE session_id IN(SELECT value FROM json_each(?))').all(Date.now(),ids) as {session_id:string;platform:string;from:number;to:number}[];
+    const tips=this.db.prepare("SELECT es.session_id,json_extract(e.payload_json,'$.currency') AS currency,json_extract(e.payload_json,'$.amountMinor') AS amount FROM effective_events e JOIN event_sessions es ON es.event_id=e.id WHERE e.type='donation' AND es.session_id IN(SELECT value FROM json_each(?))").all(ids) as {session_id:string;currency:string|null;amount:string|null}[];
+    return rows.map(({platforms_json, urls_json, ...row}) => {
+      const windows=sessionWindows(this.db,String(row.id),Number(row.started_at_ms),Number(row.ended_at_ms??Date.now()));
+      const merged=new Map<number,{observed_at_ms:number;twitch_viewers:number|null;youtube_viewers:number|null}>();
+      for(const sample of samples.filter(s=>s.session_id===row.id)){const at=Math.floor(sample.observed_at_ms/60000)*60000,value=merged.get(at)??{observed_at_ms:at,twitch_viewers:null,youtube_viewers:null};if(sample.twitch_viewers!==null)value.twitch_viewers=sample.twitch_viewers;if(sample.youtube_viewers!==null)value.youtube_viewers=sample.youtube_viewers;merged.set(at,value);}
+      const viewers=streamMetrics(windows,[...merged.values()],new Map(),platforms.filter(p=>p.session_id===row.id)).viewers.all;
+      const donations:Record<string,string>={};let donationCount=0;
+      for(const tip of tips.filter(t=>t.session_id===row.id)){donationCount++;if(tip.currency&&tip.amount&&/^\d+$/.test(tip.amount))donations[tip.currency]=(BigInt(donations[tip.currency]??'0')+BigInt(tip.amount)).toString();}
+      return ({
+      ...row, durationMs:windows.reduce((sum,w)=>sum+w.to-w.from,0),viewerMean:viewers.mean,viewerPeak:viewers.peak,donationTotals:donations,donationCount,
       breaks:sessionBreaks(sessionWindows(this.db,String(row.id),Number(row.started_at_ms),Number(row.ended_at_ms??Date.now()))),
       platforms: JSON.parse(platforms_json as string) as string[],
       confirmedUrls: (JSON.parse(urls_json as string) as {platform:"twitch"|"youtube";url:string}[])
         .filter(link=>this.validPlatformStreamUrl(link.platform,link.url)),
-    }));
+    });});
   }
 
   platformStreams(sessionId: string): Record<string, unknown>[] {
@@ -1475,10 +1505,12 @@ export class StreamStore {
           | { id: string }
           | undefined;
         if (!identity) {
-          const personId = randomUUID();
-          identity = { id: randomUUID() };
           const name=poll.userNames?.[userId] || userId;
-          insertPerson.run(personId, name);
+          const linked=poll.userNames?.[userId]?this.resolveAutoLinkPerson("twitch",accountId,userId,name):null;
+          const personId = linked?.personId??randomUUID();
+          identity = { id: randomUUID() };
+          if(!linked)insertPerson.run(personId, name);
+          else this.db.prepare("UPDATE persons SET revision=revision+1 WHERE id=?").run(personId);
           insertIdentity.run(
             identity.id,
             accountId,
@@ -1521,6 +1553,7 @@ export class StreamStore {
           )
           .run(user.user_name, identity.person_id, identity.display_name);
         this.rememberAlias(identity.id, user.user_name, atMs);
+        this.reconcileNicknameLinks(matchKey(user.user_name));
       }
     }).immediate();
   }

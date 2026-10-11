@@ -6,14 +6,14 @@ const at=Date.UTC(2026,9,9,12), minute=60000;
 const message=(id:string,author:string,name:string,time=at)=>({id,snippet:{type:'textMessageEvent',publishedAt:new Date(time).toISOString(),displayMessage:'hello'},authorDetails:{channelId:author,displayName:name}});
 function twitch(store:StreamStore){return store.ingest({source:'twitch',accountId:'owner',externalId:'tw-message',type:'chat.message',actor:{externalId:'viewer',displayName:'SameName'},occurredAtMs:at,receivedAtMs:at,sourceTime:new Date(at).toISOString(),timeQuality:'provider',transport:'eventsub',payload:{text:'twitch'}}).personId!;}
 
-test('YouTube authors become independent Person records and ambiguous nicknames never auto-link',()=>{
+test('YouTube authors auto-link unique nicknames and repeated messages keep one person',()=>{
  const s=new StreamStore(':memory:');try{
   const tw=twitch(s);s.youtubeMessages('channel','chat',[message('yt-message','author','SameName')]);
-  const people=s.persons(),yt=people.find(p=>p.id!==tw)!;assert.equal(people.length,2);
-  assert.equal(yt.sources,'youtube');assert.equal(yt.display_name,'SameName');
-  const detail=s.person(String(yt.id));assert.equal((detail.identities as any[])[0].source,'youtube');
-  assert.equal(s.events(undefined,String(yt.id))[0]!.source,'youtube');
-  s.youtubeMessages('channel','chat',[message('yt-message','author','SameName')]);assert.equal(s.persons().length,2);
+  const people=s.persons(),yt=people.find(p=>p.id===tw)!;assert.equal(people.length,1);
+  assert.equal(yt.sources,'twitch,youtube');assert.equal(yt.display_name,'SameName');
+  const detail=s.person(String(yt.id));assert.ok((detail.identities as any[]).some(i=>i.source==='youtube'));
+  assert.ok(s.events(undefined,String(yt.id)).some(e=>e.source==='youtube'));
+  s.youtubeMessages('channel','chat',[message('yt-message','author','SameName')]);assert.equal(s.persons().length,1);
  }finally{s.close();}
 });
 

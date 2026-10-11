@@ -87,6 +87,18 @@ export class DonationLedger {
    this.assign(id,input.occurredAtMs);const result=this.donation(id);this.audit(id,revision+1,'update',before,result,at);return result;
   }).immediate();
  }
+ reassign(id:string,personId:string|null,revision:number,at:number) {
+  assertTimestamp(at);this.validRevision(revision);
+  return this.db.transaction(()=>{
+   const row=this.raw(id);if(row.revision!==revision)throw new Error('DONATION_CONFLICT');
+   if(personId!==null&&(typeof personId!=='string'||!this.db.prepare('SELECT 1 FROM persons WHERE id=?').get(personId)))throw new Error('PERSON_NOT_FOUND');
+   this.ensureAnonymous(row.account_id);
+   const target=personId??(this.db.prepare('SELECT i.person_id FROM anonymous_donors a JOIN identities i ON i.id=a.identity_id WHERE a.account_id=?').get(row.account_id) as {person_id:string}).person_id;
+   const before=this.donation(id),identity=this.identity(target,id,'correction',at);
+   this.db.prepare(`INSERT INTO donation_corrections VALUES (?,?,?,?,0,?,?) ON CONFLICT(event_id) DO UPDATE SET identity_id=excluded.identity_id,deleted=0,revision=excluded.revision,updated_at_ms=MAX(updated_at_ms,excluded.updated_at_ms)`).run(id,identity,row.occurred_at_ms,row.payload_json,revision+1,at);
+   this.assign(id,row.occurred_at_ms);const result=this.donation(id);this.audit(id,revision+1,'assignment',before,result,at);return result;
+  }).immediate();
+ }
  private validRevision(revision:number):void {if(!Number.isSafeInteger(revision)||revision<0)throw new Error('INVALID_DONATION_REVISION');}
  remove(id:string,revision:number,at:number):void {this.setDeleted(id,revision,at,true);}
  restore(id:string,revision:number,at:number) {this.setDeleted(id,revision,at,false);return this.donation(id);}

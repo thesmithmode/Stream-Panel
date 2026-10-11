@@ -42,6 +42,7 @@ type Entity = {
     core: boolean;
     tags: string[];
     manualCore: boolean|null;
+    follower:boolean|null;
 };
 export function unionSpans(spans: Span[]): Span[] {
     const sorted = spans.filter(x => x.to > x.from).sort((a, b) => a.session.localeCompare(b.session) || a.kind.localeCompare(b.kind) || a.from - b.from || a.to - b.to), out: Span[] = [];
@@ -82,10 +83,11 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     }[];
     const entities = new Map<string, Entity>();
     const entity = (id: string, name: string, platform: 'twitch' | 'youtube') => { let e = entities.get(id); if (!e) {
-        e = { id, name, source: platform, sources:[platform], messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, sessionIds: new Set(), attendanceSessionIds: new Set(), regular: false, intervals: [], donations: {}, core: false, tags:[], manualCore:null };
+        e = { id, name, source: platform, sources:[platform], messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, sessionIds: new Set(), attendanceSessionIds: new Set(), regular: false, intervals: [], donations: {}, core: false, tags:[], manualCore:null, follower:null };
         entities.set(id, e);
     } else if(!e.sources.includes(platform)) e.sources.push(platform); return e; };
     const allowed = new Map(people.map(p => [p.id, p.display_name]));
+    const platformWindows=db.prepare('SELECT session_id,platform,started_at_ms,ended_at_ms FROM platform_streams WHERE session_id IN(SELECT value FROM json_each(?))').all(sessionIds) as {session_id:string;platform:string;started_at_ms:number;ended_at_ms:number|null}[];
     const samples = db.prepare('SELECT * FROM stream_samples WHERE session_id IN(SELECT value FROM json_each(?)) ORDER BY observed_at_ms').all(sessionIds) as any[];
     const segments: {
         session: string;
@@ -149,6 +151,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         regularObserved: number;
         regularEstimated: number;
         regularMessages: number;
+        participants:number; regularParticipants:number; followerParticipants:number; followerObserved:number; followerEstimated:number; followerMessages:number;
         viewers: number | null;
         twitchViewers: number | null;
         youtubeViewers: number | null;
@@ -156,7 +159,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         isBreak?: boolean;
     }>();
     const minute = (at: number) => { at = Math.floor(at / 60000) * 60000; let row = timeline.get(at); if (!row) {
-        row = { at, messages: 0, observed: 0, estimated: 0, regularObserved: 0, regularEstimated: 0, regularMessages: 0, viewers: null, twitchViewers: null, youtubeViewers: null, presenceKnown: false };
+        row = { at, messages: 0, observed: 0, estimated: 0, regularObserved: 0, regularEstimated: 0, regularMessages: 0, viewers: null, twitchViewers: null, youtubeViewers: null, presenceKnown: false,participants:0,regularParticipants:0,followerParticipants:0,followerObserved:0,followerEstimated:0,followerMessages:0 };
         timeline.set(at, row);
     } return row; };
     if (source !== 'youtube') {
@@ -237,6 +240,13 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         if (++expanded > 2000000) throw new Error('ANALYTICS_RANGE_TOO_LARGE');
         minute(at);
     }
+    const followRows=db.prepare("SELECT p.source,p.account_id,p.payload_json FROM provider_snapshots p WHERE key='followers' AND id=(SELECT q.id FROM provider_snapshots q WHERE q.source=p.source AND q.account_id=p.account_id AND q.key='followers' ORDER BY observed_at_ms DESC,id DESC LIMIT 1)").all() as {source:string;account_id:string;payload_json:string}[];
+    const followerPeople=new Set<string>();
+    for(const snapshot of followRows){
+      const data=JSON.parse(snapshot.payload_json);const ids=JSON.stringify((data.followers??[]).map((f:any)=>f.id));
+      const members=snapshot.source==='youtube'?db.prepare('SELECT person_id FROM youtube_identities WHERE account_id=? AND external_id IN(SELECT value FROM json_each(?))').all(snapshot.account_id,ids):db.prepare("SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id IN(SELECT value FROM json_each(?))").all(snapshot.account_id,ids);
+      for(const member of members as {person_id:string}[])followerPeople.add(member.person_id);
+    }
     const entityIds=JSON.stringify([...entities.keys()]);
     const preferences=new Map((db.prepare("SELECT person_id,manual_core FROM person_preferences WHERE person_id IN(SELECT value FROM json_each(?))").all(entityIds) as {person_id:string;manual_core:number|null}[]).map(row=>[row.person_id,row.manual_core]));
     const tags=db.prepare(`WITH RECURSIVE owners(person_id,origin_id) AS (SELECT value,value FROM json_each(?) UNION SELECT o.person_id,m.source_person_id FROM owners o JOIN person_merges m ON m.target_person_id=o.origin_id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT o.person_id,t.label FROM owners o JOIN person_tags t ON t.person_id=o.origin_id ORDER BY t.label`).all(entityIds) as {person_id:string;label:string}[];
@@ -255,6 +265,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         const override=preferences.get(e.id);
         e.manualCore=override==null?null:override===1;
         e.core=e.manualCore??automatic;
+        e.follower=followerPeople.has(e.id)?true:null;
         e.regular=e.core; // Compatibility fields refer to the same audience core.
         const signalMinutes=new Set<string>();
         for (const span of e.intervals) {
@@ -270,12 +281,13 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
                 if(signalMinutes.has(signalKey))continue;
                 signalMinutes.add(signalKey);
                 const point = minute(at);
-                if (span.kind === 'observed'){point.observed++;if(e.regular)point.regularObserved++;}
-                else {point.estimated++;if(e.regular)point.regularEstimated++;}
+                if(!signalMinutes.has(`all:${at}`)){signalMinutes.add(`all:${at}`);point.participants++;if(e.core)point.regularParticipants++;else if(e.follower)point.followerParticipants++;}
+                if (span.kind === 'observed'){point.observed++;if(e.regular)point.regularObserved++;else if(e.follower)point.followerObserved++;}
+                else {point.estimated++;if(e.regular)point.regularEstimated++;else if(e.follower)point.followerEstimated++;}
             }
         }
     }
-    for(const [at,authors] of messageAuthors)for(const [id,n] of authors)if(entities.get(id)?.regular)minute(at).regularMessages+=n;
+    for(const [at,authors] of messageAuthors)for(const [id,n] of authors)if(entities.get(id)?.regular)minute(at).regularMessages+=n;else if(entities.get(id)?.follower)minute(at).followerMessages+=n;
     const categories = new Map<string, {
         id: string;
         name: string;
@@ -319,7 +331,9 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             const point = minute(sample.observed_at_ms);
             if(sample.twitch_viewers !== null)point.twitchViewers=sample.twitch_viewers;
             if(sample.youtube_viewers !== null)point.youtubeViewers=sample.youtube_viewers;
-            point.viewers = source === 'twitch' ? point.twitchViewers : source === 'youtube' ? point.youtubeViewers : point.twitchViewers === null || point.youtubeViewers === null ? null : point.twitchViewers + point.youtubeViewers;
+            const active=platformWindows.filter(p=>p.session_id===sample.session_id&&p.started_at_ms<point.at+60000&&(p.ended_at_ms===null||p.ended_at_ms>point.at));
+            const keys=active.length?active.map(p=>p.platform==='twitch'?'twitchViewers':'youtubeViewers'):['twitchViewers'];
+            point.viewers = source === 'twitch' ? point.twitchViewers : source === 'youtube' ? point.youtubeViewers : keys.some(key=>point[key as 'twitchViewers'|'youtubeViewers']===null)?null:keys.reduce((sum,key)=>sum+(point[key as 'twitchViewers'|'youtubeViewers']??0),0);
         }
     const coverage = db.prepare("SELECT session_id,started_at_ms AS first,completed_at_ms AS last FROM presence_polls WHERE status='complete' AND completed_at_ms>=? AND started_at_ms<? AND session_id IN(SELECT value FROM json_each(?))").all(from, to, sessionIds) as any[];
     for (const poll of coverage)
@@ -377,9 +391,11 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         const durationMs=selected.filter(segment=>segment.session===s.id).reduce((n,segment)=>n+segment.to-segment.from,0);
         const donations=streamDonations.get(s.id)??{},messages=sessionMessages.get(s.id)??0;
         const metrics=streamMetrics(selected.filter(segment=>segment.session===s.id),samples.filter(sample=>sample.session_id===s.id),streamAuthors.get(s.id)??new Map());
+        const aggregate=streamMetrics(selected.filter(segment=>segment.session===s.id),[...timeline.values()].filter(p=>contains(s.id,p.at)).map(p=>({observed_at_ms:p.at,twitch_viewers:p.viewers,youtube_viewers:0})),new Map());
+        metrics.viewers.all=aggregate.viewers.all;
         return { ...metrics,durationMs,messagesPerHour:durationMs?messages*3600000/durationMs:null,donationCount:streamDonationCounts.get(s.id)??0,donationTotals:donations,donationsPerHourMinor:currencyRates(donations,durationMs),id: s.id, startedAt: s.started_at_ms, endedAt: s.ended_at_ms ?? to, title: samples.find(x => x.session_id === s.id)?.title ?? "", audience: visitors.length, core: visitors.filter(e => e.core).length, newInPeriod, returning: visitors.length - newInPeriod, messages: sessionMessages.get(s.id) ?? 0, categories: [...new Set(selected.filter(segment => segment.session === s.id).map(segment => segment.name))] };
     });
     const report=source!=='twitch'&&options.youtubeAccount ? db.prepare("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {payload_json:string;updated_at_ms:number}|undefined : undefined;
     const youtubeReport=report ? {data:JSON.parse(report.payload_json),updatedAt:report.updated_at_ms} : null;
-    return { breaks, youtubeReport, streamComparison, availableCategories: [...new Map(segments.map(s => [s.categoryId, { id: s.categoryId, name: s.name }])).values()], filters: { fromMs: from, toMs: to, source, category, minSessions, minMinutes, minMessages, regularThresholdPercent, coreRule: rule, chatWindowMinutes: window, timezone }, summary: { entities: audience.length, attendees: attendees.length, regulars, regularShare: audience.length?regulars/audience.length:null, core: audience.filter(e => e.core).length, streams: new Set(selected.map(x => x.session)).size, messages: audience.reduce((sum, e) => sum + e.messages, 0) }, audience, categories: [...categories.values()].map(c => ({ ...c, donationCount:categoryDonationCounts.get(c.id)??0,donationTotals:categoryDonations.get(c.id)??{},donationsPerHourMinor:currencyRates(categoryDonations.get(c.id)??{},Math.round(c.minutes*60000)),sessions: c.sessions.size, audience: c.audience.size, core: c.core.size, messagesPerHour: c.minutes ? c.messages * 60 / c.minutes : 0, observedPerMinute: c.minutes ? c.observedMinutes / c.minutes : 0, observedPerKnownMinute: c.observedKnownMinutes ? c.observedMinutes / c.observedKnownMinutes : null, coverageRatio: c.minutes ? c.observedKnownMinutes/c.minutes : null })), timeline: [...timeline.values()].sort((a, b) => a.at - b.at), hours: [...hourly.values()].map(cell=>({...cell,donationsPerHourMinor:currencyRates(cell.donationTotals,Math.round(cell.sampleMinutes*60000))})).sort((a, b) => ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(a.day) - ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(b.day) || a.hour - b.hour), sessions, excluded: [...excluded] };
+    return { breaks, youtubeReport, streamComparison, availableCategories: [...new Map(segments.map(s => [s.categoryId, { id: s.categoryId, name: s.name }])).values()], filters: { fromMs: from, toMs: to, source, category, minSessions, minMinutes, minMessages, regularThresholdPercent, coreRule: rule, chatWindowMinutes: window, timezone }, summary: { entities: audience.length, attendees: attendees.length, regulars, regularShare: audience.length?regulars/audience.length:null, core: audience.filter(e => e.core).length, streams: new Set(selected.map(x => x.session)).size, chatters:audience.filter(e=>e.messages>0).length, messages: audience.reduce((sum, e) => sum + e.messages, 0) }, audience, categories: [...categories.values()].map(c => ({ ...c, donationCount:categoryDonationCounts.get(c.id)??0,donationTotals:categoryDonations.get(c.id)??{},donationsPerHourMinor:currencyRates(categoryDonations.get(c.id)??{},Math.round(c.minutes*60000)),sessions: c.sessions.size, audience: c.audience.size, core: c.core.size, messagesPerHour: c.minutes ? c.messages * 60 / c.minutes : 0, observedPerMinute: c.minutes ? c.observedMinutes / c.minutes : 0, observedPerKnownMinute: c.observedKnownMinutes ? c.observedMinutes / c.observedKnownMinutes : null, coverageRatio: c.minutes ? c.observedKnownMinutes/c.minutes : null })), timeline: [...timeline.values()].sort((a, b) => a.at - b.at), hours: [...hourly.values()].map(cell=>({...cell,donationsPerHourMinor:currencyRates(cell.donationTotals,Math.round(cell.sampleMinutes*60000))})).sort((a, b) => ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(a.day) - ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(b.day) || a.hour - b.hour), sessions, excluded: [...excluded] };
 }

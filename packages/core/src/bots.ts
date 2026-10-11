@@ -19,6 +19,8 @@ export const WELL_KNOWN_TWITCH_BOTS: readonly string[] = [
   "anotherttvviewer",
   "kofistreambot",
   "frankie_showman",
+  "franky_showman",
+  "creatisbot",
 ];
 
 export function normalizeBotLogin(login: string): string {
