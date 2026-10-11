@@ -52,7 +52,7 @@ test('DA automatic collection retains older donations and keeps checking after t
  } finally {await connection.stop();await db.stop();await rm(dir,{recursive:true,force:true});}
 });
 
-test('DA realtime skips donations predating the active stream and deduplicates current donations',async()=>{
+test('DA realtime retains older and offline donations without assigning them to the current stream',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-da-realtime-'));const config=new Configuration(dir);await config.load();config.value.daAccessToken='fixture';config.value.daUtcOffsetMinutes=0;
  const db=new StoreClient(join(dir,'data.sqlite'),'ruslan');await db.ready;
  const socket=new EventEmitter() as any;socket.close=()=>socket.emit('close');socket.send=()=>{};socket.terminate=()=>{};
@@ -66,7 +66,11 @@ test('DA realtime skips donations predating the active stream and deduplicates c
   socket.emit('message',JSON.stringify(donation(11,now)));
   socket.emit('message',JSON.stringify(donation(11,now)));
   for(let n=0;n<100 && !(await db.call<any[]>('events')).some(e=>e.external_id==='11');n++)await delay(10);
-  assert.deepEqual((await db.call<any[]>('events')).map(e=>e.external_id),['11']);
+  assert.deepEqual((await db.call<any[]>('events')).map(e=>e.external_id).sort(),['10','11']);
+  const current=(await db.call<any>('activeLogicalStream')).id;assert.equal((await db.call<any>('summary',current)).donations,1);
+  await db.call('endSession',current,now+60000);socket.emit('message',JSON.stringify(donation(12,now+120000)));
+  for(let n=0;n<100&&!(await db.call<any[]>('events')).some(e=>e.external_id==='12');n++)await delay(10);
+  assert.equal((await db.call<any[]>('events')).some(e=>e.external_id==='12'),true);assert.equal((await db.call<any>('summary',current)).donations,1);
  }finally{await connection.stop();await db.stop();await rm(dir,{recursive:true,force:true});}
 });
 

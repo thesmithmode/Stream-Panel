@@ -3,6 +3,7 @@ import type { Configuration, Tokens } from "./config.js";
 import type { StoreClient } from "./db.js";
 import { object, string } from "./twitch.js";
 const scopes = ["https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/yt-analytics.readonly"];
+const videoParts='snippet,statistics,contentDetails,liveStreamingDetails,status,recordingDetails,topicDetails,localizations,paidProductPlacementDetails';
 export class YouTubeConnection {
   status = { state: "disconnected", account: "", detail: "" };
   private pending: { state: string; verifier: string; expires: number } | undefined;
@@ -62,15 +63,22 @@ export class YouTubeConnection {
     void this.start();
   }
   private async api(resource: string, params: Record<string,string>, tokens: Tokens) {
+    const generation=this.generation;
     const day = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(this.now());
     if (!await this.db.call("youtubeQuota", day, this.profile, 1)) throw new Error("YOUTUBE_DAILY_BUDGET");
-    return this.json(`https://www.googleapis.com/youtube/v3/${resource}?${new URLSearchParams(params)}`, { headers: { Authorization: `Bearer ${tokens.access}` } });
+    const data=await this.json(`https://www.googleapis.com/youtube/v3/${resource}?${new URLSearchParams(params)}`, { headers: { Authorization: `Bearer ${tokens.access}` } });
+    if(generation!==this.generation)return {};
+    if(tokens.userId){
+      await this.db.call('providerSnapshot','youtube',tokens.userId,`api:${resource}`,{request:{resource,params},response:data},this.now());
+      if(generation!==this.generation)return {};
+    }
+    return data;
   }
   private async activeBroadcasts(tokens: Tokens, valid: () => boolean) {
     let page = "";
     const seenPages = new Set<string>(), seenIds = new Set<string>(), broadcasts: Record<string, any>[] = [];
     for (let n = 0; n < 5; n++) {
-      const response = await this.api("liveBroadcasts", { part: "snippet,status,contentDetails", broadcastStatus: "active", maxResults: "50", ...(page ? { pageToken: page } : {}) }, tokens);
+      const response = await this.api("liveBroadcasts", { part: "snippet,status,contentDetails,monetizationDetails", broadcastStatus: "active", maxResults: "50", ...(page ? { pageToken: page } : {}) }, tokens);
       if (!valid()) return null;
       if (!Array.isArray(response.items) || response.items.length > 50) throw new Error("YOUTUBE_INVALID_BROADCASTS");
       for (const value of response.items) {
@@ -120,10 +128,16 @@ export class YouTubeConnection {
     if (!discovered || !valid()) return 300000;
     const broadcasts = discovered;
     const videoIds = broadcasts.map((broadcast) => string(broadcast.id));
+    const savedCursor=previous.snapshots['cursor:archivedVideos']?.data;
+    const cursor=savedCursor&&typeof savedCursor==='object'&&!Array.isArray(savedCursor)?savedCursor as Record<string,unknown>:{};
+    const oldBroadcasts=previous.snapshots.broadcasts?.data;
+    const removed=(Array.isArray(oldBroadcasts)?oldBroadcasts:[]).map((b:unknown)=>b&&typeof b==='object'&&!Array.isArray(b)?string((b as Record<string,unknown>).id):'').filter((id:string)=>id&&!videoIds.includes(id));
+    const archivedIds=[...new Set([...removed,...(Array.isArray(cursor.ids)?cursor.ids:[])])].filter((id):id is string=>typeof id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(id)&&!videoIds.includes(id)).slice(0,200);
+    if(removed.length){await this.db.call('youtubeSnapshot',tokens.userId,'cursor:archivedVideos',{ids:archivedIds,checkedAt:0},this.now());if(!valid())return 300000;}
     const videoDetails = new Map<string, Record<string, any>>();
     for (let offset = 0; offset < videoIds.length; offset += 50) {
       const ids = videoIds.slice(offset, offset + 50);
-      const response = await this.api("videos", { part: "snippet,statistics,contentDetails,liveStreamingDetails", id: ids.join(",") }, tokens);
+      const response = await this.api("videos", { part: videoParts, id: ids.join(",") }, tokens);
       if (!valid()) return 300000;
       if (!Array.isArray(response.items)) continue;
       const batch = new Map<string, Record<string, any>>();
@@ -192,8 +206,20 @@ export class YouTubeConnection {
       if (!valid()) return 300000;
     }
     await this.collectSubscribers(tokens,valid,this.now());if(!valid())return 300000;
+    if(archivedIds.length&&(removed.length||!Number.isFinite(Number(cursor.checkedAt))||this.now()-Number(cursor.checkedAt??0)>=21600000))await this.collectArchivedVideos(tokens,archivedIds,valid,this.now());if(!valid())return 300000;
     this.status = { state: "connected", account: tokens.userId, detail: broadcasts.length ? "Чат активных эфиров собирается" : "Канал подключён; активных эфиров нет" };
     return Math.min(interval, 3600000);
+  }
+  private async collectArchivedVideos(tokens:Tokens,ids:string[],valid:()=>boolean,at:number){
+    try{
+      const videos:unknown[]=[];
+      for(let offset=0;offset<ids.length;offset+=50){
+        const response=await this.api('videos',{part:videoParts,id:ids.slice(offset,offset+50).join(',')},tokens);if(!valid())return;
+        if(!Array.isArray(response.items))throw new Error('INVALID_ARCHIVED_VIDEOS');videos.push(...response.items);
+      }
+      await this.db.call('youtubeSnapshot',tokens.userId,'archivedVideoDetails',videos,at);if(!valid())return;
+      await this.db.call('youtubeSnapshot',tokens.userId,'cursor:archivedVideos',{ids,checkedAt:at},at);
+    }catch{if(valid())await this.db.call('gap','youtube','archived_video_metadata_unavailable',at,at);}
   }
   private async collectSubscribers(tokens:Tokens,valid:()=>boolean,at:number){
     const previous=await this.db.call<any>('youtubeData',tokens.userId);if(!valid()||at-(previous.snapshots["cursor:followers"]?.updatedAt??-Infinity)<15*60000)return;

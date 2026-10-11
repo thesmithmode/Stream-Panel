@@ -76,6 +76,7 @@ test(
                 : { cursor: "second" },
             },
           };
+        if (["channels", "users", "videos", "clips", "settings", "emotes", "badges"].some(name => u.pathname.endsWith("/" + name))) return {data:{data:[]}};
         assert.fail(req.url);
       },
       (s) => s.send(JSON.stringify(welcome())),

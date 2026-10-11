@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import {twitchCatalog} from "./twitch-catalog.js";
 import {extraTwitchEvents,extraTwitchScopes} from './twitch-events.js';
 import type { Configuration, Tokens } from "./config.js";
 import type { StoreClient } from "./db.js";
@@ -164,6 +165,7 @@ export class TwitchConnection {
   private reconnectAttempt = 0;
   private sessionId: string | null = null;
   private lastFollowersPollAt:number|null=null;
+  private lastCatalogPollAt:number|null=null;
   private lastSuccessfulPollAt: number | null = null;
   private authGeneration = 0;
   private gapStart: number | null = null;
@@ -342,6 +344,7 @@ export class TwitchConnection {
     init: RequestInit = {},
     retried = false,
   ): Promise<unknown> {
+    const generation=this.authGeneration;
     if (Date.now() < this.rateLimitedUntil)
       throw new Error(
         `TWITCH_RATE_LIMIT_UNTIL_${Math.ceil(this.rateLimitedUntil / 1000)}`,
@@ -370,7 +373,14 @@ export class TwitchConnection {
       );
     }
     if (!response.ok) throw new Error(`TWITCH_HTTP_${response.status}`);
-    return response.json();
+    const data=await response.json();
+    if(generation!==this.authGeneration)throw new Error('TWITCH_AUTH_CANCELLED');
+    if((init.method??'GET')==='GET'&&this.token.userId){
+      const endpoint=new URL(path,'https://api.twitch.tv/helix/');
+      await this.db.call('providerSnapshot','twitch',this.token.userId,`api:${endpoint.pathname}`,{request:{path:endpoint.pathname,params:Object.fromEntries(endpoint.searchParams)},response:data},this.now());
+      if(generation!==this.authGeneration)throw new Error('TWITCH_AUTH_CANCELLED');
+    }
+    return data;
   }
   private async validate(): Promise<void> {
     const generation = this.authGeneration;
@@ -522,7 +532,7 @@ export class TwitchConnection {
               await this.reconcile();
           }
         }
-      })().catch((error) => this.report(error));
+      })().catch((error) => {if(!this.stopped&&generation===this.authGeneration)this.report(error);});
     });
     socket.on("close", () => {
       this.sockets.delete(socket);
@@ -619,6 +629,29 @@ export class TwitchConnection {
           error instanceof Error ? error.message : "error";
         if (type === "channel.chat.message") throw error;
       }
+    }
+  }
+  private async collectCatalog(account:string,current:()=>boolean,at:number){
+    if(this.lastCatalogPollAt!==null&&at-this.lastCatalogPollAt<15*60000)return;
+    this.lastCatalogPollAt=at;
+    for(const item of twitchCatalog){
+      if(!current())return;
+      const key=`api:${item.path}`;
+      if(item.scope&&!this.token.scopes.includes(item.scope)){this.status.capabilities[key]='Нет разрешения';continue;}
+      try{
+        const params=new URLSearchParams(item.paginated?{broadcaster_id:account,first:'100'}:{broadcaster_id:account});
+        for(const [name,value]of Object.entries(item.params??{}))params.set(name,value==='$account'?account:value);
+        if(params.has('id')||params.has('user_id'))params.delete('broadcaster_id');
+        const seen=new Set<string>();let complete=false;
+        for(let page=0;page<25;page++){
+          const data=object(await this.api(`${item.path}?${params}`));if(!current())return;
+          if(!Array.isArray(data.data))throw new Error('INVALID_CATALOG_RESPONSE');
+          const cursor=string(object(data.pagination).cursor);
+          if(!item.paginated||!cursor){complete=true;break;}
+          if(seen.has(cursor))throw new Error('CATALOG_PAGINATION_LOOP');seen.add(cursor);params.set('after',cursor);
+        }
+        this.status.capabilities[key]=complete?'Снимки сохранены':'Снимки сохранены частично: лимит страниц';
+      }catch{if(!current())return;this.status.capabilities[key]='Не удалось получить снимок';}
     }
   }
   private async collectFollowers(account:string,current:()=>boolean,at:number){
@@ -754,6 +787,7 @@ export class TwitchConnection {
         }
       }
       if(current())await this.collectFollowers(accountId,current,this.now());
+      if(current())await this.collectCatalog(accountId,current,this.now());
       if (current() && this.reconcileError !== null) {
         if (this.eventSubReady && this.status.detail === this.reconcileError) {
           this.status.state = "connected";
@@ -803,7 +837,7 @@ export class TwitchConnection {
       if (timer) clearTimeout(timer);
     this.retry = this.tick = this.hourly = null;
     this.reconcileRequested = false;
-    this.lastFollowersPollAt=null;
+    this.lastFollowersPollAt=null;this.lastCatalogPollAt=null;
     this.lastSuccessfulPollAt = null;
     for (const socket of this.sockets) socket.close();
     this.sockets.clear();
