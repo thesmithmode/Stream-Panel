@@ -59,3 +59,12 @@ test('DA realtime keeps untimed donations, archives malformed rows and stops at 
   }finally{await connection.stop();}
  }
 });
+
+test('DA cannot retry an expired request after refresh completes in a retired generation',async()=>{
+ let requests=0;const config={value:{daAccessToken:'fixture'},save:async()=>{}} as unknown as Configuration;
+ const db={call:async()=>{assert.fail('no write from cancelled request');}} as unknown as StoreClient;
+ const c=new DonationAlertsConnection(config,db,async()=>{requests++;return Response.json({},{status:401});});const runtime=c as any;
+ runtime.refresh=async()=>{await c.stop();};
+ try{await assert.rejects(runtime.api('alerts/donations'),/DA_AUTH_CANCELLED/);assert.equal(requests,1);assert.equal(config.value.daAccessToken,'fixture');}
+ finally{await c.stop();}
+});

@@ -237,6 +237,7 @@ export class DonationAlertsConnection {
     if(generation!==this.generation)throw new Error('DA_AUTH_CANCELLED');
     if (response.status === 401 && !retried) {
       await this.refresh();
+      if(generation!==this.generation)throw new Error("DA_AUTH_CANCELLED");
       return this.api(path, init, true);
     }
     if (response.status === 429) {

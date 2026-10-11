@@ -350,6 +350,7 @@ export class TwitchConnection {
         `TWITCH_RATE_LIMIT_UNTIL_${Math.ceil(this.rateLimitedUntil / 1000)}`,
       );
     if (this.token.expiresAt < Date.now() + 60_000) await this.refresh();
+    if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${this.token.access}`);
     headers.set("Client-Id", this.config.value.twitchClientId);
@@ -358,8 +359,10 @@ export class TwitchConnection {
       headers,
       signal: init.signal ?? AbortSignal.timeout(15000),
     });
+    if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
     if (response.status === 401 && !retried) {
       await this.refresh();
+      if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
       return this.api(path, init, true);
     }
     if (response.status === 429) {
@@ -385,12 +388,15 @@ export class TwitchConnection {
   private async validate(): Promise<void> {
     const generation = this.authGeneration;
     if (this.token.expiresAt < Date.now() + 60_000) await this.refresh();
+    if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
     let response = await this.request("https://id.twitch.tv/oauth2/validate", {
       headers: { Authorization: `OAuth ${this.token.access}` },
       signal: AbortSignal.timeout(15000),
     });
+    if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
     if (response.status === 401) {
       await this.refresh();
+      if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
       response = await this.request("https://id.twitch.tv/oauth2/validate", {
         headers: { Authorization: `OAuth ${this.token.access}` },
         signal: AbortSignal.timeout(15000),
@@ -445,10 +451,10 @@ export class TwitchConnection {
       if (this.stopped || generation !== this.authGeneration) return;
       this.connect();
       this.hourly = setInterval(() => {
-        void this.validate().catch((error) => this.report(error));
+        void this.validate().catch((error) => this.report(error,generation));
       }, 3_600_000);
       // Reconcile/chatters failures must not tear down a healthy EventSub.
-      void this.reconcile().catch((error) => this.report(error));
+      void this.reconcile().catch((error) => this.report(error,generation));
     } catch (error) {
       if (this.stopped || generation !== this.authGeneration) return;
       this.report(error);
@@ -805,11 +811,12 @@ export class TwitchConnection {
       if (current()) {
         const immediate = this.reconcileRequested;
         this.reconcileRequested = false;
-        this.tick = setTimeout(() => { this.tick = null; void this.reconcile().catch(error => this.report(error)); }, immediate ? 0 : this.platformLive ? 60000 : 300000);
+        this.tick = setTimeout(() => { this.tick = null; void this.reconcile().catch(error => this.report(error,generation)); }, immediate ? 0 : this.platformLive ? 60000 : 300000);
       }
     }
   }
-  private report(error: unknown): void {
+  private report(error: unknown,generation=this.authGeneration): void {
+    if(this.stopped||generation!==this.authGeneration)return;
     const message = error instanceof Error ? error.message : "TWITCH_ERROR";
     if (message === "TWITCH_REAUTH_REQUIRED") {
       this.status.state = "error";
