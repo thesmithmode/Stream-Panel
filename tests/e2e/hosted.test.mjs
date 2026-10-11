@@ -47,6 +47,20 @@ test("two browser accounts see only their own data; logout in demo revokes the r
       await page.getByRole("heading", { name: "Вход в Stream Panel" }).waitFor();
       await page.getByLabel("Логин", { exact: true }).fill(profile);
       await page.getByLabel("Пароль", { exact: true }).fill("bad");
+      // Returning from the password manager must keep the same form and focus.
+      const loginInput = await page.getByLabel("Пароль", { exact: true }).elementHandle();
+      let authPolls = 0;
+      const trackAuth = request => { if (request.url().includes('/api/v1/status')) authPolls++; };
+      page.on('request', trackAuth);
+      await page.evaluate(() => {
+        window.dispatchEvent(new Event('focus'));
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await page.waitForTimeout(200);
+      assert.equal(authPolls, 0, 'unauthenticated focus must not restart initialization');
+      assert.equal(await loginInput.evaluate(input => input.isConnected && input === document.activeElement), true);
+      assert.equal(await page.getByLabel("Пароль", { exact: true }).inputValue(), "bad");
+      page.off('request', trackAuth);
       await page.getByRole("button", { name: "Войти", exact: true }).click();
       await page.getByText("Неверный логин или пароль", { exact: true }).waitFor();
       await page.getByLabel("Пароль", { exact: true }).fill(`${profile}-browser-password`);

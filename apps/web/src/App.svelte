@@ -150,10 +150,10 @@
   }
   onMount(() => {
     let alive=true,initializing=false;
-    const update=()=>{if(!alive||document.hidden||!navigator.onLine)return;if(!authorized){void initialize();return;}const current=epoch;void refresh().catch(e=>{if(current!==epoch||!alive)return;if(['LOGIN_REQUIRED','LOCAL_LOGIN_REQUIRED'].includes(e.message)){epoch++;authorized=false;people=[];events=[];sessions=[];clearScope();}reportFailure(e);});};
+    const update=()=>{if(!alive||busy||initializing||document.hidden||!navigator.onLine)return;if(!authorized)return;const current=epoch;void refresh().catch(e=>{if(current!==epoch||!alive)return;if(['LOGIN_REQUIRED','LOCAL_LOGIN_REQUIRED'].includes(e.message)){epoch++;authorized=false;people=[];events=[];sessions=[];clearScope();}reportFailure(e);});};
     const timer=setInterval(update,15000);
     async function initialize() {
-      if(initializing)return;initializing=true;
+      if(initializing||busy)return;initializing=true;
       restoreRoute();setDataMode("real");
       loading = true;
       error = "";
@@ -191,9 +191,9 @@
 </script>
 
 <div class="app-shell">
-  <aside class="sidebar">
+  <aside class="sidebar" aria-label="Навигация">
     <a class="brand" href="/">Stream <span>Panel</span></a>
-    <nav>
+    <nav aria-label="Разделы">
       {#each nav as [key, label]}<button
           class:active={tab === key}
           onclick={() => navigate(key)}><Icon name={key} />{label}</button
@@ -212,7 +212,7 @@
       <Icon name="arrow" size={17} />
     </div>
   </aside>
-  <main class:people-page={tab==='people'}>
+  <main class:stream-page={tab==='stream'} class:people-page={tab==='people'}>
     <div class="page-heading">
       <div>
         <h1>{titles[tab]}</h1>
@@ -283,7 +283,7 @@
           onPerson={openPerson}
         />
       {:else if tab === "analytics"}
-        <Analytics profile={user?.profile ?? "local"} mode={dataMode} onPerson={openPerson} />
+        <Analytics profile={profile} mode={dataMode} onPerson={openPerson} />
       {:else if tab === "connections"}<Connections
           {status}
           onChange={refresh}
