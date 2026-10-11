@@ -4,18 +4,20 @@ import {mkdtemp,mkdir,writeFile,readdir,rm,symlink,truncate} from 'node:fs/promi
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {BackupService} from '../src/backup.js';
-test('local backups expire after two days even if cloud is unavailable; unrelated files and links survive',async()=>{
+test('acknowledged local copies follow the thirty-day policy; pending copies, unrelated files and links survive',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-retention-')),folder=join(dir,'backups');
  const now=Date.parse('2026-10-10T12:00:00Z');
  const name=(at:number)=>`stream-panel-${new Date(at).toISOString().replace(/[:.]/g,'-')}-1234abcd.spbk`;
  try {
-  await mkdir(folder);const old=name(now-2*86400000-1),boundary=name(now-2*86400000),recent=name(now-86400000);
-  for(const file of [old,boundary,recent,'unrelated.spbk'])await writeFile(join(folder,file),'keep');
+  await mkdir(folder);const old=name(now-31*86400000),boundary=name(now-29*86400000),recent=name(now-86400000);
+  const pending=name(now-40*86400000);
+  for(const file of [old,boundary,recent,pending,'unrelated.spbk'])await writeFile(join(folder,file),'keep');
   await symlink(join(folder,'unrelated.spbk'),join(folder,name(now-3*86400000)));
+  await writeFile(join(dir,'backup-state.json'),JSON.stringify({version:1,installationId:'a'.repeat(32),uploaded:[old,boundary,recent],pending:[pending],attempts:0,retryAt:0}));
   const backup=new BackupService(dir,{keyFile:join(dir,'missing-key'),url:'https://fixture.supabase.co'});
   await backup.purgeLocal(now);
   const files=await readdir(folder);assert.ok(!files.includes(old));
-  assert.ok(files.includes(boundary));assert.ok(files.includes(recent));assert.ok(files.includes('unrelated.spbk'));
+  assert.ok(files.includes(pending));assert.ok(files.includes(boundary));assert.ok(files.includes(recent));assert.ok(files.includes('unrelated.spbk'));
   assert.ok(files.includes(name(now-3*86400000)));
  }finally{await rm(dir,{recursive:true,force:true});}
 });

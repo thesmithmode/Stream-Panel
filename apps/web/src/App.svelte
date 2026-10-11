@@ -248,6 +248,7 @@
         </form>
       {#if error}<p role="alert" class="small notice error">{error}</p>{/if}
       </section>{:else}
+      {#if dataMode==='real'&&status?.backup&&(status.backup.cloud?.state!=='success'||status.backup.pendingUploads>0)}<p role="status" class="notice backup-warning">Облачная резервная копия {status?.backup?.cloud?.state==='disabled'?'не настроена':status?.backup?.cloud?.state==='error'?'не загружается':'ожидает подтверждения'}. Проверьте раздел «Интеграции».</p>{/if}
       {#if connectionLost}<p role="status" class="notice">Связь прервана. Показываем последние загруженные данные.</p>{/if}
       {#if outdated}<div role="status" class="notice">Доступна новая версия панели для обоих профилей. <button class="outline small" onclick={()=>location.reload()}>Обновить панель</button></div>{/if}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}

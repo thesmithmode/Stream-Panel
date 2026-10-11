@@ -3,7 +3,8 @@ import {mkdtemp,writeFile,readFile,rm,stat,open} from 'node:fs/promises';import 
 import {CloudBackup,CLOUD_PART_SIZE} from '../src/cloud-backup.js';
 const filename='stream-panel-2099-01-08T00-00-00-000Z-12345678.spbk';
 const sha=(b:Buffer)=>createHash('sha256').update(b).digest('hex');
-test('cloud backup bounds remote bodies, validates immutable object names and rotates only owned verified archives',async()=>{
+test('cloud backup bounds remote bodies, validates immutable object names and rotates only owned verified archives',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:Date.parse('2099-01-08T05:00:00Z')});
  const dir=await mkdtemp(join(tmpdir(),'sp-cloud-guards-')),service=join(dir,'key'),source=join(dir,'local');await writeFile(service,'fixture');await writeFile(source,'encrypted fixture');
  const options={url:'https://fixture.supabase.co',serviceKeyFile:service};
  try{
@@ -13,7 +14,7 @@ test('cloud backup bounds remote bodies, validates immutable object names and ro
   await writeFile(service,'');await assert.rejects(c.uploadFile(filename,source),/MISSING_BACKUP_SERVICE_KEY/);await writeFile(service,'fixture');
   for(const mode of ['private','empty','http','length','stream','invalid-list','missing-list','bad-parts','rotate','valid']){
    let uploaded:Buffer|undefined;const deletes:string[]=[];
-   const old='stream-panel-2099-01-01T00-00-00-000Z-12345678.spbk';
+   const old='stream-panel-2098-12-01T00-00-00-000Z-12345678.spbk';
    const request:typeof fetch=async(input,init)=>{
     const p=new URL(String(input)).pathname;
     if(p.includes('/bucket/')){
@@ -34,7 +35,7 @@ test('cloud backup bounds remote bodies, validates immutable object names and ro
     else uploaded=Buffer.from(init?.body as Uint8Array);return Response.json({});
    };
    const cloud=new CloudBackup(options,request);
-   if(['valid','rotate'].includes(mode)){await cloud.uploadFile(filename,source);assert.ok(uploaded);const target=join(dir,mode);await cloud.downloadFile(filename,target);assert.equal(await readFile(target,'utf8'),'encrypted fixture');if(mode==='rotate')assert.deepEqual(deletes,[`stream-panel/${old}.parts/0000.part`,`stream-panel/${old}.manifest.json`,'stream-panel/stream-panel-2098-12-31T00-00-00-000Z-12345678.spbk']);}
+   if(['valid','rotate'].includes(mode)){await cloud.uploadFile(filename,source);assert.ok(uploaded);const target=join(dir,mode);await cloud.downloadFile(filename,target);assert.equal(await readFile(target,'utf8'),'encrypted fixture');if(mode==='rotate')assert.deepEqual(deletes,[`stream-panel/${old}.parts/0000.part`,`stream-panel/${old}.manifest.json`]);}
    else await assert.rejects(cloud.uploadFile(filename,source));
   }
   const sparse=await open(source,'w');await sparse.truncate(2*1024*1024*1024+1);await sparse.close();
@@ -53,6 +54,31 @@ test('chunk manifests reject traversal, invalid lengths and checksums without le
    if(mode==='valid'){await cloud.downloadFile(filename,destination);assert.equal((await stat(destination)).size,baseline.size);}
    else if(mode==='existing'){await writeFile(destination,'keep');await assert.rejects(cloud.downloadFile(filename,destination),{code:'EEXIST'});assert.equal(await readFile(destination,'utf8'),'keep');}
    else {await assert.rejects(cloud.downloadFile(filename,destination));await assert.rejects(stat(destination),/ENOENT/);}
+  }
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+test('cloud rotation paginates within its installation and rejects an unbounded listing',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-cloud-pages-')),service=join(dir,'key'),source=join(dir,'source');await writeFile(service,'fixture');await writeFile(source,'encrypted fixture');
+ const prefix='stream-panel/'+'a'.repeat(32),other='stream-panel/'+'b'.repeat(32),old='stream-panel-2000-01-01T00-00-00-000Z-12345678.spbk';
+ try{
+  assert.throws(()=>new CloudBackup({url:'https://fixture.supabase.co',serviceKeyFile:service,prefix:'stream-panel/../other'}),/INVALID_BACKUP_PREFIX/);
+  for(const unbounded of [false,true]){
+   const offsets:number[]=[],deletes:string[]=[];
+   const request:typeof fetch=async(input,init)=>{
+    const p=new URL(String(input)).pathname;
+    assert.equal(init?.redirect,'error');
+    if(p.includes('/bucket/'))return Response.json({public:false});
+    if(p.includes('/object/list/')){
+     const query=JSON.parse(String(init?.body));assert.equal(query.prefix,prefix);offsets.push(query.offset);
+     return Response.json(unbounded||query.offset===0?Array.from({length:1000},(_,i)=>({name:`unrelated-${query.offset+i}`})):[{name:filename},{name:old},{name:other+'/'+old}]);
+    }
+    if(init?.method==='DELETE'){deletes.push(...JSON.parse(String(init.body)).prefixes);return Response.json({});}
+    if(p.includes('/object/authenticated/'))return new Response('encrypted fixture');
+    assert.ok(p.includes(prefix));return Response.json({});
+   };
+   const cloud=new CloudBackup({url:'https://fixture.supabase.co',serviceKeyFile:service,prefix},request);
+   if(unbounded){await assert.rejects(cloud.uploadFile(filename,source),/BACKUP_LIST_LIMIT/);assert.equal(offsets.length,100);assert.deepEqual(deletes,[]);}
+   else {await cloud.uploadFile(filename,source);assert.deepEqual(offsets,[0,1000]);assert.deepEqual(deletes,[prefix+'/'+old]);}
   }
  }finally{await rm(dir,{recursive:true,force:true});}
 });

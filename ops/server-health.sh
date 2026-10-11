@@ -68,6 +68,8 @@ if parsed.scheme!='https' or not (parsed.hostname or '').endswith('.supabase.co'
     raise SystemExit('Invalid backup endpoint')
 key=Path(keyfile).read_text().strip()
 bucket='stream-panel-backups'
+ledger=json.loads((Path(config.get('STREAM_PANEL_DATA_DIR','/var/lib/stream-panel'))/'backup-state.json').read_text())
+prefix='stream-panel/'+ledger['installationId']
 def call(path,body=None):
     request=Request(url.rstrip('/')+'/storage/v1/'+path,data=None if body is None else json.dumps(body).encode(),headers={'Authorization':'Bearer '+key,'apikey':key,'Content-Type':'application/json'})
     with urlopen(request,timeout=30) as response:
@@ -77,7 +79,7 @@ def call(path,body=None):
 try:
     info=call('bucket/'+bucket)
     if info.get('public') is not False: raise ValueError('Backup bucket must be private')
-    objects=call('object/list/'+bucket,{'prefix':'stream-panel','limit':1000,'offset':0,'sortBy':{'column':'name','order':'desc'}})
+    objects=call('object/list/'+bucket,{'prefix':prefix,'limit':1000,'offset':0,'sortBy':{'column':'name','order':'desc'}})
     valid=re.compile(r'^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$')
     copies={row['name'].removesuffix('.manifest.json'):row for row in objects if valid.fullmatch(row.get('name','').removesuffix('.manifest.json'))}
     local=Path(config.get('STREAM_PANEL_DATA_DIR','/var/lib/stream-panel'))/'backups'
@@ -89,12 +91,12 @@ try:
         while chunk:=source.read(1024*1024): digest.update(chunk)
     local_hash=digest.hexdigest()
     if remote['name'].endswith('.manifest.json'):
-        manifest=call('object/authenticated/'+bucket+'/stream-panel/'+remote['name'])
+        manifest=call('object/authenticated/'+bucket+'/'+prefix+'/'+remote['name'])
         if manifest.get('filename')!=latest.name or manifest.get('size')!=latest.stat().st_size or manifest.get('sha256')!=local_hash:
             raise ValueError('Cloud manifest does not match local archive')
         verification='manifest_sha256'
     else:
-        request=Request(url.rstrip('/')+'/storage/v1/object/authenticated/'+bucket+'/stream-panel/'+latest.name,headers={'Authorization':'Bearer '+key,'apikey':key})
+        request=Request(url.rstrip('/')+'/storage/v1/object/authenticated/'+bucket+'/'+prefix+'/'+latest.name,headers={'Authorization':'Bearer '+key,'apikey':key})
         digest=hashlib.sha256(); size=0
         with urlopen(request,timeout=30) as response:
             while chunk:=response.read(1024*1024):
@@ -107,7 +109,7 @@ try:
     age=max(0,int(time.time()-latest.stat().st_mtime))
     print('cloud bucket_private=true copies='+str(len(copies))+' matching_local=true age_seconds='+str(age))
     print('cloud latest='+latest.name+' uploaded_at='+str(remote.get('updated_at')))
-    if age>30*60: raise ValueError('Cloud backup is stale')
+    if age>13*3600: raise ValueError('Cloud backup is stale')
 except Exception as error:
     # Error bodies can contain credentials; report only known local checks.
     print('Cloud verification failed ('+type(error).__name__+')')

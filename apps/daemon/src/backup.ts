@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import {CloudBackup} from "./cloud-backup.js";
+import {retainedBackups,backupDue} from "./backup-policy.js";
 import { randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { mkdir, readFile, writeFile, readdir, rm, stat, statfs, lstat, rename, open } from "node:fs/promises";
@@ -15,7 +16,7 @@ const maxPayloadSize = 64 * 1024 * 1024;
 const profiles = ["ruslan", "gulnaz"] as const;
 const backupFilename=/^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/;
 type BackupChannelStatus = { state: string; lastSuccessAt: number; filename: string; error: string };
-type BackupStatus = { state: string; lastSuccessAt: number; filename: string; error: string; local: BackupChannelStatus; cloud: BackupChannelStatus };
+type BackupStatus = { pendingUploads:number;nextRetryAt:number;state: string; lastSuccessAt: number; filename: string; error: string; local: BackupChannelStatus; cloud: BackupChannelStatus };
 export function validateSnapshot(db: Database.Database): void {
   if (db.pragma("integrity_check", {simple:true}) !== "ok" ||
       (db.pragma("foreign_key_check") as unknown[]).length)
@@ -41,11 +42,75 @@ export function openBackup(blob: Buffer, key: Buffer): Buffer {
 }
 export class BackupService {
   status: BackupStatus = {
-    state: "disabled", lastSuccessAt: 0, filename: "", error: "",
+    pendingUploads:0,nextRetryAt:0,state: "disabled", lastSuccessAt: 0, filename: "", error: "",
     local: { state: "pending", lastSuccessAt: 0, filename: "", error: "" },
     cloud: { state: "disabled", lastSuccessAt: 0, filename: "", error: "" },
   };
   private active: Promise<{filename:string;cloudError?:string}> | undefined;
+  private uploadTask:Promise<void>|undefined;
+  private stateTask:Promise<void>|undefined;
+  private saving:Promise<void>=Promise.resolve();
+  private ledger:{version:1;installationId:string;uploaded:string[];pending:string[];attempts:number;retryAt:number;local?:BackupChannelStatus;cloud?:BackupChannelStatus}|undefined;
+  private ready(){
+    return this.stateTask??= (async()=>{
+      try{
+        const raw=await readFile(join(this.dir,'backup-state.json'),'utf8');
+        if(Buffer.byteLength(raw)>1024*1024)throw new Error('BACKUP_STATE_INVALID');
+        const state=JSON.parse(raw);
+        if(state.version!==1||!(/^[a-f0-9]{32}$/).test(state.installationId)||!Array.isArray(state.uploaded)||!Array.isArray(state.pending)||![...state.uploaded,...state.pending].every(n=>typeof n==='string'&&backupFilename.test(n))||!Number.isSafeInteger(state.attempts)||state.attempts<0||!Number.isSafeInteger(state.retryAt)||state.retryAt<0)throw new Error('BACKUP_STATE_INVALID');
+        for(const channel of [state.local,state.cloud])if(channel!==undefined&&(!channel||!['pending','success','error','disabled'].includes(channel.state)||!Number.isSafeInteger(channel.lastSuccessAt)||channel.lastSuccessAt<0||typeof channel.filename!=='string'||(channel.filename!==''&&!backupFilename.test(channel.filename))||typeof channel.error!=='string'))throw new Error('BACKUP_STATE_INVALID');
+        this.ledger=state;
+      }catch(error){
+        if((error as NodeJS.ErrnoException).code!=='ENOENT')throw new Error('BACKUP_STATE_INVALID');
+        let pending:string[]=[];
+        try{pending=(await readdir(join(this.dir,'backups'),{withFileTypes:true})).filter(e=>e.isFile()&&backupFilename.test(e.name)).map(e=>e.name);}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
+        this.ledger={version:1,installationId:randomBytes(16).toString('hex'),uploaded:[],pending,attempts:0,retryAt:0};
+        await this.save();
+      }
+      this.status.pendingUploads=this.ledger!.pending.length;this.status.nextRetryAt=this.ledger!.retryAt;
+      if(this.ledger!.local){this.status.local=this.ledger!.local;this.status.filename=this.status.local.filename;this.status.lastSuccessAt=this.status.local.lastSuccessAt;}
+      if(this.options.url&&this.ledger!.cloud)this.status.cloud=this.ledger!.cloud;
+    })();
+  }
+  private save(){
+    this.status.pendingUploads=this.ledger?.pending.length??0;this.status.nextRetryAt=this.ledger?.retryAt??0;
+    const task=this.saving.catch(()=>{}).then(async()=>{
+      const target=join(this.dir,'backup-state.json'),temporary=target+'.'+randomBytes(4).toString('hex')+'.tmp';
+      const handle=await open(temporary,'wx',0o600);
+      try{await handle.writeFile(JSON.stringify(this.ledger));await handle.sync();await handle.close();await rename(temporary,target);const directory=await open(this.dir,'r');try{await directory.sync();}finally{await directory.close();}}
+      catch(error){await handle.close().catch(()=>{});await rm(temporary,{force:true});throw error;}
+    });this.saving=task;return task;
+  }
+  async runIfDue(now=Date.now()){
+    await this.ready();
+    if(backupDue(this.status.local.lastSuccessAt,now))return this.run();
+    return undefined;
+  }
+  async retryPending(now=Date.now(),force=false){
+    await this.ready();
+    if(!this.options.url||(!force&&this.ledger!.retryAt>now))return;
+    if(this.uploadTask)return this.uploadTask;
+    const task=(async()=>{
+      try{
+        const cloud=new CloudBackup({url:this.options.url!,serviceKeyFile:this.options.serviceKeyFile,bucket:this.options.bucket,prefix:'stream-panel/'+this.ledger!.installationId},this.request);
+        for(const filename of [...this.ledger!.pending].sort().slice(0,4)){
+          await cloud.uploadFile(filename,join(this.dir,'backups',filename));
+          this.ledger!.pending=this.ledger!.pending.filter(n=>n!==filename);
+          this.ledger!.uploaded=[...new Set([...this.ledger!.uploaded,filename])];
+          this.ledger!.attempts=0;this.ledger!.retryAt=0;
+          this.status.cloud={state:'success',lastSuccessAt:Date.now(),filename,error:''};
+          this.ledger!.cloud=this.status.cloud;await this.save();
+        }
+        this.status.state=this.ledger!.pending.length?'pending':'uploaded';this.status.error='';
+        await this.purgeLocal(now);
+      }catch(error){
+        const code=error instanceof Error&&/^[A-Z_]+$/.test(error.message)?error.message:'BACKUP_FAILED';
+        this.ledger!.attempts++;this.ledger!.retryAt=now+Math.min(3600000,60000*2**Math.min(6,this.ledger!.attempts-1));
+        this.status.state='partial';this.status.error=code;this.status.cloud={...this.status.cloud,state:'error',error:code};this.ledger!.cloud=this.status.cloud;await this.save();
+      }
+    })();this.uploadTask=task;
+    try{await task;}finally{if(this.uploadTask===task)this.uploadTask=undefined;}
+  }
   constructor(private dir: string, private options: { keyFile: string; url?: string; serviceKeyFile?: string; bucket?: string }, private request: typeof fetch = fetch, private readPersistedBackup: (path:string)=>Promise<Buffer> = readFile, private freeSpace:()=>Promise<number> = async()=>{const info=await statfs(this.dir);return info.bavail*info.bsize;}) {
     this.status.state = options.url ? "pending" : "local";
     this.status.local.state = "pending";
@@ -63,17 +128,14 @@ export class BackupService {
     return this.active;
   }
   async purgeLocal(now=Date.now()):Promise<void>{
-    const directory=join(this.dir,'backups');
-    let entries;
+    await this.ready();
+    const directory=join(this.dir,'backups');let entries;
     try{entries=await readdir(directory,{withFileTypes:true});}
     catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return;throw error;}
-    for(const entry of entries){
-      if(!entry.isFile()||!backupFilename.test(entry.name))continue;
-      const match=/^stream-panel-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z-/.exec(entry.name);
-      if(!match)continue;
-      const created=Date.parse(`${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}Z`);
-      if(Number.isFinite(created)&&created<now-2*86400000)await rm(join(directory,entry.name),{force:true});
-    }
+    const names=entries.filter(e=>e.isFile()&&backupFilename.test(e.name)).map(e=>e.name);
+    const keep=retainedBackups(names,now,this.status.local.filename),pending=new Set(this.ledger!.pending);
+    for(const name of names)if(!keep.has(name)&&!pending.has(name))await rm(join(directory,name),{force:true});
+    this.ledger!.uploaded=this.ledger!.uploaded.filter(n=>keep.has(n)||pending.has(n));await this.save();
   }
   async files() {
     await this.purgeLocal();
@@ -121,7 +183,7 @@ export class BackupService {
   }
   private async perform() {
     const directory = join(this.dir, "backups"); await mkdir(directory, {recursive:true,mode:0o700});
-    await this.purgeLocal();
+    await this.ready();
     const encodedKey = (await readFile(this.options.keyFile, "utf8")).trim();
     if (!/^[a-fA-F0-9]{64}$/.test(encodedKey)) throw new Error("INVALID_BACKUP_KEY");
     const key = Buffer.from(encodedKey, "hex");
@@ -191,8 +253,7 @@ export class BackupService {
         await rm(path, {force:true});
         throw new Error("BACKUP_LOCAL_VERIFY_FAILED");
       }
-      const owned = (await readdir(directory)).filter(f => /^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/.test(f)).sort().reverse();
-      for (const old of owned.slice(7)) await rm(join(directory,old));
+
       const localSuccessAt = Date.now();
       this.status = {
         ...this.status,
@@ -202,35 +263,20 @@ export class BackupService {
         error: "",
         local: { state: "success", lastSuccessAt: localSuccessAt, filename, error: "" },
       };
-      if (!this.options.url) return {filename};
-      try {
-        await new CloudBackup({url:this.options.url,serviceKeyFile:this.options.serviceKeyFile,bucket:this.options.bucket},this.request).uploadFile(filename,path,blob);
-        const cloudSuccessAt = Date.now();
-        this.status = {
-          ...this.status,
-          state: "uploaded",
-          lastSuccessAt: cloudSuccessAt,
-          error: "",
-          cloud: { state: "success", lastSuccessAt: cloudSuccessAt, filename, error: "" },
-        };
-        return {filename};
-      } catch (error) {
-        const cloudError = error instanceof Error && /^[A-Z_]+$/.test(error.message) ? error.message : "BACKUP_FAILED";
-        this.status = {
-          ...this.status,
-          state: "partial",
-          error: cloudError,
-          cloud: { ...this.status.cloud, state: "error", error: cloudError },
-        };
-        return {filename, cloudError};
-      }
+      this.ledger!.pending.push(filename);this.ledger!.local=this.status.local;await this.save();
+      if(!this.options.url){await this.purgeLocal();return {filename};}
+      // Creating a snapshot explicitly retries pending uploads; the timer respects backoff.
+      await this.retryPending(Date.now(),true);
+      if(this.status.cloud.state==='error')return {filename,cloudError:this.status.cloud.error};
+      this.status.lastSuccessAt=this.status.cloud.lastSuccessAt;
+      return {filename};
     } finally {
       if(pendingFile)await rm(pendingFile,{force:true});
       for (const path of [snapshot, snapshot + "-wal", snapshot + "-shm"])
         await rm(path, {force:true});
     }
   }
-  async stop() { await this.active?.catch(() => {}); }
+  async stop() { await this.active?.catch(() => {}); await this.uploadTask?.catch(()=>{}); await this.saving.catch(()=>{}); }
 }
 export async function restoreBackup(blob: Buffer, key: Buffer, destination: string) {
   // Restore only into a new directory. Operator stops the service and selects it.

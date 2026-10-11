@@ -40,7 +40,12 @@ const hosted = await createHostedApplication(dir, origin, false, backupOptions, 
 const frontend=split?new FrontendProcess(join(dirname(fileURLToPath(import.meta.url)),'../../../../apps/web/dist'),collectorPort,port,origin,network):undefined;
 const runBackup = async () => {
   try {
-    const result = await hosted.backup?.run();
+    for(const marker of ['deploying','initializing','restoring','restore-pending']){
+      try{await access(join(dir,marker));return;}
+      catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+    }
+    await hosted.backup?.retryPending();
+    const result = await hosted.backup?.runIfDue();
     if (result?.cloudError) console.error("Cloud backup failed; local copy saved; see protected status");
   } catch { console.error("Backup failed; see protected status"); }
 };
@@ -56,14 +61,17 @@ const startCollectors = async () => {
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") { console.error("Maintenance state unavailable; collectors remain stopped"); return; } }
   }
   collectorsStarted = true;
-  await Promise.all([...hosted.runtimes.values()].map(runtime=>runtime.db.call("collectionLifecycle","start",Date.now())));
+  // Promotion can clear maintenance between scheduler ticks; recheck backup immediately.
   void runBackup();
+  await Promise.all([...hosted.runtimes.values()].map(runtime=>runtime.db.call("collectionLifecycle","start",Date.now())));
   for (const runtime of hosted.runtimes.values()) {
     void runtime.twitch.start(); void runtime.da.start(); void runtime.youtube.start();
   }
 };
 await startCollectors();
-const backupTimer = setInterval(() => { if (collectorsStarted) void runBackup(); }, 15 * 60 * 1000);
+void runBackup();
+// Check persisted due time and retry backoff; collecting platforms is independent.
+const backupTimer = setInterval(() => { if(!closing)void runBackup(); }, 60000);
 const retentionTimer=setInterval(()=>{void hosted.backup?.purgeLocal().catch(()=>console.error('Local backup cleanup failed'));},60*60*1000);
 const heartbeatTimer=setInterval(()=>{if(collectorsStarted&&!closing)for(const runtime of hosted.runtimes.values())void runtime.db.call("collectionLifecycle","heartbeat",Date.now()).catch(()=>console.error("Collector heartbeat failed"));},30000);
 const timer = setInterval(() => void startCollectors(), 2000);

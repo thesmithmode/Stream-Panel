@@ -106,11 +106,12 @@ test('large cloud backup verifies bounded parts and restores the complete databa
   const db=new Database(path);db.exec('CREATE TABLE retained_large_data(payload BLOB); INSERT INTO retained_large_data VALUES(randomblob(49*1024*1024))');db.close();
   const backup=new BackupService(dir,{keyFile:join(dir,'key'),url:'https://test.supabase.co',serviceKeyFile:join(dir,'service')},request);
   const result=await backup.run();assert.equal(result.cloudError,undefined);assert.equal(backup.status.cloud.state,'success');
-  const manifest=JSON.parse(objects.get(result.filename+'.manifest.json')!.toString());assert.ok(manifest.parts.length>=4);assert.ok(manifest.parts.every((p:any)=>p.size<=16*1024*1024));
-  const cloud=new CloudBackup({url:'https://test.supabase.co',serviceKeyFile:join(dir,'service')},request),downloaded=join(dir,'remote.spbk');
+  const installation=JSON.parse(await readFile(join(dir,'backup-state.json'),'utf8')).installationId;
+  const manifest=JSON.parse(objects.get(installation+'/'+result.filename+'.manifest.json')!.toString());assert.ok(manifest.parts.length>=4);assert.ok(manifest.parts.every((p:any)=>p.size<=16*1024*1024));
+  const cloud=new CloudBackup({url:'https://test.supabase.co',serviceKeyFile:join(dir,'service'),prefix:'stream-panel/'+installation},request),downloaded=join(dir,'remote.spbk');
   await cloud.downloadFile(result.filename,downloaded);await restoreBackupFile(downloaded,key,join(dir,'restored'));
   const restored=new Database(join(dir,'restored','data.sqlite'),{readonly:true});try{assert.equal((restored.prepare('SELECT length(payload) AS n FROM retained_large_data').get() as any).n,49*1024*1024);assert.equal(restored.pragma('integrity_check',{simple:true}),'ok');}finally{restored.close();}
-  const part=objects.get(manifest.parts[0].name)!;part[0]=part[0]!^1;
+  const part=objects.get(installation+'/'+manifest.parts[0].name)!;part[0]=part[0]!^1;
   await assert.rejects(cloud.downloadFile(result.filename,join(dir,'corrupt.spbk')),/BACKUP_UPLOAD_VERIFY_FAILED/);await assert.rejects(stat(join(dir,'corrupt.spbk')),/ENOENT/);
  }finally{auth.close();await rm(dir,{recursive:true,force:true});}
 });

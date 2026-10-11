@@ -19,6 +19,8 @@
     <div><strong>Локальная копия</strong><span>{channelLabel(status.local)}</span>{#if status.local?.lastSuccessAt}<small>{date(status.local.lastSuccessAt)}</small>{/if}</div>
     <div><strong>Облачная копия</strong><span>{channelLabel(status.cloud)}</span>{#if status.cloud?.lastSuccessAt}<small>{date(status.cloud.lastSuccessAt)}</small>{/if}</div>
   </div>
+  <p class="small muted">Копия каждые 12 часов. Храним 7 дневных и 3 более старые недельные точки за 30 дней.</p>
+  {#if status.pendingUploads}<p class="small notice">Ожидают загрузки: {status.pendingUploads}.{#if status.nextRetryAt} Следующая попытка: {date(status.nextRetryAt)}.{/if} Эти копии защищены от удаления.</p>{/if}
   {#if directory}<div>Каталог на сервере<code>{directory}</code></div>{/if}
   <button class="outline" disabled={busy} onclick={refresh}>Обновить список копий</button>
   {#if error}<p role="alert">{error}</p>{/if}
