@@ -478,9 +478,9 @@ export class TwitchConnection {
     };
     reset();
     socket.on("message", (data) => {
+      if (this.stopped || generation !== this.authGeneration || !this.sockets.has(socket)) return;
       reset();
       void (async () => {
-        if (this.stopped || generation !== this.authGeneration) return;
         const body = object(JSON.parse(data.toString())),
           meta = object(body.metadata),
           payload = object(body.payload),
@@ -550,6 +550,7 @@ export class TwitchConnection {
       }
     });
     socket.on("error", () => {
+      if (this.stopped || generation !== this.authGeneration || !this.sockets.has(socket)) return;
       this.status.detail = "Ошибка WebSocket";
     });
   }

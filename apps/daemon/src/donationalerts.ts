@@ -312,9 +312,9 @@ export class DonationAlertsConnection {
     );
     socket.on("pong", touch);
     socket.on("message", (frame) => {
+      if (this.stopped || generation !== this.generation || socket !== this.socket) return;
       touch();
       void (async () => {
-        if (this.stopped || generation !== this.generation) return;
         for (const line of frame.toString().split("\n").filter(Boolean)) {
           const message = object(parse(line));
           if (message.error) throw new Error("DA_CENTRIFUGO_ERROR");
@@ -383,6 +383,7 @@ export class DonationAlertsConnection {
       }
     });
     socket.on("error", () => {
+      if (this.stopped || generation !== this.generation || socket !== this.socket) return;
       this.status.capabilities.realtime = "Ошибка WebSocket";
     });
   }

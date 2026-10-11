@@ -74,3 +74,22 @@ test('completed YouTube broadcasts keep a durable archive cursor before discover
  try{await yt.collectOnce();assert.deepEqual(snapshots['cursor:archivedVideos'].data,{ids:['finished','old'],checkedAt:at});assert.ok(writes.findIndex(x=>x[2]==='cursor:archivedVideos')<writes.findIndex(x=>x[2]==='broadcasts'));assert.equal(archivedCalls,1);await yt.collectOnce();assert.equal(archivedCalls,1,'archive refresh respects the six-hour interval');}
  finally{await yt.stop();}
 });
+test('retired Twitch and DA sockets cannot change status or recreate keepalive timers',async()=>{
+ const {EventEmitter}=await import('node:events');const {DonationAlertsConnection}=await import('../src/donationalerts.js');
+ for(const provider of ['twitch','da'])for(const retirement of ['stop','generation','removed']){
+  const config={value:{twitch:{access:'fixture',userId:'owner',scopes:[]},daAccessToken:'fixture'},save:async()=>{}} as unknown as Configuration;
+  let writes=0;const db={call:async()=>{writes++;}} as unknown as StoreClient;
+  const socket=new EventEmitter() as any;socket.send=()=>{};socket.close=()=>socket.emit('close');socket.terminate=()=>{};
+  const request:typeof fetch=async()=>{assert.fail('late publication must not request');};
+  const c=provider==='twitch'?new TwitchConnection(config,db,request,()=>socket):new DonationAlertsConnection(config,db,request,()=>socket);const runtime=c as any;
+  runtime.stopped=false;if(provider==='twitch')runtime.connect();else runtime.connect('fixture',runtime.generation);
+  try{
+   socket.emit('error',new Error('current failure'));assert.equal(provider==='twitch'?c.status.detail:c.status.capabilities.realtime,'Ошибка WebSocket');
+   if(retirement==='stop')await c.stop();
+   if(retirement==='generation')runtime[provider==='twitch'?'authGeneration':'generation']++;
+   if(retirement==='removed'){runtime.socket=null;if(provider==='twitch')runtime.sockets.delete(socket);}
+   const prior=JSON.stringify(c.status);socket.emit('error',new Error('late failure'));socket.emit('message','invalid obsolete JSON');
+   for(let n=0;n<3;n++)await new Promise(r=>setImmediate(r));assert.equal(JSON.stringify(c.status),prior);assert.equal(writes,0);
+  }finally{socket.close();await c.stop();}
+ }
+});
