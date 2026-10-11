@@ -42,3 +42,7 @@ test('Redis cache handles hits, corrupt values, deadlines and bounded local evic
   await tick();assert.ok([...values.values()].every(value=>value.length<2_000_000));
  }finally{cache.close();for(const socket of sockets)socket.destroy();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });
+
+test('expired local values reload without returning stale snapshots',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:1000});const cache=new ReadCache('');try{assert.equal(await cache.read('key',async()=>1),1);t.mock.timers.tick(3001);assert.equal(await cache.read('key',async()=>2),2);}finally{cache.close();t.mock.timers.reset();}
+});
