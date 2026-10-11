@@ -111,3 +111,24 @@ are revoked; login uses the credentials saved in the imported archive. A failed
 validation leaves the active database untouched. The operating system, service
 installation, domains and server-side cloud-backup settings are infrastructure
 configuration and are not replaced by a profile/database import.
+
+## Shared interface and request scope (2026-10-11)
+
+Both profiles use the same application components and stream columns. Analytics
+layout preferences now share one browser key; audience filters retain separate
+profile keys. Existing saved preferences migrate without copying private records,
+notes or donation assignments between profiles. A stale production client shows an
+update notice, and changing profiles refreshes that stale client after saving the
+selected route. The UI build embeds the release SHA and compares it with protected
+server status; local preview builds are exempt from production-version checks.
+
+Background refresh requests only the resources used by the active screen: stream
+history needs status/sessions, People needs status/sessions/persons, channel overview
+needs status/events, stream details needs status/sessions/events/summary, and
+analytics/integrations need status plus their component's own requests. Previously
+every screen polled all five endpoints every 15 seconds.
+
+Read-only production diagnostics run from the protected main branch and report
+service resource counters plus local HTTP timings without printing secrets,
+database content or command-line arguments. These distinguish server delay from
+external network/proxy delay; they do not restart the running service.

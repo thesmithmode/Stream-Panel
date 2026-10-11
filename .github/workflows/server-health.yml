@@ -2,8 +2,7 @@ name: Read-only server health
 on:
   workflow_dispatch:
   push:
-    branches: [dev]
-    paths: ['ops/server-health.sh', '.github/workflows/server-health.yml']
+    branches: [main]
 permissions:
   contents: read
 concurrency:

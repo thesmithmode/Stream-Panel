@@ -2,6 +2,8 @@
   import { onMount } from "svelte";
   import {readRoute,routeUrl,type View} from "./route";
   import {ConnectionError} from "./request";
+  import {isOutdatedRelease} from './release';
+  import {viewRequests} from './view-requests';
   import Icon from "./Icon.svelte";
   import {streamRange} from "./stream-time";
   import Overview from "./Overview.svelte";
@@ -52,6 +54,7 @@
   let profile = $state<Profile>(getProfile());
   let epoch = 0;
   let scopeReady=$state(false),connectionLost=$state(false);
+  let outdated=$state(false);
   let refreshTask:{epoch:number;task:Promise<void>}|null=null;
   function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile,mode:dataMode});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
   function clearScope(){busy=false;scopeReady=false;events=[];summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
@@ -103,12 +106,11 @@
   ] as const;
   async function refresh() {
     const current=epoch;if(refreshTask?.epoch===current)return refreshTask.task;
-    const query=(tab==='stream'||tab==='people')&&sessionFilter?`?session=${encodeURIComponent(sessionFilter)}`:'';
     const task=(async()=>{
-      const values=await Promise.all([api('status'),api<Session[]>('sessions'),api<Person[]>('persons'),api<Event[]>(`events${query}`),api<Summary>(`summary${query}`)]);
+      const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter).map(async([key,path])=>[key,await api(path)])));
       if(current!==epoch)return;
-      status=values[0];if(dataMode==='real'){setCsrf(status.csrf);user=status.user??user;}
-      sessions=values[1];people=values[2];events=values[3];summary=values[4];scopeReady=true;connectionLost=!navigator.onLine;error='';
+      status=values.status;if(dataMode==='real'){setCsrf(status.csrf);user=status.user??user;outdated=isOutdatedRelease(status.release);}
+      sessions=values.sessions??sessions;people=values.persons??people;events=values.events??events;summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';
     })();refreshTask={epoch:current,task};
     try{await task;}finally{if(refreshTask?.task===task)refreshTask=null;}
   }
@@ -144,6 +146,7 @@
     status = null; sessions = []; people = []; events = []; personId = sessionFilter = ""; error = "";
     summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
     clearScope();saveRoute();await action(async () => {});
+    if(outdated)location.reload();
   }
   onMount(() => {
     let alive=true,initializing=false;
@@ -246,6 +249,7 @@
       {#if error}<p role="alert" class="small notice error">{error}</p>{/if}
       </section>{:else}
       {#if connectionLost}<p role="status" class="notice">Связь прервана. Показываем последние загруженные данные.</p>{/if}
+      {#if outdated}<div role="status" class="notice">Доступна новая версия панели для обоих профилей. <button class="outline small" onclick={()=>location.reload()}>Обновить панель</button></div>{/if}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}
       {#if dataMode === "demo"}<p class="demo-banner" role="status">
           Режим <strong>Демо</strong>: показаны фикстуры. Запись в SQLite и

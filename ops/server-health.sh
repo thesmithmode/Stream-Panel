@@ -20,7 +20,11 @@ free -m
 df -Pm /var/lib/stream-panel
 for path in / /healthz /api/v1/events; do
   for sample in 1 2 3; do
-    curl --max-time 10 -fsS -o /dev/null -H "Host: $public_host" -w "$path local status=%{http_code} ttfb=%{time_starttransfer} total=%{time_total}\n" "http://127.0.0.1:47831$path" || test "$path" = /api/v1/events
+    result=$(curl --max-time 10 -sS -o /dev/null -H "Host: $public_host" -w '%{http_code} %{time_starttransfer} %{time_total}' "http://127.0.0.1:47831$path")
+    read -r code first_byte total <<< "$result"
+    printf '%s local status=%s ttfb=%s total=%s\n' "$path" "$code" "$first_byte" "$total"
+    expected=200;test "$path" != /api/v1/events || expected=401
+    test "$code" = "$expected"
   done
 done
 curl --max-time 10 -fsS -H "Host: $public_host" http://127.0.0.1:47831/healthz

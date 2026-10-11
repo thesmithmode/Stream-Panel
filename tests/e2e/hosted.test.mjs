@@ -7,7 +7,7 @@ import net from "node:net";
 import { AccountStore } from "../../dist/apps/daemon/src/auth.js";
 import { createHostedApplication } from "../../dist/apps/daemon/src/hosted.js";
 import { launchBrowser } from "../helpers/browser.mjs";
-import { goto, saveCoverage, reload } from "../helpers/browser-coverage.mjs";
+import { goto, saveCoverage, reload, startCoverage } from "../helpers/browser-coverage.mjs";
 
 test("two browser accounts see only their own data; logout in demo revokes the real session", { timeout: 30000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), "sp-hosted-browser-"));
@@ -106,6 +106,9 @@ test("profile switch reloads all views, preserves other clients and remains visi
     for (const profile of ["ruslan", "gulnaz"]) {
       await h.runtimes.get(profile).db.call("ingest", { source: "twitch", accountId: "same-channel", externalId: "same-event", type: "chat.message", actor: { externalId: "viewer", displayName: `Viewer ${profile}` }, occurredAtMs: Date.now(), receivedAtMs: Date.now(), sourceTime: null, timeQuality: "provider", transport: "eventsub", payload: { text: `Message ${profile}` } });
     }
+    for(const profile of ['ruslan','gulnaz']){
+      const sid=await h.runtimes.get(profile).db.call('startSession','same-channel',`stream-${profile}`,Date.now()-120000,'platform',Date.now()-120000);await h.runtimes.get(profile).db.call('endSession',sid,Date.now()-60000);
+    }
     await h.app.listen({ host: "127.0.0.1", port: 47839 });
     browser = await launchBrowser();
     const pages = [];
@@ -129,6 +132,20 @@ test("profile switch reloads all views, preserves other clients and remains visi
     await a.getByLabel("Профиль", { exact: true }).selectOption("ruslan");
     await a.getByText("Viewer ruslan", { exact: true }).first().waitFor();
     assert.equal(await a.getByText("Viewer gulnaz", { exact: true }).count(), 0);
+    const headers=[];
+    for(const profile of ['ruslan','gulnaz']){
+      await a.getByLabel('Профиль',{exact:true}).selectOption(profile);
+      await a.getByRole('button',{name:'Стримы',exact:true}).click();
+      await a.locator('table thead').waitFor();headers.push(await a.locator('table thead th').allTextContents());
+    }
+    assert.deepEqual(headers[0],headers[1]);assert.deepEqual(headers[0],['Период · МСК','Длительность','Площадки','Название и ссылка','Зрители · пик / среднее','Донаты','События','']);
+    await a.getByLabel('Профиль',{exact:true}).selectOption('ruslan');await a.getByRole('button',{name:'Аналитика',exact:true}).click();
+    await a.getByText('Настроить отображение',{exact:true}).click();await a.getByLabel('Сравнение стримов',{exact:true}).uncheck();
+    await a.getByLabel('Только ядро',{exact:true}).check();
+    await a.getByLabel('Профиль',{exact:true}).selectOption('gulnaz');await a.getByText('Настроить отображение',{exact:true}).click();
+    assert.equal(await a.getByLabel('Сравнение стримов',{exact:true}).isChecked(),false);assert.equal(await a.getByLabel('Только ядро',{exact:true}).isChecked(),false);
+    await a.getByLabel('Профиль',{exact:true}).selectOption('ruslan');await a.getByText('Настроить отображение',{exact:true}).click();assert.equal(await a.getByLabel('Только ядро',{exact:true}).isChecked(),true);
+    await a.getByRole('button',{name:'Люди',exact:true}).click();await a.getByText('Viewer ruslan',{exact:true}).first().waitFor();
     await a.setViewportSize({ width: 390, height: 844 });
     await a.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     const box = await a.getByLabel("Профиль", { exact: true }).boundingBox();
@@ -140,6 +157,11 @@ test("profile switch reloads all views, preserves other clients and remains visi
     await a.getByLabel("Профиль", { exact: true }).waitFor();
     assert.equal(await a.getByLabel("Профиль", { exact: true }).inputValue(), "gulnaz");
     assert.equal(await a.getByRole("button", { name: "Выйти", exact: true }).count(),0);
+    let fakeRemaining=2;
+    await a.route('**/api/v1/status',async route=>{const response=await route.fetch();const data=await response.json();if(fakeRemaining-->0)data.release='a'.repeat(40);await route.fulfill({response,json:data});});
+    await a.evaluate(()=>window.dispatchEvent(new Event('focus')));await a.getByRole('button',{name:'Обновить панель',exact:true}).waitFor();
+    await saveCoverage(a);await startCoverage(a);const nextDocument=a.waitForEvent('load');await a.getByLabel('Профиль',{exact:true}).selectOption('ruslan');await nextDocument;
+    await a.getByText('Viewer ruslan',{exact:true}).first().waitFor();assert.equal(await a.getByRole('button',{name:'Обновить панель',exact:true}).count(),0);await a.unroute('**/api/v1/status');
     await a.evaluate(async()=>{const {csrf}=await fetch("/api/v1/auth/me").then(r=>r.json());await fetch("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},body:"{}"});});
     await a.reload();
     await a.getByRole("heading", { name: "Вход в Stream Panel" }).waitFor();

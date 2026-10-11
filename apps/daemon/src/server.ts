@@ -274,6 +274,7 @@ export async function createApplication(
     };
   });
   app.get("/api/v1/status", async (request) => ({
+    release:process.env.STREAM_PANEL_RELEASE??'development',
     youtube: youtube.status,
     twitch: twitch.status,
     donationalerts: da.status,

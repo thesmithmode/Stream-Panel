@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { api, date, money } from "./api";
-  import {analyticsView} from "./analytics-view";
+  import {analyticsView,loadAnalyticsView,saveAnalyticsView} from "./analytics-view";
   import Help from "./Help.svelte";
   import AudienceChart from "./AudienceChart.svelte";
   let { profile = "local", mode = "real", onPerson }: {profile?:string;mode?:string;onPerson:(id:string)=>void} = $props();
@@ -21,7 +21,7 @@
     const timer=window.setTimeout(()=>{if(!cancelled)untrack(()=>void refresh());},250);
     return ()=>{cancelled=true;window.clearTimeout(timer);requestId++;};
   });
-  $effect(()=>{const saved=JSON.stringify(view);if(mounted){try{localStorage.setItem(`sp-analytics-view-${profile}`,saved);}catch{/* optional preferences */}}});
+  $effect(()=>{const saved=JSON.stringify(view);void saved;if(mounted)saveAnalyticsView(()=>localStorage,profile,view);});
   const visible=$derived((data?.audience??[]).filter((e:any)=>(!view.coreOnly||e.core)&&e.name.toLowerCase().includes(search.toLowerCase())).sort((a:any,b:any)=>view.sort==="sessions"?b.sessionIds.length-a.sessionIds.length:(b[view.sort]??0)-(a[view.sort]??0)));
   const weekdays=["пн","вт","ср","чт","пт","сб","вс"];
   const hourCells=$derived(new Map((data?.hours??[]).map((h:any)=>[`${h.day}:${h.hour}`,h])) as Map<string,any>);
@@ -49,7 +49,7 @@
     const id=++requestId;busy=true;error="";
     const fromMs=new Date(from).getTime(),toMs=new Date(to).getTime();
     try{
-      try {localStorage.setItem(`sp-analytics-${profile}`,JSON.stringify({timezone}));}catch{/* optional local preferences */}
+      try {localStorage.setItem('sp-analytics',JSON.stringify({timezone}));}catch{/* optional local preferences */}
       const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,timezone});
       const result=await api(`analytics?${q}`);
       if(id===requestId){data=result;selected=null;}
@@ -57,8 +57,8 @@
     finally{if(id===requestId)busy=false;}
   }
   onMount(()=>{
-    try{const saved=JSON.parse(localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved?.timezone)timezone=saved.timezone;}catch{/* private browser may deny storage */}
-    try{view=analyticsView(JSON.parse(localStorage.getItem(`sp-analytics-view-${profile}`)??"null"));}catch{/* storage is optional */}
+    try{const saved=JSON.parse(localStorage.getItem('sp-analytics')??localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved?.timezone)timezone=saved.timezone;}catch{/* private browser may deny storage */}
+    view=loadAnalyticsView(()=>localStorage,profile);
     mounted=true;const timer=setInterval(()=>{if(!busy&&!selected&&!barOpen){if(liveEnd){const next=localInput(Date.now());if(next===to)void refresh();else to=next;}else void refresh();}},60000);return ()=>{requestId++;clearInterval(timer);};
   });
 </script>
