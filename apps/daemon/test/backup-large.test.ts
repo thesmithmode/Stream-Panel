@@ -8,6 +8,7 @@ import {tmpdir} from 'node:os';
 import {AccountStore} from '../src/auth.js';
 import {StreamStore} from '../../../packages/core/src/store.js';
 import {BackupService,restoreBackupFile} from '../src/backup.js';
+import {CloudBackup} from '../src/cloud-backup.js';
 import {sealBackupFile} from '../src/backup-stream.js';
 
 test('large SQLite uses streaming encrypted backup and restores data, credentials and revoked sessions',async()=>{
@@ -89,26 +90,29 @@ test('backup low disk space preserves database and existing copies; oversized da
  } finally {await rm(sparse,{recursive:true,force:true});}
 });
 
-test('large encrypted object keeps local success and reports cloud size limit without uploading',async()=>{
+test('large cloud backup verifies bounded parts and restores the complete database',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-large-cloud-')),key=randomBytes(32),path=join(dir,'data.sqlite');
- const auth=new AccountStore(path);
+ const auth=new AccountStore(path),objects=new Map<string,Buffer>();
+ const request:typeof fetch=async(input,init)=>{
+  const p=new URL(String(input)).pathname,base='/storage/v1/object/';
+  if(p.includes('/bucket/'))return Response.json({public:false});
+  if(p.includes('/object/list/')){const prefix=JSON.parse(String(init?.body)).prefix.replace(/^stream-panel\/?/,'');return Response.json([...new Set([...objects.keys()].filter(k=>k.startsWith(prefix)).map(k=>k.slice(prefix.length).replace(/^\//,'').split('/')[0]!))].map(name=>({name})));}
+  if(p.includes('/object/authenticated/')){const name=p.split('/stream-panel/')[1]!,bytes=objects.get(name);return bytes?new Response(new Uint8Array(bytes)):Response.json({},{status:404});}
+  if(init?.method==='DELETE'){for(const n of JSON.parse(String(init.body)).prefixes)objects.delete(n.replace(/^stream-panel\//,''));return Response.json({});}
+  const name=p.slice(base.length).split('/stream-panel/')[1]!;objects.set(name,Buffer.from(init?.body as Uint8Array));return Response.json({});
+ };
  try {
-  await writeFile(join(dir,'key'),key.toString('hex'));
+  await writeFile(join(dir,'key'),key.toString('hex'));await writeFile(join(dir,'service'),'fixture');
   const db=new Database(path);db.exec('CREATE TABLE retained_large_data(payload BLOB); INSERT INTO retained_large_data VALUES(randomblob(49*1024*1024))');db.close();
-  let calls=0;
-  const backup=new BackupService(dir,{keyFile:join(dir,'key'),url:'https://test.supabase.co',serviceKeyFile:join(dir,'unused')},async()=>{calls++;throw new Error('UNEXPECTED_REMOTE_CALL');});
-  const result=await backup.run();
-  assert.equal(result.cloudError,'BACKUP_CLOUD_SIZE_LIMIT');
-  assert.equal(calls,0);
-  assert.equal(backup.status.local.state,'success');
-  assert.equal(backup.status.cloud.state,'error');
-  assert.ok((await stat(join(dir,'backups',result.filename))).size>48*1024*1024);
-  assert.equal((await backup.files()).files.length,1);
-  await assert.rejects(backup.file(result.filename),/BACKUP_NOT_FOUND/);
-  const stream=await backup.download(result.filename);let bytes=0;
-  for await(const chunk of stream)bytes+=chunk.length;
-  assert.equal(bytes,(await stat(join(dir,'backups',result.filename))).size);
- } finally {auth.close();await rm(dir,{recursive:true,force:true});}
+  const backup=new BackupService(dir,{keyFile:join(dir,'key'),url:'https://test.supabase.co',serviceKeyFile:join(dir,'service')},request);
+  const result=await backup.run();assert.equal(result.cloudError,undefined);assert.equal(backup.status.cloud.state,'success');
+  const manifest=JSON.parse(objects.get(result.filename+'.manifest.json')!.toString());assert.ok(manifest.parts.length>=4);assert.ok(manifest.parts.every((p:any)=>p.size<=16*1024*1024));
+  const cloud=new CloudBackup({url:'https://test.supabase.co',serviceKeyFile:join(dir,'service')},request),downloaded=join(dir,'remote.spbk');
+  await cloud.downloadFile(result.filename,downloaded);await restoreBackupFile(downloaded,key,join(dir,'restored'));
+  const restored=new Database(join(dir,'restored','data.sqlite'),{readonly:true});try{assert.equal((restored.prepare('SELECT length(payload) AS n FROM retained_large_data').get() as any).n,49*1024*1024);assert.equal(restored.pragma('integrity_check',{simple:true}),'ok');}finally{restored.close();}
+  const part=objects.get(manifest.parts[0].name)!;part[0]=part[0]!^1;
+  await assert.rejects(cloud.downloadFile(result.filename,join(dir,'corrupt.spbk')),/BACKUP_UPLOAD_VERIFY_FAILED/);await assert.rejects(stat(join(dir,'corrupt.spbk')),/ENOENT/);
+ }finally{auth.close();await rm(dir,{recursive:true,force:true});}
 });
 
 test('file restore supports old backups and rejects malformed authenticated v2 metadata and invalid databases',async()=>{

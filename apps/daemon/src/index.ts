@@ -55,7 +55,7 @@ const startCollectors = async () => {
   }
 };
 await startCollectors();
-const backupTimer = setInterval(() => { if (collectorsStarted) void runBackup(); }, 12 * 60 * 60 * 1000);
+const backupTimer = setInterval(() => { if (collectorsStarted) void runBackup(); }, 15 * 60 * 1000);
 const retentionTimer=setInterval(()=>{void hosted.backup?.purgeLocal().catch(()=>console.error('Local backup cleanup failed'));},60*60*1000);
 const heartbeatTimer=setInterval(()=>{if(collectorsStarted&&!closing)for(const runtime of hosted.runtimes.values())void runtime.db.call("collectionLifecycle","heartbeat",Date.now()).catch(()=>console.error("Collector heartbeat failed"));},30000);
 const timer = setInterval(() => void startCollectors(), 2000);

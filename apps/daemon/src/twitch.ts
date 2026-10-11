@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import {twitchCatalog} from "./twitch-catalog.js";
 import {extraTwitchEvents,extraTwitchScopes} from './twitch-events.js';
 import type { Configuration, Tokens } from "./config.js";
 import type { StoreClient } from "./db.js";
@@ -164,6 +165,7 @@ export class TwitchConnection {
   private reconnectAttempt = 0;
   private sessionId: string | null = null;
   private lastFollowersPollAt:number|null=null;
+  private lastCatalogPollAt:number|null=null;
   private lastSuccessfulPollAt: number | null = null;
   private authGeneration = 0;
   private gapStart: number | null = null;
@@ -342,11 +344,13 @@ export class TwitchConnection {
     init: RequestInit = {},
     retried = false,
   ): Promise<unknown> {
+    const generation=this.authGeneration;
     if (Date.now() < this.rateLimitedUntil)
       throw new Error(
         `TWITCH_RATE_LIMIT_UNTIL_${Math.ceil(this.rateLimitedUntil / 1000)}`,
       );
     if (this.token.expiresAt < Date.now() + 60_000) await this.refresh();
+    if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${this.token.access}`);
     headers.set("Client-Id", this.config.value.twitchClientId);
@@ -355,8 +359,10 @@ export class TwitchConnection {
       headers,
       signal: init.signal ?? AbortSignal.timeout(15000),
     });
+    if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
     if (response.status === 401 && !retried) {
       await this.refresh();
+      if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
       return this.api(path, init, true);
     }
     if (response.status === 429) {
@@ -370,17 +376,27 @@ export class TwitchConnection {
       );
     }
     if (!response.ok) throw new Error(`TWITCH_HTTP_${response.status}`);
-    return response.json();
+    const data=await response.json();
+    if(generation!==this.authGeneration)throw new Error('TWITCH_AUTH_CANCELLED');
+    if((init.method??'GET')==='GET'&&this.token.userId){
+      const endpoint=new URL(path,'https://api.twitch.tv/helix/');
+      await this.db.call('providerSnapshot','twitch',this.token.userId,`api:${endpoint.pathname}`,{request:{path:endpoint.pathname,params:Object.fromEntries(endpoint.searchParams)},response:data},this.now());
+      if(generation!==this.authGeneration)throw new Error('TWITCH_AUTH_CANCELLED');
+    }
+    return data;
   }
   private async validate(): Promise<void> {
     const generation = this.authGeneration;
     if (this.token.expiresAt < Date.now() + 60_000) await this.refresh();
+    if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
     let response = await this.request("https://id.twitch.tv/oauth2/validate", {
       headers: { Authorization: `OAuth ${this.token.access}` },
       signal: AbortSignal.timeout(15000),
     });
+    if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
     if (response.status === 401) {
       await this.refresh();
+      if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
       response = await this.request("https://id.twitch.tv/oauth2/validate", {
         headers: { Authorization: `OAuth ${this.token.access}` },
         signal: AbortSignal.timeout(15000),
@@ -435,10 +451,10 @@ export class TwitchConnection {
       if (this.stopped || generation !== this.authGeneration) return;
       this.connect();
       this.hourly = setInterval(() => {
-        void this.validate().catch((error) => this.report(error));
+        void this.validate().catch((error) => this.report(error,generation));
       }, 3_600_000);
       // Reconcile/chatters failures must not tear down a healthy EventSub.
-      void this.reconcile().catch((error) => this.report(error));
+      void this.reconcile().catch((error) => this.report(error,generation));
     } catch (error) {
       if (this.stopped || generation !== this.authGeneration) return;
       this.report(error);
@@ -468,9 +484,9 @@ export class TwitchConnection {
     };
     reset();
     socket.on("message", (data) => {
+      if (this.stopped || generation !== this.authGeneration || !this.sockets.has(socket)) return;
       reset();
       void (async () => {
-        if (this.stopped || generation !== this.authGeneration) return;
         const body = object(JSON.parse(data.toString())),
           meta = object(body.metadata),
           payload = object(body.payload),
@@ -522,7 +538,7 @@ export class TwitchConnection {
               await this.reconcile();
           }
         }
-      })().catch((error) => this.report(error));
+      })().catch((error) => {if(!this.stopped&&generation===this.authGeneration)this.report(error);});
     });
     socket.on("close", () => {
       this.sockets.delete(socket);
@@ -540,6 +556,7 @@ export class TwitchConnection {
       }
     });
     socket.on("error", () => {
+      if (this.stopped || generation !== this.authGeneration || !this.sockets.has(socket)) return;
       this.status.detail = "Ошибка WebSocket";
     });
   }
@@ -619,6 +636,29 @@ export class TwitchConnection {
           error instanceof Error ? error.message : "error";
         if (type === "channel.chat.message") throw error;
       }
+    }
+  }
+  private async collectCatalog(account:string,current:()=>boolean,at:number){
+    if(this.lastCatalogPollAt!==null&&at-this.lastCatalogPollAt<15*60000)return;
+    this.lastCatalogPollAt=at;
+    for(const item of twitchCatalog){
+      if(!current())return;
+      const key=`api:${item.path}`;
+      if(item.scope&&!this.token.scopes.includes(item.scope)){this.status.capabilities[key]='Нет разрешения';continue;}
+      try{
+        const params=new URLSearchParams(item.paginated?{broadcaster_id:account,first:'100'}:{broadcaster_id:account});
+        for(const [name,value]of Object.entries(item.params??{}))params.set(name,value==='$account'?account:value);
+        if(params.has('id')||params.has('user_id'))params.delete('broadcaster_id');
+        const seen=new Set<string>();let complete=false;
+        for(let page=0;page<25;page++){
+          const data=object(await this.api(`${item.path}?${params}`));if(!current())return;
+          if(!Array.isArray(data.data))throw new Error('INVALID_CATALOG_RESPONSE');
+          const cursor=string(object(data.pagination).cursor);
+          if(!item.paginated||!cursor){complete=true;break;}
+          if(seen.has(cursor))throw new Error('CATALOG_PAGINATION_LOOP');seen.add(cursor);params.set('after',cursor);
+        }
+        this.status.capabilities[key]=complete?'Снимки сохранены':'Снимки сохранены частично: лимит страниц';
+      }catch{if(!current())return;this.status.capabilities[key]='Не удалось получить снимок';}
     }
   }
   private async collectFollowers(account:string,current:()=>boolean,at:number){
@@ -754,6 +794,7 @@ export class TwitchConnection {
         }
       }
       if(current())await this.collectFollowers(accountId,current,this.now());
+      if(current())await this.collectCatalog(accountId,current,this.now());
       if (current() && this.reconcileError !== null) {
         if (this.eventSubReady && this.status.detail === this.reconcileError) {
           this.status.state = "connected";
@@ -770,11 +811,12 @@ export class TwitchConnection {
       if (current()) {
         const immediate = this.reconcileRequested;
         this.reconcileRequested = false;
-        this.tick = setTimeout(() => { this.tick = null; void this.reconcile().catch(error => this.report(error)); }, immediate ? 0 : this.platformLive ? 60000 : 300000);
+        this.tick = setTimeout(() => { this.tick = null; void this.reconcile().catch(error => this.report(error,generation)); }, immediate ? 0 : this.platformLive ? 60000 : 300000);
       }
     }
   }
-  private report(error: unknown): void {
+  private report(error: unknown,generation=this.authGeneration): void {
+    if(this.stopped||generation!==this.authGeneration)return;
     const message = error instanceof Error ? error.message : "TWITCH_ERROR";
     if (message === "TWITCH_REAUTH_REQUIRED") {
       this.status.state = "error";
@@ -803,7 +845,7 @@ export class TwitchConnection {
       if (timer) clearTimeout(timer);
     this.retry = this.tick = this.hourly = null;
     this.reconcileRequested = false;
-    this.lastFollowersPollAt=null;
+    this.lastFollowersPollAt=null;this.lastCatalogPollAt=null;
     this.lastSuccessfulPollAt = null;
     for (const socket of this.sockets) socket.close();
     this.sockets.clear();

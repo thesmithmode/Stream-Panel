@@ -102,6 +102,9 @@ test('live viewer counts match exact broadcast IDs and preserve unknown for hidd
  try {
   for(const [items,expected]of [
    [[{id:'live',liveStreamingDetails:{concurrentViewers:'12'}}],12],
+   [[null],null],
+   [[5],null],
+   [[[]],null],
    [[{id:'wrong',liveStreamingDetails:{concurrentViewers:'12'}}],null],
    [[{id:'live',liveStreamingDetails:{concurrentViewers:'-1'}}],null],
    [[{id:'live',liveStreamingDetails:{concurrentViewers:''}}],null],

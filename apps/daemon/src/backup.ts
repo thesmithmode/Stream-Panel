@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import {CloudBackup} from "./cloud-backup.js";
 import { randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { mkdir, readFile, writeFile, readdir, rm, stat, statfs, lstat, rename, open } from "node:fs/promises";
@@ -203,8 +204,7 @@ export class BackupService {
       };
       if (!this.options.url) return {filename};
       try {
-        if((await stat(path)).size>maxSize)throw new Error("BACKUP_CLOUD_SIZE_LIMIT");
-        await this.upload(filename, blob ?? await readFile(path));
+        await new CloudBackup({url:this.options.url,serviceKeyFile:this.options.serviceKeyFile,bucket:this.options.bucket},this.request).uploadFile(filename,path,blob);
         const cloudSuccessAt = Date.now();
         this.status = {
           ...this.status,
@@ -229,32 +229,6 @@ export class BackupService {
       for (const path of [snapshot, snapshot + "-wal", snapshot + "-shm"])
         await rm(path, {force:true});
     }
-  }
-  private async upload(filename: string, blob: Buffer) {
-    const url = new URL(this.options.url!);
-    if (url.protocol !== "https:" || !url.hostname.endsWith(".supabase.co") || url.origin !== this.options.url || !this.options.serviceKeyFile) throw new Error("INVALID_BACKUP_REMOTE");
-    const bucket = this.options.bucket ?? "stream-panel-backups";
-    if (!/^[a-z0-9-]{1,63}$/.test(bucket)) throw new Error("INVALID_BACKUP_BUCKET");
-    const secret = (await readFile(this.options.serviceKeyFile, "utf8")).trim();
-    if (!secret) throw new Error("MISSING_BACKUP_SERVICE_KEY");
-    const call = async (path: string, method="GET", body?: BodyInit, contentType="application/json") => {
-      const response = await this.request(`${url.origin}/storage/v1/${path}`, {method, headers:{Authorization:`Bearer ${secret}`, apikey:secret, "Content-Type":contentType}, ...(body === undefined ? {} : {body}), signal:AbortSignal.timeout(60000)});
-      if (!response.ok) throw new Error("BACKUP_UPLOAD_FAILED");
-      return response;
-    };
-    const info = await (await call(`bucket/${bucket}`)).json() as {public?:boolean};
-    if (info.public !== false) throw new Error("BACKUP_BUCKET_MUST_BE_PRIVATE");
-    await call(`object/${bucket}/stream-panel/${filename}`, "POST", new Uint8Array(blob), "application/octet-stream");
-    const downloaded = await call(`object/authenticated/${bucket}/stream-panel/${filename}`);
-    const remoteBlob = Buffer.from(await downloaded.arrayBuffer());
-    if (createHash("sha256").update(remoteBlob).digest("hex") !== createHash("sha256").update(blob).digest("hex"))
-      throw new Error("BACKUP_UPLOAD_VERIFY_FAILED");
-    const listed = await (await call(`object/list/${bucket}`, "POST", JSON.stringify({prefix:"stream-panel",limit:1000,offset:0,sortBy:{column:"name",order:"desc"}}))).json() as {name:string}[];
-    if (!Array.isArray(listed)) throw new Error("BACKUP_INVALID_LIST");
-    const owned = listed.map(x => x.name).filter(x => /^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/.test(x)).sort().reverse();
-    if (!owned.includes(filename)) throw new Error("BACKUP_UPLOAD_NOT_VERIFIED");
-    const remove = owned.slice(3).map(name => `stream-panel/${name}`);
-    if (remove.length) await call(`object/${bucket}`,"DELETE",JSON.stringify({prefixes:remove}));
   }
   async stop() { await this.active?.catch(() => {}); }
 }

@@ -215,9 +215,11 @@ export class DonationAlertsConnection {
     init: RequestInit = {},
     retried = false,
   ): Promise<unknown> {
+    const generation=this.generation;
     const task = this.httpTail.then(async () => {
       const wait = 1100 - (Date.now() - this.lastRequest);
       if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      if(generation!==this.generation)throw new Error('DA_AUTH_CANCELLED');
       this.lastRequest = Date.now();
       const headers = new Headers(init.headers);
       headers.set("Authorization", `Bearer ${this.config.value.daAccessToken}`);
@@ -232,8 +234,10 @@ export class DonationAlertsConnection {
       () => {},
     );
     const response = await task;
+    if(generation!==this.generation)throw new Error('DA_AUTH_CANCELLED');
     if (response.status === 401 && !retried) {
       await this.refresh();
+      if(generation!==this.generation)throw new Error("DA_AUTH_CANCELLED");
       return this.api(path, init, true);
     }
     if (response.status === 429) {
@@ -309,9 +313,9 @@ export class DonationAlertsConnection {
     );
     socket.on("pong", touch);
     socket.on("message", (frame) => {
+      if (this.stopped || generation !== this.generation || socket !== this.socket) return;
       touch();
       void (async () => {
-        if (this.stopped || generation !== this.generation) return;
         for (const line of frame.toString().split("\n").filter(Boolean)) {
           const message = object(parse(line));
           if (message.error) throw new Error("DA_CENTRIFUGO_ERROR");
@@ -359,21 +363,17 @@ export class DonationAlertsConnection {
           }
           const donation = findDonation(message);
           if (donation) {
+            await this.db.call('providerSnapshot','donationalerts',this.recipient,'donation_notification',message,Date.now());
+            if(this.stopped||generation!==this.generation)return;
+            const event=normalizeDonation(donation,this.recipient,'centrifugo',this.config.value.daUtcOffsetMinutes);
             const active = await this.db.call<{id:string;started_at_ms:number} | null>("activeLogicalStream");
-            if (!active || this.stopped || generation !== this.generation) return;
-            const result = await this.db.call(
-              "ingestLiveDonation",
-              normalizeDonation(
-                donation,
-                this.recipient,
-                "centrifugo",
-                this.config.value.daUtcOffsetMinutes,
-              ), active.id, true,
-            );
+            if (this.stopped || generation !== this.generation) return;
+            const result = active&&event.occurredAtMs===null?await this.db.call('ingestLiveDonation',event,active.id,true):await this.db.call('ingest',event);
+            if(this.stopped||generation!==this.generation)return;
             if(result)this.status.lastEventAt = Date.now();
           }
         }
-      })().catch((error) => this.report(error));
+      })().catch((error) => {if(!this.stopped&&generation===this.generation)this.report(error);});
     });
     socket.on("close", () => {
       clearTimeout(deadline);
@@ -384,6 +384,7 @@ export class DonationAlertsConnection {
       }
     });
     socket.on("error", () => {
+      if (this.stopped || generation !== this.generation || socket !== this.socket) return;
       this.status.capabilities.realtime = "Ошибка WebSocket";
     });
   }
@@ -412,6 +413,8 @@ export class DonationAlertsConnection {
           await this.api(`alerts/donations?page=${page}`),
         );
         if (this.stopped || generation !== this.generation) return;
+        await this.db.call('providerSnapshot','donationalerts',this.recipient,'donation_history_page',{page,response},Date.now());
+        if(this.stopped||generation!==this.generation)return;
         if (!Array.isArray(response.data))
           throw new Error("INVALID_DA_HISTORY");
         let pageAllKnown = response.data.length > 0;
@@ -451,6 +454,7 @@ export class DonationAlertsConnection {
         this.status.detail = "REST работает; realtime не подтверждён";
       }
     } catch (error) {
+      if(this.stopped||generation!==this.generation)return;
       this.status.capabilities.history = "Ошибка импорта";
       throw error;
     }

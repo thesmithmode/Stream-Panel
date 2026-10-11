@@ -67,16 +67,6 @@
     } catch (e) { reportFailure(e); }
     finally { busy = false; }
   }
-  async function logout() {
-    try {
-      await api("auth/logout", {});
-      epoch++; authorized = false; user = null; status = null;
-      sessions = []; people = []; events = []; personId = sessionFilter = "";
-      summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
-      setCsrf(""); setDataMode("real"); dataMode = "real";
-      tab="overview";clearScope();saveRoute(true);error = "";
-    } catch (e) { reportFailure(e); }
-  }
   function isConfirmedPlatformUrl(entry: { platform: string; url: string }): boolean {
     try {
       const url = new URL(entry.url);
@@ -223,7 +213,6 @@
         <p>{descriptions[tab]}</p>
       </div>
       <div class="inline" style="justify-content:flex-end">
-        {#if authorized && user}<button class="outline" onclick={logout}>Выйти</button>{/if}
         {#if authorized}<div class="mode-toggle" role="group" aria-label="Режим данных">
             <button
               type="button"

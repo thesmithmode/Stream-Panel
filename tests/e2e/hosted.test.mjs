@@ -77,7 +77,9 @@ test("two browser accounts see only their own data; logout in demo revokes the r
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
       await page.setViewportSize({width:1280,height:800});
       await page.getByRole("button", { name: "Демо", exact: true }).click();
-      await page.getByRole("button", { name: "Выйти", exact: true }).click();
+      assert.equal(await page.getByRole("button", { name: "Выйти", exact: true }).count(),0);
+      await page.evaluate(async()=>{const {csrf}=await fetch("/api/v1/auth/me").then(r=>r.json());await fetch("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},body:"{}"});});
+      await page.reload();
       await page.getByRole("heading", { name: "Вход в Stream Panel" }).waitFor();
       assert.equal(await page.evaluate(() => fetch("/api/v1/events").then((r) => r.status)), 401);
       assert.deepEqual(errors, []);
@@ -129,7 +131,9 @@ test("profile switch reloads all views, preserves other clients and remains visi
     await a.reload();
     await a.getByLabel("Профиль", { exact: true }).waitFor();
     assert.equal(await a.getByLabel("Профиль", { exact: true }).inputValue(), "gulnaz");
-    await a.getByRole("button", { name: "Выйти", exact: true }).click();
+    assert.equal(await a.getByRole("button", { name: "Выйти", exact: true }).count(),0);
+    await a.evaluate(async()=>{const {csrf}=await fetch("/api/v1/auth/me").then(r=>r.json());await fetch("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},body:"{}"});});
+    await a.reload();
     await a.getByRole("heading", { name: "Вход в Stream Panel" }).waitFor();
     assert.equal(await a.evaluate(() => fetch("/api/v1/events").then(r => r.status)), 401);
     for (const page of pages) await saveCoverage(page);

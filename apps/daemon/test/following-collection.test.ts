@@ -17,7 +17,7 @@ test('Twitch followers paginate, preserve dates, throttle, distinguish truncated
  for(const mode of ['ok','fallback','missing-scope','invalid','missing-id','loop','partial','network','cancel-request','cancel-store','cancel-final','cancel-error','negative-date']){
   let valid=true,requests=0;const writes:any[]=[];
   const config={value:{twitchClientId:'client123',twitch:{access:'fixture',userId:'owner',scopes:mode==='missing-scope'?[]:['moderator:read:followers']}},save:async()=>{}} as unknown as Configuration;
-  const db={call:async(method:string,...args:any[])=>{writes.push([method,...args]);if(mode==='cancel-store')valid=false;}} as unknown as StoreClient;
+  const db={call:async(method:string,...args:any[])=>{if(method==='providerSnapshot')return;writes.push([method,...args]);if(mode==='cancel-store')valid=false;}} as unknown as StoreClient;
   const request:typeof fetch=async input=>{
    const url=new URL(String(input));assert.equal(url.searchParams.get('broadcaster_id'),'owner');assert.equal(url.searchParams.get('first'),'100');requests++;
    if(mode==='cancel-error'){valid=false;throw new Error('offline');}if(mode==='network')throw new Error('offline');if(mode==='cancel-request')valid=false;
@@ -39,7 +39,7 @@ test('YouTube subscriber collection paginates and stores available subscribers w
   const config={value:{youtube:tokens},save:async()=>{}} as unknown as Configuration;
   const db={call:async(method:string,...args:any[])=>{
    if(method==='youtubeQuota')return true;if(method==='youtubeData'){if(mode==='cancel-read')valid=false;return {snapshots:mode==='cached'?{'cursor:followers':{updatedAt:at}}:{}};}
-   writes.push([method,...args]);if(mode==='cancel-store')valid=false;
+   if(method==='providerSnapshot')return;writes.push([method,...args]);if(mode==='cancel-store')valid=false;
   }} as unknown as StoreClient;
   const request:typeof fetch=async input=>{
    const url=new URL(String(input));assert.equal(url.searchParams.get('mySubscribers'),'true');requests++;
