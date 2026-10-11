@@ -7,7 +7,7 @@
  import EventList from './EventList.svelte';
  import Help from './Help.svelte';
  import type {ChartMetric} from './chart-series';
- let metric=$state<ChartMetric>('observed');
+ let metric=$state<ChartMetric>('viewers');
  let {events,onPerson,onStream,connect}:{events:Event[];onPerson:(id:string)=>void;onStream:(id:string)=>void;connect:()=>void}=$props();
  const local=(at:number)=>{const d=new Date(at);return new Date(at-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
  let from=$state(local(Date.now()-30*86400000)),to=$state(local(Date.now())),data=$state<any>(null),error=$state(''),busy=$state(false),filter=$state('all'),endNow=$state(true);
@@ -34,7 +34,7 @@ onMount(()=>{const timer=setInterval(()=>{if(endNow&&!busy)void refresh();},6000
   <div class="metric"><div><span>Ядро аудитории</span><strong>{data.summary.core}</strong></div></div>
   <div class="metric"><div><span>Донаты</span>{#each Object.entries(totals) as [currency,amount]}<strong>{money(amount,currency)}</strong>{:else}<strong>—</strong>{/each}</div></div>
  </section>
- <section class="panel"><header><h2>Аудитория в чате <Help id="channel-presence" label="О данных аудитории" text="Twitch показывает наблюдения присутствия, YouTube — активность сообщений. Эти сигналы не подтверждают просмотр видео. Нажмите столбец, чтобы увидеть участников; неизвестные периоды не считаются нулём."/></h2><label>Метрика графика<select bind:value={metric}><option value="observed">Участники Twitch</option><option value="estimated">Оценка YouTube</option><option value="messages">Сообщения</option><option value="viewers">Счётчик площадки</option></select></label></header><AudienceChart points={data.timeline} audience={data.audience} {metric} resolution={0} {onPerson}/></section>
+ <section class="panel"><header><h2>Аудитория в чате <Help id="channel-presence" label="О данных аудитории" text="Twitch показывает наблюдения присутствия, YouTube — активность сообщений. Эти сигналы не подтверждают просмотр видео. Нажмите столбец, чтобы увидеть участников; неизвестные периоды не считаются нулём."/></h2><label>Метрика графика<select bind:value={metric}><option value="observed">Участники Twitch</option><option value="estimated">Оценка YouTube</option><option value="messages">Сообщения</option><option value="viewers">Зрители · все площадки</option><option value="participants">Участники чата · все площадки</option><option value="twitchViewers">Зрители Twitch</option><option value="youtubeViewers">Зрители YouTube</option></select></label></header><AudienceChart points={data.timeline} audience={data.audience} {metric} resolution={0} {onPerson}/></section>
  <AudienceRanking people={data.audience} {onPerson}/>
  <section class="panel"><header><h2>Стримы за период</h2></header><div class="stream-list">{#each [...data.streamComparison].reverse() as stream}<button class="outline stream" onclick={()=>onStream(stream.id)}><span>{stream.title||'Стрим'}</span><span class="small muted">{date(stream.startedAt)} · {stream.messages} сообщений</span></button>{:else}<p class="muted">Стримов за этот период нет</p>{/each}</div></section>
 {/if}

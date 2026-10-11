@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {application,seed} from '../helpers/application.mjs';
 import {launchBrowser} from '../helpers/browser.mjs';
-import {startCoverage,saveCoverage,goto} from '../helpers/browser-coverage.mjs';
+import {startCoverage,saveCoverage,goto,reload} from '../helpers/browser-coverage.mjs';
 
 test('person notes support mobile CRUD and return 409 without losing a stale draft', {timeout:60000},async()=>{
  const app=await application();let browser;
@@ -11,7 +11,7 @@ test('person notes support mobile CRUD and return 409 without losing a stale dra
   const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(10000);
   await startCoverage(page);await goto(page,app.bootstrap());
   await page.getByRole('button',{name:'Люди',exact:true}).click();
-  await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();
+  await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();await page.getByRole('tab',{name:'Заметки и метки',exact:true}).click();
   const section=page.getByRole('region',{name:'Заметки о человеке'});
   await section.getByLabel('Новая заметка').fill('Первая заметка\nВторая строка');
   await section.getByRole('button',{name:'Добавить заметку',exact:true}).click();
@@ -32,8 +32,8 @@ test('person notes support mobile CRUD and return 409 without losing a stale dra
   await section.getByLabel('Текст заметки').fill('Исправленная заметка');
   await section.getByRole('button',{name:'Сохранить заметку',exact:true}).click();
   await section.locator('.note-body').filter({hasText:'Исправленная заметка'}).waitFor();
-  await page.reload();await page.getByRole('button',{name:'Люди',exact:true}).click();
-  await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();
+  await reload(page);await page.getByRole('button',{name:'Люди',exact:true}).click();
+  await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();await page.getByRole('tab',{name:'Заметки и метки',exact:true}).click();
   await section.locator('.note-body').filter({hasText:'Исправленная заметка'}).waitFor();
   await page.screenshot({path:'/tmp/sp-notes-mobile.png',fullPage:true});
   await section.getByRole('button',{name:'Удалить заметку',exact:true}).click();

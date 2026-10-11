@@ -46,7 +46,7 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
   assert.equal((await streams.locator('tbody tr td').nth(5).textContent()).trim(),'0 / 0 / —');
   assert.equal((await streams.locator('tbody tr td').nth(6).textContent()).trim(),'— / —');
   assert.equal((await streams.locator('tbody tr td').nth(7).textContent()).trim(),'— / —');
-  await page.getByRole('button',{name:person.name,exact:true}).click();
+  await page.getByRole('button',{name:`Интервалы ${person.name}`,exact:true}).click();
   await page.getByRole('heading',{name:`Активность: ${person.name}`,exact:true}).waitFor();
   await page.locator('.minute-dot.unknown').first().waitFor();
   assert.equal(await page.locator('.minute-dot.unknown').count(),1440);

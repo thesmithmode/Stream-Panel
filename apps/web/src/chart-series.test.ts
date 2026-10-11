@@ -28,7 +28,7 @@ test('YouTube estimate segments remain bounded by the total and tolerate legacy 
 
 test('known legacy sample without the selected metric contributes a zero instead of NaN',()=>{
  const [point]=chartSeries([{at:0,presenceKnown:true}],'observed');
- assert.deepEqual(point,{at:0,known:true,isBreak:false,value:0,regularValue:0,width:60000});
+ assert.deepEqual(point,{followerValue:0,at:0,known:true,isBreak:false,value:0,regularValue:0,width:60000});
 });
 
  test('requested chart resolution aggregates accurately and caps long periods',()=>{
@@ -38,7 +38,7 @@ test('known legacy sample without the selected metric contributes a zero instead
  assert.equal(chartSeries(points,'messages',5)[0]?.regularValue,3);
  assert.equal(chartSeries(points,'messages',1).length,2);
  const long=Array.from({length:129600},(_,i)=>({at:i*60000,messages:1}));
- assert.ok(chartSeries(long,'messages',1).length<=601);
+ assert.ok(chartSeries(long,'messages',1).every(p=>p.width<=300000));
  assert.equal(chartSeries(points,'messages',NaN)[0]?.width,60000);
  });
 

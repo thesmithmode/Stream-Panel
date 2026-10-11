@@ -66,10 +66,11 @@ test("person notes and donation reassignment preserve revisions and expose no im
     const donation = { personId: person.id, amount: "4.25", currency: "RUB", occurredAtMs: now, message: "manual", sourceName: "cash" };
     const made = await post("/api/v1/donations", donation);
     assert.equal(made.statusCode, 200, made.body);
-    const updated = await post(`/api/v1/donations/${encodeURIComponent(made.json().id)}/update`, { ...donation, personId: second.id, occurredAtMs: null, revision: 0 });
+    const updated = await post(`/api/v1/donations/${encodeURIComponent(made.json().id)}/assign`, { personId: second.id, revision: 0 });
     assert.equal(updated.statusCode, 200, updated.body);
     assert.equal(updated.json().personId, second.id);
-    assert.equal(updated.json().occurredAtMs, null);
+    assert.equal(updated.json().occurredAtMs, now);
+    assert.equal(updated.json().amountMinor,"425");
   } finally { await f.close(); }
 });
 

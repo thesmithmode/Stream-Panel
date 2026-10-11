@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {application,seed} from '../helpers/application.mjs';
 import {launchBrowser} from '../helpers/browser.mjs';
-import {startCoverage,saveCoverage,goto} from '../helpers/browser-coverage.mjs';
+import {startCoverage,saveCoverage,goto,reload} from '../helpers/browser-coverage.mjs';
 
 test('tags and manual core work on mobile, persist, reject stale changes and agree with analytics',{timeout:60000},async()=>{
  const app=await application();let browser;
@@ -10,7 +10,7 @@ test('tags and manual core work on mobile, persist, reject stale changes and agr
   await seed(app);browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(10000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await startCoverage(page);await goto(page,app.bootstrap());
-  const open=async()=>{await page.getByRole('button',{name:'Люди',exact:true}).click();await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();};
+  const open=async()=>{await page.getByRole('button',{name:'Люди',exact:true}).click();await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();await page.getByRole('tab',{name:'Заметки и метки',exact:true}).click();};
   await open();const form=page.getByRole('region',{name:'Метки человека'});
   await form.getByLabel('Новый тег').fill('Друг');await form.getByRole('button',{name:'Добавить тег',exact:true}).click();
   await form.getByLabel('Ядро аудитории',{exact:true}).selectOption('include');
@@ -37,7 +37,7 @@ test('tags and manual core work on mobile, persist, reject stale changes and agr
   await form.getByLabel('Ядро аудитории',{exact:true}).selectOption('auto');
   const reset=page.waitForResponse(r=>r.url().endsWith('/metadata')&&r.request().method()==='POST'&&r.status()===200);
   await form.getByRole('button',{name:'Сохранить метки',exact:true}).click();await reset;
-  await page.reload();await open();await form.getByLabel('Ядро аудитории',{exact:true}).waitFor();
+  await reload(page);await open();await form.getByLabel('Ядро аудитории',{exact:true}).waitFor();
   assert.equal(await form.getByLabel('Ядро аудитории',{exact:true}).inputValue(),'auto');assert.deepEqual((await app.db.call('personMetadata',person.id)).tags,[]);
   await page.screenshot({path:'/tmp/sp-metadata-mobile.png',fullPage:true});
   await page.setViewportSize({width:1280,height:800});await page.screenshot({path:'/tmp/sp-metadata-desktop.png',fullPage:true});

@@ -32,10 +32,10 @@
     session?:Session|undefined;
   } = $props();
   let audienceData=$state<any>(null),audienceError=$state(''),audienceBusy=$state(false),barOpen=$state(false);
-  let audienceMetric=$state<ChartMetric>('twitchViewers');
-  const viewers=$derived(audienceData?.streamComparison?.[0]?.viewers?.twitch);
+  let audienceMetric=$state<ChartMetric>('viewers');
+  const viewers=$derived(audienceData?.streamComparison?.[0]?.viewers?.all);
   const youtubeViewers=$derived(audienceData?.streamComparison?.[0]?.viewers?.youtube);
-  const lastViewers=$derived(audienceData?.timeline?.findLast((p:any)=>p.twitchViewers!=null)?.twitchViewers);
+  const lastViewers=$derived(audienceData?.timeline?.findLast((p:any)=>p.viewers!=null)?.viewers);
   const decimal=(n:number)=>n.toLocaleString('ru-RU',{maximumFractionDigits:1});
   let metadata=$state<Array<{at:number;title:string;categoryName:string}>>([]);
   let audienceRequest=0,lastAudienceSession='';
@@ -96,7 +96,7 @@
   function coverageLabel() {
     const c = summary.coverage;
     if (!c || c.ratio === null) return "—";
-    return `${Math.round(c.ratio * 100)}% (${decimal(c.knownMinutes)}/${decimal(c.totalMinutes)} мин)`;
+    return `${Math.round(c.ratio * 100)}%`;
   }
 </script>
 {#if session}<section class="panel stream-facts">
@@ -123,7 +123,7 @@
   <div class="metric">
     <span class="teal"><Icon name="people" size={27} /></span>
     <div>
-      <span>Среднее число зрителей Twitch</span><strong>{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'Нет замеров'}</strong>
+      <span>Среднее число зрителей</span><strong>{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'Нет замеров'}</strong>
       {#if viewers?.peak!=null}<small>Максимум: {viewers.peak}</small>{/if}
       {#if lastViewers!=null}<small>Последний замер: {lastViewers}</small>{/if}
     </div>
@@ -146,13 +146,13 @@
 <section class="metrics secondary-metrics">
   <div class="metric">
     <div>
-      <span>Писали в чате</span><strong
-        >{(summary.participants?.length ?? 0).toLocaleString("ru-RU")}</strong
+      <span>Участники чата</span><strong
+        >{(audienceData?.summary?.chatters ?? summary.participants?.length ?? 0).toLocaleString("ru-RU")}</strong
       >
-      <small>Уникальные авторы сообщений</small>
+
     </div>
   </div>
-  <div class="metric"><div><span>Людей в чате Twitch за стрим</span><strong>{summary.uniquePersonsObserved??'Нет опросов'}</strong><small>Уникальные люди по опросам чата, не зрители видео</small></div></div>
+  <div class="metric"><div><span>Замечены в чате</span><strong>{audienceData?.summary?.attendees??summary.uniquePersonsObserved??'Нет наблюдений'}</strong></div></div>
   <div class="metric"><div>
       <span>Полнота наблюдений</span><strong>{coverageLabel()}</strong>
       {#if (summary.gapCount ?? 0) > 0}<small class="gap-badge"
@@ -193,9 +193,9 @@
   </div>
 </section>
 <section class="panel series-panel">
-  <header><label>График<select aria-label="Показатель графика стрима" bind:value={audienceMetric}><option value="twitchViewers">Зрители Twitch</option><option value="youtubeViewers">Зрители YouTube</option><option value="observed">Люди в чате Twitch</option><option value="estimated">Активность чата YouTube</option><option value="messages">Сообщения</option></select></label><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Поэтому 10 зрителей и 4 ника в чате возможны одновременно. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2></header>
+  <header><label>График<select aria-label="Показатель графика стрима" bind:value={audienceMetric}><option value="viewers">Зрители · все площадки</option><option value="participants">Участники · все площадки</option><option value="twitchViewers">Зрители Twitch</option><option value="youtubeViewers">Зрители YouTube</option><option value="observed">Люди в чате Twitch</option><option value="estimated">Активность чата YouTube</option><option value="messages">Сообщения</option></select></label><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Поэтому 10 зрителей и 4 ника в чате возможны одновременно. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2></header>
   {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceData}
-    <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric={audienceMetric} resolution={1} showRegulars={false} {onPerson} onselection={(open)=>barOpen=open}/>
+    <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric={audienceMetric} resolution={1} showRegulars={true} {onPerson} onselection={(open)=>barOpen=open}/>
   {:else}<p class="empty-small" role="status">{audienceBusy?'Загружаем график…':'Выберите стрим'}</p>{/if}
 </section>
 <AudienceRanking people={audienceData?.audience??[]} {onPerson} showIntervals/>

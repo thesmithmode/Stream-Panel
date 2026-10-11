@@ -276,10 +276,10 @@ test(
       await page.getByLabel("Фильтр событий").selectOption("chat.message");
       assert.equal(await page.locator(".event-row").count(), 8);
       await page.locator(".event-title button").first().click();
-      await page.getByLabel("Имя группы").waitFor();
+      await page.getByRole("tab", {name:"Аккаунты",exact:true}).click();await page.getByLabel("Имя группы").waitFor();
       await page.getByRole("button", { name: "Стримы", exact: true }).click();
       await page.getByRole("button", { name: "Открыть", exact: true }).click();
-      await page.getByRole("button", {name:"К списку стримов",exact:true}).waitFor();
+      assert.equal(await page.getByRole("button", {name:"К списку стримов",exact:true}).count(),0);
       assert.equal(await page.getByLabel("Период аналитики").count(), 0);
       await page.getByLabel("Фильтр событий").selectOption("donation");
       await page.getByText("Событий этого типа нет", { exact: true }).waitFor();

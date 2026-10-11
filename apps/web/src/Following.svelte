@@ -29,10 +29,8 @@
   </article>{:else}<p class="muted">Нет связанных аккаунтов Twitch или YouTube.</p>{/each}
  {:else}
   {#if data.polls.length||data.newFollowers.length}<p>Новых подписок за стрим: <strong>{data.newFollowers.length}</strong></p>{:else}<p class="muted">Данных о подписках за этот стрим пока нет.</p>{/if}
-  {#if data.polls.length}<div class="follow-chart" aria-label="Число подписчиков по проверкам">{#each data.polls as poll}<div class="follow-poll"><span>{platform(poll.source)} · {date(poll.at)}</span><meter min="0" max={Math.max(1,...data.polls.map((p:any)=>p.total))} value={poll.total} aria-label={`${platform(poll.source)} ${poll.total}`}></meter><strong>{poll.total}{poll.source==='youtube'?' · доступных':''}{poll.complete?'':' · частично'}</strong></div>{/each}</div>{/if}
+  {#if data.polls.length}<details><summary>История числа подписчиков</summary><ul>{#each data.polls as poll}<li>{platform(poll.source)} · {date(poll.at)} · {poll.total}{poll.complete?'':' · частично'}</li>{/each}</ul></details>{/if}
   {#if data.newFollowers.length}<ul>{#each data.newFollowers as follower}<li>{platform(follower.source)} · {#if follower.personId}<button class="text-button" onclick={()=>onPerson(follower.personId)}>{follower.name}</button>{:else}{follower.name}{/if} · {date(follower.at)}</li>{/each}</ul>{/if}
  {/if}
 </section>
-<style>
- .following{margin-bottom:16px}.follow-platform{padding:8px 0}h4{margin:4px 0}dl{margin:8px 0}dl>div{display:grid;grid-template-columns:minmax(120px,1fr) 2fr;gap:10px;margin:8px 0}dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}.follow-chart{display:grid;gap:8px;max-height:240px;overflow:auto}.follow-poll{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:center}.follow-poll span{font-size:12px}meter{width:100%;min-width:0}ul{padding-left:20px}@media(max-width:600px){dl>div{grid-template-columns:1fr}.follow-poll{grid-template-columns:1fr auto}.follow-poll span{grid-column:1/-1}}
-</style>
+<style>.following{margin-bottom:16px}.follow-platform{padding:8px 0}h4{margin:4px 0}dl{margin:8px 0}dl>div{display:grid;grid-template-columns:minmax(120px,1fr) 2fr;gap:10px;margin:8px 0}dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}ul{padding-left:20px;max-height:200px;overflow:auto}summary{cursor:pointer}@media(max-width:600px){dl>div{grid-template-columns:1fr}}</style>

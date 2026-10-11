@@ -22,9 +22,12 @@
     type DataMode,
     type Session,
     type Person,
+    money,
     type Summary,
     type Event,
   } from "./api";
+  import {sessionGroup} from "./session-group";
+  import {formatDuration} from "./duration";
   let tab = $state("overview"),
     authorized = $state(false),
     loading = $state(true),
@@ -123,7 +126,7 @@
     }
   }
   function navigate(next:string,person='') {
-    epoch++;if(next==='overview')sessionFilter='';tab=next;personId=person;clearScope();saveRoute();
+    epoch++;if(next==='overview'||next==='people'||next==='analytics')sessionFilter='';tab=next;personId=person;clearScope();saveRoute();
     window.scrollTo({top:0,behavior:'instant'});void action(async()=>{});
   }
   function openPerson(id:string){navigate('people',id);}
@@ -145,7 +148,7 @@
   onMount(() => {
     let alive=true,initializing=false;
     const update=()=>{if(!alive||document.hidden||!navigator.onLine)return;if(!authorized){void initialize();return;}const current=epoch;void refresh().catch(e=>{if(current!==epoch||!alive)return;if(['LOGIN_REQUIRED','LOCAL_LOGIN_REQUIRED'].includes(e.message)){epoch++;authorized=false;people=[];events=[];sessions=[];clearScope();}reportFailure(e);});};
-    const timer=setInterval(update,5000);
+    const timer=setInterval(update,15000);
     async function initialize() {
       if(initializing)return;initializing=true;
       restoreRoute();setDataMode("real");
@@ -206,7 +209,7 @@
       <Icon name="arrow" size={17} />
     </div>
   </aside>
-  <main>
+  <main class:people-page={tab==='people'}>
     <div class="page-heading">
       <div>
         <h1>{titles[tab]}</h1>
@@ -248,7 +251,7 @@
           Режим <strong>Демо</strong>: показаны фикстуры. Запись в SQLite и
           secrets.json отключена.
         </p>{/if}
-      {#key `${profile}:${dataMode}:${tab}:${sessionFilter}:${personId}`}
+      {#key `${profile}:${dataMode}:${tab}:${sessionFilter}`}
       {#if !scopeReady}<div class="panel empty" role="status">Загружаем данные…</div>{:else}
       {#if tab === "people"}{#if sessions.length}<div
             class="session-picker"
@@ -268,7 +271,7 @@
             >
           </div>{/if}{/if}
       {#if tab === "overview"}<ChannelOverview {events} onPerson={openPerson} onStream={id=>{sessionFilter=id;navigate("stream");}} connect={()=>navigate("connections")} />
-      {:else if tab === "stream"}<button class="outline" onclick={()=>navigate("sessions")}>К списку стримов</button><Overview session={sessions.find(s=>s.id===sessionFilter)}
+      {:else if tab === "stream"}<Overview session={sessions.find(s=>s.id===sessionFilter)}
           {summary}
           {events}
           {sessionFilter}
@@ -284,7 +287,6 @@
         <YouTube mode={dataMode} />
       {:else if tab === "people"}<People
           {people}
-          {sessions}
           {sessionFilter}
           initialId={personId}
           onSelect={(id)=>{personId=id;saveRoute();}}
@@ -303,16 +305,16 @@
               <table>
                 <thead
                   ><tr
-                    ><th>Период · МСК</th><th>Площадки</th
-                    ><th>Название и ссылка</th><th>События</th><th></th></tr
+                    ><th>Период · МСК</th><th>Длительность</th><th>Площадки</th
+                    ><th>Название и ссылка</th><th>Зрители · пик / среднее</th><th>Донаты</th><th>События</th><th></th></tr
                   ></thead
                 ><tbody
-                  >{#each sessions as session}<tr data-session-id={session.id}
+                  >{#each sessions as session,index}{#if index===0||sessionGroup(session.started_at_ms)!==sessionGroup(sessions[index-1]!.started_at_ms)}<tr class="session-group"><th colspan="8">{sessionGroup(session.started_at_ms)}</th></tr>{/if}<tr data-session-id={session.id}
                       > <td>{streamRange(session.started_at_ms,session.ended_at_ms)}
                         {#each session.breaks??[] as pause}<small>Перерыв: {streamRange(pause.from,pause.to)}</small>{/each}
                         {#if session.end_quality==='estimated'}<small>Граница приблизительная</small>{/if}
                         </td
-                      ><td class="platform-labels"
+                      ><td>{formatDuration((session.durationMs??((session.ended_at_ms??Date.now())-session.started_at_ms))/60000)}</td><td class="platform-labels"
                         >{session.platforms?.length
                           ? session.platforms.map((platform) => platform === "twitch" ? "Twitch" : "YouTube").join(", ")
                           : "Источник неизвестен"}</td
@@ -322,7 +324,7 @@
                           <a href={entry.url} target="_blank" rel="noopener noreferrer">{entry.platform === "twitch" ? "Twitch" : "YouTube"}</a>
                         {/each}
                       </td
-                      ><td>{session.event_count}</td><td
+                      ><td>{session.viewerPeak??'—'} / {session.viewerMean==null?'—':session.viewerMean.toLocaleString('ru-RU',{maximumFractionDigits:1})}</td><td>{#each Object.entries(session.donationTotals??{}) as [currency,amount]}<div>{money(amount,currency)}</div>{:else}—{/each}<small>{session.donationCount??0} донатов</small></td><td>{session.event_count}</td><td
                         ><button
                           class="outline small"
                           onclick={() =>

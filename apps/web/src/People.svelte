@@ -4,13 +4,14 @@
     date,
     money,
     type Person,
-    type Session,
     type Event,
     type PersonStats,
     type PersonTop,
   } from "./api";
   import { formatDuration } from "./duration";
   import EventList from "./EventList.svelte";
+  import PersonActivity from "./PersonActivity.svelte";
+  import {untrack} from "svelte";
   import Icon from "./Icon.svelte";
   import Help from "./Help.svelte";
   import PersonNotes from "./PersonNotes.svelte";
@@ -19,21 +20,18 @@
   import PersonMetadata from "./PersonMetadata.svelte";
   let {
     people,
-    sessions,
     sessionFilter = "",
     initialId = "",
     onChange,
     onSelect,
   }: {
     people: Person[];
-    sessions: Session[];
     sessionFilter?: string;
     initialId?: string;
     onSelect:(id:string)=>void;
     onChange: () => Promise<void>;
   } = $props();
-  let createOpen=$state(false),newPersonName=$state("");
-  async function createPerson(){await operation(async()=>{const person=await api<{id:string}>("persons",{name:newPersonName});createOpen=false;newPersonName="";await select(person.id);});}
+  let detailTab=$state("activity"),showFollowing=$state(false);
   let search = $state(""),
     selectedId = $state(""),
     detail = $state<any>(null),
@@ -43,13 +41,9 @@
     target = $state(""),
     selectedIdentities = $state<string[]>([]),
     splitName = $state(""),
-    gridSession = $state(""),
-    grid = $state<{ minuteStartMs: number; state: string }[]>([]),
-    gridLoaded = $state(false),
     merges = $state<any[]>([]),
     candidates = $state<string[]>([]),
     busy = $state(false),
-    minute = $state<number | null>(null),
     sortBy = $state<"default" | "messages" | "donations" | "observed_minutes">(
       "default",
     ),
@@ -118,16 +112,6 @@
       cancelled = true;
     };
   });
-  let minuteEvents = $state<Event[]>([]);
-  async function selectMinute(at: number) {
-    minute = at;
-    minuteEvents = [];
-    await operation(async () => {
-      minuteEvents = await api(
-        `events?person=${selectedId}&session=${gridSession}&from=${at}&to=${at + 60000}`,
-      );
-    });
-  }
   async function loadStats(id: string) {
     const q = sessionFilter ? `?session=${sessionFilter}` : "";
     const value = await api<PersonStats>(`persons/${id}/stats${q}`);
@@ -145,17 +129,14 @@
     stats = null;
     detail = null;
     try {
-      const [person, matches] = await Promise.all([api(`persons/${id}`),api<string[]>(`persons/${id}/candidates`)]);
+      const [person, matches,metrics] = await Promise.all([api(`persons/${id}`),api<string[]>(`persons/${id}/candidates`),api<PersonStats>(`persons/${id}/stats${sessionFilter ? `?session=${sessionFilter}` : ""}`)]);
       if (selectedId !== id) return;
       detail = person;
       name = detail.display_name;
       selectedIdentities = [];
       target = "";
-      grid = [];
-      gridLoaded = false;
-      minute = null;
       candidates = matches;
-      await loadStats(id);
+      stats=metrics;
     } catch (e) {
       if (selectedId === id) error = (e as Error).message;
     }
@@ -188,21 +169,8 @@
     });
     await select(other.id);
   }
-  async function loadGrid() {
-    if (!gridSession || !selectedId) return;
-    const s = sessions.find((x) => x.id === gridSession)!;
-    const start = Math.floor(s.started_at_ms / 60000) * 60000;
-    const end = Math.ceil((s.ended_at_ms ?? Date.now()) / 60000) * 60000;
-    if (end - start > 31 * 86400000)
-      throw new Error("Выберите сессию короче 31 дня");
-    grid = await api(
-      `presence?session=${gridSession}&person=${selectedId}&from=${start}&to=${end}`,
-    );
-    gridLoaded = true;
-    minute = null;
-  }
   $effect(() => {
-    if (initialId) void select(initialId);
+    if (initialId) untrack(()=>{if(selectedId!==initialId)void select(initialId);});
   });
   $effect(() => {
     // reload stats when session filter changes while a person is open
@@ -230,9 +198,8 @@
   <section class="panel">
     <header>
       <h2>Люди</h2>
-      <button class="outline small" disabled={busy} onclick={()=>createOpen=!createOpen}>Добавить человека</button>
+
     </header>
-    {#if createOpen}<form class="new-person" onsubmit={e=>{e.preventDefault();void createPerson();}}><label>Имя человека<input bind:value={newPersonName} required maxlength="200" disabled={busy}/></label><button class="primary" disabled={busy}>Создать человека</button><button type="button" class="outline" disabled={busy} onclick={()=>createOpen=false}>Отмена</button></form>{/if}
     <div class="tops-tabs" role="tablist" aria-label="Сортировка людей">
       {#each [
         ["default", "Все"],
@@ -330,7 +297,9 @@
           {/if}
 
         </div>{/if}
-      <div class="settings-body">
+      <div class="person-tabs" role="tablist" aria-label="Разделы человека">{#each [["activity","Активность"],["donations","Донаты"],["notes","Заметки и метки"],["accounts","Аккаунты" ]] as const as [key,label]}<button role="tab" aria-selected={detailTab===key} class:active={detailTab===key} onclick={()=>detailTab=key}>{label}</button>{/each}</div>
+      <div class="settings-body person-scroll">
+      {#if detailTab==='accounts'}
         <label
           >Имя группы
           <div class="inline">
@@ -345,13 +314,8 @@
             >
           </div></label
         >
-        {#key detail.id}
-          <Following personId={detail.id} sessionId={sessionFilter} onPerson={onSelect} />
-          <PersonMetadata personId={detail.id} onChange={()=>refreshPerson(detail.id)} />
-          <PersonDonations personId={detail.id} {people} onChange={()=>detail?refreshPerson(detail.id):Promise.resolve()} />
-          <PersonNotes personId={detail.id} />
-        {/key}
-        <h3>Связанные аккаунты <Help id="person-identities-help" label="О связях аккаунтов" text="Здесь собраны аккаунты одного человека. Совпадение имени служит подсказкой для проверки. YouTube связывается вручную; выбранный аккаунт можно разъединить, сохранив события." /></h3>
+
+        <h3>Связанные аккаунты <Help id="person-identities-help" label="О связях аккаунтов" text="Здесь собраны аккаунты одного человека. Совпадающие никнеймы связываются автоматически. При неоднозначном совпадении выберите человека вручную; выбранный аккаунт можно разъединить, сохранив события." /></h3>
         {#each detail.identities as identity}<label class="identity-row"
             ><input
               type="checkbox"
@@ -400,51 +364,6 @@
             Все события и наблюдения этих групп будут связаны. Содержимое
             событий сохранится; отмена доступна ниже.
           </p>{/if}
-        <h3>Наблюдения по минутам</h3>
-        <div class="inline">
-          <select aria-label="Сессия наблюдений" bind:value={gridSession}
-            ><option value="">Выберите сессию…</option
-            >{#each sessions as session}<option value={session.id}
-                >{date(session.started_at_ms)}</option
-              >{/each}</select
-          ><button
-            class="outline"
-            disabled={busy || !gridSession}
-            onclick={() => operation(loadGrid)}>Показать</button
-          >
-        </div>
-        {#if grid.length}<div class="legend">
-            <span><i class="observed"></i>Наблюдался</span><span
-              ><i class="not_observed"></i>Не наблюдался</span
-            ><span><i class="unknown"></i>Нет данных</span><span><i class="break"></i>Перерыв</span>
-          </div>
-          <div class="minute-grid">
-            {#each grid as cell}<button
-                class={cell.state}
-                aria-label={`${date(cell.minuteStartMs)}: ${cell.state}`}
-                title={`${date(cell.minuteStartMs)}: ${cell.state}`}
-                onclick={() => selectMinute(cell.minuteStartMs)}
-              ></button>{/each}
-          </div>
-          <p class="small muted">
-            {grid.filter((c) => c.state === "observed").length} минут с наблюдением
-            в чате · {grid.filter((c) => ['observed','not_observed'].includes(c.state))
-              .length}/{grid.filter(c=>c.state!=='break').length} минут с полным опросом
-          </p>
-          {#if minute !== null}<p class="small">
-              Выбрана минута: {date(minute)}. Показаны доступные события этой
-              минуты.
-            </p>{/if}
-        {:else if gridLoaded}
-          <p class="empty-small presence-empty">нет данных — эфир не идёт</p>
-        {/if}
-        <h3>События</h3>
-        <EventList
-          events={minute === null ? (detail.events as Event[]) : minuteEvents}
-        />
-      </div>{/if}
-  </section>
-</div>
 {#if merges.length}<section class="panel audit">
     <header><h2>История связей</h2></header>
     {#each merges as merge}<div class="capability">
@@ -458,11 +377,26 @@
           onclick={() =>
             operation(async () => {
               await api(`${merge.kind === "split" ? "splits" : "merges"}/${merge.id}/undo`, {});
-              detail = null;
+              await select(selectedId);
             })}>Отменить</button
         >
       </div>{/each}
   </section>{/if}
+      {:else if detailTab==='donations'}
+       <PersonDonations personId={detail.id} {people} onChange={()=>refreshPerson(detail.id)} />
+      {:else if detailTab==='notes'}
+       <PersonMetadata personId={detail.id} onChange={()=>refreshPerson(detail.id)} />
+       <PersonNotes personId={detail.id} />
+      {:else}
+       <PersonActivity personId={detail.id} />
+       <details bind:open={showFollowing}><summary>Подписки и первые наблюдения</summary><Following personId={detail.id} onPerson={onSelect} /></details>
+       <details><summary>Последние события</summary><EventList events={detail.events as Event[]} onPerson={onSelect}/></details>
+      {/if}
+      </div>{/if}
+  </section>
+</div>
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 
-<style>.new-person{display:grid;gap:.7rem;padding:1rem;}.new-person label{display:grid;gap:.4rem;}.new-person input{min-width:0;max-width:100%;box-sizing:border-box;}</style>
+<style>
+.people-grid{height:calc(100dvh - 230px);min-height:360px;}.people-grid>section{min-height:0;display:flex;flex-direction:column;overflow:hidden;margin-bottom:0;}.people-list{min-height:0;flex:1;max-height:none;}.person-scroll{min-height:0;overflow-y:auto;flex:1;}.person-tabs{display:flex;gap:.4rem;padding:.6rem 1rem;border-bottom:1px solid var(--border);flex-wrap:wrap;}.person-tabs button{background:transparent;border:0;padding:.5rem .7rem;}.person-tabs button.active{background:#292438;color:var(--accent);}.person-detail .kpi-strip{padding:12px 16px;gap:12px;}.person-detail .kpi span{font-size:11px;}.person-detail .kpi strong{font-size:18px;}@media(max-width:760px){.people-grid{height:auto;min-height:0;}.people-grid>section{overflow:visible;}.people-list{max-height:260px;}.person-scroll{overflow:visible;}}
+</style>

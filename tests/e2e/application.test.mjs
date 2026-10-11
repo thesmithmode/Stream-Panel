@@ -83,6 +83,7 @@ test(
         .filter({ hasText: "Тестовый зритель" })
         .first()
         .click();
+      await page.getByRole("tab",{name:"Аккаунты",exact:true}).click();
       await page.getByLabel("Целевой человек").selectOption(da.id);
       await page
         .getByRole("button", { name: "Объединить", exact: true })
@@ -133,15 +134,10 @@ test(
       );
       await page.getByLabel("Поиск человека").fill("");
       checks.push("historical alias search after group rename");
-      const sessions = await page.evaluate(() =>
-        fetch("/api/v1/sessions").then((r) => r.json()),
-      );
-      await page.getByLabel("Сессия наблюдений").selectOption(sessions[0].id);
-      await page.getByRole("button", { name: "Показать", exact: true }).click();
-      await page.locator(".minute-grid button").first().waitFor();
-      await page.locator(".minute-grid button").first().click();
-      await page.getByText("Выбрана минута:", { exact: false }).waitFor();
-      checks.push("presence grid and persisted minute event query");
+      await page.getByRole('tab',{name:'Активность',exact:true}).click();
+      await page.getByLabel('Активность человека по часам').waitFor();
+      assert.equal(await page.getByLabel('Сессия наблюдений').count(),0);
+      checks.push('person activity is visual and session grid is absent');
 
       await a.db.call("endSession", sessionId, Date.now(), "observed");
       await reload(page);

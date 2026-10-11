@@ -13,13 +13,13 @@ test('stream scope never flashes channel totals, reload/back retain the route an
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   let bootstrapRequests=0;await page.route('**/api/v1/bootstrap',async route=>{bootstrapRequests++;const response=await route.fetch();await route.fulfill({response,status:502,json:{}});});
   await startCoverage(page);await goto(page,app.bootstrap());
-  await page.getByRole('button',{name:'Стримы',exact:true}).waitFor();assert.equal(bootstrapRequests,1);assert.equal(new URL(page.url()).hash,'');
+  await page.getByRole('button',{name:'Стримы',exact:true}).waitFor();assert.equal(bootstrapRequests,1);await page.waitForFunction(()=>location.hash==='');assert.equal(new URL(page.url()).hash,'');
   await page.getByRole('button',{name:'Стримы',exact:true}).click();
   await page.route('**/api/v1/summary?*',async route=>{await new Promise(r=>setTimeout(r,400));await route.continue();});
   await page.locator(`tr[data-session-id="${id}"]`).getByRole('button',{name:'Открыть',exact:true}).click();
   assert.ok(!(await page.locator('main').textContent()).includes('12 000'));
-  await page.getByText('Нет донатов',{exact:true}).waitFor();await page.getByText('Среднее число зрителей Twitch',{exact:true}).waitFor();
-  assert.equal(await page.getByText('Среднее число зрителей Twitch',{exact:true}).locator('..').locator('strong').textContent(),'10');
+  await page.getByText('Нет донатов',{exact:true}).waitFor();await page.getByText('Среднее число зрителей',{exact:true}).waitFor();
+  assert.equal(await page.getByText('Среднее число зрителей',{exact:true}).locator('..').locator('strong').textContent(),'10');
   assert.ok(!/\d\.\d{5}/.test(await page.getByText('Полнота наблюдений',{exact:true}).locator('..').textContent()));
   await reload(page);await page.getByText('Нет донатов',{exact:true}).waitFor();assert.ok(new URL(page.url()).searchParams.get('stream')===id);
   const ranking=page.getByRole('region',{name:'Рейтинг участников'});await ranking.getByRole('button',{name:'Viewer',exact:true}).click();await page.getByRole('heading',{name:'Viewer',exact:true}).waitFor();

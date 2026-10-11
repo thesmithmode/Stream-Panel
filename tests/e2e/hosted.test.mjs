@@ -7,7 +7,7 @@ import net from "node:net";
 import { AccountStore } from "../../dist/apps/daemon/src/auth.js";
 import { createHostedApplication } from "../../dist/apps/daemon/src/hosted.js";
 import { launchBrowser } from "../helpers/browser.mjs";
-import { goto, saveCoverage } from "../helpers/browser-coverage.mjs";
+import { goto, saveCoverage, reload } from "../helpers/browser-coverage.mjs";
 
 test("two browser accounts see only their own data; logout in demo revokes the real session", { timeout: 30000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), "sp-hosted-browser-"));
@@ -79,7 +79,7 @@ test("two browser accounts see only their own data; logout in demo revokes the r
       await page.getByRole("button", { name: "Демо", exact: true }).click();
       assert.equal(await page.getByRole("button", { name: "Выйти", exact: true }).count(),0);
       await page.evaluate(async()=>{const {csrf}=await fetch("/api/v1/auth/me").then(r=>r.json());await fetch("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},body:"{}"});});
-      await page.reload();
+      await reload(page);
       await page.getByRole("heading", { name: "Вход в Stream Panel" }).waitFor();
       assert.equal(await page.evaluate(() => fetch("/api/v1/events").then((r) => r.status)), 401);
       assert.deepEqual(errors, []);

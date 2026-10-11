@@ -360,27 +360,28 @@ test('donation API enforces auth, CSRF, strict exact-money payloads and optimist
   for(const body of [{...input,amount:12.34},{...input,amount:'1e3'},{...input,amount:'12.345'},{...input,currency:'XXX'},{...input,occurredAtMs:null},{...input,extra:true}])assert.equal((await post('/api/v1/donations',body)).statusCode,400);
   const made=await post('/api/v1/donations',input);assert.equal(made.statusCode,200);assert.equal(made.json().amountMinor,'1234');
   const id=encodeURIComponent(made.json().id);
-  const updated=await post(`/api/v1/donations/${id}/update`,{...input,amount:'5.00',revision:0});assert.equal(updated.statusCode,200);assert.equal(updated.json().revision,1);
-  assert.equal((await post(`/api/v1/donations/${id}/delete`,{revision:0})).statusCode,409);
-  assert.equal((await post(`/api/v1/donations/${id}/delete`,{revision:1})).statusCode,200);
+  const updated=await post(`/api/v1/donations/${id}/assign`,{personId:null,revision:0});assert.equal(updated.statusCode,200);assert.equal(updated.json().revision,1);assert.equal(updated.json().amountMinor,'1234');
+  assert.equal((await post(`/api/v1/donations/${id}/assign`,{personId:input.personId,revision:0})).statusCode,409);
+  assert.equal((await post(`/api/v1/donations/${id}/assign`,{personId:input.personId,revision:1,amount:'5.00'})).statusCode,400);
+  assert.equal((await post(`/api/v1/donations/${id}/delete`,{revision:1})).statusCode,404);
+  assert.equal((await post(`/api/v1/donations/${id}/update`,{...input,revision:1})).statusCode,404);
   assert.equal((await f.a.app.inject({url:'/api/v1/donations?person=youtube%3Aauthor',headers:f.headers})).json().total,0);
-  assert.equal((await f.a.app.inject({url:'/api/v1/donations?person=youtube%3Aauthor&includeDeleted=true',headers:f.headers})).json().total,1);
-  assert.equal((await post(`/api/v1/donations/${id}/restore`,{revision:2})).json().revision,3);
-  assert.equal((await f.a.app.inject({url:`/api/v1/donations/${id}/audit`,headers:f.headers})).json().length,4);
+  assert.equal((await f.a.app.inject({url:'/api/v1/donations',headers:f.headers})).json().total,1);
+  assert.equal((await post(`/api/v1/donations/${id}/assign`,{personId:input.personId,revision:1})).json().revision,2);
+  assert.equal((await f.a.app.inject({url:`/api/v1/donations/${id}/audit`,headers:f.headers})).json().length,3);
+  assert.equal((await post('/api/v1/persons',{name:'Manual person'})).statusCode,404);
   assert.equal((await f.a.app.inject({url:'/api/v1/donations?limit=101',headers:f.headers})).statusCode,400);
   assert.equal((await f.a.app.inject({url:'/api/v1/donations?includeDeleted=yes',headers:f.headers})).statusCode,400);
  }finally{await f.close();}
 });
 
 
-test('manual Person creation is protected, strict and does not invent attendance or link same names',async()=>{
+test('manual Person creation is unavailable even to an authorized user',async()=>{
  const f=await fixture();try{
-  const post=(headers:Record<string,string>,payload:Record<string,unknown>)=>f.a.app.inject({method:'POST',url:'/api/v1/persons',headers,payload});
-  assert.equal((await post({host:f.headers.host},{name:'Manual person'})).statusCode,401);
-  assert.equal((await post({...f.headers,'x-csrf-token':'wrong'},{name:'Manual person'})).statusCode,403);
-  for(const payload of [{name:1},{name:''},{name:'   '},{name:'x',extra:true},{name:'x'.repeat(201)}])assert.equal((await post(f.headers,payload)).statusCode,400);
-  const person=(await post(f.headers,{name:' Manual person '})).json();assert.equal(person.display_name,'Manual person');assert.deepEqual(person.identities,[]);
-  assert.notEqual((await post(f.headers,{name:'Manual person'})).json().id,person.id);
-  const stats=(await f.a.app.inject({url:`/api/v1/persons/${person.id}/stats`,headers:f.headers})).json();assert.equal(stats.messageCount,0);assert.equal(stats.watchingSinceMs,null);assert.equal(stats.donationCount,0);
+  const post=(headers:Record<string,string>)=>f.a.app.inject({method:'POST',url:'/api/v1/persons',headers,payload:{name:'Manual person'}});
+  assert.equal((await post({host:f.headers.host})).statusCode,401);
+  assert.equal((await post({...f.headers,'x-csrf-token':'wrong'})).statusCode,403);
+  assert.equal((await post(f.headers)).statusCode,404);
+  assert.equal((await f.a.app.inject({url:'/api/v1/persons',headers:f.headers})).json().some((p:any)=>p.display_name==='Manual person'),false);
  }finally{await f.close();}
 });

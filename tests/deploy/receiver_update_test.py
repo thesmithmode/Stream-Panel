@@ -11,7 +11,7 @@ class ReceiverUpdateTests(unittest.TestCase):
     def run_update(self, payload, key='fixture-key'):
         source = (ROOT / '.github/workflows/deploy.yml').read_text()
         section = source.split('name: Update trusted deployment receiver without restarting collection', 1)[1]
-        block = section.split('        run: |\n', 1)[1].split('      - uses:', 1)[0]
+        block = section.split('        run: |\n', 1)[1].split('\n      - ', 1)[0]
         script = '\n'.join(line[10:] for line in block.splitlines())
         with tempfile.TemporaryDirectory() as temporary:
             folder = pathlib.Path(temporary)
