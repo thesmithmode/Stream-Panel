@@ -1,0 +1,50 @@
+name: Verify and export recovery credentials
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: stream-panel-production
+  cancel-in-progress: false
+jobs:
+  recovery:
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify actual backup and encrypt requested credentials
+        env:
+          BOOTSTRAP_KEY: ${{ secrets.STREAM_PANEL_BOOTSTRAP_KEY }}
+          DEPLOY_HOST: ${{ secrets.STREAM_PANEL_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.STREAM_PANEL_DEPLOY_PORT }}
+          KNOWN_HOSTS: ${{ secrets.STREAM_PANEL_DEPLOY_KNOWN_HOSTS }}
+          BACKUP_KEY: ${{ secrets.STREAM_PANEL_BACKUP_KEY }}
+          ACCOUNTS: ${{ secrets.STREAM_PANEL_ACCOUNTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ && "$DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]]
+          for value in "$BOOTSTRAP_KEY" "$KNOWN_HOSTS" "$BACKUP_KEY" "$ACCOUNTS"; do test -n "$value"; done
+          task_dir=$(mktemp -d)
+          trap 'rm -rf "$task_dir"' EXIT
+          printf '%s\n' "$BOOTSTRAP_KEY" > "$task_dir/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$task_dir/known-hosts"
+          mkdir "$task_dir/payload"
+          cp scripts/recovery-proof.mjs "$task_dir/payload/"
+          cp ops/recovery-recipient.pem "$task_dir/payload/recipient.pem"
+          printf '%s' "$BACKUP_KEY" > "$task_dir/payload/expected-key"
+          python3 -c 'import os,json; users=json.loads(os.environ["ACCOUNTS"]); user=next(u for u in users if u["profile"]=="gulnaz"); print(json.dumps(user))' > "$task_dir/payload/credentials.json"
+          tar -czf "$task_dir/payload.tgz" -C "$task_dir/payload" .
+          mkdir -p artifacts
+          ssh -i "$task_dir/key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$task_dir/known-hosts" -o ConnectTimeout=15 "root@$DEPLOY_HOST" 'set -eu; umask 077; task_dir=$(mktemp -d /tmp/sp-recovery.XXXXXXXX); trap '\''rm -rf "$task_dir"'\'' EXIT; tar -xzf - -C "$task_dir"; set -a; . /etc/stream-panel/server.env; set +a; cd /opt/stream-panel/current; ./bin/node "$task_dir/recovery-proof.mjs" "$task_dir" >&2; cat "$task_dir/recovery.enc.json"' < "$task_dir/payload.tgz" > artifacts/recovery.enc.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-encrypted-recovery
+          path: artifacts/recovery.enc.json
+          retention-days: 1
+          if-no-files-found: error
+      - name: Remove encrypted runner export
+        if: always()
+        run: rm -rf artifacts
