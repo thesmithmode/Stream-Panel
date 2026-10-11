@@ -24,13 +24,16 @@ if(!dir||!url||!keyFile||!serviceKeyFile){
 }
 const staging=await mkdtemp(join(dir,'cloud-verify-'));
 try{
- const ledger=JSON.parse(await readFile(join(dir,'backup-state.json'),'utf8'));
- const cloud=new CloudBackup({url,serviceKeyFile,prefix:'stream-panel/'+ledger.installationId});let filename,verified=false;
+ let filename,verified=false;
  for(let attempt=0;attempt<18;attempt++){
-  const files=(await readdir(join(dir,'backups'))).filter(x=>/^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/.test(x)).sort().reverse();filename=files[0];
-  if(!filename)throw new Error('LOCAL_BACKUP_MISSING');
-  const local=join(dir,'backups',filename),remote=join(staging,'remote.spbk');
+  const remote=join(staging,'remote.spbk');
   try{
+   // Read startup state inside the retry window: health can become ready before the first snapshot.
+   const ledger=JSON.parse(await readFile(join(dir,'backup-state.json'),'utf8'));
+   const cloud=new CloudBackup({url,serviceKeyFile,prefix:'stream-panel/'+ledger.installationId});
+   const files=(await readdir(join(dir,'backups'))).filter(x=>/^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/.test(x)).sort().reverse();filename=files[0];
+   if(!filename)throw new Error('LOCAL_BACKUP_MISSING');
+   const local=join(dir,'backups',filename);
    const age=Date.now()-(await stat(local)).mtimeMs;if(age<0||age>13*3600000)throw new Error('CLOUD_BACKUP_STALE');
    await cloud.downloadFile(filename,remote);
    if(await hashFile(local)!==await hashFile(remote))throw new Error('CLOUD_BACKUP_HASH_MISMATCH');
