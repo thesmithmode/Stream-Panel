@@ -14,7 +14,7 @@ test('a slow pre-mutation read cannot repopulate the cache or overwrite a new re
 test('failed reads are not cached; unavailable Redis falls back to SQLite',async()=>{
  const malformed=new ReadCache('not a redis URL');assert.equal(await malformed.read('key',async()=>undefined),undefined);malformed.close();const cache=new ReadCache('redis://127.0.0.1:1');await assert.rejects(cache.read('bad',async()=>{throw new Error('failure');}));assert.equal(await cache.read('bad',async()=>4),4);cache.close();
 });
-test('Redis cache handles hits, corrupt values, deadlines and bounded local eviction',async t=>{
+test('Redis cache handles hits, corrupt values, deadlines and bounded local eviction',async()=>{
  const values=new Map<string,string>();let mode='normal';const sockets=new Set<net.Socket>();
  const server=net.createServer(socket=>{
   socket.setNoDelay(true);sockets.add(socket);socket.on('close',()=>sockets.delete(socket));let buffer='';
