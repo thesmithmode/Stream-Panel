@@ -420,10 +420,6 @@ export class TwitchConnection {
     await this.config.save();
     if (generation !== this.authGeneration) throw new Error("TWITCH_AUTH_CANCELLED");
     this.status.account = string(body.login);
-    if (string(body.login) && !this.config.value.excludedBotLogins.includes(string(body.login))) {
-      this.config.value.excludedBotLogins.push(string(body.login)); await this.config.save();
-      if (generation !== this.authGeneration) throw new Error("TWITCH_AUTH_CANCELLED");
-    }
     await this.db.call(
       "ensureOwnerIdentity",
       this.token.userId,

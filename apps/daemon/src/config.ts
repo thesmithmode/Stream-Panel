@@ -1,4 +1,5 @@
 import { clampChattersPollSeconds } from "../../../packages/core/src/presence.js";
+import { normalizeBotLogin } from "../../../packages/core/src/bots.js";
 import { mkdir, readFile, rename, open, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -35,7 +36,7 @@ const defaults: Config = {
   daRefreshToken: "",
   daUtcOffsetMinutes: null,
   chattersPollSeconds: 60,
-  excludedBotLogins: ["fullrandomname_twitch", "jeetbot", "streemelements", "streamelements"],
+  excludedBotLogins: ["jeetbot", "streemelements", "streamelements"],
 };
 export function defaultDataDir(): string {
   return (
@@ -63,7 +64,8 @@ export class Configuration {
         ? this.value.excludedBotLogins
             .filter((v): v is string => typeof v === "string")
             .map((v) => v.trim())
-            .filter(Boolean)
+            // Remove the former universal self-exclusion from saved profiles.
+            .filter(v=>Boolean(v)&&normalizeBotLogin(v)!=='fullrandomname_twitch')
             .slice(0, 200)
         : [];
       this.value.excludedBotLogins = [...new Set([...defaults.excludedBotLogins,...this.value.excludedBotLogins])];

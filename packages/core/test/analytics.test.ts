@@ -18,7 +18,7 @@ test('analytics keeps owners/bots out, unions linked identities, splits categori
         s.streamSample(first, base + 5 * minute, 'talk', 'Talk', 'Switched', 15);
         const a = s.ingest(input('1', 'regular', 'Regular', base + minute));
         s.ingest(input('2', 'regular', 'Regular', base + 7 * minute));
-        for (const [id, name] of [['owner', 'RenamedOwner'], ['jeetbot', 'jeetbot'], ['self', 'fullrandomname_twitch'], ['typo', 'streemelements']])
+        for (const [id, name] of [['owner', 'RenamedOwner'], ['jeetbot', 'jeetbot'], ['self', 'streamlabs'], ['typo', 'streemelements']])
             s.ingest(input(id!, id!, name!, base + minute));
         s.recordPoll(first, 'channel', { startedAtMs: base, completedAtMs: base + minute, status: 'complete', userIds: ['regular', 'owner', 'jeetbot', 'self', 'typo'] });
         s.recordPoll(first, 'channel', { startedAtMs: base + minute, completedAtMs: base + 2 * minute, status: 'complete', userIds: ['regular'] });
@@ -136,9 +136,10 @@ test('excluded owner donations stay in raw history but never inflate summary or 
     const s = new StreamStore(':memory:');
     try {
         recordedStream(s,'channel', 'donations', base, 'platform', base);
+        s.ensureOwnerIdentity('owner','owner','fullrandomname_twitch',base);
         for (const [n, name] of ['fullrandomname_twitch', 'RealDonor'].entries())
             s.ingest({ source: 'donationalerts', accountId: 'da', externalId: String(n), type: 'donation', actor: { externalId: daDonorExternalId(name), displayName: name }, occurredAtMs: base + minute, receivedAtMs: base + minute, sourceTime: null, timeQuality: 'configured', transport: 'rest', payload: { amountMinor: '500', currency: 'RUB' } });
-        const summary = s.summary(undefined, ['fullrandomname_twitch']);
+        const summary = s.summary();
         assert.equal(summary.donations, 1);
         assert.equal((summary.totals as any).RUB, '500');
         assert.equal(s.eventCount(), 2);

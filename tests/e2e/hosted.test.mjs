@@ -25,6 +25,11 @@ test("two browser accounts see only their own data; logout in demo revokes the r
   });
   for (const profile of ["ruslan", "gulnaz"]) {
     const runtime = h.runtimes.get(profile);
+    const owner=profile==='ruslan'?'ruslan-id':'gulnaz-id',at=Date.now()-180000;
+    runtime.configuration.value.twitch={userId:owner,access:'fixture',refresh:'fixture',expiresAt:Date.now()+3600000,scopes:[]};
+    const sid=await runtime.db.call('startSession',owner,'owner-exclusion',at,'platform',at);
+    for(const [id,name] of [['ruslan-id','FullRandomName_Twitch'],['gulnaz-id','AmaliaMelina']])await runtime.db.call('ingest',{source:'twitch',accountId:owner,externalId:id,type:'chat.message',actor:{externalId:id,displayName:name},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'Viewer in the other profile'}});
+    await runtime.db.call('recordPoll',sid,owner,{startedAtMs:at,completedAtMs:at+60000,status:'complete',userIds:['ruslan-id','gulnaz-id']});await runtime.db.call('endSession',sid,at+120000);
     runtime.configuration.value.youtube = {userId: "channel",access:"fixture",refresh:"fixture",expiresAt:Date.now()+3600000,scopes:[]};
     await runtime.db.call("youtubeSnapshot", "channel", "channel", {snippet:{title:`Own ${profile}`},statistics:{subscriberCount:"10",viewCount:"100"}});
     await runtime.db.call("youtubeSnapshot", "channel", "report", {start:"2026-09-09",end:"2026-10-06",columnHeaders:[{name:"day"},{name:"views"}],rows:[["2026-10-06",profile==="ruslan"?42:17]]});
@@ -49,6 +54,9 @@ test("two browser accounts see only their own data; logout in demo revokes the r
       await page.getByText(`Private ${profile}`, { exact: true }).waitFor();
       assert.equal(await page.getByText(`Private ${profile === "ruslan" ? "gulnaz" : "ruslan"}`, { exact: true }).count(), 0);
       assert.equal(await page.title(), "Stream Panel");
+      const ownName=profile==='ruslan'?'FullRandomName_Twitch':'AmaliaMelina',guestName=profile==='ruslan'?'AmaliaMelina':'FullRandomName_Twitch';
+      await page.getByRole('button',{name:'Люди',exact:true}).click();await page.locator('.person-row').filter({hasText:guestName}).waitFor();assert.equal(await page.locator('.person-row').filter({hasText:ownName}).count(),0);
+      await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('button',{name:guestName,exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:ownName,exact:true}).count(),0);
       await page.getByRole("button", {name:"Интеграции",exact:true}).click();
       assert.equal(await page.getByRole("button",{name:"YouTube",exact:true}).count(),0);
       await page.getByRole("heading",{name:`YouTube Own ${profile}`}).waitFor();

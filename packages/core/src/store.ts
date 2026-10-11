@@ -2142,7 +2142,7 @@ export class StreamStore {
   }
 
   private analyticsExclusions(excludedBotLogins: readonly string[] = []): ReadonlySet<string> {
-    const keys=new Set(botExclusionSet(["fullrandomname_twitch",...excludedBotLogins]));
+    const keys=new Set(botExclusionSet(excludedBotLogins));
     const json=JSON.stringify([...keys]);
     const rows=this.db.prepare(`WITH excluded_people AS (
       SELECT i.person_id FROM identities i WHERE i.match_key IN(SELECT value FROM json_each(?))

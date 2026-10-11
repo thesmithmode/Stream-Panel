@@ -1140,7 +1140,7 @@ test("insights detectors surface first-timers, silent presence, donors without t
       sourceTime: "2011-03-13T07:06:40Z",
       payload: { amountMinor: "2500", currency: "RUB" },
     });
-    for (const name of ["jeetbot", "fullrandomname_twitch", "streamelements", "streemelements"]) {
+    for (const name of ["jeetbot", "streamlabs", "streamelements", "streemelements"]) {
       store.ingest({...donation, externalId: `excluded-${name}`, actor: {externalId: daDonorExternalId(name), displayName: name}, occurredAtMs: 1_300_000_100_000, timeQuality: "configured", payload: {amountMinor: "100", currency: "RUB"}});
     }
     // First-timer chatter

@@ -3,6 +3,33 @@ import assert from "node:assert/strict";
 import { botExclusionSet, isExcludedBot, normalizeBotLogin } from "../src/bots.js";
 import { StreamStore } from "../src/store.js";
 
+test('each profile excludes its own broadcaster while counting the other broadcaster as a viewer',()=>{
+ const viewers=[['ruslan-id','FullRandomName_Twitch'],['gulnaz-id','AmaliaMelina']] as const;
+ const at=Date.UTC(2026,9,11,12);
+ for(const [profile,owner,guest] of [['ruslan',viewers[0],viewers[1]],['gulnaz',viewers[1],viewers[0]]] as const){
+  const store=new StreamStore(':memory:',profile);
+  try{
+   store.ensureOwnerIdentity(owner[0],owner[0],owner[1],at);
+   const sid=store.startSession(owner[0],'stream',at,'platform',at);
+   const persons=new Map<string,string>();
+   for(const [uid,name] of [...viewers,['bot-id','Nightbot']] as const){
+    const row=store.ingest({source:'twitch',accountId:owner[0],externalId:uid,type:'chat.message',actor:{externalId:uid,displayName:name},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
+    persons.set(uid,row.personId!);
+   }
+   store.recordPoll(sid,owner[0],{startedAtMs:at,completedAtMs:at+60000,status:'complete',userIds:[owner[0],guest[0],'bot-id']});
+   store.endSession(sid,at+120000);
+   assert.deepEqual(store.persons().filter(p=>!p.is_bot).map(p=>p.display_name),[guest[1]],profile);
+   assert.equal(store.summary(sid).messages,1);
+   assert.equal(store.summary(sid).chatters,1);
+   assert.deepEqual(store.analytics({fromMs:at,toMs:at+120000,ownerId:owner[0]}).audience.map(p=>p.name),[guest[1]]);
+   assert.equal(store.personStats(persons.get(owner[0])!,sid).messageCount,0);
+   assert.equal(store.personStats(persons.get(guest[0])!,sid).messageCount,1);
+   assert.deepEqual(store.personsTop('observed_minutes',sid).map(p=>p.display_name),[guest[1]]);
+   assert.equal(store.eventCount(),3);
+  }finally{store.close();}
+ }
+});
+
 test("known bot aliases are excluded from metrics while raw events remain stored", () => {
   const exclusions = botExclusionSet(["CustomBot"]);
 
