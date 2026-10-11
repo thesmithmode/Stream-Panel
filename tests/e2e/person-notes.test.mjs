@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {application,seed} from '../helpers/application.mjs';
 import {launchBrowser} from '../helpers/browser.mjs';
 import {startCoverage,saveCoverage,goto,reload} from '../helpers/browser-coverage.mjs';
+import {assertUiLayout} from '../helpers/ui-layout.mjs';
 
 test('person notes support mobile CRUD and return 409 without losing a stale draft', {timeout:60000},async()=>{
  const app=await application();let browser;
@@ -14,8 +15,12 @@ test('person notes support mobile CRUD and return 409 without losing a stale dra
   await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();await page.getByRole('tab',{name:'Заметки и метки',exact:true}).click();
   const section=page.getByRole('region',{name:'Заметки о человеке'});
   await section.getByLabel('Новая заметка').fill('Первая заметка\nВторая строка');
+  let releaseSave;const holdSave=new Promise(resolve=>releaseSave=resolve);
+  await page.route('**/api/v1/persons/*/notes',async route=>{if(route.request().method()==='POST')await holdSave;await route.continue();});
   await section.getByRole('button',{name:'Добавить заметку',exact:true}).click();
+  assert.equal(await section.getByLabel('Новая заметка').isDisabled(),true);releaseSave();
   await section.locator('.note-body').filter({hasText:'Первая заметка'}).waitFor();
+  await page.unroute('**/api/v1/persons/*/notes');
   const person=(await app.db.call('persons')).find(p=>p.display_name==='Тестовый зритель');
   const note=(await app.db.call('personNotes',person.id))[0];
   const denied=await page.evaluate(async id=>(await fetch(`/api/v1/persons/${id}/notes`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body:'Forbidden'})})).status,person.id);
@@ -32,6 +37,7 @@ test('person notes support mobile CRUD and return 409 without losing a stale dra
   await section.getByLabel('Текст заметки').fill('Исправленная заметка');
   await section.getByRole('button',{name:'Сохранить заметку',exact:true}).click();
   await section.locator('.note-body').filter({hasText:'Исправленная заметка'}).waitFor();
+  for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:800});await assertUiLayout(page);}await page.setViewportSize({width:390,height:844});
   await reload(page);await page.getByRole('button',{name:'Люди',exact:true}).click();
   await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();await page.getByRole('tab',{name:'Заметки и метки',exact:true}).click();
   await section.locator('.note-body').filter({hasText:'Исправленная заметка'}).waitFor();
