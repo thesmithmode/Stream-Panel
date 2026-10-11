@@ -192,7 +192,7 @@ export class BackupService {
         throw new Error("BACKUP_LOCAL_VERIFY_FAILED");
       }
       const owned = (await readdir(directory)).filter(f => /^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/.test(f)).sort().reverse();
-      for (const old of owned.slice(3)) await rm(join(directory,old));
+      for (const old of owned.slice(7)) await rm(join(directory,old));
       const localSuccessAt = Date.now();
       this.status = {
         ...this.status,

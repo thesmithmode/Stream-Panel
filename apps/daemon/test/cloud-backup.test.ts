@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp,writeFile,readFile,rm,stat,open} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';import {createHash} from 'node:crypto';
 import {CloudBackup,CLOUD_PART_SIZE} from '../src/cloud-backup.js';
-const filename='stream-panel-2099-01-04T00-00-00-000Z-12345678.spbk';
+const filename='stream-panel-2099-01-08T00-00-00-000Z-12345678.spbk';
 const sha=(b:Buffer)=>createHash('sha256').update(b).digest('hex');
 test('cloud backup bounds remote bodies, validates immutable object names and rotates only owned verified archives',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-cloud-guards-')),service=join(dir,'key'),source=join(dir,'local');await writeFile(service,'fixture');await writeFile(source,'encrypted fixture');
@@ -27,7 +27,7 @@ test('cloud backup bounds remote bodies, validates immutable object names and ro
      const prefix=JSON.parse(String(init?.body)).prefix;
      if(prefix.endsWith('.parts'))return Response.json(mode==='bad-parts'?{}:[{name:'0000.part'},{name:'../unrelated'}]);
      if(mode==='invalid-list')return Response.json({});if(mode==='missing-list')return Response.json([]);
-     const names=mode==='rotate'||mode==='bad-parts'?[filename,'stream-panel-2099-01-03T00-00-00-000Z-12345678.spbk','stream-panel-2099-01-02T00-00-00-000Z-12345678.spbk',old+'.manifest.json','stream-panel-2098-12-31T00-00-00-000Z-12345678.spbk']:[filename];
+     const names=mode==='rotate'||mode==='bad-parts'?[filename,...[7,6,5,4].map(day=>`stream-panel-2099-01-0${day}T00-00-00-000Z-12345678.spbk`),'stream-panel-2099-01-03T00-00-00-000Z-12345678.spbk','stream-panel-2099-01-02T00-00-00-000Z-12345678.spbk',old+'.manifest.json','stream-panel-2098-12-31T00-00-00-000Z-12345678.spbk']:[filename];
      return Response.json([...names.map(name=>({name})),{name:'unrelated'},{name:33}]);
     }
     if(init?.method==='DELETE')deletes.push(...JSON.parse(String(init.body)).prefixes);

@@ -69,7 +69,7 @@ export class CloudBackup {
   const owned=[...new Set(listed.map((x:{name:string})=>typeof x.name==='string'?x.name.replace(/\.manifest\.json$/,''):'').filter((n:string)=>validName.test(n)))].sort().reverse() as string[];
   if(!owned.includes(filename))throw new Error('BACKUP_UPLOAD_NOT_VERIFIED');
   const remove:string[]=[];
-  for(const name of owned.slice(3)){
+  for(const name of owned.slice(7)){
    if(listed.some((x:{name:string})=>x.name===`${name}.manifest.json`)){
     const parts=JSON.parse((await this.bytes((await this.call(`object/list/${this.bucket}`,'POST',JSON.stringify({prefix:`stream-panel/${name}.parts`,limit:1000,offset:0})))!,4*1024*1024)).toString());
     if(!Array.isArray(parts))throw new Error('BACKUP_INVALID_LIST');
