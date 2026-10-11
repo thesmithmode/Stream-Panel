@@ -107,7 +107,7 @@
   <p class="small muted">Текст уведомления о начале эфира публичный Twitch API не отдаёт.</p>
  </details>
 </section>{/if}
-<section class="metrics">
+<section class="metrics stream-metrics">
   <div class="metric">
     <Icon name="chat" size={27} />
     <div>
@@ -115,7 +115,7 @@
         >{summary.messages.toLocaleString("ru-RU")}</strong
       >
       {#if summary.messagesPerMinuteOfSession != null}<small
-          >{summary.messagesPerMinuteOfSession.toLocaleString("ru-RU")} сообщ./мин
+          >{decimal(summary.messagesPerMinuteOfSession)} сообщ./мин
           эфира</small
         >{/if}
     </div>
@@ -123,7 +123,7 @@
   <div class="metric">
     <span class="teal"><Icon name="people" size={27} /></span>
     <div>
-      <span>Среднее число зрителей</span><strong>{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'Нет замеров'}</strong>
+      <span>Зрители · все площадки</span><strong>{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'Нет замеров'}</strong>
       {#if viewers?.peak!=null}<small>Максимум: {viewers.peak}</small>{/if}
       {#if lastViewers!=null}<small>Последний замер: {lastViewers}</small>{/if}
     </div>
@@ -136,13 +136,12 @@
           ? Object.entries(summary.totals)
               .map(([c, a]) => money(a, c))
               .join(" · ")
-          : "Нет донатов"}</strong
+          : "0"}</strong
       >
     </div>
   </div>
+{#if youtubeViewers?.mean!=null}<div class="metric"><div><span>Зрители YouTube · среднее</span><strong>{decimal(youtubeViewers.mean)}</strong><small>Пик: {youtubeViewers.peak}</small></div></div>{/if}
 </section>
-{#if youtubeViewers?.mean!=null}<section class="metrics"><div class="metric"><div><span>Среднее число зрителей YouTube</span><strong>{decimal(youtubeViewers.mean)}</strong><small>Максимум: {youtubeViewers.peak}</small></div></div></section>{/if}
-{#if sessionFilter}<Following sessionId={sessionFilter} {onPerson} />{/if}
 <section class="metrics secondary-metrics">
   <div class="metric">
     <div>
@@ -193,12 +192,13 @@
   </div>
 </section>
 <section class="panel series-panel">
-  <header><label>График<select aria-label="Показатель графика стрима" bind:value={audienceMetric}><option value="viewers">Зрители · все площадки</option><option value="participants">Участники · все площадки</option><option value="twitchViewers">Зрители Twitch</option><option value="youtubeViewers">Зрители YouTube</option><option value="observed">Люди в чате Twitch</option><option value="estimated">Активность чата YouTube</option><option value="messages">Сообщения</option></select></label><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Поэтому 10 зрителей и 4 ника в чате возможны одновременно. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2></header>
+  <header><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Поэтому 10 зрителей и 4 ника в чате возможны одновременно. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2><label>Показатель<select aria-label="Показатель графика стрима" bind:value={audienceMetric}><option value="viewers">Зрители · все площадки</option><option value="participants">Участники · все площадки</option><option value="twitchViewers">Зрители Twitch</option><option value="youtubeViewers">Зрители YouTube</option><option value="observed">Люди в чате Twitch</option><option value="estimated">Активность чата YouTube</option><option value="messages">Сообщения</option></select></label></header>
   {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceData}
     <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric={audienceMetric} resolution={1} showRegulars={true} {onPerson} onselection={(open)=>barOpen=open}/>
   {:else}<p class="empty-small" role="status">{audienceBusy?'Загружаем график…':'Выберите стрим'}</p>{/if}
 </section>
-<AudienceRanking people={audienceData?.audience??[]} {onPerson} showIntervals/>
+<div class="stream-details-grid"><AudienceRanking people={audienceData?.audience??[]} {onPerson} showIntervals/>
+{#if sessionFilter}<Following sessionId={sessionFilter} {onPerson} />{/if}</div>
 <div class="overview-grid">
   <section class="panel feed">
     <header>
@@ -224,4 +224,4 @@
 
 </div>
 
-<style>.overview-grid{display:block;}</style>
+<style>.overview-grid{display:block}.stream-details-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:20px;margin-bottom:20px;align-items:start}@media(max-width:900px){.stream-details-grid{grid-template-columns:1fr}}</style>

@@ -13,6 +13,7 @@ export function participantsAt(audience: SignalParticipant[], from: number, to: 
 export function timelineTicks(start: number, end: number) {
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
   const quarter = 15 * 60000;
+  if(end-start<quarter)return [start,end];
   const step = Math.max(1, Math.ceil((end - start) / quarter / 96)) * quarter;
   const ticks: number[] = [];
   for (let at = Math.ceil(start / step) * step; at < end; at += step) ticks.push(at);

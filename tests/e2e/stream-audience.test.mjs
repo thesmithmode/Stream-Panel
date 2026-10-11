@@ -27,6 +27,11 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   const rank=page.getByRole('region',{name:'Рейтинг участников'});
   await rank.getByRole('button',{name:'Silent Viewer',exact:true}).waitFor();
   assert.equal(await rank.locator('li strong').first().textContent(),'5 мин');
+  await assertUiLayout(page);
+  assert.equal(await page.evaluate(() => {
+    const panels = [...document.querySelectorAll('.stream-details-grid > .panel')].map(p => p.getBoundingClientRect());
+    return panels.length === 2 && Math.abs(panels[0].top - panels[1].top) < 1 && panels[0].right <= panels[1].left;
+  }), true, 'desktop audience and follower panels align in columns');
   assert.ok((await rank.locator('li').nth(1).textContent()).includes('3 мин'));
   assert.equal(await rank.getByRole('button',{name:'Other Stream Viewer',exact:true}).count(),0);
   assert.equal(await rank.getByRole('button',{name:'streamelements',exact:true}).count(),0);
@@ -53,6 +58,11 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   assert.equal(await detail.getByRole('button',{name:'Silent Viewer',exact:true}).count(),0);
   await page.getByRole('button',{name:'Закрыть детализацию',exact:true}).click();
   await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(() => {
+    const nav = [...document.querySelectorAll('.sidebar nav button')].map(b => b.getBoundingClientRect());
+    const cards = [...document.querySelectorAll('.stream-metrics .metric')].map(c => c.getBoundingClientRect());
+    return nav.length === 5 && nav.every(b => Math.abs(b.top - nav[0].top) < 1) && cards.length >= 2 && Math.abs(cards[0].top-cards[1].top)<1;
+  }), true, 'mobile navigation occupies one row and metrics use two columns');
   await bars.first().click();await detail.waitFor();
   await detail.getByRole('button',{name:'О детализации минуты',exact:true}).click();
   const help=page.getByRole('dialog',{name:'О детализации минуты'});await help.waitFor();

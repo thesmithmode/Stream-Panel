@@ -18,12 +18,12 @@ test('stream scope never flashes channel totals, reload/back retain the route an
   await page.route('**/api/v1/summary?*',async route=>{await new Promise(r=>setTimeout(r,400));await route.continue();});
   await page.locator(`tr[data-session-id="${id}"]`).getByRole('button',{name:'Открыть',exact:true}).click();
   assert.ok(!(await page.locator('main').textContent()).includes('12 000'));
-  await page.getByText('Нет донатов',{exact:true}).waitFor();await page.getByText('Среднее число зрителей',{exact:true}).waitFor();
-  assert.equal(await page.getByText('Среднее число зрителей',{exact:true}).locator('..').locator('strong').textContent(),'10');
+  await page.locator('.stream-metrics .metric').filter({hasText:'Донаты'}).getByText('0',{exact:true}).waitFor();await page.getByText('Зрители · все площадки',{exact:true}).waitFor();
+  assert.equal(await page.getByText('Зрители · все площадки',{exact:true}).locator('..').locator('strong').textContent(),'10');
   assert.ok(!/\d\.\d{5}/.test(await page.getByText('Полнота наблюдений',{exact:true}).locator('..').textContent()));
-  await reload(page);await page.getByText('Нет донатов',{exact:true}).waitFor();assert.ok(new URL(page.url()).searchParams.get('stream')===id);
+  await reload(page);await page.locator('.stream-metrics .metric').filter({hasText:'Донаты'}).getByText('0',{exact:true}).waitFor();assert.ok(new URL(page.url()).searchParams.get('stream')===id);
   const ranking=page.getByRole('region',{name:'Рейтинг участников'});await ranking.getByRole('button',{name:'Viewer',exact:true}).click();await page.getByRole('heading',{name:'Viewer',exact:true}).waitFor();
-  await page.goBack();await page.getByText('Нет донатов',{exact:true}).waitFor();await page.goBack();await page.getByRole('heading',{name:'История стримов',exact:true}).waitFor();await page.goForward();await page.getByText('Нет донатов',{exact:true}).waitFor();
+  await page.goBack();await page.locator('.stream-metrics .metric').filter({hasText:'Донаты'}).getByText('0',{exact:true}).waitFor();await page.goBack();await page.getByRole('heading',{name:'История стримов',exact:true}).waitFor();await page.goForward();await page.locator('.stream-metrics .metric').filter({hasText:'Донаты'}).getByText('0',{exact:true}).waitFor();
   await page.locator('.trend-plot svg').first().waitFor();
   const layout=await page.locator('.trend-plot').first().evaluate(el=>{const svg=el.querySelector('svg'),box=svg.getBoundingClientRect();el.scrollLeft=1000;return {viewport:innerWidth,width:el.clientWidth,scrollWidth:el.scrollWidth,scrollLeft:el.scrollLeft,svgLeft:box.left,svgRight:box.right,barsFit:[...svg.querySelectorAll('.chart-bar rect')].every(bar=>{const r=bar.getBoundingClientRect();return r.left>=box.left-1&&r.right<=box.right+1;})};});
   assert.ok(layout.svgLeft>=0&&layout.svgRight<=layout.viewport&&layout.barsFit,JSON.stringify(layout));assert.equal(layout.scrollLeft,0,JSON.stringify(layout));assert.ok(layout.scrollWidth<=layout.width+1,JSON.stringify(layout));
@@ -33,7 +33,7 @@ test('stream scope never flashes channel totals, reload/back retain the route an
   await context.setOffline(true);await page.evaluate(()=>window.dispatchEvent(new Event('offline')));await page.getByText('Связь прервана. Показываем последние загруженные данные.',{exact:true}).waitFor();
   assert.ok(!(await page.locator('main').textContent()).includes('Failed to fetch'));
   await context.setOffline(false);await page.evaluate(()=>window.dispatchEvent(new Event('online')));await page.waitForFunction(()=>!document.body.textContent.includes('Связь прервана.'));
-  await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.goBack();await page.getByText('Нет донатов',{exact:true}).waitFor();assert.equal(await page.getByLabel('Профиль',{exact:true}).isEnabled(),true);
+  await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.goBack();await page.locator('.stream-metrics .metric').filter({hasText:'Донаты'}).getByText('0',{exact:true}).waitFor();assert.equal(await page.getByLabel('Профиль',{exact:true}).isEnabled(),true);
   assert.deepEqual(errors,[]);await saveCoverage(page,'navigation-resilience');
  }finally{await browser?.close();await app.close();}
 });

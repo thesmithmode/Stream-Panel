@@ -14,3 +14,8 @@ test('stream timeline aligns to quarter hours, includes missing-data periods and
  assert.deepEqual(timelineTicks(10,10),[]);
  assert.deepEqual(timelineTicks(NaN,10),[]);
 });
+
+test('short stream timelines retain readable start and end labels',()=>{
+ assert.deepEqual(timelineTicks(19*60000,29*60000),[19*60000,29*60000]);
+ assert.deepEqual(timelineTicks(0,60000),[0,60000]);
+});

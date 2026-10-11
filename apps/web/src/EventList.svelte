@@ -25,7 +25,7 @@
   {#each events as event (event.id)}
     <article class="event-row">
       <div class:donation={event.type === "donation"} class="event-symbol">
-        {event.type === "donation" ? "DA" : "TW"}
+        {event.source === "donationalerts" ? "DA" : event.source === "youtube" ? "YT" : "TW"}
       </div>
       <div class="event-body">
         <div class="event-title">
