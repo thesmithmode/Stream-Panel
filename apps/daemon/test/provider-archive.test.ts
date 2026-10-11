@@ -93,3 +93,34 @@ test('retired Twitch and DA sockets cannot change status or recreate keepalive t
   }finally{socket.close();await c.stop();}
  }
 });
+test('Twitch does not return an obsolete API result when disconnected during raw archive persistence',async()=>{
+ const at=Date.now();let c:TwitchConnection,writes=0;
+ const config={value:{twitchClientId:'id',twitch:{access:'fixture',expiresAt:at+3600000,userId:'owner',scopes:[]}},save:async()=>{}} as unknown as Configuration;
+ const db={call:async()=>{writes++;await c.stop();}} as unknown as StoreClient;
+ c=new TwitchConnection(config,db,async()=>Response.json({data:[]}));
+ try{await assert.rejects(c.api('channels'),/TWITCH_AUTH_CANCELLED/);assert.equal(writes,1);}finally{await c.stop();}
+});
+test('YouTube resumes final metadata collection from a durable cursor after cancellation or unavailable responses',async()=>{
+ for(const mode of ['register-cancel','metadata-cancel','archive-cancel','network','malformed','old-array','old-string']){
+  const at=Date.now(),snapshots:Record<string,any>={channel:{updatedAt:at},report:{updatedAt:at},'cursor:followers':{updatedAt:at},broadcasts:{data:[{id:'finished'}]},'cursor:archivedVideos':{data:mode==='old-array'?[]:mode==='old-string'?'legacy':{ids:[],checkedAt:0}}};
+  let yt:YouTubeConnection,first=true,calls=0;const writes:string[]=[];
+  const config={value:{youtube:{access:'fixture',refresh:'r',expiresAt:at+3600000,userId:'channel',scopes:[]}},save:async()=>{}} as unknown as Configuration;
+  const db={call:async(method:string,...args:any[])=>{
+   if(method==='youtubeQuota')return true;if(method==='youtubeData')return {snapshots};writes.push(`${method}:${args[1]}`);
+   if(method==='youtubeSnapshot')snapshots[args[1]]={data:args[2],updatedAt:at};
+   if(first&&((mode==='register-cancel'&&method==='youtubeSnapshot'&&args[1]==='cursor:archivedVideos')||(mode==='archive-cancel'&&method==='youtubeSnapshot'&&args[1]==='archivedVideoDetails')||(mode==='metadata-cancel'&&method==='providerSnapshot'&&args[2]==='api:videos')))await yt.stop();
+  }} as unknown as StoreClient;
+  const request:typeof fetch=async input=>{
+   if(String(input).includes('/liveBroadcasts'))return Response.json({items:[]});calls++;
+   if(first&&mode==='network')throw new Error('unavailable');return Response.json(first&&mode==='malformed'?{}:{items:[{id:'finished',statistics:{viewCount:'500'},future_field:'retained'}]});
+  };
+  yt=new YouTubeConnection(config,db,'https://panel.test/callback','ruslan',request,()=>at);
+  try{
+   await yt.collectOnce();assert.deepEqual(snapshots['cursor:archivedVideos'].data.ids,['finished']);
+   if(mode.endsWith('-cancel')||['network','malformed'].includes(mode))assert.equal(snapshots['cursor:archivedVideos'].data.checkedAt,0);
+   if(['network','malformed'].includes(mode))assert.ok(writes.includes('gap:archived_video_metadata_unavailable'));
+   if(mode==='register-cancel')assert.equal(calls,0);
+   await yt.stop();first=false;yt=new YouTubeConnection(config,db,'https://panel.test/callback','ruslan',request,()=>at);await yt.collectOnce();assert.equal(snapshots['cursor:archivedVideos'].data.checkedAt,at);assert.equal(snapshots.archivedVideoDetails.data[0].statistics.viewCount,'500');
+  }finally{await yt.stop();}
+ }
+});
