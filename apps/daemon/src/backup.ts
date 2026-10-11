@@ -67,6 +67,12 @@ export class BackupService {
         this.ledger={version:1,installationId:randomBytes(16).toString('hex'),uploaded:[],pending,attempts:0,retryAt:0};
         await this.save();
       }
+      // Recover archives published just before a crash interrupted queue registration.
+      let found:string[]=[];
+      try{found=(await readdir(join(this.dir,'backups'),{withFileTypes:true})).filter(e=>e.isFile()&&backupFilename.test(e.name)).map(e=>e.name);}
+      catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+      const known=new Set([...this.ledger!.uploaded,...this.ledger!.pending]),unregistered=found.filter(name=>!known.has(name));
+      if(unregistered.length){this.ledger!.pending.push(...unregistered);await this.save();}
       this.status.pendingUploads=this.ledger!.pending.length;this.status.nextRetryAt=this.ledger!.retryAt;
       if(this.ledger!.local){this.status.local=this.ledger!.local;this.status.filename=this.status.local.filename;this.status.lastSuccessAt=this.status.local.lastSuccessAt;}
       if(this.options.url&&this.ledger!.cloud)this.status.cloud=this.ledger!.cloud;

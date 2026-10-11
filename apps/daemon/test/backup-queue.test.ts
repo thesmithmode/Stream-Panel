@@ -46,3 +46,15 @@ test('corrupt queue metadata is reported and never overwritten; unrelated files 
   const backup=new BackupService(dir,{keyFile:join(dir,'key')});await backup.retryPending();assert.equal(await readFile(join(dir,'backups','unrelated'),'utf8'),'keep');await backup.stop();
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+test('restart recovers an archive published before its queue registration and protects it from retention',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-queue-publication-')),auth=new AccountStore(join(dir,'data.sqlite'));await writeFile(join(dir,'key'),randomBytes(32).toString('hex'));
+ try{
+  const first=new BackupService(dir,{keyFile:join(dir,'key')}),result=await first.run();await first.stop();
+  const blob=await readFile(join(dir,'backups',result.filename));
+  const orphan='stream-panel-2000-01-01T00-00-00-000Z-deadbeef.spbk';await writeFile(join(dir,'backups',orphan),blob);
+  const ledger=JSON.parse(await readFile(join(dir,'backup-state.json'),'utf8'));ledger.pending=[];ledger.uploaded=[result.filename];await writeFile(join(dir,'backup-state.json'),JSON.stringify(ledger));
+  const restarted=new BackupService(dir,{keyFile:join(dir,'key')});await restarted.purgeLocal();
+  assert.equal(restarted.status.pendingUploads,1);assert.deepEqual(await readFile(join(dir,'backups',orphan)),blob);
+  const recovered=JSON.parse(await readFile(join(dir,'backup-state.json'),'utf8'));assert.deepEqual(recovered.pending,[orphan]);await restarted.stop();
+ }finally{auth.close();await rm(dir,{recursive:true,force:true});}
+});
