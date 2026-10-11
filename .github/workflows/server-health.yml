@@ -22,9 +22,15 @@ jobs:
           DEPLOY_HOST: ${{ secrets.STREAM_PANEL_DEPLOY_HOST }}
           DEPLOY_PORT: ${{ secrets.STREAM_PANEL_DEPLOY_PORT }}
           KNOWN_HOSTS: ${{ secrets.STREAM_PANEL_DEPLOY_KNOWN_HOSTS }}
+          SUPABASE_URL: ${{ vars.STREAM_PANEL_SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.STREAM_PANEL_SUPABASE_KEY }}
         run: |
           set -euo pipefail
           umask 077
+          cloud_url=false; cloud_key=false
+          test -z "$SUPABASE_URL" || cloud_url=true
+          test -z "$SUPABASE_KEY" || cloud_key=true
+          printf 'cloud_ci_url_configured=%s cloud_ci_key_configured=%s\n' "$cloud_url" "$cloud_key"
           test -n "$BOOTSTRAP_KEY" && test -n "$KNOWN_HOSTS"
           [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ && "$DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]]
           task_dir=$(mktemp -d)

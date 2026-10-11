@@ -150,7 +150,7 @@
   }
   onMount(() => {
     let alive=true,initializing=false;
-    const update=()=>{if(!alive||busy||initializing||document.hidden||!navigator.onLine)return;if(!authorized)return;const current=epoch;void refresh().catch(e=>{if(current!==epoch||!alive)return;if(['LOGIN_REQUIRED','LOCAL_LOGIN_REQUIRED'].includes(e.message)){epoch++;authorized=false;people=[];events=[];sessions=[];clearScope();}reportFailure(e);});};
+    const update=()=>{if(!alive||busy||initializing||document.hidden||!navigator.onLine)return;if(!authorized){if(connectionLost&&!username&&!password)void initialize();return;}const current=epoch;void refresh().catch(e=>{if(current!==epoch||!alive)return;if(['LOGIN_REQUIRED','LOCAL_LOGIN_REQUIRED'].includes(e.message)){epoch++;authorized=false;people=[];events=[];sessions=[];clearScope();}reportFailure(e);});};
     const timer=setInterval(update,15000);
     async function initialize() {
       if(initializing||busy)return;initializing=true;

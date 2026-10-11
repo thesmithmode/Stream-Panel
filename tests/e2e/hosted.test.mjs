@@ -43,6 +43,7 @@ test("two browser accounts see only their own data; logout in demo revokes the r
       const context = await browser.newContext(); contexts.push(context);
       const page = await context.newPage(); page.setDefaultTimeout(5000);
       const errors = []; page.on("pageerror", (e) => errors.push(e.message));
+      await page.clock.install();
       await goto(page, origin);
       await page.getByRole("heading", { name: "Вход в Stream Panel" }).waitFor();
       await page.getByLabel("Логин", { exact: true }).fill(profile);
@@ -52,12 +53,13 @@ test("two browser accounts see only their own data; logout in demo revokes the r
       let authPolls = 0;
       const trackAuth = request => { if (request.url().includes('/api/v1/status')) authPolls++; };
       page.on('request', trackAuth);
+      await page.clock.fastForward(16000);
       await page.evaluate(() => {
         window.dispatchEvent(new Event('focus'));
         document.dispatchEvent(new Event('visibilitychange'));
       });
       await page.waitForTimeout(200);
-      assert.equal(authPolls, 0, 'unauthenticated focus must not restart initialization');
+      assert.equal(authPolls, 0, 'unauthenticated timer and focus must not restart initialization');
       assert.equal(await loginInput.evaluate(input => input.isConnected && input === document.activeElement), true);
       assert.equal(await page.getByLabel("Пароль", { exact: true }).inputValue(), "bad");
       page.off('request', trackAuth);

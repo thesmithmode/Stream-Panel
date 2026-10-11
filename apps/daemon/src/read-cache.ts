@@ -1,6 +1,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {createClient} from 'redis';
-/** Derived data only. SQLite remains authoritative; a Redis outage never blocks collection. */
+/** Redis outlives the short local cache; every write invalidates both via versioned keys.
+ * Derived data only. SQLite remains authoritative; a Redis outage never blocks collection. */
 export class ReadCache {
  private readonly prefix=`sp:${randomUUID()}:`;
  private version=0;
@@ -30,7 +31,7 @@ export class ReadCache {
     if(this.local.size>=128)this.local.delete(this.local.keys().next().value!);
     this.local.set(cacheKey,{until:Date.now()+3000,value:structuredClone(value)});
     const raw=JSON.stringify(value);
-    if(this.redis?.isReady&&raw!==undefined&&Buffer.byteLength(raw)<=2_000_000)void this.redis.set(redisKey,raw,{PX:3000}).catch(()=>{});
+    if(this.redis?.isReady&&raw!==undefined&&Buffer.byteLength(raw)<=2_000_000)void this.redis.set(redisKey,raw,{PX:30000}).catch(()=>{});
    }
    return value;
   })();

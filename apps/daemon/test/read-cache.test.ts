@@ -14,8 +14,8 @@ test('a slow pre-mutation read cannot repopulate the cache or overwrite a new re
 test('failed reads are not cached; unavailable Redis falls back to SQLite',async()=>{
  const malformed=new ReadCache('not a redis URL');assert.equal(await malformed.read('key',async()=>undefined),undefined);malformed.close();const cache=new ReadCache('redis://127.0.0.1:1');await assert.rejects(cache.read('bad',async()=>{throw new Error('failure');}));assert.equal(await cache.read('bad',async()=>4),4);cache.close();
 });
-test('Redis cache handles hits, corrupt values, deadlines and bounded local eviction',async()=>{
- const values=new Map<string,string>();let mode='normal';const sockets=new Set<net.Socket>();
+test('Redis cache handles hits, corrupt values, deadlines and bounded local eviction',async t=>{
+ const values=new Map<string,string>(),expires=new Map<string,number>();let mode='normal';const sockets=new Set<net.Socket>();
  const server=net.createServer(socket=>{
   socket.setNoDelay(true);sockets.add(socket);socket.on('close',()=>sockets.delete(socket));let buffer='';
   socket.on('data',chunk=>{buffer+=chunk.toString();for(;;){
@@ -23,8 +23,8 @@ test('Redis cache handles hits, corrupt values, deadlines and bounded local evic
    const count=Number(buffer.slice(1,header));let at=header+2;const parts:string[]=[];
    for(let i=0;i<count;i++){const end=buffer.indexOf('\r\n',at);if(end<0)return;const length=Number(buffer.slice(at+1,end));at=end+2;if(buffer.length<at+length+2)return;parts.push(buffer.slice(at,at+length));at+=length+2;}
    buffer=buffer.slice(at);const command=parts[0]!.toUpperCase();
-   if(command==='GET'){if(mode==='timeout')continue;const value=mode==='corrupt'?'invalid JSON':values.get(parts[1]!);socket.write(value===undefined?'$-1\r\n':`$${Buffer.byteLength(value)}\r\n${value}\r\n`);}
-   else {if(command==='SET')values.set(parts[1]!,parts[2]!);socket.write('+OK\r\n');}
+   if(command==='GET'){if(mode==='timeout')continue;const value=mode==='corrupt'?'invalid JSON':(expires.get(parts[1]!)!>Date.now()?values.get(parts[1]!):undefined);socket.write(value===undefined?'$-1\r\n':`$${Buffer.byteLength(value)}\r\n${value}\r\n`);}
+   else {if(command==='SET'){values.set(parts[1]!,parts[2]!);expires.set(parts[1]!,Date.now()+Number(parts[4]));}socket.write('+OK\r\n');}
   }});
  });
  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -33,6 +33,10 @@ test('Redis cache handles hits, corrupt values, deadlines and bounded local evic
  try{
   await tick();await tick();let loads=0;
   assert.equal(await cache.read('key',async()=>++loads),1);await tick();
+  t.mock.timers.enable({apis:['Date'],now:Date.now()});
+  t.mock.timers.tick(3001);
+  assert.equal(await cache.read('key',async()=>++loads),1,'Redis survives expiration of the short local cache');
+  t.mock.timers.reset();
   // Eviction leaves the shared Redis value available.
   for(let n=0;n<129;n++)await cache.read(`other-${n}`,async()=>n);
   assert.equal(await cache.read('key',async()=>++loads),1);assert.equal(loads,1);
