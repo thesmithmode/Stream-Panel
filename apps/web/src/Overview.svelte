@@ -123,7 +123,7 @@
   <div class="metric">
     <span class="teal"><Icon name="people" size={27} /></span>
     <div>
-      <span>Зрители · все площадки</span><strong>{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'Нет замеров'}</strong>
+      <span>Зрители (все)</span><strong>{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'Нет замеров'}</strong>
       {#if viewers?.peak!=null}<small>Максимум: {viewers.peak}</small>{/if}
       {#if lastViewers!=null}<small>Последний замер: {lastViewers}</small>{/if}
     </div>
@@ -192,7 +192,7 @@
   </div>
 </section>
 <section class="panel series-panel">
-  <header><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Поэтому 10 зрителей и 4 ника в чате возможны одновременно. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2><label>Показатель<select aria-label="Показатель графика стрима" bind:value={audienceMetric}><option value="viewers">Зрители · все площадки</option><option value="participants">Участники · все площадки</option><option value="twitchViewers">Зрители Twitch</option><option value="youtubeViewers">Зрители YouTube</option><option value="observed">Люди в чате Twitch</option><option value="estimated">Активность чата YouTube</option><option value="messages">Сообщения</option></select></label></header>
+  <header><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Поэтому 10 зрителей и 4 ника в чате возможны одновременно. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2><label>Показатель<select aria-label="Показатель графика стрима" bind:value={audienceMetric}><option value="viewers">Зрители (все)</option><option value="participants">Участники (все)</option><option value="twitchViewers">Зрители Twitch</option><option value="youtubeViewers">Зрители YouTube</option><option value="observed">Люди в чате Twitch</option><option value="estimated">Активность чата YouTube</option><option value="messages">Сообщения</option></select></label></header>
   {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceData}
     <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric={audienceMetric} resolution={1} showRegulars={true} {onPerson} onselection={(open)=>barOpen=open}/>
   {:else}<p class="empty-small" role="status">{audienceBusy?'Загружаем график…':'Выберите стрим'}</p>{/if}

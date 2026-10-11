@@ -153,6 +153,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         regularMessages: number;
         participants:number; regularParticipants:number; followerParticipants:number; followerObserved:number; followerEstimated:number; followerMessages:number;
         viewers: number | null;
+        viewersPartial?: boolean;
         twitchViewers: number | null;
         youtubeViewers: number | null;
         presenceKnown: boolean;
@@ -329,11 +330,13 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     for (const sample of samples)
         if (contains(sample.session_id, sample.observed_at_ms)) {
             const point = minute(sample.observed_at_ms);
-            if(sample.twitch_viewers !== null)point.twitchViewers=sample.twitch_viewers;
-            if(sample.youtube_viewers !== null)point.youtubeViewers=sample.youtube_viewers;
+            if(source!=='youtube'&&sample.twitch_viewers !== null)point.twitchViewers=sample.twitch_viewers;
+            if(source!=='twitch'&&sample.youtube_viewers !== null)point.youtubeViewers=sample.youtube_viewers;
             const active=platformWindows.filter(p=>p.session_id===sample.session_id&&p.started_at_ms<point.at+60000&&(p.ended_at_ms===null||p.ended_at_ms>point.at));
-            const keys=active.length?active.map(p=>p.platform==='twitch'?'twitchViewers':'youtubeViewers'):['twitchViewers'];
-            point.viewers = source === 'twitch' ? point.twitchViewers : source === 'youtube' ? point.youtubeViewers : keys.some(key=>point[key as 'twitchViewers'|'youtubeViewers']===null)?null:keys.reduce((sum,key)=>sum+(point[key as 'twitchViewers'|'youtubeViewers']??0),0);
+            const keys=active.length?[...new Set(active.map(p=>p.platform==='twitch'?'twitchViewers':'youtubeViewers'))]:['twitchViewers'];
+            const known=[point.twitchViewers,point.youtubeViewers].filter((value):value is number=>value!==null);
+            point.viewers = source === 'twitch' ? point.twitchViewers : source === 'youtube' ? point.youtubeViewers : known.length?known.reduce((sum,value)=>sum+value,0):null;
+            point.viewersPartial = source === 'all' && known.length>0 && keys.some(key=>point[key as 'twitchViewers'|'youtubeViewers']===null);
         }
     const coverage = db.prepare("SELECT session_id,started_at_ms AS first,completed_at_ms AS last FROM presence_polls WHERE status='complete' AND completed_at_ms>=? AND started_at_ms<? AND session_id IN(SELECT value FROM json_each(?))").all(from, to, sessionIds) as any[];
     for (const poll of coverage)
@@ -377,7 +380,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         cell.donationCount+=minuteDonationCounts.get(point.at)??0;
         cell.messages += point.messages;
         cell.sampleMinutes+=elapsed;
-        if(point.viewers !== null) {cell.viewersTotal+=point.viewers*elapsed;cell.viewerSamples+=elapsed;}
+        if(point.viewers !== null&&!point.viewersPartial) {cell.viewersTotal+=point.viewers*elapsed;cell.viewerSamples+=elapsed;}
         if (point.presenceKnown)
             cell.observedKnownMinutes+=elapsed;
     }
@@ -391,7 +394,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         const durationMs=selected.filter(segment=>segment.session===s.id).reduce((n,segment)=>n+segment.to-segment.from,0);
         const donations=streamDonations.get(s.id)??{},messages=sessionMessages.get(s.id)??0;
         const metrics=streamMetrics(selected.filter(segment=>segment.session===s.id),samples.filter(sample=>sample.session_id===s.id),streamAuthors.get(s.id)??new Map());
-        const aggregate=streamMetrics(selected.filter(segment=>segment.session===s.id),[...timeline.values()].filter(p=>contains(s.id,p.at)).map(p=>({observed_at_ms:p.at,twitch_viewers:p.viewers,youtube_viewers:0})),new Map());
+        const aggregate=streamMetrics(selected.filter(segment=>segment.session===s.id),[...timeline.values()].filter(p=>contains(s.id,p.at)).map(p=>({observed_at_ms:p.at,twitch_viewers:p.viewersPartial?null:p.viewers,youtube_viewers:0})),new Map());
         metrics.viewers.all=aggregate.viewers.all;
         return { ...metrics,durationMs,messagesPerHour:durationMs?messages*3600000/durationMs:null,donationCount:streamDonationCounts.get(s.id)??0,donationTotals:donations,donationsPerHourMinor:currencyRates(donations,durationMs),id: s.id, startedAt: s.started_at_ms, endedAt: s.ended_at_ms ?? to, title: samples.find(x => x.session_id === s.id)?.title ?? "", audience: visitors.length, core: visitors.filter(e => e.core).length, newInPeriod, returning: visitors.length - newInPeriod, messages: sessionMessages.get(s.id) ?? 0, categories: [...new Set(selected.filter(segment => segment.session === s.id).map(segment => segment.name))] };
     });

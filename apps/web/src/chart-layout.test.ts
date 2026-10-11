@@ -1,8 +1,12 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {chartLayout,chartPages} from './chart-layout.ts';
-test('a multi-hour chart fits a phone without losing minute drilldown and caps buckets at five minutes',()=>{
- const mobile=chartLayout(0,180*60000,340,1),desktop=chartLayout(0,180*60000,1200,1);
- assert.ok(mobile.resolution>desktop.resolution);assert.ok(mobile.resolution<=5);assert.equal(mobile.plotWidth,340);
- assert.equal(chartLayout(0,60000,340,15).resolution,5);assert.equal(chartLayout(0,60000,0,NaN).resolution,1);
+test('phone and desktop honor the chosen 1/5/15 minute interval without automatic aggregation',()=>{
+ for(const resolution of [1,5,15]){
+  assert.equal(chartLayout(0,180*60000,340,resolution).resolution,resolution);
+  assert.equal(chartLayout(0,180*60000,1200,resolution).resolution,resolution);
+ }
+ assert.equal(chartLayout(0,60000,340,0).resolution,1);
+ assert.equal(chartLayout(0,60000,0,NaN).resolution,1);
+ assert.equal(chartLayout(0,60000,340,1).plotWidth,340);
 });
 
 test('chart pages omit multi-day gaps and preserve every point with at most six hours per page',()=>{

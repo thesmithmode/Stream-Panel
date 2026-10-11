@@ -8,10 +8,9 @@ export function chartPages<T extends {at:number}>(points:T[]):T[][] {
  }
  return pages;
 }
-/** Fit the visible period on screen; never aggregate beyond five minutes. */
-export function chartLayout(from:number,to:number,width:number,requested=0){
- const plotWidth=Math.max(280,width||800),capacity=Math.max(1,Math.floor((plotWidth-50)/10));
- const fit=Math.max(1,Math.ceil((to-from)/60000/capacity));
- const resolution=Math.min(5,Math.max(1,Number.isFinite(requested)?requested:0,fit));
+/** Fit the plot on screen without changing the selected interval. */
+export function chartLayout(from:number,to:number,width:number,requested=1){
+ const plotWidth=Math.max(280,width||800);
+ const resolution=[1,5,15].includes(requested)?requested:1;
  return {plotWidth,resolution,labelEvery:Math.max(1,Math.ceil((to-from)/(15*60000)/Math.max(2,Math.floor(plotWidth/80))))};
 }

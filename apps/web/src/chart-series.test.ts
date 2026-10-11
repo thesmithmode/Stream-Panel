@@ -4,9 +4,9 @@ import {chartSeries} from './chart-series.ts';
 
 test('regular segments use the same known-minute denominator as the full bar; messages remain sums',()=>{
  const points=[{at:0,observed:10,regularObserved:8,messages:5,regularMessages:4,presenceKnown:true},{at:60000,observed:10,regularObserved:2,messages:1,regularMessages:0,presenceKnown:true},{at:120000,observed:99,regularObserved:99,messages:7,regularMessages:7,presenceKnown:false},{at:480*60000,observed:0,messages:0,presenceKnown:true}];
- const first=chartSeries(points,'observed')[0]!;
+ const first=chartSeries(points,'observed',5)[0]!;
  assert.equal(first.value,10);assert.equal(first.regularValue,5);assert.equal(first.known,true);
- const messages=chartSeries(points,'messages')[0]!;
+ const messages=chartSeries(points,'messages',5)[0]!;
  assert.equal(messages.value,13);assert.equal(messages.regularValue,11);
 });
 
@@ -47,4 +47,17 @@ test('break buckets exclude presence and messages and mixed live buckets retain 
  assert.equal(chartSeries(points,'observed')[0]?.isBreak,true);
  assert.equal(chartSeries(points,'messages')[0]?.value,0);
  const mixed=chartSeries(points,'observed',5)[0]!;assert.equal(mixed.isBreak,false);assert.equal(mixed.value,4);
+});
+
+
+test('minute default and explicit 1/5/15 minute buckets preserve sums and separate platform averages',()=>{
+ const points=[{at:0,twitchViewers:10,youtubeViewers:null,viewers:10,viewersPartial:true,messages:2},{at:60000,twitchViewers:2,youtubeViewers:4,viewers:6,messages:3}];
+ assert.equal(chartSeries(points,'viewers').length,2);
+ for(const resolution of [1,5,15]){
+  const all=chartSeries(points,'viewers',resolution),tw=chartSeries(points,'twitchViewers',resolution),yt=chartSeries(points,'youtubeViewers',resolution);
+  for(let i=0;i<all.length;i++)assert.equal(all[i]!.value,tw[i]!.value+yt[i]!.value);
+  assert.equal(all[0]!.width,resolution*60000);
+ }
+ assert.equal(chartSeries(points,'viewers',5)[0]!.partial,true);
+ assert.equal(chartSeries(points,'messages',15)[0]!.value,5);
 });

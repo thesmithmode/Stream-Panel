@@ -93,3 +93,5 @@ GET /donations?person=<id>&offset=0&limit=50&includeDeleted=false возвращ
 
 
 POST /persons {name} создаёт отдельную ручную карточку без платформенной identity и событий. name 1–200 символов после обязательной проверки непустого trimmed значения; одноимённые люди не объединяются автоматически. Карточка доступна для донатов/заметок/меток, дата просмотра/follow/attendance остаются неизвестными. Endpoint защищён теми же auth/CSRF/Origin/body guards.
+
+Viewer timeline points expose `viewersPartial` when an active platform lacks a count. `viewers` then contains the sum of available platform measurements; both missing remains null. Complete aggregate averages exclude partial points. A platform source filter leaves the other platform count null.

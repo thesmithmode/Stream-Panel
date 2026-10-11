@@ -375,3 +375,26 @@ test('single-stream analytics scopes overlapping recordings and ranks silent att
   assert.throws(()=>s.analytics({...opts,sessionId:'missing'}),/SESSION_NOT_FOUND/);
  }finally{s.close();}
 });
+
+
+test('all viewers retain each known platform minute and mark missing counts as partial',()=>{
+ const s=new StreamStore(':memory:');
+ try {
+  const sid=recordedStream(s,'channel','partial-counts',base,'platform',base);
+  s.streamSample(sid,base,'game','Game','',12);
+  s.youtubeViewers(base+minute,4);
+  s.streamSample(sid,base+2*minute,'game','Game','',8);
+  s.youtubeViewers(base+2*minute,3);
+  s.streamSample(sid,base+3*minute,'game','Game','',0);
+  const rows=s.analytics(opts).timeline;
+  for(const [offset,total,partial] of [[0,12,true],[1,4,true],[2,11,false],[3,0,true]] as const){
+   const row=rows.find(p=>p.at===base+offset*minute)!;
+   assert.equal(row.viewers,total);assert.equal(row.viewersPartial,partial);
+   assert.ok(row.viewers! >= (row.twitchViewers??0));assert.ok(row.viewers! >= (row.youtubeViewers??0));
+  }
+  assert.equal(s.analytics({...opts,source:'youtube'}).timeline.find(p=>p.at===base)?.viewers,null);
+  assert.equal(s.analytics({...opts,source:'youtube'}).timeline.find(p=>p.at===base+2*minute)?.twitchViewers,null);
+  assert.equal(s.analytics({...opts,source:'twitch'}).timeline.find(p=>p.at===base+2*minute)?.youtubeViewers,null);
+  assert.equal(s.analytics(opts).hours[0]?.viewerSamples,1);
+ }finally{s.close();}
+});
