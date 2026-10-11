@@ -5,15 +5,17 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import net from 'node:net';
 import {createHostedApplication} from '../../dist/apps/daemon/src/hosted.js';
+import {assertUiLayout} from '../helpers/ui-layout.mjs';
 import {launchBrowser} from '../helpers/browser.mjs';
 import {goto,startCoverage,saveCoverage} from '../helpers/browser-coverage.mjs';
 
 test('authenticated backup UI lists server files, separates cloud status and downloads encrypted bytes on mobile',{timeout:60000},async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-backup-ui-')),key=join(dir,'key');await writeFile(key,'b'.repeat(64));
  const port=await new Promise(resolve=>{const s=net.createServer();s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p));});});
- const origin=`http://127.0.0.1:${port}`,h=await createHostedApplication(dir,origin,false,{keyFile:key});let browser;
+ const origin=`http://127.0.0.1:${port}`,h=await createHostedApplication(dir,origin,false,{keyFile:key},undefined,true,()=>{});let browser;
  try {
   await h.accounts.createUser('ruslan','ruslan','Руслан','backup-download-password');await h.app.listen({host:'127.0.0.1',port});
+  const config=h.runtimes.get('ruslan').configuration;config.value.daClientId='fixture-client';config.value.daClientSecret='fixture-secret';config.value.daAccessToken='fixture-token';config.value.twitch={access:'twitch-token',refresh:'twitch-refresh',userId:'owner',expiresAt:Date.now()+3600000,scopes:['chat:read']};await config.save();
   const {filename}=await h.backup.run();h.backup.status.cloud={state:'error',lastSuccessAt:0,filename:'',error:'BACKUP_UPLOAD_FAILED'};
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844},acceptDownloads:true});page.setDefaultTimeout(10000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));await startCoverage(page);await goto(page,origin);
@@ -29,7 +31,24 @@ test('authenticated backup UI lists server files, separates cloud status and dow
   await page.route('**/api/v1/backups',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'BACKUP_NOT_CONFIGURED'})}));
   await region.getByRole('button',{name:'Обновить список копий',exact:true}).click();await region.getByRole('alert').filter({hasText:'не настроено'}).waitFor();
   await page.unroute('**/api/v1/backups');await region.getByRole('button',{name:'Обновить список копий',exact:true}).click();await region.getByRole('alert').waitFor({state:'detached'});
+  const credentials=page.getByLabel('Сохранённые ключи интеграций');
+  await page.route('**/api/v1/integrations/credentials',route=>route.fulfill({status:500,contentType:'application/json',body:'{"error":"REQUEST_FAILED"}'}));
+  await credentials.getByRole('button',{name:'Загрузить ключи'}).click();await credentials.getByRole('alert').waitFor();await page.unroute('**/api/v1/integrations/credentials');
+  await credentials.getByRole('button',{name:'Загрузить ключи'}).click();await credentials.getByLabel('Client secret',{exact:true}).waitFor();
+  assert.equal(await credentials.getByLabel('Client secret',{exact:true}).inputValue(),'fixture-secret');assert.equal(await credentials.getByLabel('Client secret',{exact:true}).getAttribute('type'),'password');
+  await credentials.getByRole('button',{name:'Показать значения'}).click();assert.equal(await credentials.getByLabel('Client secret',{exact:true}).getAttribute('type'),'text');
+  for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:800});await assertUiLayout(page);}await page.setViewportSize({width:390,height:844});
+  await credentials.getByRole('button',{name:'Скрыть значения'}).click();await credentials.getByRole('button',{name:'Закрыть ключи'}).click();assert.equal(await credentials.getByLabel('Client secret',{exact:true}).count(),0);
+  const restore=page.getByLabel('Восстановление резервной копии');
+  await page.route('**/api/v1/backup/key',route=>route.fulfill({status:500,contentType:'application/json',body:'{"error":"REQUEST_FAILED"}'}));await restore.getByRole('button',{name:'Скачать ключ восстановления'}).click();await restore.getByRole('alert').waitFor();await page.unroute('**/api/v1/backup/key');
+  const keyPending=page.waitForEvent('download');await restore.getByRole('button',{name:'Скачать ключ восстановления'}).click();const keyDownload=await keyPending;assert.equal((await readFile(await keyDownload.path(),'utf8')).trim(),'b'.repeat(64));
+  await restore.getByText('Импорт резервной копии',{exact:true}).click();
+  await restore.getByLabel('Файл резервной копии').setInputFiles({name:'test.spbk',mimeType:'application/octet-stream',buffer:bytes});await restore.getByLabel('Заменить текущие данные данными копии').check();
+  await restore.getByLabel('Ключ восстановления',{exact:true}).fill('invalid');await restore.getByRole('button',{name:'Импортировать резервную копию'}).click();await restore.getByRole('alert').filter({hasText:'64'}).waitFor();
+  await restore.getByLabel('Ключ восстановления',{exact:true}).fill('a'.repeat(64));await restore.getByRole('button',{name:'Импортировать резервную копию'}).click();await restore.getByRole('alert').filter({hasText:'Текущая база не изменена'}).waitFor();
+  await page.route('**/api/v1/backups/restore',route=>route.fulfill({status:409,contentType:'application/json',body:'{"error":"RESTORE_PENDING"}'}));await restore.getByRole('button',{name:'Импортировать резервную копию'}).click();await restore.getByRole('alert').filter({hasText:'RESTORE_PENDING'}).waitFor();await page.unroute('**/api/v1/backups/restore');
+  await restore.getByLabel('Ключ восстановления',{exact:true}).fill('');for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:800});await assertUiLayout(page);}await page.setViewportSize({width:390,height:844});
   await page.screenshot({path:'/tmp/sp-backup-mobile.png',fullPage:true});await page.setViewportSize({width:1280,height:800});await page.screenshot({path:'/tmp/sp-backup-desktop.png',fullPage:true});
-  assert.deepEqual(errors,[]);await saveCoverage(page);
+  await restore.getByRole('button',{name:'Импортировать резервную копию'}).click();await restore.getByRole('status').filter({hasText:'Сервис перезапускается'}).waitFor();assert.equal(await restore.getByLabel('Ключ восстановления',{exact:true}).inputValue(),'');assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await h.app.close();await rm(dir,{recursive:true,force:true});}
 });

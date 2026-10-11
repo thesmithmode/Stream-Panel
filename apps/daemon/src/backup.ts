@@ -16,7 +16,7 @@ const profiles = ["ruslan", "gulnaz"] as const;
 const backupFilename=/^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/;
 type BackupChannelStatus = { state: string; lastSuccessAt: number; filename: string; error: string };
 type BackupStatus = { state: string; lastSuccessAt: number; filename: string; error: string; local: BackupChannelStatus; cloud: BackupChannelStatus };
-function validateSnapshot(db: Database.Database): void {
+export function validateSnapshot(db: Database.Database): void {
   if (db.pragma("integrity_check", {simple:true}) !== "ok" ||
       (db.pragma("foreign_key_check") as unknown[]).length)
     throw new Error("BACKUP_INTEGRITY_FAILED");

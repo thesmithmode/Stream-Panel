@@ -265,6 +265,14 @@ export async function createApplication(
       excludedLogins:configuration.value.excludedBotLogins,ownerId:configuration.value.twitch?.userId??"",youtubeAccount:configuration.value.youtube?.userId??configuration.value.youtubeAccountId??"",
     });
   });
+  app.post('/api/v1/integrations/credentials',{schema:{body:{type:'object',additionalProperties:false,properties:{}}}},async()=>{
+    const config=configuration.value;
+    return {
+      twitch:{clientId:config.twitchClientId,...config.twitch},
+      youtube:{clientId:config.youtubeClientId??'',clientSecret:config.youtubeClientSecret??'',...config.youtube},
+      donationalerts:{clientId:config.daClientId,clientSecret:config.daClientSecret,access:config.daAccessToken,refresh:config.daRefreshToken},
+    };
+  });
   app.get("/api/v1/status", async (request) => ({
     youtube: youtube.status,
     twitch: twitch.status,

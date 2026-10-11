@@ -5,6 +5,9 @@ import { join, basename } from "node:path";
 import {dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {FrontendProcess} from './frontend-process.js';
+import {existsSync} from 'node:fs';
+import {createServer} from 'node:net';
+import {activatePendingRestore} from './restore-service.js';
 
 const dir = process.env.STREAM_PANEL_DATA_DIR;
 const origin = process.env.STREAM_PANEL_PUBLIC_ORIGIN;
@@ -28,7 +31,12 @@ const backupOptions = process.env.STREAM_PANEL_BACKUP_KEY_FILE ? {
   ...(process.env.STREAM_PANEL_SUPABASE_URL ? {url: process.env.STREAM_PANEL_SUPABASE_URL} : {}),
   ...(process.env.STREAM_PANEL_SUPABASE_KEY_FILE ? {serviceKeyFile: process.env.STREAM_PANEL_SUPABASE_KEY_FILE} : {}),
 } : undefined;
-const hosted = await createHostedApplication(dir, origin, false, backupOptions, collectorNetwork,!split);
+if(existsSync(join(dir,'restore-pending'))||existsSync(join(dir,'restoring'))){
+  const reservation=createServer();
+  await new Promise<void>((resolve,reject)=>{reservation.once('error',reject);reservation.listen(collectorPort,collectorNetwork.bindHost,resolve);});
+  try{await activatePendingRestore(dir);}finally{await new Promise<void>(resolve=>reservation.close(()=>resolve()));}
+}
+const hosted = await createHostedApplication(dir, origin, false, backupOptions, collectorNetwork,!split,()=>{setTimeout(()=>void shutdown(75),250);});
 const frontend=split?new FrontendProcess(join(dirname(fileURLToPath(import.meta.url)),'../../../../apps/web/dist'),collectorPort,port,origin,network):undefined;
 const runBackup = async () => {
   try {
@@ -59,11 +67,11 @@ const backupTimer = setInterval(() => { if (collectorsStarted) void runBackup();
 const retentionTimer=setInterval(()=>{void hosted.backup?.purgeLocal().catch(()=>console.error('Local backup cleanup failed'));},60*60*1000);
 const heartbeatTimer=setInterval(()=>{if(collectorsStarted&&!closing)for(const runtime of hosted.runtimes.values())void runtime.db.call("collectionLifecycle","heartbeat",Date.now()).catch(()=>console.error("Collector heartbeat failed"));},30000);
 const timer = setInterval(() => void startCollectors(), 2000);
-const shutdown = async () => {
+const shutdown = async (code=0) => {
   if (closing) return;
   closing = true; clearInterval(timer); clearInterval(backupTimer);clearInterval(retentionTimer);clearInterval(heartbeatTimer);
   const timeout = setTimeout(() => process.exit(1), 10000); timeout.unref();
-  try { if(collectorsStarted)await Promise.all([...hosted.runtimes.values()].map(runtime=>runtime.db.call("collectionLifecycle","stop",Date.now())));await frontend?.stop();await hosted.app.close(); clearTimeout(timeout); process.exit(0); }
+  try { if(collectorsStarted)await Promise.all([...hosted.runtimes.values()].map(runtime=>runtime.db.call("collectionLifecycle","stop",Date.now())));await frontend?.stop();await hosted.app.close(); clearTimeout(timeout); process.exit(code); }
   catch { process.exit(1); }
 };
 for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => void shutdown());

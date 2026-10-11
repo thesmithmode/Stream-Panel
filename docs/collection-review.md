@@ -83,3 +83,31 @@ API не раскрывают ники всех зрителей видео и �
 ### Исключение владельца по профилю
 
 Убрано универсальное исключение `fullrandomname_twitch` из сводки, людей и аналитики. Старое значение удаляется при загрузке сохранённых настроек; Twitch больше не добавляет владельца в список ботов по никнейму. Владелец определяется по ID канала внутри профиля, включая связанные аккаунты. Поэтому Руслан учитывается как зритель у Гульназ, а Гульназ — у Руслана, если есть наблюдение их присутствия. Собственный канал и настоящие боты исключаются; исходные события сохраняются. Проверены оба направления в сводке, посещаемости, ранжировании и браузерных разделах «Люди»/«Аналитика».
+
+## Full recovery from the panel (2026-10-11)
+
+Integrations can show the selected profile's saved client IDs, secrets and OAuth
+access/refresh tokens. Values are requested only by an explicit authenticated,
+CSRF-protected POST, masked initially, cleared when closed or when the profile is
+changed, and never stored in browser persistence. Normal status responses still
+contain only public configuration and secret-presence flags.
+
+The physical SQLite database is shared; history and integration configuration
+remain separated by profile. Encrypted `.spbk` copies include the complete database,
+login accounts and both profiles' `secrets.json`. Download the encryption key from
+the backup section and retain it off the server together with the archive. Import
+accepts an optional key for copies created on another server; leaving it blank uses
+the currently configured server key. Revoked provider tokens still require normal
+provider reauthorization.
+
+The upload is streamed with a 2 GiB limit. Decryption, authentication, SQLite
+integrity/schema checks and account/configuration validation happen in a separate
+staging directory. A new local safety backup is required before replacement. A
+prepared import blocks API changes, shuts down both collectors and the frontend,
+and requests a systemd restart. Startup reserves the collector port before touching
+SQLite, installs the database and both configuration files, and replays a pending
+replacement after an interrupted installation. Previously issued panel sessions
+are revoked; login uses the credentials saved in the imported archive. A failed
+validation leaves the active database untouched. The operating system, service
+installation, domains and server-side cloud-backup settings are infrastructure
+configuration and are not replaced by a profile/database import.

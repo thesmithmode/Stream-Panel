@@ -1,5 +1,6 @@
 <script lang="ts">
   import {api,date} from './api';
+  import BackupRestore from './BackupRestore.svelte';
   let {status}:{status:any}=$props();
   type File={filename:string;size:number;createdAt:number};
   let directory=$state(''),files=$state<File[]>([]),busy=$state(false),error=$state('');
@@ -25,6 +26,7 @@
     <article><div><strong>{date(file.createdAt)}</strong><small>{file.filename}</small><small>{(file.size/1024).toFixed(1)} КБ</small></div><a class="outline" href={`/api/v1/backups/${encodeURIComponent(file.filename)}`} download={file.filename}>Скачать копию</a></article>
   {/each}
   {#if !busy&&!error&&!files.length}<p class="small muted">Сохранённых файлов пока нет</p>{/if}
+  <BackupRestore available={status.restoreAvailable??false}/>
 </div>
 
 <style>

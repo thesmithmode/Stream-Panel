@@ -2,6 +2,7 @@
   import { api } from "./api";
   import { statusLabel } from "./labels";
   import BackupFiles from './BackupFiles.svelte';
+  import Credentials from './Credentials.svelte';
   import CollectionGaps from './CollectionGaps.svelte';
   import IntegrationGuide from './IntegrationGuide.svelte';
   let { status, onChange }: { status: any; onChange: () => Promise<void> } =
@@ -80,6 +81,7 @@
 </script>
 
 <div class="settings-grid">
+  <Credentials/>
   <section class="panel settings">
     <header>
       <h2>Twitch</h2>

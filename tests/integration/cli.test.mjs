@@ -131,3 +131,22 @@ test('local preview imports legacy credentials/history, requires setup password 
  const b=run(undefined,'0');children.push(b);await b.ready();await b.browserError();b.c.kill('SIGTERM');assert.equal((await b.exit).code,0);
  }finally{for(const c of children)c.c.kill();await Promise.all(children.map(c=>c.exit));await rm(root,{recursive:true,force:true});}
 });
+
+test('full restore streams through production frontend, restarts safely and activates both profiles before SQLite reopens',{timeout:30000},async()=>{
+ const {writeFile,readFile}=await import('node:fs/promises');const {createHostedApplication}=await import('../../dist/apps/daemon/src/hosted.js');
+ const dir=await mkdtemp(join(tmpdir(),'sp-cli-restore-')),port=await freePort(),collectorPort=await freePort(),origin=`http://127.0.0.1:${port}`,key=join(dir,'key'),children=[];
+ await writeFile(key,'c'.repeat(64));
+ try{
+  const h=await createHostedApplication(dir,origin,false,{keyFile:key},undefined,false);
+  let blob;try{for(const profile of ['ruslan','gulnaz']){await h.accounts.createUser(profile,profile,profile,'restore-entrypoint-password');h.runtimes.get(profile).configuration.value.daClientId=profile+'-saved-id';await h.runtimes.get(profile).configuration.save();}blob=await h.backup.file((await h.backup.run()).filename);}finally{await h.app.close();}
+  const env={NODE_ENV:'production',STREAM_PANEL_COLLECTOR_PORT:String(collectorPort),STREAM_PANEL_BACKUP_KEY_FILE:key};
+  const first=start(dir,port,env);children.push(first);await first.ready();
+  const login=async()=>{const response=await fetch(origin+'/api/v1/auth/login',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({username:'ruslan',password:'restore-entrypoint-password'})});assert.equal(response.status,200);return {Origin:origin,Cookie:response.headers.get('set-cookie').split(';')[0],'X-CSRF-Token':(await response.json()).csrf};};
+  const headers=await login();const response=await fetch(origin+'/api/v1/backups/restore',{method:'POST',headers:{...headers,'Content-Type':'application/octet-stream'},body:blob});assert.equal(response.status,202,await response.text());assert.equal((await first.exit).code,75);
+  const reservation=net.createServer();await new Promise(resolve=>reservation.listen(collectorPort,'127.0.0.1',resolve));
+  const conflict=start(dir,port,env);children.push(conflict);assert.equal((await conflict.exit).code,1);assert.ok(await readFile(join(dir,'restore-pending','data.sqlite')));await new Promise(resolve=>reservation.close(resolve));
+  const next=start(dir,port,env);children.push(next);await next.ready();assert.equal((await fetch(origin+'/api/v1/auth/me',{headers})).status,401);
+  const restoredHeaders=await login();for(const profile of ['ruslan','gulnaz']){const r=await fetch(origin+'/api/v1/integrations/credentials',{method:'POST',headers:{...restoredHeaders,'Content-Type':'application/json','X-Stream-Panel-Profile':profile},body:'{}'});assert.equal((await r.json()).donationalerts.clientId,profile+'-saved-id');}
+  next.child.kill('SIGTERM');assert.equal((await next.exit).code,0);
+ }finally{for(const child of children)child.child.kill();await Promise.all(children.map(child=>child.exit));await rm(dir,{recursive:true,force:true});}
+});
