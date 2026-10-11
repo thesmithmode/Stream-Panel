@@ -39,7 +39,20 @@ WantedBy=multi-user.target
 SERVICE
 systemctl daemon-reload
 systemctl enable --now stream-panel-cache.service
-redis-cli -h 127.0.0.1 -p 6380 ping | grep -qx PONG
+# Type=simple reports process launch before Redis has bound its socket.
+wait_for_redis() {
+ready=false
+for attempt in {1..50}; do
+  if redis-cli -h 127.0.0.1 -p 6380 ping 2>/dev/null | grep -qx PONG; then ready=true;break;fi
+  sleep 0.2
+done
+if ! $ready; then
+  systemctl status stream-panel-cache.service --no-pager --lines=0 || true
+  journalctl -u stream-panel-cache.service -n 20 --no-pager
+  return 1
+fi
+}
+wait_for_redis
 # Receiver restarts the application after immutable release activation.
 if ! grep -q '^STREAM_PANEL_REDIS_URL=' /etc/stream-panel/server.env; then
   printf '\nSTREAM_PANEL_REDIS_URL=redis://127.0.0.1:6380\n' >> /etc/stream-panel/server.env
