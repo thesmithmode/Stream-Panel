@@ -50,21 +50,21 @@
     return()=>{audienceRequest++;};
   });
   let filter = $state("all"),sourceFilter=$state("all");
-  let insightsOpen = $state(false),insightsLoaded=false;
+  let insightsOpen = $state(false),insightsLoadedAt=0;
   let insights = $state<InsightCard[]>([]);
   let insightsLoading = $state(false);
   let insightsError = $state("");
   const visible = $derived(
-    events.filter((e) => (filter === "all" || e.type === filter) && (sourceFilter === "all" || e.source === sourceFilter)),
+    events.filter((e) => !e.type.startsWith('channel_points') && (filter === "all" || e.type === filter) && (sourceFilter === "all" || e.source === sourceFilter)),
   );
   async function loadInsights() {
     insightsOpen = !insightsOpen;
-    if (!insightsOpen||insightsLoaded) return;
+    if (!insightsOpen||Date.now()-insightsLoadedAt<60000) return;
     insightsLoading = true;
     insightsError = "";
     try {
       const q = sessionFilter ? `?session=${sessionFilter}` : "";
-      insights = await api<InsightCard[]>(`insights${q}`);insightsLoaded=true;
+      insights = await api<InsightCard[]>(`insights${q}`);insightsLoadedAt=Date.now();
     } catch (e) {
       insightsError = (e as Error).message;
       insights = [];

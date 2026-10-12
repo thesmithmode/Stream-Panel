@@ -17,6 +17,7 @@
   const plotWidth=$derived(layout.plotWidth);
   const timeFormatter=$derived(new Intl.DateTimeFormat('ru-RU',{timeZone:timezone,hour:'2-digit',minute:'2-digit'}));
   const dateFormatter=$derived(new Intl.DateTimeFormat('ru-RU',{timeZone:timezone,day:'2-digit',month:'2-digit'}));
+  const crossesDay=$derived(dateFormatter.format(start)!==dateFormatter.format(end));
   const detailFormatter=$derived(new Intl.DateTimeFormat('ru-RU',{timeZone:timezone,dateStyle:'short',timeStyle:'medium'}));
   const timeLabel=(at:number)=>timeFormatter.format(at);
   const split=$derived(showRegulars&&!['viewers','twitchViewers','youtubeViewers'].includes(metric));
@@ -52,7 +53,7 @@
         {@const x=32+(at-start)/(end-start)*(plotWidth-50)}
         <line x1={x} y1="190" x2={x} y2="197" stroke="currentColor" opacity=".4" />
         {#if i%layout.labelEvery===0}<text x={Math.max(38,Math.min(x,plotWidth-38))} y="213" text-anchor="middle" fill="currentColor" font-size="12">{timeLabel(at)}</text>
-        <text x={Math.max(38,Math.min(x,plotWidth-38))} y="231" text-anchor="middle" fill="currentColor" font-size="10">{dateFormatter.format(at)}</text>{/if}
+        {#if crossesDay}<text x={Math.max(38,Math.min(x,plotWidth-38))} y="231" text-anchor="middle" fill="currentColor" font-size="10">{dateFormatter.format(at)}</text>{/if}{/if}
       {/each}
     </svg></div>
     {#if pages.length>1}<div class="chart-pages"><button class="outline small" disabled={pageOffset+1>=pages.length} onclick={()=>pageOffset++}>Раньше</button><span>{new Date(start).toLocaleDateString('ru-RU',{timeZone:timezone})} · {timeLabel(start)}–{timeLabel(end)}</span><button class="outline small" disabled={pageOffset===0} onclick={()=>pageOffset--}>Позже</button></div>{/if}

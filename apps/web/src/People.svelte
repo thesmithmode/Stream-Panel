@@ -46,6 +46,7 @@
       "default",
     ),
     tops = $state<PersonTop[]>([]);
+  const rankLabels=$derived(new Map(tops.map(t=>[t.id,sortBy==='donations'?Object.entries(t.donationTotals).map(([currency,amount])=>money(amount,currency)).join(' · ')||`${t.donationCount} донатов`:sortBy==='observed_minutes'?formatDuration(t.observedMinutes):`${t.messageCount} сообщ.`])));
   let searchResults = $state<Person[]>([]);
   let selectedSession = '';
   const visible = $derived(
@@ -236,7 +237,7 @@
         ><span
           ><strong>{person.display_name}</strong><small>{person.sources}</small
           ></span
-        ><span class="count">{person.event_count}</span></button
+        ><span class="count">{sortBy==='default'?person.event_count:rankLabels.get(person.id)}</span></button
       >{/each}
     </div>
   </section>
