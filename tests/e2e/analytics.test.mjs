@@ -120,7 +120,8 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await page.getByRole('button',{name:'Обзор',exact:true}).click();await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
    assert.equal(await page.getByRole('heading',{name:'Активность по времени',exact:true}).count(),0);
    await page.getByText('Настроить отображение',{exact:true}).click();
-   assert.equal(await page.getByLabel('Детализация графика').inputValue(),'5');assert.equal(await page.getByLabel('Только ядро').isChecked(),true);
+   await page.getByLabel('График активности',{exact:true}).check();
+   assert.equal(await page.getByLabel('Детализация графика').inputValue(),'1');assert.equal(await page.getByLabel('Только ядро').isChecked(),true);
    await page.getByRole('button',{name:'Сбросить отображение',exact:true}).click();await page.getByRole('heading',{name:'Активность по времени',exact:true}).waitFor();
    assert.equal(await page.getByLabel('Только постоянники').count(),0);await page.getByLabel('Метрика графика').selectOption('observed');assert.ok(await page.locator('.regular-segment').count()>0);
    if(profile==='ruslan'){
