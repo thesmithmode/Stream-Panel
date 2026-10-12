@@ -82,7 +82,7 @@ export async function createApplication(
             ? 409
             : /NOT_FOUND/.test(safe)
               ? 404
-              : storage || /^(DB_|QUEUE_OVERFLOW|SQLITE_)/.test(safe)
+              : storage || /^(DB_|QUEUE_OVERFLOW|SQLITE_|STORAGE_)/.test(safe)
                 ? 503
                 : clientFailure
                   ? 400
@@ -283,6 +283,7 @@ export async function createApplication(
     };
   });
   app.get("/api/v1/status", async (request) => ({
+    storage:db.storageStatus(),
     release:process.env.STREAM_PANEL_RELEASE??'development',
     youtube: youtube.status,
     twitch: twitch.status,

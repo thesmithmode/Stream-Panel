@@ -190,6 +190,7 @@ export class BackupService {
   private async perform() {
     const directory = join(this.dir, "backups"); await mkdir(directory, {recursive:true,mode:0o700});
     await this.ready();
+    if(this.ledger!.pending.length>=20)throw new Error("BACKUP_QUEUE_LIMIT");
     const encodedKey = (await readFile(this.options.keyFile, "utf8")).trim();
     if (!/^[a-fA-F0-9]{64}$/.test(encodedKey)) throw new Error("INVALID_BACKUP_KEY");
     const key = Buffer.from(encodedKey, "hex");
@@ -198,7 +199,7 @@ export class BackupService {
     let walSize=0;
     try {walSize=(await stat(join(this.dir,"data.sqlite-wal"))).size;}
     catch(error){if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error;}
-    if(await this.freeSpace()<512*1024*1024+3*(databaseSize+walSize))throw new Error("BACKUP_STORAGE_LIMIT");
+    if(await this.freeSpace()<1024*1024*1024+3*(databaseSize+walSize))throw new Error("BACKUP_STORAGE_LIMIT");
     const snapshot = join(directory, "snapshot.tmp.sqlite");
     let pendingFile:string|undefined;
     try {

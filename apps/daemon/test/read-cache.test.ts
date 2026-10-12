@@ -59,3 +59,13 @@ test('Redis cache handles hits, corrupt values, deadlines and bounded local evic
 test('expired local values reload without returning stale snapshots',async t=>{
  t.mock.timers.enable({apis:['Date'],now:1000});const cache=new ReadCache('');try{assert.equal(await cache.read('key',async()=>1),1);t.mock.timers.tick(3001);assert.equal(await cache.read('key',async()=>2),2);}finally{cache.close();t.mock.timers.reset();}
 });
+
+test('local cache bounds total serialized bytes and never retains oversized analytics responses',async()=>{
+ const cache=new ReadCache('');const inspect=cache as unknown as {local:Map<string,unknown>;localBytes:number};
+ try{
+  for(let i=0;i<20;i++)await cache.read(String(i),async()=>({payload:'x'.repeat(1_000_000)}));
+  assert.ok(inspect.localBytes<=8_000_000);assert.ok(inspect.local.size<20);
+  let loads=0;await cache.read('huge',async()=>{loads++;return 'x'.repeat(2_000_001);});await cache.read('huge',async()=>{loads++;return 'x'.repeat(2_000_001);});assert.equal(loads,2);
+  cache.invalidate();assert.equal(inspect.localBytes,0);
+ }finally{cache.close();}
+});

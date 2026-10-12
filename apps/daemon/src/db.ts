@@ -1,8 +1,11 @@
-import {ReadCache,cachedReads} from "./read-cache.js";
+import {StorageGuard} from "./storage-guard.js";
+import {ReadCache,cachedReads,uncachedReads} from "./read-cache.js";
 import { Worker } from "node:worker_threads";
 export class StoreClient {
   private worker: Worker;
   private cache=new ReadCache();
+  private storage:StorageGuard;
+  storageStatus(){return this.storage.status();}
   private sequence = 0;
   private dead = false;
   private pending = new Map<
@@ -11,6 +14,7 @@ export class StoreClient {
   >();
   readonly ready: Promise<void>;
   constructor(path: string, profile?: string) {
+    this.storage=new StorageGuard(path);
     this.worker = new Worker(new URL("./db-worker.js", import.meta.url), {
       workerData: { path, profile },
     });
@@ -44,6 +48,8 @@ export class StoreClient {
     await this.ready;
     if(this.dead)throw new Error("DB_WORKER_STOPPED");
     if(cachedReads.has(method))return this.cache.read(JSON.stringify([method,args]),()=>this.execute<T>(method,...args));
+    if(uncachedReads.has(method))return this.execute<T>(method,...args);
+    if(method!=="close")await this.storage.check();
     this.cache.invalidate();
     try{return await this.execute<T>(method,...args);}finally{this.cache.invalidate();}
   }

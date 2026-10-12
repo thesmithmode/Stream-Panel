@@ -14,6 +14,8 @@ test('settings are validated, isolated by request profile and persist across res
   assert.equal((await h.app.inject({method:'POST',url:'/api/v1/settings',headers,payload:{minSessions:-1}})).statusCode,400);
   assert.equal((await get('ruslan')).json().regularThresholdPercent,75);
   const analytics=await h.app.inject({url:`/api/v1/analytics?from=0&to=${Date.now()}`,headers});assert.equal(analytics.statusCode,200,analytics.body);assert.equal(analytics.json().filters.regularThresholdPercent,75);assert.equal(analytics.json().filters.timezone,'UTC');
+  const configuration=h.runtimes.get('ruslan')!.configuration,save=configuration.save.bind(configuration);configuration.save=async()=>{throw new Error('DISK_FAIL');};
+  assert.equal((await h.app.inject({method:'POST',url:'/api/v1/settings',headers,payload:{minSessions:4}})).statusCode,500);assert.equal((await get('ruslan')).json().minSessions,1);configuration.save=save;
   await h.app.close();h=await createHostedApplication(dir,origin,false);
   assert.equal((await get('ruslan')).json().timezone,'UTC');assert.equal((await get('gulnaz')).json().timezone,'Europe/Moscow');
  }finally{await h.app.close();await rm(dir,{recursive:true,force:true});}

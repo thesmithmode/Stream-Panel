@@ -40,3 +40,12 @@ test('backup reads reject malformed, oversized or non-file entries and report in
   await assert.rejects(backup.files(),{code:'ENOTDIR'});
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test('an unavailable cloud cannot produce an unbounded queue of local archives',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-backup-bounded-'));
+ try{
+  const pending=Array.from({length:20},(_,i)=>`stream-panel-2026-10-${String(i+1).padStart(2,'0')}T00-00-00-000Z-1234abcd.spbk`);
+  await writeFile(join(dir,'backup-state.json'),JSON.stringify({version:1,installationId:'a'.repeat(32),uploaded:[],pending,attempts:0,retryAt:0}));
+  const service=new BackupService(dir,{keyFile:join(dir,'missing-key')});await assert.rejects(service.run(),/BACKUP_QUEUE_LIMIT/);assert.equal(service.status.pendingUploads,20);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
