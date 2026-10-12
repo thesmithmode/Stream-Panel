@@ -168,6 +168,7 @@ export async function createApplication(
     ),
     "/api/v1/donationalerts/disconnect": body(),
     "/api/v1/donationalerts/rescan": body(),
+    "/api/v1/donationalerts/timezone": body({utcOffsetMinutes:{type:"integer",minimum:-840,maximum:840}},["utcOffsetMinutes"]),
     "/api/v1/backup": body(),
   };
   app.addHook("onRoute", (route) => {
@@ -558,9 +559,17 @@ export async function createApplication(
     await da.disconnect();
     return { ok: true };
   });
+  app.post('/api/v1/donationalerts/timezone',async request=>{
+    const offset=Number(object(request.body).utcOffsetMinutes),previous=configuration.value.daUtcOffsetMinutes;
+    if(!Number.isInteger(offset)||Math.abs(offset)>840)throw new Error('INVALID_UTC_OFFSET');
+    configuration.value.daUtcOffsetMinutes=offset;
+    try{await configuration.save();}catch(error){configuration.value.daUtcOffsetMinutes=previous;throw error;}
+    return db.call('resolveDonationTimes',offset);
+  });
   app.post("/api/v1/donationalerts/rescan", async (request) => {
+    if(!configuration.value.daAccessToken)throw new Error('DA_LOGIN_REQUIRED');
     await da.scanHistory(string(object(request.query).recent)==="1");
-    return { ok: true };
+    return { ok: true, history:da.status.capabilities.history };
   });
   app.post("/api/v1/backup", async () => {
     const directory = join(dir, "backups");

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type {Configuration} from '../src/config.js';
 import type {StoreClient} from '../src/db.js';
-import {DonationAlertsConnection} from '../src/donationalerts.js';
+import {DonationAlertsConnection,findDonation,normalizeDonation} from '../src/donationalerts.js';
 
 function da(request:typeof fetch, values:Record<string,unknown>={}) {
  const config={value:{daAccessToken:'old-access',daRefreshToken:'keep-refresh',daClientId:'client',daClientSecret:'secret',daUtcOffsetMinutes:0,...values},save:async()=>{}} as unknown as Configuration;
@@ -107,4 +107,13 @@ test('DA revoked authorization stops reconnect and explicitly requires login, te
    }
   } finally {await state.connection.stop();}
  }
+});
+
+
+test('DA publication accepts bounded JSON-string and v2 push wrappers without losing precise amounts',()=>{
+ const row={id:'9007199254740999',amount:'123.45',currency:'RUB',created_at:'2026-10-12T18:01:00Z',username:'Donor'};
+ assert.equal(findDonation({push:{pub:{data:JSON.stringify(row)}}})!==null,true);
+ assert.equal(normalizeDonation(findDonation({push:{pub:{data:JSON.stringify(row)}}}),'owner','centrifugo',null).payload.amountMinor,'12345');
+ assert.equal(findDonation({data:'not json'}),null);
+ let nested:unknown=row;for(let i=0;i<8;i++)nested=JSON.stringify(nested);assert.equal(findDonation(nested),null);
 });

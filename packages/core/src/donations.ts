@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import {randomUUID} from 'node:crypto';
 import {assertTimestamp,moneyToMinor,eventKey} from './domain.js';
 export interface DonationInput {personId:string;amount:string;currency:string;occurredAtMs:number|null;message:string;sourceName:string;}
-type Raw = {id:string;source:string;account_id:string;external_id:string;identity_id:string|null;occurred_at_ms:number|null;payload_json:string;original_payload:string;revision:number;deleted:number;person_id:string|null;display_name:string|null;};
+type Raw = {id:string;source:string;account_id:string;external_id:string;identity_id:string|null;occurred_at_ms:number|null;source_time:string|null;received_at_ms:number;stream_ids:string;payload_json:string;original_payload:string;revision:number;deleted:number;person_id:string|null;display_name:string|null;};
 export class DonationLedger {
  constructor(private db:Database.Database){}
  ensureAnonymous(account:string):void {
@@ -12,7 +12,8 @@ export class DonationLedger {
   this.db.prepare("INSERT OR IGNORE INTO identities VALUES (?,'donationalerts',?,'anonymous:donor','Аноним','',?,?)").run(identity,account,person,`anonymous:${account}`);
   this.db.prepare('INSERT INTO anonymous_donors VALUES (?,?)').run(account,identity);
  }
- private selection = `SELECT e.id,e.source,e.account_id,e.external_id,coalesce(c.identity_id,e.identity_id,a.identity_id) AS identity_id,
+ private selection = `SELECT e.id,e.source,e.account_id,e.external_id,e.source_time,e.received_at_ms,
+    (SELECT json_group_array(es.session_id) FROM event_sessions es WHERE es.event_id=e.id) AS stream_ids,coalesce(c.identity_id,e.identity_id,a.identity_id) AS identity_id,
     CASE WHEN c.event_id IS NULL THEN e.occurred_at_ms ELSE c.occurred_at_ms END AS occurred_at_ms,
     coalesce(c.payload_json,e.payload_json) AS payload_json,e.payload_json AS original_payload,
     coalesce(c.revision,0) AS revision,coalesce(c.deleted,0) AS deleted,i.person_id,p.display_name
@@ -28,7 +29,7 @@ export class DonationLedger {
  }
  private present(row:Raw) {
   const payload=JSON.parse(row.payload_json),original=JSON.parse(row.original_payload);
-  return {id:row.id,personId:row.person_id,personName:row.display_name,amountMinor:String(payload.amountMinor??''),currency:String(payload.currency??''),occurredAtMs:row.occurred_at_ms,message:String(payload.text??''),sourceName:String(payload.sourceName??(row.account_id==='manual'?'Manual':'DonationAlerts')),originalActorName:String(original.actorName??''),provider:row.source,providerAccount:row.account_id,providerId:row.external_id,revision:row.revision,deleted:row.deleted===1};
+  return {id:row.id,sourceTime:row.source_time,receivedAtMs:row.received_at_ms,sessionIds:JSON.parse(row.stream_ids),personId:row.person_id,personName:row.display_name,amountMinor:String(payload.amountMinor??''),currency:String(payload.currency??''),occurredAtMs:row.occurred_at_ms,message:String(payload.text??''),sourceName:String(payload.sourceName??(row.account_id==='manual'?'Manual':'DonationAlerts')),originalActorName:String(original.actorName??''),provider:row.source,providerAccount:row.account_id,providerId:row.external_id,revision:row.revision,deleted:row.deleted===1};
  }
  list(personId?:string,offset=0,limit=50,includeDeleted=false,sessionId?:string) {
   if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>100||typeof includeDeleted!=='boolean')throw new Error('INVALID_DONATION_PAGE');

@@ -1,3 +1,4 @@
+import {parseDonationTime} from './donation-time.js';
 import {streamMetrics} from "./stream-metrics.js";
 import {personActivity} from "./person-activity.js";
 import {DonationLedger,type DonationInput} from "./donations.js";
@@ -153,6 +154,23 @@ export class StreamStore {
   personActivity(id:string,chatWindowMinutes=5,timezone="Europe/Moscow"){return personActivity(this.db,id,chatWindowMinutes,timezone);}
   donation(id:string) {return new DonationLedger(this.db).donation(id);}
   donations(personId?:string,offset=0,limit=50,includeDeleted=false,sessionId?:string) {return new DonationLedger(this.db).list(personId,offset,limit,includeDeleted,sessionId);}
+  resolveDonationTimes(offset:number) {
+    if(!Number.isInteger(offset)||Math.abs(offset)>840)throw new Error('INVALID_UTC_OFFSET');
+    return this.db.transaction(()=>{
+      const rows=this.db.prepare("SELECT id,account_id,source_time,occurred_at_ms FROM events WHERE source='donationalerts' AND type='donation' AND account_id!='manual' AND source_time IS NOT NULL").all() as {id:string;account_id:string;source_time:string;occurred_at_ms:number|null}[];
+      let resolved=0,invalid=0;
+      for(const row of rows){
+        let at:number|null;try{at=parseDonationTime(row.source_time,offset);}catch{invalid++;continue;}
+        if(at===null||at===row.occurred_at_ms)continue;
+        this.db.prepare("UPDATE events SET occurred_at_ms=?,time_quality='configured' WHERE id=?").run(at,row.id);
+        this.db.prepare("UPDATE donation_corrections SET occurred_at_ms=? WHERE event_id=? AND coalesce(json_extract(payload_json,'$.corrected'),0)=0").run(at,row.id);
+        const effective=this.db.prepare('SELECT occurred_at_ms FROM effective_events WHERE id=?').get(row.id) as {occurred_at_ms:number|null}|undefined;
+        if(effective?.occurred_at_ms!=null){this.db.prepare('DELETE FROM event_sessions WHERE event_id=?').run(row.id);this.assignEvent(row.id,row.account_id,effective.occurred_at_ms);}
+        resolved++;
+      }
+      return {resolved,invalid};
+    }).immediate();
+  }
   createDonation(input:DonationInput,atMs:number) {return new DonationLedger(this.db).create(input,atMs);}
   updateDonation(id:string,input:DonationInput,revision:number,atMs:number) {return new DonationLedger(this.db).update(id,input,revision,atMs);}
   deleteDonation(id:string,revision:number,atMs:number):void {new DonationLedger(this.db).remove(id,revision,atMs);}

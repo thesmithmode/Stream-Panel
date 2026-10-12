@@ -15,29 +15,8 @@ import {
   type SocketFactory,
 } from "./twitch.js";
 
-export function parseDonationTime(
-  raw: string,
-  offsetMinutes: number | null,
-): number | null {
-  if (offsetMinutes === null) return null;
-  if (!Number.isInteger(offsetMinutes) || Math.abs(offsetMinutes) > 840)
-    throw new Error("INVALID_UTC_OFFSET");
-  const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(raw);
-  if (!m) throw new Error("INVALID_DA_TIME");
-  const d = new Date(
-    Date.UTC(
-      Number(m[1]),
-      Number(m[2]) - 1,
-      Number(m[3]),
-      Number(m[4]),
-      Number(m[5]),
-      Number(m[6]),
-    ),
-  );
-  if (d.toISOString().slice(0, 19).replace("T", " ") !== raw)
-    throw new Error("INVALID_DA_DATE");
-  return d.getTime() - offsetMinutes * 60000;
-}
+import {parseDonationTime} from '../../../packages/core/src/donation-time.js';
+export {parseDonationTime} from '../../../packages/core/src/donation-time.js';
 export function normalizeDonation(
   raw: unknown,
   accountId: string,
@@ -76,7 +55,9 @@ export function normalizeDonation(
 }
 // Published legacy frames wrap the resource in result/data. Ignore unrelated push types.
 export function findDonation(value: unknown, depth = 0): unknown | null {
-  if (depth > 6 || !value || typeof value !== "object" || Array.isArray(value))
+  if(depth>6)return null;
+  if(typeof value==='string'){try{return findDonation(parse(value),depth+1);}catch{return null;}}
+  if (!value || typeof value !== "object" || Array.isArray(value))
     return null;
   const row = value as Record<string, unknown>;
   if (
@@ -86,7 +67,7 @@ export function findDonation(value: unknown, depth = 0): unknown | null {
     row.created_at !== undefined
   )
     return row;
-  for (const key of ["result", "data", "publication"]) {
+  for (const key of ["result", "data", "publication", "push", "pub"]) {
     const found = findDonation(row[key], depth + 1);
     if (found) return found;
   }
@@ -267,7 +248,10 @@ export class DonationAlertsConnection {
       if (this.stopped || generation !== this.generation) return;
       this.recipient = String(profile.id);
       this.status.account = string(profile.name);
+      if(!/^\d+$/.test(this.recipient))throw new Error('DA_INVALID_RECIPIENT');
       this.connect(string(profile.socket_connection_token), generation);
+      if(this.config.value.daUtcOffsetMinutes!==null)await this.db.call('resolveDonationTimes',this.config.value.daUtcOffsetMinutes);
+      if(this.stopped||generation!==this.generation)return;
       // REST remains useful if realtime permission/protocol fails. State exposes each capability.
       void this.scanHistory(true).catch((error) => this.report(error));
       this.history = setInterval(() => {
@@ -368,9 +352,9 @@ export class DonationAlertsConnection {
             const event=normalizeDonation(donation,this.recipient,'centrifugo',this.config.value.daUtcOffsetMinutes);
             const active = await this.db.call<{id:string;started_at_ms:number} | null>("activeLogicalStream");
             if (this.stopped || generation !== this.generation) return;
-            const result = active&&event.occurredAtMs===null?await this.db.call('ingestLiveDonation',event,active.id,true):await this.db.call('ingest',event);
+            const result = active&&event.occurredAtMs===null?await this.db.call<{inserted:boolean}|null>('ingestLiveDonation',event,active.id,true):await this.db.call<{inserted:boolean}>('ingest',event);
             if(this.stopped||generation!==this.generation)return;
-            if(result)this.status.lastEventAt = Date.now();
+            if(result?.inserted)this.status.lastEventAt = Date.now();
           }
         }
       })().catch((error) => {if(!this.stopped&&generation===this.generation)this.report(error);});
@@ -423,7 +407,7 @@ export class DonationAlertsConnection {
             const event = normalizeDonation(raw, this.recipient, "rest", this.config.value.daUtcOffsetMinutes);
             const result=await this.db.call<{inserted:boolean}>('ingest',event);
             if (this.stopped || generation !== this.generation) return;
-            if (result?.inserted) pageAllKnown = false;
+            if (result?.inserted) {pageAllKnown = false;this.status.lastEventAt=Date.now();}
           } catch (error) {
             skippedRows++;
             pageAllKnown = false;

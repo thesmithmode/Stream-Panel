@@ -145,7 +145,7 @@ test("HTTP contracts: missing entities, conflicts, bounded grids, callback rejec
       (await post("/api/v1/donationalerts/disconnect")).statusCode,
       200,
     );
-    assert.equal((await post("/api/v1/donationalerts/rescan")).statusCode, 200);
+    assert.equal((await post("/api/v1/donationalerts/rescan")).statusCode, 400);
     const backup = await post("/api/v1/backup");
     assert.equal(backup.statusCode, 200);
     assert.match(backup.json().filename, /\.sqlite$/);
