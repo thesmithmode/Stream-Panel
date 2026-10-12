@@ -24,10 +24,10 @@
 </script>
 <section class="panel time-patterns"><header><h2>Когда стримить</h2></header>
  <div class="pattern-controls">
-  <label>Сравнение времени<select bind:value={dimension}><option value="weekday">Дни недели</option><option value="hour">Время суток</option></select></label>
-  <label>Показатель времени<select bind:value={metric}><option value="viewers">Зрители</option><option value="messages">Сообщения</option><option value="observed">Участники Twitch</option><option value="estimated">Активность YouTube · оценка</option><option value="donations">Число донатов</option><option value="amount">Сумма донатов</option></select></label>
-  <label>Расчёт времени<select bind:value={calculation}><option value="average">Среднее / на час эфира</option><option value="total">Накопленная сумма</option></select></label>
-  {#if metric==='amount'}<label>Валюта времени<select bind:value={currency}>{#each currencies as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select></label>{/if}
+  <label>Сравнение времени<select aria-label="Сравнение времени" bind:value={dimension}><option value="weekday">Дни недели</option><option value="hour">Время суток</option></select></label>
+  <label>Показатель времени<select aria-label="Показатель времени" bind:value={metric}><option value="viewers">Зрители</option><option value="messages">Сообщения</option><option value="observed">Участники Twitch</option><option value="estimated">Активность YouTube · оценка</option><option value="donations">Число донатов</option><option value="amount">Сумма донатов</option></select></label>
+  <label>Расчёт времени<select aria-label="Расчёт времени" bind:value={calculation}><option value="average">Среднее / на час эфира</option><option value="total">Накопленная сумма</option></select></label>
+  {#if metric==='amount'}<label>Валюта времени<select aria-label="Валюта времени" bind:value={currency}>{#each currencies as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select></label>{/if}
  </div>
  <p class="small muted pattern-note">{units} · средние взвешены по длительности с данными; часы без эфиров не считаются нулями.</p>
  <div class="pattern-bars" aria-label="Сравнение дней и часов">{#each rows as row}<div class="pattern-row"><span>{row.label}</span><div class="pattern-track" class:no-data={value(row.cell)===null}><i style:width={`${(value(row.cell)??0)/maximum*100}%`}></i></div><strong>{format(value(row.cell))}</strong><small>{row.cell?`${Math.round(row.cell.sampleMinutes)} мин эфира`:''}</small></div>{/each}</div>
@@ -40,7 +40,7 @@
   <p class="small muted">Анонимные зрители в счётчиках площадок не раскрывают свой аккаунт. Неизвестный статус не означает отсутствие подписки.</p>
  </div></section>
  <section class="panel donation-leaders"><header><h2>Кто поддерживает стримы</h2></header><div class="settings-body">
-  <label>Валюта донатеров<select bind:value={currency}>{#each currencies as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select></label>
+  <label>Валюта донатеров<select aria-label="Валюта донатеров" bind:value={currency}>{#each currencies as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select></label>
   {#each donors.slice(0,10) as e}<p class="composition-row"><button class="text-button" aria-label={`Донатер: ${e.name}`} onclick={()=>onPerson(e.id)}>{e.name}</button><strong>{money(e.donations[available],available)}</strong></p>{:else}<p class="muted">В выбранном периоде донатов нет.</p>{/each}
  </div></section>
 </div>
