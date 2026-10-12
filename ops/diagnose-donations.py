@@ -17,6 +17,18 @@ for profile in ('ruslan', 'gulnaz'):
     if db.execute('SELECT 1 FROM sqlite_master WHERE name=?', (table,)).fetchone():
         row = db.execute(f"SELECT count(*),sum(occurred_at_ms IS NULL),sum(EXISTS(SELECT 1 FROM p_{profile}_event_sessions es WHERE es.event_id=e.id)) FROM {table} e WHERE source='donationalerts' AND type='donation'").fetchone()
         print(f'da stored={row[0]} untimed={row[1] or 0} linked_to_stream={row[2] or 0}')
+        bounds = db.execute(f"SELECT min(started_at_ms),max(coalesce(ended_at_ms,started_at_ms)),count(*) FROM p_{profile}_sessions s WHERE NOT EXISTS(SELECT 1 FROM p_{profile}_session_tombstones t WHERE t.session_id=s.id)").fetchone()
+        rows = db.execute(f"SELECT e.occurred_at_ms,c.occurred_at_ms,c.event_id,c.payload_json FROM {table} e LEFT JOIN p_{profile}_donation_corrections c ON c.event_id=e.id WHERE e.source='donationalerts' AND e.type='donation'").fetchall()
+        facts = {'streams':bounds[2],'beforeRecordedHistory':0,'afterRecordedHistory':0,'withinHistoryBounds':0,'manualEditsWithEmptyTime':0,'emptyTimeUpdatesPreservedUnknown':0,'explicitTimeClears':0}
+        for original,corrected,event_id,payload in rows:
+            if original is not None and bounds[0] is not None:
+                facts['beforeRecordedHistory' if original<bounds[0] else 'afterRecordedHistory' if original>bounds[1] else 'withinHistoryBounds']+=1
+            if event_id and corrected is None and json.loads(payload or '{}').get('corrected'):
+                facts['manualEditsWithEmptyTime']+=1
+                audit=db.execute(f"SELECT before_json,after_json FROM p_{profile}_donation_audit WHERE event_id=? AND kind='update' ORDER BY revision DESC LIMIT 1",(event_id,)).fetchone()
+                if audit and json.loads(audit[1]).get('occurredAtMs') is None:
+                    facts['emptyTimeUpdatesPreservedUnknown' if json.loads(audit[0]).get('occurredAtMs') is None else 'explicitTimeClears']+=1
+        print('da attribution_facts='+json.dumps(facts,sort_keys=True))
     if not token:
         continue
     for endpoint in ('user/oauth', 'alerts/donations?page=1'):
