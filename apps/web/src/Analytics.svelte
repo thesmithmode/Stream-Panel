@@ -92,12 +92,6 @@
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 {#if data}
   <ComparisonCharts streams={data.streamComparison??[]} categories={data.categories??[]} />
-  <section class="metrics">
-    <div class="metric"><div><span>Аудитория</span><strong>{data.summary.entities}</strong></div></div>
-    <div class="metric"><div><span>Ядро аудитории</span><strong>{data.summary.core}</strong></div></div>
-    <div class="metric"><div><span>Эфиры / сообщения</span><strong>{data.summary.streams} / {data.summary.messages}</strong></div></div>
-  </section>
-
   {#if view.trend}<section class="panel analytics-chart"><header><h2>Активность по времени</h2><Help id="analytics-signals" label="О сигналах активности" text="Twitch — присутствие в опросах чата. YouTube — окно после сообщения, оценка активности. Эти сигналы не подтверждают просмотр видео. Счётчик площадки агрегатный и не раскрывает личности зрителей."/><label>Метрика графика<select bind:value={view.metric}><option value="viewers">Зрители (все)</option><option value="participants">Участники (все)</option><option value="twitchViewers">Зрители Twitch</option><option value="youtubeViewers">Зрители YouTube</option><option value="observed">Участники Twitch</option><option value="estimated">Оценка активности YouTube</option><option value="messages">Сообщения</option></select></label></header>
     <p class="small regular-summary">Ядро аудитории: <strong>{data.summary.regulars??0} из {data.summary.entities??0} ({data.summary.regularShare==null?"нет данных":(data.summary.regularShare*100).toFixed(1)+"%"})</strong></p>
     <AudienceChart points={data.timeline} audience={data.audience} metric={view.metric} bind:resolution={view.resolution} showRegulars={view.showRegulars} {timezone} {onPerson} onselection={(open)=>barOpen=open}/>

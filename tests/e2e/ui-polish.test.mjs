@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';
+import {mkdir} from 'node:fs/promises';import {join} from 'node:path';import test from 'node:test';import assert from 'node:assert/strict';
 import {application,seed} from '../helpers/application.mjs';import {launchBrowser} from '../helpers/browser.mjs';import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';import {assertUiLayout} from '../helpers/ui-layout.mjs';
 test('real data screens fit small phones and desktop without duplicated overview content',{timeout:90000},async()=>{
  const app=await application();let browser;try{
@@ -8,7 +8,7 @@ test('real data screens fit small phones and desktop without duplicated overview
    if(name==='Обзор'){await page.locator('.channel-metrics').waitFor();assert.equal(await page.locator('.trend-chart,.event-list,.audience-ranking,input[type="datetime-local"]').count(),0);}
    if(name==='Стримы'){const row=page.locator(`tr[data-session-id="${sid}"]`);await row.waitFor();if(width<=720){const box=await row.boundingBox();const panel=await page.locator(".sessions-page .panel").boundingBox(),heading=await page.locator(".page-heading").boundingBox();assert.ok(box.y<360&&box.x+box.width<=width,JSON.stringify(box));assert.ok(panel.y-(heading.y+heading.height)<=24,"No blank vertical space before stream history");}}
    if(name==='Аналитика')await page.locator('.comparison-charts').waitFor();
-   assert.equal(await page.getByRole('button',{name:'Демо',exact:true}).count(),0);assert.deepEqual(errors,[]);await assertUiLayout(page);
+   assert.equal(await page.getByRole('button',{name:'Демо',exact:true}).count(),0);assert.deepEqual(errors,[]);await assertUiLayout(page);if(width===390&&['Обзор','Стримы','Аналитика'].includes(name)&&process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR){const dir=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;await mkdir(dir,{recursive:true});await page.screenshot({path:join(dir,`mobile-${['Обзор','Стримы','Аналитика'].indexOf(name)}.png`),fullPage:name!=='Аналитика'});}
   }}await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });

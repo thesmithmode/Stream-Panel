@@ -141,7 +141,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
       await page.setViewportSize({width:1280,height:800});analyticsData=await (await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'})).json();await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
    }
    await page.getByLabel('Только ядро').check();
-   const defaultCoreCount=Number(await page.locator('.metrics .metric').filter({hasText:'Ядро аудитории'}).locator('strong').textContent());
+   const defaultCoreCount=parseInt(await page.locator('.regular-summary strong').textContent(),10);
    const audienceSection=page.getByRole('heading',{name:'Возвращаемость участников',exact:true}).locator('..').locator('..');
    const visibleCoreRows=await audienceSection.locator('.analytics-table tbody tr').count();
    assert.equal(visibleCoreRows,defaultCoreCount,'core-only filter must use default-qualified audience');
