@@ -207,10 +207,11 @@ test('single-stream analytics derives its bounds server-side and never includes 
 
 test('manual donation refresh awaits collection and propagates failure instead of reporting false success',async()=>{
  const f=await fixture();try{
+  f.a.configuration.value.daAccessToken='fixture';
   let release!:()=>void,entered!:()=>void;const start=new Promise<void>(resolve=>entered=resolve),completion=new Promise<void>(resolve=>release=resolve);let finished=false;
   f.a.da.scanHistory=async(recent=false)=>{assert.equal(recent,true);entered();await completion;};
   const response=f.a.app.inject({method:'POST',url:'/api/v1/donationalerts/rescan?recent=1',headers:f.headers,payload:{}}).then(value=>{finished=true;return value;});
-  await start;assert.equal(finished,false);release();assert.equal((await response).statusCode,200);
+  await Promise.race([start,response.then(value=>{throw new Error('Import returned before collection started: '+value.statusCode);})]);assert.equal(finished,false);release();assert.equal((await response).statusCode,200);
   f.a.da.scanHistory=async()=>{throw new Error('DA_HTTP_403');};
   const failed=await f.a.app.inject({method:'POST',url:'/api/v1/donationalerts/rescan?recent=1',headers:f.headers,payload:{}});assert.notEqual(failed.statusCode,200);
  }finally{await f.close();}
