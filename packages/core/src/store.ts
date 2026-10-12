@@ -1682,6 +1682,7 @@ export class StreamStore {
   summary(
     sessionId?: string,
     excludedBotLogins: readonly string[] = [],
+    details = true,
   ): Record<string, unknown> {
     const excluded = this.analyticsExclusions(excludedBotLogins);
     const botKeys = [...excluded];
@@ -1743,6 +1744,8 @@ export class StreamStore {
         BigInt(totals[row.currency] ?? "0") + BigInt(row.amount_minor)
       ).toString();
     }
+    // Stream cards do not need a second expansion of minute presence data.
+    if(!details)return {messages:counts.messages+youtubeMessageCount,donations:counts.donations,totals,chatters:null,lastPollAtMs:null,events:counts.event_count+youtubeMessageCount};
     const latest = this.db
       .prepare(
         `SELECT p.id, p.completed_at_ms FROM presence_polls p

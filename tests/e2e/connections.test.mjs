@@ -270,9 +270,9 @@ test(
       assert.equal(await page.getByRole("button", { name: /запись/i }).count(), 0);
       await page.getByRole("button", { name: "Стримы", exact: true }).click();
       await page.getByText("Twitch", { exact: true }).waitFor();
-      await page.getByRole("button", { name: "Обзор", exact: true }).click();
+      await page.getByRole("button", { name: "Открыть", exact: true }).click();
       await page.getByLabel("Фильтр событий").selectOption("donation");
-      assert.equal(await page.locator(".event-row").count(), 1);
+      assert.equal(await page.locator(".event-row").count(), 0);
       await page.getByLabel("Фильтр событий").selectOption("chat.message");
       assert.equal(await page.locator(".event-row").count(), 8);
       await page.locator(".event-title button").first().click();
@@ -284,7 +284,7 @@ test(
       await page.getByLabel("Фильтр событий").selectOption("donation");
       await page.getByText("Событий этого типа нет", { exact: true }).waitFor();
       await page.getByRole("button", {name:"Обзор",exact:true}).click();
-      await page.getByLabel("Фильтр событий").selectOption("all");
+
       await a.db.call("endSession", s, Date.now(), "estimated");
       await reload(page);
       await page.getByRole("button", { name: "Стримы", exact: true }).click();

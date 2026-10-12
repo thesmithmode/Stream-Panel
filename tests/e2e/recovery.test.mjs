@@ -38,7 +38,9 @@ test(
       assert.equal(await page.locator(".record-button").count(), 0);
       assert.equal(await page.getByRole("button", { name: /запись/i }).count(), 0);
       await seed(a);
+      await page.getByRole("button",{name:"Стримы",exact:true}).click();
       await a.db.stop();
+      await page.evaluate(()=>window.dispatchEvent(new Event("focus")));
       await page
         .getByRole("alert")
         .filter({ hasText: "DB_WORKER_STOPPED" })

@@ -114,7 +114,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    for(const metric of ['observed','estimated','messages','viewers']){await page.getByLabel('Метрика карты').selectOption(metric);const displayed=(await hourSection.locator('.analytics-table tbody tr').first().locator('td').nth(1).textContent()).trim(),value=metricValue(firstHour,metric);assert.equal(displayed,value===null?'нет данных':value.toFixed(1),`hour table should render ${metric} from API data`);}
    await page.getByLabel('Вид дней и часов').selectOption('map');assert.equal(await page.locator('.hour-heatmap').count(),1);
    for(const metric of ['observed','estimated','messages','viewers']){await page.getByLabel('Метрика карты').selectOption(metric);assert.ok(await page.locator('.hour-heatmap').count()>0);}
-   const sections=[['Отчёт YouTube','Агрегатный отчёт YouTube: все видео канала'],['График активности','Активность по времени'],['Сравнение категорий','Категории'],['Дни и часы','Активность по дням и часам'],['Сравнение стримов','Сравнение стримов'],['Таблица аудитории','Состав аудитории']];
+   const sections=[['Отчёт YouTube','Агрегатный отчёт YouTube: все видео канала'],['График активности','Активность по времени'],['Сравнение категорий','Категории'],['Дни и часы','Активность по дням и часам'],['Сравнение стримов','Сравнение стримов'],['Возвращаемость участников','Возвращаемость участников']];
    for(const [label,heading] of sections){await page.getByLabel(label,{exact:true}).uncheck();assert.equal(await page.getByRole('heading',{name:heading,exact:true}).count(),0);await page.getByLabel(label,{exact:true}).check();}
    await page.getByLabel('График активности',{exact:true}).uncheck();
    await page.getByRole('button',{name:'Обзор',exact:true}).click();await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
@@ -142,7 +142,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    }
    await page.getByLabel('Только ядро').check();
    const defaultCoreCount=Number(await page.locator('.metrics .metric').filter({hasText:'Ядро аудитории'}).locator('strong').textContent());
-   const audienceSection=page.getByRole('heading',{name:'Состав аудитории',exact:true}).locator('..').locator('..');
+   const audienceSection=page.getByRole('heading',{name:'Возвращаемость участников',exact:true}).locator('..').locator('..');
    const visibleCoreRows=await audienceSection.locator('.analytics-table tbody tr').count();
    assert.equal(visibleCoreRows,defaultCoreCount,'core-only filter must use default-qualified audience');
    assert.equal(await audienceSection.locator('.analytics-table tbody tr').evaluateAll(rows=>rows.every(row=>row.querySelector('.core-badge'))),true);

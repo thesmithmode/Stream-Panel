@@ -27,11 +27,11 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
  await page.route('**/api/v1/analytics?*',route=>route.fulfill({json:data}));
  page.setDefaultTimeout(8000);
  const response=()=>page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/analytics');
- const renderNextHistory=async()=>{assert.deepEqual(errors,[]);await page.getByRole('button',{name:'Обзор',exact:true}).click();const received=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await received;await page.getByText('Сравнения и отчёты',{exact:true}).click();};
+ const renderNextHistory=async()=>{assert.deepEqual(errors,[]);await page.getByRole('button',{name:'Обзор',exact:true}).click();const received=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await received;};
  try {
   await goto(page,`http://127.0.0.1:${port}`);
   await page.getByLabel('Логин',{exact:true}).fill('fixture');await page.getByLabel('Пароль',{exact:true}).fill('fixture-missing-data-password');await page.getByRole('button',{name:'Войти',exact:true}).click();
-  const first=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await first;await page.getByText('Сравнения и отчёты',{exact:true}).click();
+  const first=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await first;
   await page.getByRole('button',{name:person.name,exact:true}).waitFor();
   assert.ok(await page.getByText('0 из 1 (нет данных)',{exact:true}).count());
   const report=page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).locator('..').locator('..');
@@ -54,7 +54,7 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
   data={summary:{entities:205,core:0,streams:0,messages:0,regulars:0,regularShare:0},audience:Array.from({length:205},(_,i)=>({...person,id:`legacy-${i}`,name:`Архив ${i}`,source:'youtube',tags:['архив'],attendanceSessionIds:[],attendanceRatio:0,observedMinutesPerSession:0})),categories:[],hours:[],timeline:[]};
   await renderNextHistory();
   await page.getByText('Показаны первые 200; используйте поиск или меньший период.',{exact:true}).waitFor();
-  const audience=page.getByRole('heading',{name:'Состав аудитории',exact:true}).locator('..').locator('..');
+  const audience=page.getByRole('heading',{name:'Возвращаемость участников',exact:true}).locator('..').locator('..');
   assert.equal(await audience.locator('tbody tr').count(),200);
   await page.getByLabel('Поиск участника').fill('Архив 204');
   assert.equal(await audience.locator('tbody tr').count(),1);

@@ -325,6 +325,7 @@ export async function createApplication(
       "summary",
       string(object(request.query).session) || undefined,
       configuration.value.excludedBotLogins,
+      string(object(request.query).compact)!=="1",
     ),
   );
   app.get("/api/v1/events", async (request) => {

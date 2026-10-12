@@ -30,7 +30,7 @@ test("stream history shows only confirmed Twitch and YouTube links from the plat
     page.on("pageerror", error => errors.push(error.message));
     await startCoverage(page);
     await goto(page, a.bootstrap());
-    await page.getByRole("button", { name: "Открыть интеграции", exact: true }).waitFor();
+    await page.locator(".channel-metrics").waitFor();
     const sessions = await page.evaluate(() => fetch("/api/v1/sessions").then(response => response.json()));
     const combined = sessions.find(session => session.id === bothId);
     assert.deepEqual(combined.platforms, ["twitch", "youtube"]);
