@@ -16,7 +16,7 @@ test('timezone repair distributes imported tips across closed streams, preserves
  s.deleteDonation(eventKey(tip('deleted')),0,at);
  assert.equal(s.summary(sid).donations,0);
  assert.deepEqual(s.resolveDonationTimes(0),{resolved:4,invalid:1});
- assert.equal(s.summary(sid).donations,2);assert.equal(s.summary(sid).totals.RUB,'20000');
+ assert.equal(s.summary(sid).donations,2);assert.equal((s.summary(sid).totals as Record<string,string>).RUB,'20000');
  assert.equal(s.donation(eventKey(tip('assigned'))).personId,viewer);
  assert.equal(s.donation(eventKey(tip('edited'))).occurredAtMs,null);
  assert.equal(s.donation(eventKey(tip('invalid'))).occurredAtMs,null);
