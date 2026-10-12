@@ -13,7 +13,7 @@ test('confirmed Moscow timezone migrates both hosted profiles and repairs histor
   const a=await createApplication(join(dir,profile),47831,false,{}, {databasePath:path,profile});try{
    assert.equal(a.configuration.value.daUtcOffsetMinutes,180);
    const saved=JSON.parse(await readFile(join(dir,profile,'secrets.json'),'utf8'));assert.equal(saved.daMoscowTimeConfirmed,true);assert.equal(saved.daAccessToken,'saved-access');assert.equal(saved.daRefreshToken,'saved-refresh');
-   const sessions=await a.db.call<any[]>('sessions');assert.equal((await a.db.call<any>('summary',sessions[0].id)).totals.RUB,'10000');assert.equal((await a.db.call<any>('donations')).items[0].occurredAtMs,at+60000);
+   const sessions=await a.db.call<any[]>('sessions');assert.equal(sessions[0].donationCount,1);assert.equal(sessions[0].donationTotals.RUB,'10000');assert.equal((await a.db.call<any>('summary',sessions[0].id)).totals.RUB,'10000');assert.equal((await a.db.call<any>('donations')).items[0].occurredAtMs,at+60000);
    if(profile==='ruslan'){a.configuration.value.daUtcOffsetMinutes=0;await a.configuration.save();}
   }finally{await a.app.close();}
  }
