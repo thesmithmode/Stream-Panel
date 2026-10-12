@@ -40,15 +40,24 @@ for profile in ('ruslan', 'gulnaz'):
                 except ValueError:return None
             def fits(at):
                 return at is not None and any(start<=at and (end is None or at<end) for start,end in streams)
-            target=db.execute(f"SELECT e.source_time,e.payload_json,e.occurred_at_ms,(SELECT count(*) FROM p_{profile}_event_sessions es WHERE es.event_id=e.id) FROM {table} e WHERE e.source='donationalerts' AND e.type='donation' AND json_extract(e.payload_json,'$.amountMinor')='22800' AND json_extract(e.payload_json,'$.currency')='RUB'").fetchall()
-            report={'matchingPayments':len(target),'linkedPayments':sum(links>0 for raw,payload,stored,links in target),'createdFitsByOffset':{},'shownFitsByOffset':{},'hasShownTime':0,'rawSourceMatchesStoredCreated':0}
-            for raw,payload,stored,links in target:
+            target=db.execute(f"SELECT e.source_time,e.payload_json,e.occurred_at_ms,e.received_at_ms,e.external_id,(SELECT count(*) FROM p_{profile}_event_sessions es WHERE es.event_id=e.id) FROM {table} e WHERE e.source='donationalerts' AND e.type='donation' AND json_extract(e.payload_json,'$.amountMinor')='22800' AND json_extract(e.payload_json,'$.currency')='RUB'").fetchall()
+            report={'matchingPayments':len(target),'linkedPayments':sum(links>0 for raw,payload,stored,received,external,links in target),'createdFitsByOffset':{},'shownFitsByOffset':{},'hasShownTime':0,'rawSourceMatchesStoredCreated':0,'receiptLagMinutesByOffset':{},'notificationClockMatchesByOffset':{}}
+            for raw,payload,stored,received,external,links in target:
                 original=json.loads(payload).get('raw',{})
                 if original.get('shown_at'):report['hasShownTime']+=1
                 if original.get('created_at')==raw:report['rawSourceMatchesStoredCreated']+=1
             for offset in [180,0,-180]:
-                report['createdFitsByOffset'][str(offset)]=sum(fits(parsed(raw,offset)) for raw,payload,stored,links in target)
-                report['shownFitsByOffset'][str(offset)]=sum(fits(parsed(json.loads(payload).get('raw',{}).get('shown_at'),offset)) for raw,payload,stored,links in target)
+                report['createdFitsByOffset'][str(offset)]=sum(fits(parsed(raw,offset)) for raw,payload,stored,received,external,links in target)
+                report['shownFitsByOffset'][str(offset)]=sum(fits(parsed(json.loads(payload).get('raw',{}).get('shown_at'),offset)) for raw,payload,stored,received,external,links in target)
+            notifications=db.execute(f"SELECT observed_at_ms,payload_json FROM p_{profile}_provider_snapshots WHERE source='donationalerts' AND key='donation_notification'").fetchall()
+            def contains_id(value,external):
+                if isinstance(value,dict):
+                    if str(value.get('id'))==external and 'created_at' in value:return True
+                    return any(contains_id(item,external) for item in value.values())
+                return isinstance(value,list) and any(contains_id(item,external) for item in value)
+            for offset in [180,0,-180]:
+                report['receiptLagMinutesByOffset'][str(offset)]=[round((received-parsed(raw,offset))/60000,2) for raw,payload,stored,received,external,links in target if parsed(raw,offset) is not None]
+                report['notificationClockMatchesByOffset'][str(offset)]=sum(abs(observed-parsed(raw,offset))<120000 for raw,payload,stored,received,external,links in target for observed,body in notifications if parsed(raw,offset) is not None and contains_id(json.loads(body),external))
             print('da selected_payment_time_comparison='+json.dumps(report,sort_keys=True))
     if not token:
         continue
