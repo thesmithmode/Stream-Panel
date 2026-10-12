@@ -17,6 +17,12 @@ const profiles = ["ruslan", "gulnaz"] as const;
 const backupFilename=/^stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk$/;
 type BackupChannelStatus = { state: string; lastSuccessAt: number; filename: string; error: string };
 type BackupStatus = { pendingUploads:number;nextRetryAt:number;state: string; lastSuccessAt: number; filename: string; error: string; local: BackupChannelStatus; cloud: BackupChannelStatus };
+function schemaSignature(db:Database.Database):string {
+  const profiles=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sp_profile_schema'").get()
+    ?db.prepare('SELECT profile,version FROM sp_profile_schema ORDER BY profile').all():[];
+  const objects=db.prepare("SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all();
+  return createHash('sha256').update(JSON.stringify({version:db.pragma('user_version',{simple:true}),profiles,objects})).digest('hex');
+}
 export function validateSnapshot(db: Database.Database): void {
   if (db.pragma("integrity_check", {simple:true}) !== "ok" ||
       (db.pragma("foreign_key_check") as unknown[]).length)
@@ -50,7 +56,7 @@ export class BackupService {
   private uploadTask:Promise<void>|undefined;
   private stateTask:Promise<void>|undefined;
   private saving:Promise<void>=Promise.resolve();
-  private ledger:{version:1;installationId:string;uploaded:string[];pending:string[];attempts:number;retryAt:number;local?:BackupChannelStatus;cloud?:BackupChannelStatus}|undefined;
+  private ledger:{version:1;installationId:string;uploaded:string[];pending:string[];attempts:number;retryAt:number;local?:BackupChannelStatus;cloud?:BackupChannelStatus;schemaSignature?:string}|undefined;
   private ready(){
     return this.stateTask??= (async()=>{
       try{
@@ -90,6 +96,10 @@ export class BackupService {
   async runIfDue(now=Date.now()){
     await this.ready();
     if(backupDue(this.status.local.lastSuccessAt,now))return this.run();
+    const db=new Database(join(this.dir,'data.sqlite'),{readonly:true});
+    let signature:string;
+    try{signature=schemaSignature(db);}finally{db.close();}
+    if(signature!==this.ledger!.schemaSignature)return this.run();
     return undefined;
   }
   async retryPending(now=Date.now(),force=false){
@@ -206,7 +216,8 @@ export class BackupService {
       const db = new Database(join(this.dir, "data.sqlite"), {readonly:true});
       try { await db.backup(snapshot); } finally { db.close(); }
       const check = new Database(snapshot, {readonly:true});
-      try { validateSnapshot(check); } finally { check.close(); }
+      let signature:string;
+      try { validateSnapshot(check);signature=schemaSignature(check); } finally { check.close(); }
       const secrets: Record<string,unknown> = {};
       for (const profile of profiles) {
         try { secrets[profile] = JSON.parse(await readFile(join(this.dir,"profiles",profile,"secrets.json"), "utf8")); }
@@ -270,7 +281,7 @@ export class BackupService {
         error: "",
         local: { state: "success", lastSuccessAt: localSuccessAt, filename, error: "" },
       };
-      this.ledger!.pending.push(filename);this.ledger!.local=this.status.local;await this.save();
+      this.ledger!.pending.push(filename);this.ledger!.local=this.status.local;this.ledger!.schemaSignature=signature;await this.save();
       if(!this.options.url){await this.purgeLocal();return {filename};}
       // Creating a snapshot explicitly retries pending uploads; the timer respects backoff.
       await this.retryPending(Date.now(),true);
