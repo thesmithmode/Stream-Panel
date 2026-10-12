@@ -41,7 +41,7 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
   for(const metric of ['observed','estimated','messages','viewers']){
    await page.getByLabel('Метрика карты').selectOption(metric);
    assert.equal((await hours.locator('tbody tr td').nth(1).textContent()).trim(),'нет данных');
-   assert.match(await hours.locator('.heatmap-row span').first().getAttribute('title'),/нет данных/);
+   assert.match(await hours.locator('.heatmap-row button').first().getAttribute('title'),/нет данных/);
   }
   const streams=page.getByRole('heading',{name:'Сравнение стримов',exact:true}).locator('..').locator('..');
   assert.equal((await streams.locator('tbody tr td').nth(5).textContent()).trim(),'0 / 0 / —');

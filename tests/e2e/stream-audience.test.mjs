@@ -61,8 +61,8 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   assert.equal(await page.evaluate(() => {
     const nav = [...document.querySelectorAll('.sidebar nav button')].map(b => b.getBoundingClientRect());
     const cards = [...document.querySelectorAll('.stream-metrics .metric')].map(c => c.getBoundingClientRect());
-    return nav.length === 5 && nav.every(b => Math.abs(b.top - nav[0].top) < 1) && cards.length >= 2 && Math.abs(cards[0].top-cards[1].top)<1;
-  }), true, 'mobile navigation occupies one row and metrics use two columns');
+    return nav.length === 6 && new Set(nav.map(b=>Math.round(b.top))).size===2 && nav.every(b=>b.left>=0&&b.right<=innerWidth) && cards.length >= 2 && Math.abs(cards[0].top-cards[1].top)<1;
+  }), true, 'all six mobile destinations fit in two rows and metrics use two columns');
   await bars.first().click();await detail.waitFor();
   await detail.getByRole('button',{name:'О детализации минуты',exact:true}).click();
   const help=page.getByRole('dialog',{name:'О детализации минуты'});await help.waitFor();

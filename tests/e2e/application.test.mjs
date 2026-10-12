@@ -144,7 +144,7 @@ test(
       await page.getByText("Запись не закрыта", { exact: true }).waitFor({ state: "hidden" });
       checks.push("automatic stream session remains in history after DB close");
       await page
-        .getByRole("navigation").getByRole("button", { name: "Интеграции", exact: true })
+        .getByRole("navigation").getByRole("button", { name: "Настройки", exact: true })
         .click();
       await page
         .getByRole("button", { name: "Создать резервную копию", exact: true })

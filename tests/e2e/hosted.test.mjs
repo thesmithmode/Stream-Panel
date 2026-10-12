@@ -160,7 +160,7 @@ test("profile switch reloads all views, preserves other clients and remains visi
     await a.getByText('Настроить отображение',{exact:true}).click();await a.getByLabel('Сравнение стримов',{exact:true}).uncheck();
     await a.getByLabel('Только ядро',{exact:true}).check();
     await a.getByLabel('Профиль',{exact:true}).selectOption('gulnaz');await a.getByText('Настроить отображение',{exact:true}).click();
-    assert.equal(await a.getByLabel('Сравнение стримов',{exact:true}).isChecked(),false);assert.equal(await a.getByLabel('Только ядро',{exact:true}).isChecked(),false);
+    assert.equal(await a.getByLabel('Сравнение стримов',{exact:true}).isChecked(),true,'layout belongs to each profile');assert.equal(await a.getByLabel('Только ядро',{exact:true}).isChecked(),false);
     await a.getByLabel('Профиль',{exact:true}).selectOption('ruslan');await a.getByText('Настроить отображение',{exact:true}).click();assert.equal(await a.getByLabel('Только ядро',{exact:true}).isChecked(),true);
     await a.getByRole('button',{name:'Люди',exact:true}).click();await a.getByText('Viewer ruslan',{exact:true}).first().waitFor();
     await a.setViewportSize({ width: 390, height: 844 });

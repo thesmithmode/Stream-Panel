@@ -31,6 +31,7 @@ test('authenticated backup UI lists server files, separates cloud status and dow
   await page.route('**/api/v1/backups',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'BACKUP_NOT_CONFIGURED'})}));
   await region.getByRole('button',{name:'Обновить список копий',exact:true}).click();await region.getByRole('alert').filter({hasText:'не настроено'}).waitFor();
   await page.unroute('**/api/v1/backups');await region.getByRole('button',{name:'Обновить список копий',exact:true}).click();await region.getByRole('alert').waitFor({state:'detached'});
+  await page.getByRole('button',{name:'Интеграции',exact:true}).click();
   const credentials=page.getByLabel('Сохранённые ключи интеграций');
   await page.route('**/api/v1/integrations/credentials',route=>route.fulfill({status:500,contentType:'application/json',body:'{"error":"REQUEST_FAILED"}'}));
   await credentials.getByRole('button',{name:'Загрузить ключи'}).click();await credentials.getByRole('alert').waitFor();await page.unroute('**/api/v1/integrations/credentials');
@@ -39,6 +40,7 @@ test('authenticated backup UI lists server files, separates cloud status and dow
   await credentials.getByRole('button',{name:'Показать значения'}).click();assert.equal(await credentials.getByLabel('Client secret',{exact:true}).getAttribute('type'),'text');
   for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:800});await assertUiLayout(page);}await page.setViewportSize({width:390,height:844});
   await credentials.getByRole('button',{name:'Скрыть значения'}).click();await credentials.getByRole('button',{name:'Закрыть ключи'}).click();assert.equal(await credentials.getByLabel('Client secret',{exact:true}).count(),0);
+  await page.getByRole('button',{name:'Настройки',exact:true}).click();
   const restore=page.getByLabel('Восстановление резервной копии');
   await page.route('**/api/v1/backup/key',route=>route.fulfill({status:500,contentType:'application/json',body:'{"error":"REQUEST_FAILED"}'}));await restore.getByRole('button',{name:'Скачать ключ восстановления'}).click();await restore.getByRole('alert').waitFor();await page.unroute('**/api/v1/backup/key');
   const keyPending=page.waitForEvent('download');await restore.getByRole('button',{name:'Скачать ключ восстановления'}).click();const keyDownload=await keyPending;assert.equal((await readFile(await keyDownload.path(),'utf8')).trim(),'b'.repeat(64));
