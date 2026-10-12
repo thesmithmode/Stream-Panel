@@ -3,7 +3,9 @@
 set -euo pipefail
 [[ $EUID == 0 ]] || { echo 'Root required'; exit 1; }
 ensure_private_cache_port() {
-  if [[ -n $(ss -H -ltn 'sport = :6380') ]]; then
+  local listener
+  listener=$(ss -H -ltn 'sport = :6380') || { echo 'Cannot verify cache port ownership'; return 1; }
+  if [[ -n "$listener" ]]; then
     local cache_pid redis_pid
     cache_pid=$(systemctl show stream-panel-cache.service --property=MainPID --value)
     redis_pid=$(redis-cli -h 127.0.0.1 -p 6380 INFO server 2>/dev/null | tr -d '\r' | sed -n 's/^process_id://p')

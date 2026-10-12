@@ -46,7 +46,7 @@ class RedisIsolationTest(unittest.TestCase):
         source = (ROOT / 'ops/install-redis.sh').read_text()
         function = source.split('ensure_private_cache_port() {', 1)[1].split('\n}\nensure_private_cache_port', 1)[0]
         script = """set -euo pipefail
-ss() { printf '%s' "$LISTENER"; }
+ss() { [[ "$LISTENER" != 'ERROR' ]] || return 1; printf '%s' "$LISTENER"; }
 systemctl() { printf '%s' "$SERVICE_PID"; }
 redis-cli() { printf 'process_id:%s\\r\\n' "$REDIS_PID"; }
 ensure_private_cache_port() {
@@ -63,3 +63,8 @@ ensure_private_cache_port() {
             result = self.run_preflight('LISTEN', service_pid, redis_pid)
             self.assertEqual(result.returncode, 1, result.stderr)
             self.assertIn('another service', result.stdout)
+
+    def test_failed_socket_inspection_cannot_allow_installation(self):
+        result = self.run_preflight('ERROR', '0', '')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('Cannot verify', result.stdout)
