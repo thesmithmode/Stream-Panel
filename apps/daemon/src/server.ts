@@ -36,8 +36,18 @@ export async function createApplication(
 ) {
   const configuration = new Configuration(dir);
   await configuration.load();
+  // The owner confirmed DA wall-clock dates are Moscow time for both hosted profiles.
+  // Apply once; later edits in the profile's integration settings remain authoritative.
+  if((options.profile==='ruslan'||options.profile==='gulnaz')&&!configuration.value.daMoscowTimeConfirmed){
+    configuration.value.daUtcOffsetMinutes=180;
+    configuration.value.daMoscowTimeConfirmed=true;
+    await configuration.save();
+  }
   const db = new StoreClient(options.databasePath ?? join(dir, "data.sqlite"), options.profile);
   await db.ready;
+  if(configuration.value.daUtcOffsetMinutes!==null){
+    try{await db.call('resolveDonationTimes',configuration.value.daUtcOffsetMinutes);}catch(error){await db.stop();throw error;}
+  }
   const twitch = new TwitchConnection(
       configuration,
       db,

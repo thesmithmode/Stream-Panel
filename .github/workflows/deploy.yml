@@ -133,7 +133,7 @@ jobs:
           trap 'rm -rf "$task_dir"' EXIT
           printf '%s\n' "$BOOTSTRAP_KEY" > "$task_dir/key"
           printf '%s\n' "$KNOWN_HOSTS" > "$task_dir/known-hosts"
-          ssh -i "$task_dir/key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$task_dir/known-hosts" -o ConnectTimeout=15 "root@$DEPLOY_HOST" 'set -eu; set -a; . /etc/stream-panel/server.env; set +a; cd /opt/stream-panel/current; ./bin/node scripts/verify-cache.mjs; ./bin/node scripts/verify-cloud-backup.mjs'
+          ssh -i "$task_dir/key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$task_dir/known-hosts" -o ConnectTimeout=15 "root@$DEPLOY_HOST" 'set -eu; set -a; . /etc/stream-panel/server.env; set +a; cd /opt/stream-panel/current; ./bin/node scripts/verify-cache.mjs; ./bin/node scripts/verify-donations.mjs; ./bin/node scripts/verify-cloud-backup.mjs'
       - name: Remove runner artifacts
         if: always()
         run: rm -rf artifacts/server artifacts/server.tar.gz artifacts/server.header

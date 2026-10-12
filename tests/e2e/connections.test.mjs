@@ -1,3 +1,4 @@
+import {acceptConfirmation} from '../helpers/confirmation.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { launchBrowser } from "../helpers/browser.mjs";
@@ -118,7 +119,7 @@ test(
       );
       await twitch
         .getByRole("button", { name: "Отменить", exact: true })
-        .click();
+        .click();await acceptConfirmation(page,'Отключить');
       await page
         .getByText("Код: ABCD", { exact: true })
         .waitFor({ state: "hidden" });
@@ -127,7 +128,7 @@ test(
       await twitch.getByText('Для проверки подписок нужен повторный вход в Twitch с разрешением читать подписчиков',{exact:true}).waitFor();
       await twitch.getByRole('button',{name:'Разрешить чтение подписчиков',exact:true}).click();
       await twitch.getByText('Код: ABCD',{exact:true}).waitFor();
-      await twitch.getByRole('button',{name:'Отменить',exact:true}).click();
+      await twitch.getByRole('button',{name:'Отменить',exact:true}).click();await acceptConfirmation(page,'Отключить');
       await da
         .getByRole("button", { name: "Подключить DonationAlerts" })
         .click();
@@ -138,7 +139,7 @@ test(
       await da.getByLabel("Client ID", { exact: true }).fill("da-app");
       await da.getByLabel("Client secret", { exact: true }).fill("secret-app");
       await da.locator("details.compact-details").locator("summary").click();
-      await da.getByLabel("UTC offset (минуты)", { exact: true }).fill("180");
+      assert.equal(await da.getByLabel("UTC offset (минуты)", { exact: true }).count(),0);
       await context.route(
         "https://www.donationalerts.com/oauth/authorize?**",
         (route) =>
@@ -196,7 +197,7 @@ test(
         .getByRole("status")
         .filter({ hasText: "Данные о донатах обновлены" })
         .waitFor();
-      await da.getByRole("button", { name: "Отключить", exact: true }).click();
+      await da.getByRole("button", { name: "Отключить", exact: true }).click();await acceptConfirmation(page,'Отключить');
       await until(() => a.configuration.value.daAccessToken === "", 8000);
       assert.equal(a.configuration.value.daAccessToken, "");
       await da.locator("summary").click();
@@ -204,7 +205,7 @@ test(
         .getByLabel("Access token", { exact: true })
         .fill("manual-access");
       await da.getByLabel("Refresh token", { exact: true }).fill("manual-refresh");
-      await da.getByLabel("UTC offset (минуты)", { exact: true }).fill("");
+
       await da
         .getByRole("button", { name: "Подключить DonationAlerts" })
         .click();
@@ -220,7 +221,7 @@ test(
         await da.getByLabel("Refresh token", { exact: true }).inputValue(),
         "",
       );
-      assert.equal(a.configuration.value.daUtcOffsetMinutes, null);
+      assert.equal(a.configuration.value.daUtcOffsetMinutes, 180);
       assert.equal(a.configuration.value.daAccessToken, "manual-access");
       await a.db.call("gap", "twitch", "fixture_gap", Date.now(), null);
       await reload(page);

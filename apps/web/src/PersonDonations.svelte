@@ -1,5 +1,6 @@
 <script lang="ts">
  import {untrack,onMount} from 'svelte';
+ import Icon from './Icon.svelte';
  import {api,date,money,type Person} from './api';
  import {donationAuditChanges} from './donation-form';
  type Donation={id:string;personId:string|null;personName:string|null;amountMinor:string;currency:string;occurredAtMs:number|null;message:string;sourceName:string;originalActorName:string;revision:number;deleted:boolean};
@@ -27,8 +28,8 @@
  {#each rows as row (row.id)}<article data-donation-id={row.id}>
   <div class="donation-heading"><strong>{value(row)}</strong><span class="small muted">{date(row.occurredAtMs)}</span></div>
   <span class="small muted">{row.sourceName} · {row.originalActorName||'Аноним'}</span>{#if row.message}<p class="donation-message">{row.message}</p>{/if}
-  {#if editing?.id===row.id}<form onsubmit={e=>{e.preventDefault();void assign(row,recipient);}}><label>Привязать к человеку<select aria-label="Привязать к человеку" bind:value={recipient} disabled={busy||loading}>{#each people.filter(p=>!p.is_bot) as person}<option value={person.id}>{person.display_name}</option>{/each}</select></label><button class="primary" disabled={busy||loading||!recipient}>Сохранить привязку</button><button type="button" class="outline" onclick={()=>editing=null}>Отмена</button></form>
-  {:else}<button class="outline" disabled={busy||loading} onclick={()=>{editing=row;recipient=row.personId??personId;}}>Изменить привязку</button><button class="outline" disabled={busy||loading} onclick={()=>assign(row,null)}>Открепить от человека</button>{/if}
+  {#if editing?.id===row.id}<form onsubmit={e=>{e.preventDefault();void assign(row,recipient||null);}}><label>Привязать к человеку<select aria-label="Привязать к человеку" bind:value={recipient} disabled={busy||loading}><option value="">Без привязки</option>{#each people.filter(p=>!p.is_bot) as person}<option value={person.id}>{person.display_name}</option>{/each}</select></label><button class="primary" disabled={busy||loading}>Сохранить привязку</button><button type="button" class="outline" onclick={()=>editing=null}>Отмена</button></form>
+  {:else}<button class="icon-button" aria-label="Изменить привязку" title="Изменить привязку" disabled={busy||loading} onclick={()=>{editing=row;recipient=row.personId??personId;}}><Icon name="pencil" size={18}/></button>{/if}
   <details ontoggle={e=>{if(e.currentTarget.open)void audit(row.id).catch(e=>error=e.message);}}><summary>История привязок</summary>{#each histories[row.id]??[] as entry}<div class="audit-entry"><p class="small">{date(entry.created_at_ms)}</p>{#each donationAuditChanges(entry.before_json,entry.after_json) as change}<p class="small donation-message">{change.label}: {change.before??''} → {change.after}</p>{/each}</div>{/each}</details>
  </article>{/each}
  {#if loading}<p role="status">Загружаем донаты…</p>{/if}

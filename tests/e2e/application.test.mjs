@@ -1,3 +1,4 @@
+import {acceptConfirmation} from '../helpers/confirmation.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { launchBrowser } from "../helpers/browser.mjs";
@@ -85,12 +86,12 @@ test(
       await page.getByLabel("Целевой человек").selectOption(da.id);
       await page
         .getByRole("button", { name: "Объединить", exact: true })
-        .click();
+        .click();await acceptConfirmation(page,'Подтвердить');
       await page.waitForFunction(
         () => document.querySelectorAll(".person-row").length === 2,
       );
       checks.push("merge persists and updates people list");
-      await page.getByRole("button", { name: "Отменить", exact: true }).click();
+      await page.getByRole("button", { name: "Отменить", exact: true }).click();await acceptConfirmation(page,'Подтвердить');
       await page.waitForFunction(
         () => document.querySelectorAll(".person-row").length === 3,
       );
@@ -105,7 +106,7 @@ test(
       await page.getByLabel("Имя новой группы").fill("Выделенная группа");
       await page
         .getByRole("button", { name: "Разъединить выбранные", exact: true })
-        .click();
+        .click();await acceptConfirmation(page,'Подтвердить');
       await page
         .locator(".person-row")
         .filter({ hasText: "Выделенная группа" })

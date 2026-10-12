@@ -1,3 +1,4 @@
+import {acceptConfirmation} from '../helpers/confirmation.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { application } from "../helpers/application.mjs";
@@ -68,6 +69,8 @@ test("stream history shows only confirmed Twitch and YouTube links from the plat
     assert.equal(await manualRow.getByRole("link").count(), 0);
     assert.equal(await bothRow.getByRole("button",{name:"Удалить",exact:true}).count(),0);
     await manualRow.getByRole("button",{name:"Удалить",exact:true}).click();
+    await page.getByRole('dialog').getByRole('button',{name:'Отмена',exact:true}).click();assert.equal((await a.db.call('sessions')).some(s=>s.id===manualId),true);
+    await manualRow.getByRole("button",{name:"Удалить",exact:true}).click();await acceptConfirmation(page,'Удалить');
     await manualRow.waitFor({state:"detached"});
     assert.equal((await a.db.call("sessions")).some(s=>s.id===manualId),false);
     assert.equal((await a.db.call("sessions")).some(s=>s.id===bothId),true);

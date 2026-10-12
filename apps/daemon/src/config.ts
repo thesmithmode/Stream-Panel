@@ -15,6 +15,7 @@ export interface Config {
   version: 1;
   analyticsSettings?: AnalyticsSettings;
   coreAttendance80Applied?: boolean;
+  daMoscowTimeConfirmed?: boolean;
   youtubeClientId?: string;
   youtubeAccountId?: string;
   youtubeClientSecret?: string;

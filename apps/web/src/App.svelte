@@ -5,6 +5,8 @@
   import {isOutdatedRelease} from './release';
   import {viewRequests} from './view-requests';
   import Icon from "./Icon.svelte";
+  import Confirmation from "./Confirmation.svelte";
+  import {confirmAction} from "./confirmation.svelte";
   import {streamRange} from "./stream-time";
   import Overview from "./Overview.svelte";
   import ChannelOverview from "./ChannelOverview.svelte";
@@ -186,6 +188,8 @@
     };
   });
 </script>
+<Confirmation/>
+
 
 <div class="app-shell">
   <aside class="sidebar" aria-label="Навигация">
@@ -315,7 +319,7 @@
                               sessionFilter = session.id;
                               navigate("stream");
                             }}>Открыть</button
-                          >{#if session.kind === "manual"}<button class="outline small" onclick={()=>action(async()=>{await api(`sessions/${session.id}/delete`,{});if(sessionFilter===session.id)sessionFilter="";await refresh();})}>Удалить</button>{/if}
+                          >{#if session.kind === "manual"}<button class="icon-button danger-icon" aria-label="Удалить" title="Удалить стрим" onclick={()=>action(async()=>{if(!await confirmAction("Удалить стрим?","Стрим исчезнет из истории и аналитики. Сохранённые события останутся.","Удалить"))return;await api(`sessions/${session.id}/delete`,{});if(sessionFilter===session.id)sessionFilter="";await refresh();})}><Icon name="trash" size={18}/></button>{/if}
                         </td
                       ></tr
                     >{/each}</tbody

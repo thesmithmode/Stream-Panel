@@ -1,4 +1,5 @@
 <script lang="ts">
+  import {confirmAction} from "./confirmation.svelte";
   import { api } from "./api";
   import { statusLabel } from "./labels";
   import Credentials from './Credentials.svelte';
@@ -12,7 +13,6 @@
     daSecret = $state(""),
     daToken = $state(""),
     daRefresh = $state(""),
-    offset = $state(""),
     busy = $state(false),
     message = $state(""),
     error = $state(""),
@@ -24,8 +24,6 @@
     if (cfg.youtubeClientId) youtubeClient = cfg.youtubeClientId;
     if (cfg.twitchClientId) twitchClient = cfg.twitchClientId;
     if (cfg.daClientId) daClient = cfg.daClientId;
-    if (cfg.daUtcOffsetMinutes != null && cfg.daUtcOffsetMinutes !== "")
-      offset = String(cfg.daUtcOffsetMinutes);
     seeded = true;
   });
   const twitchConnected = $derived(status?.twitch?.state === "connected");
@@ -63,12 +61,7 @@
       clientSecret: daSecret,
       accessToken: daToken,
       refreshToken: daRefresh,
-      utcOffsetMinutes: (() => {
-        const raw = String(offset ?? "").trim();
-        if (!raw) return null;
-        const n = Number(raw);
-        return Number.isInteger(n) ? n : null;
-      })(),
+      utcOffsetMinutes: 180,
     });
     daSecret = daToken = daRefresh = "";
     if (result.url) window.open(result.url, "_blank", "noopener,noreferrer");
@@ -106,7 +99,7 @@
             disabled={busy}
             onclick={() =>
               run(async () => {
-                await api("twitch/disconnect", {});
+                if(!await confirmAction("Отключить Twitch?","Сбор новых данных остановится. История сохранится.","Отключить"))return;await api("twitch/disconnect", {});
               })}>Отключить</button
           >
         </div>
@@ -147,7 +140,7 @@
               disabled={busy}
               onclick={() =>
                 run(async () => {
-                  await api("twitch/disconnect", {});
+                  if(!await confirmAction("Отключить Twitch?","Сбор новых данных остановится. История сохранится.","Отключить"))return;await api("twitch/disconnect", {});
                 })}>Отменить</button
             >
           </div>{/if}
@@ -179,7 +172,7 @@
             disabled={busy}
             onclick={() =>
               run(async () => {
-                await api("donationalerts/disconnect", {});
+                if(!await confirmAction("Отключить DonationAlerts?","Сбор новых данных остановится. История сохранится.","Отключить"))return;await api("donationalerts/disconnect", {});
               })}>Отключить</button
           >
           <button
@@ -192,8 +185,6 @@
               })}>Обновить данные о донатах</button
           >
         </div>
-        <label>Часовой пояс дат DA<select aria-label="Часовой пояс дат DA" bind:value={offset}><option value="">Не задан</option><option value="0">UTC (GMT)</option><option value="180">Москва (UTC+3)</option>{#if offset&&!['0','180'].includes(offset)}<option value={offset}>UTC {Number(offset)/60>0?'+':''}{Number(offset)/60}</option>{/if}</select></label>
-        <button class="outline small" disabled={busy||offset===''} onclick={()=>run(async()=>{const result=await api('donationalerts/timezone',{utcOffsetMinutes:Number(offset)});message=`Время восстановлено: ${result.resolved} донатов.`;})}>Сохранить время DA</button>
       {:else}
         <label
           >Client ID<input
@@ -227,15 +218,6 @@
         </p>
         <details class="compact-details">
           <summary>Дополнительно</summary>
-          <label
-            >UTC offset (минуты)<input
-              type="number"
-              min="-840"
-              max="840"
-              bind:value={offset}
-              placeholder="пусто = неизвестен"
-            /></label
-          >
           <label
             >Access token<input
               type="password"
@@ -274,7 +256,7 @@
     <div class="settings-body">
       <p class="small muted">{status.youtube?.detail ?? "Подключите канал этого профиля"}</p>
       {#if ["connected", "error"].includes(status.youtube?.state)}
-        <button class="outline" disabled={busy} onclick={() => run(async () => { await api("youtube/disconnect", {}); })}>Отключить YouTube</button>
+        <button class="outline" disabled={busy} onclick={() => run(async () => { if(!await confirmAction("Отключить YouTube?","Сбор новых данных остановится. История сохранится.","Отключить"))return;await api("youtube/disconnect", {}); })}>Отключить YouTube</button>
       {:else}
         <label>YouTube Client ID<input bind:value={youtubeClient} autocomplete="off" /></label>
         <label>YouTube Client secret<input type="password" bind:value={youtubeSecret} autocomplete="new-password" placeholder={status.config.hasYoutubeSecret ? "Сохранён" : "Client secret"} /></label>

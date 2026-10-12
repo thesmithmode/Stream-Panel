@@ -12,6 +12,7 @@
   import PersonActivity from "./PersonActivity.svelte";
   import {untrack} from "svelte";
   import Icon from "./Icon.svelte";
+  import {confirmAction} from "./confirmation.svelte";
   import Help from "./Help.svelte";
   import PersonNotes from "./PersonNotes.svelte";
   import PersonDonations from "./PersonDonations.svelte";
@@ -297,7 +298,7 @@
       {#if detailTab==='overview'}
         <h3>Связанные аккаунты</h3>
         <div class="account-summary">{#each detail.identities as identity}<span><strong>{identity.display_name}</strong><small class="muted">{identity.source==='twitch'?'Twitch':identity.source==='youtube'?'YouTube':'DonationAlerts'}</small></span>{/each}</div>
-        <div class="actions"><button class="outline small" onclick={()=>detailTab='donations'}>История донатов</button><button class="outline small" onclick={()=>{detailTab='donations';showDonorLinks=true;}}>Привязать донаты</button><button class="outline small" onclick={()=>{detailTab='accounts';void loadAudit().catch(e=>error=e.message);}}>Редактировать аккаунты</button></div>
+        <div class="actions"><button class="outline small" onclick={()=>{detailTab='donations';showDonorLinks=true;}}>Привязать донаты</button></div>
         <PersonActivity personId={detail.id} />
         <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} sessionId={sessionFilter} onPerson={(id)=>void select(id)} />{/if}</details>
       {:else if detailTab==='accounts'}
@@ -336,6 +337,7 @@
               disabled={busy || !splitName.trim()}
               onclick={() =>
                 operation(async () => {
+                  if(!await confirmAction("Разъединить аккаунты?","Выбранные аккаунты перейдут в отдельную карточку. История событий сохранится."))return;
                   const result = await api("persons/split", {
                     identityIds: selectedIdentities,
                     name: splitName,
@@ -358,7 +360,7 @@
           ><button
             class="primary"
             disabled={busy || !target}
-            onclick={() => operation(merge)}>Объединить</button
+            onclick={() => operation(async()=>{if(await confirmAction("Объединить людей?","Аккаунты и история обеих карточек будут объединены."))await merge();})}>Объединить</button
           >
         </div>
         {#if target}<p class="small muted">
@@ -377,6 +379,7 @@
           disabled={busy || merge.undone_at_ms !== null}
           onclick={() =>
             operation(async () => {
+              if(!await confirmAction("Отменить изменение связей?","Связи аккаунтов вернутся к состоянию до этой операции."))return;
               await api(`${merge.kind === "split" ? "splits" : "merges"}/${merge.id}/undo`, {});
               await select(selectedId);
             })}>Отменить</button

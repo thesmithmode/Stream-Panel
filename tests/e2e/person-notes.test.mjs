@@ -42,8 +42,17 @@ test('person notes support mobile CRUD and return 409 without losing a stale dra
   await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();await page.getByRole('tab',{name:'Заметки и метки',exact:true}).click();
   await section.locator('.note-body').filter({hasText:'Исправленная заметка'}).waitFor();
   await page.screenshot({path:'/tmp/sp-notes-mobile.png',fullPage:true});
-  await section.getByRole('button',{name:'Удалить заметку',exact:true}).click();
-  await section.locator('.note-body').waitFor({state:'detached'});
+  assert.equal(await section.getByRole('button',{name:'Удалить заметку',exact:true}).count(),0);
+  assert.equal(await section.getByRole('button',{name:'Редактировать заметку',exact:true}).textContent(),'');
+  await section.getByRole('button',{name:'Редактировать заметку',exact:true}).click();
+  const deleting=section.getByRole('button',{name:'Удалить заметку',exact:true});assert.equal(await deleting.textContent(),'');
+  await deleting.click();const dialog=page.getByRole('dialog',{name:'Удалить заметку?'});await dialog.waitFor();await assertUiLayout(page);
+  assert.equal((await app.db.call('personNotes',person.id)).length,1,'opening confirmation must not delete');
+  assert.equal(await dialog.getByRole('button',{name:'Отмена',exact:true}).evaluate(el=>el===document.activeElement),true);
+  await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});assert.equal((await app.db.call('personNotes',person.id)).length,1);
+  await deleting.click();await dialog.getByRole('button',{name:'Отмена',exact:true}).click();await dialog.waitFor({state:'hidden'});assert.equal((await app.db.call('personNotes',person.id)).length,1);
+  await deleting.click();await dialog.getByRole('button',{name:'Удалить',exact:true}).click();await dialog.waitFor({state:'hidden'});
+  await section.locator('article').waitFor({state:'detached'});
   assert.deepEqual(await app.db.call('personNotes',person.id),[]);
   await saveCoverage(page);
  }finally{await browser?.close();await app.close();}

@@ -35,7 +35,7 @@ export class DonationLedger {
   if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>100||typeof includeDeleted!=='boolean')throw new Error('INVALID_DONATION_PAGE');
   const scope=` AND (? IS NULL OR i.person_id=?) AND (?=1 OR coalesce(c.deleted,0)=0) AND (? IS NULL OR EXISTS(SELECT 1 FROM event_sessions es WHERE es.event_id=e.id AND es.session_id=?))`;
   const args=[personId??null,personId??null,Number(includeDeleted),sessionId??null,sessionId??null] as const;
-  const rows=this.db.prepare(this.selection+scope+` ORDER BY coalesce(CASE WHEN c.event_id IS NULL THEN e.occurred_at_ms ELSE c.occurred_at_ms END,e.received_at_ms) DESC,e.id DESC LIMIT ? OFFSET ?`).all(...args,limit,offset) as Raw[];
+  const rows=this.db.prepare(this.selection+scope+` ORDER BY CASE WHEN c.event_id IS NULL THEN e.occurred_at_ms ELSE c.occurred_at_ms END DESC,e.source_time DESC,e.received_at_ms DESC,e.id DESC LIMIT ? OFFSET ?`).all(...args,limit,offset) as Raw[];
   const total=(this.db.prepare('SELECT count(*) AS n FROM ('+this.selection+scope+')').get(...args) as {n:number}).n;
   return {items:rows.map(row=>this.present(row)),total,offset,limit};
  }

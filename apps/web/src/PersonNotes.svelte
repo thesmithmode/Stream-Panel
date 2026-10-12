@@ -1,5 +1,7 @@
 <script lang="ts">
   import { api, date } from "./api";
+  import Icon from "./Icon.svelte";
+  import {confirmAction} from "./confirmation.svelte";
   let { personId }: {personId:string} = $props();
   type Note = {id:string;body:string;created_at_ms:number;updated_at_ms:number;revision:number};
   let notes = $state<Note[]>([]), draft = $state(""), editing = $state<Note|null>(null), editBody = $state(""), busy = $state(false), error = $state("");
@@ -34,10 +36,10 @@
         <label>Текст заметки<textarea bind:value={editBody} disabled={busy} maxlength="10000" rows="3"></textarea></label>
         <button class="primary" disabled={busy||!editBody.trim()} onclick={()=>change(async()=>{await api(`persons/${personId}/notes/${note.id}/update`,{body:editBody,revision:editing!.revision});editing=null;})}>Сохранить заметку</button>
         <button class="outline" disabled={busy} onclick={()=>editing=null}>Отмена</button>
+        <button class="icon-button danger-icon" aria-label="Удалить заметку" title="Удалить заметку" disabled={busy} onclick={async()=>{const revision=editing!.revision;if(!await confirmAction('Удалить заметку?','Заметка будет удалена.','Удалить'))return;await change(async()=>{await api(`persons/${personId}/notes/${note.id}/delete`,{revision});editing=null;});}}><Icon name="trash" size={18}/></button>
       {:else}
         <p class="note-body">{note.body}</p>
-        <button class="outline" disabled={busy} onclick={()=>{editing=note;editBody=note.body;}}>Редактировать заметку</button>
-        <button class="outline" disabled={busy} onclick={()=>change(()=>api(`persons/${personId}/notes/${note.id}/delete`,{revision:note.revision}))}>Удалить заметку</button>
+        <button class="icon-button" aria-label="Редактировать заметку" title="Редактировать заметку" disabled={busy} onclick={()=>{editing=note;editBody=note.body;}}><Icon name="pencil" size={18}/></button>
       {/if}
     </article>
   {/each}

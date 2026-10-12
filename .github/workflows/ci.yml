@@ -72,6 +72,7 @@ jobs:
           grep -qx 'apps/web/dist/index.html' artifacts/server.contents
           grep -qx 'bin/node' artifacts/server.contents
           grep -qx 'scripts/verify-cache.mjs' artifacts/server.contents
+          grep -qx 'scripts/verify-donations.mjs' artifacts/server.contents
       - uses: actions/upload-artifact@v4
         with:
           name: server-bundle

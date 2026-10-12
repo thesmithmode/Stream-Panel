@@ -5,6 +5,7 @@ export async function assertUiLayout(page) {
   const issues = await page.evaluate(() => {
     const problems = [];
     const rect = element => {
+      const modal=document.querySelector('dialog[open]');if(modal&&!modal.contains(element))return null;
       if (!element.checkVisibility()) return null;
       const box = element.getBoundingClientRect();
       if (!box.width || !box.height) return null;

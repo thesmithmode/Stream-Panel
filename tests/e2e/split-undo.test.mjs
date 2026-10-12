@@ -1,3 +1,4 @@
+import {acceptConfirmation} from '../helpers/confirmation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {application} from '../helpers/application.mjs';
@@ -16,10 +17,10 @@ test('YouTube memberships split and undo through the common Person card on mobil
   await page.getByRole('button',{name:'Люди',exact:true}).click();await page.locator('.person-row').filter({hasText:'one'}).click();await page.getByRole('tab',{name:'Редактировать аккаунты',exact:true}).click();
   const identity=page.locator('.identity-row').filter({hasText:'two'});await identity.getByRole('checkbox').check();
   await page.getByLabel('Имя новой группы').fill('Separate YouTube');
-  await page.getByRole('button',{name:'Разъединить выбранные',exact:true}).click();
+  await page.getByRole('button',{name:'Разъединить выбранные',exact:true}).click();await acceptConfirmation(page,'Подтвердить');
   const split=page.locator('.audit .capability').filter({hasText:'Разъединение'});await split.waitFor();
   assert.equal((await app.db.call('person',source)).identities.length,1);
-  await split.getByRole('button',{name:'Отменить',exact:true}).click();
+  await split.getByRole('button',{name:'Отменить',exact:true}).click();await acceptConfirmation(page,'Подтвердить');
   await page.locator('.audit .capability').filter({hasText:'Отменено'}).waitFor();
   assert.equal((await app.db.call('person',source)).identities.length,2);assert.equal((await app.db.call('events',undefined,source)).length,2);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
