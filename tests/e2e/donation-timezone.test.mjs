@@ -12,7 +12,7 @@ test('untimed history is visible and can be repaired without leaving the donatio
  await page.getByLabel('Часовой пояс дат DA').selectOption('0');await page.getByRole('button',{name:'Применить ко всем донатам',exact:true}).click();await page.getByText('Без привязки к эфиру',{exact:true}).waitFor({state:'hidden'});
  assert.equal((await app.db.call('summary',sid)).totals.RUB,'22800');assert.equal((await app.db.call('donations')).total,1);
  for(const width of [320,390,1280]){await page.setViewportSize({width,height:844});await assertUiLayout(page);}
- await page.setViewportSize({width:390,height:844});const footer=await page.locator('.sidebar-bottom').boundingBox();assert.ok(footer.height<80,'fixed controls must not consume the mobile viewport');
+ await page.setViewportSize({width:320,height:844});await page.getByRole('button',{name:/Автообновление/}).click();await page.getByLabel('Интервал автообновления').waitFor();await assertUiLayout(page);await page.getByLabel('Интервал автообновления').selectOption('60');await page.setViewportSize({width:390,height:844});const footer=await page.locator('.sidebar-bottom').boundingBox();assert.ok(footer.height<80,'fixed controls must not consume the mobile viewport');
  const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(evidence){await mkdir(evidence,{recursive:true});await page.screenshot({path:join(evidence,'repaired-donations-mobile.png'),fullPage:true});}assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });

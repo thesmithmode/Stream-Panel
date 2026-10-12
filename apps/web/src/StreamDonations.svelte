@@ -33,7 +33,7 @@
  {#if error}<p class="notice error" role="alert">{error}</p>{/if}
  {#each rows as row (row.id)}<article data-donation-id={row.id}>
   <div class="donation-summary"><strong>{value(row)}</strong><time class="small muted">{row.occurredAtMs===null&&row.sourceTime?`${row.sourceTime} · время DA`:date(row.occurredAtMs)}</time></div>
-  <div class="donation-owner"><span><span class="small muted">Отправитель: </span>{row.originalActorName||'Аноним'}</span>{#if row.personId}<button class="text-button" aria-label={`Связан: ${row.personName}`} onclick={()=>onPerson(row.personId!)}><span class="small muted">Связан: </span>{row.personName}</button>{/if}<button class="outline small" disabled={busy} onclick={()=>void edit(row)}>Привязать к человеку</button></div>
+  <div class="donation-owner">{#if !row.personId||row.personName!==row.originalActorName}<span>{row.originalActorName||'Аноним'}</span>{/if}{#if row.personId}<button class="text-button" aria-label={`Связан: ${row.personName}`} onclick={()=>onPerson(row.personId!)}>{row.personName}</button>{/if}<button class="outline small" aria-label="Привязать к человеку" disabled={busy} onclick={()=>void edit(row)}>Связать</button></div>
   {#if showAll&&!row.sessionIds?.length}<span class="small muted">Без привязки к эфиру</span>{/if}
  {#if row.message}<p class="donation-message">{row.message}</p>{/if}
   {#if editing?.id===row.id}<form class="donation-editor" onsubmit={e=>{e.preventDefault();void assign();}}>
