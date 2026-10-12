@@ -224,7 +224,7 @@ export class YouTubeConnection {
   private async collectSubscribers(tokens:Tokens,valid:()=>boolean,at:number){
     const previous=await this.db.call<any>('youtubeData',tokens.userId);if(!valid()||at-(previous.snapshots["cursor:followers"]?.updatedAt??-Infinity)<15*60000)return;
     try{
-      const channelStats=object(object(previous.snapshots.channel?.data).statistics),count=Number(channelStats.subscriberCount);
+      const channelStats=object(object(previous.snapshots.channel?.data??{}).statistics??{}),count=Number(channelStats.subscriberCount);
       const subscriberTotal=channelStats.hiddenSubscriberCount===true||!Number.isSafeInteger(count)||count<0?null:count;
       let page='',complete=false;const seen=new Set<string>(),followers:{id:string;name:string;followedAtMs:number|null;raw:unknown}[]=[];
       for(let n=0;n<25;n++){
