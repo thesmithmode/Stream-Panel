@@ -17,11 +17,11 @@ test('person detail tabs retain immutable donations, paginate and recover from u
   assert.equal(reads.filter(path=>path===`/api/v1/persons/${viewer}/stats`).length,1,'opening a person must not fetch statistics twice');
   assert.equal(reads.filter(path=>path.endsWith('/following')).length,0,'collapsed following details must not query history');
   const followingResponse=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/v1/persons/${viewer}/following`);
-  await page.getByText('Подписки и первые наблюдения',{exact:true}).click();await followingResponse;await page.getByRole('region',{name:'Подписки на канал'}).waitFor();
+  await page.locator('summary').filter({hasText:'Подписки на канал'}).click();await followingResponse;await page.getByRole('region',{name:'Подписки на канал'}).waitFor();
   assert.equal(reads.filter(path=>path===`/api/v1/persons/${viewer}/following`).length,1);
-  await page.getByText('Подписки и первые наблюдения',{exact:true}).click();
-  await page.getByText('Активность YouTube оценена по сообщениям.',{exact:true}).waitFor();await page.getByText('Баллы канала и награды',{exact:true}).click();await page.locator('.rewards article').filter({hasText:'Music'}).filter({hasText:'250 баллов · Выполнена'}).waitFor();
-  await page.getByText('50 баллов · Отменена · баллы возвращены',{exact:true}).waitFor();await page.getByText('50 баллов · Ожидает выполнения',{exact:true}).waitFor();
+  await page.locator('summary').filter({hasText:'Подписки на канал'}).click();
+  await page.getByText('Активность YouTube оценена по сообщениям.',{exact:true}).waitFor();assert.equal(await page.getByText('Баллы канала и награды',{exact:true}).count(),0);
+
   for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:800});await assertUiLayout(page);}await page.setViewportSize({width:1280,height:800});await page.screenshot({path:'/tmp/sp-points-desktop.png',fullPage:true});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight),true);
   const tabs=page.getByRole('tablist',{name:'Разделы человека'});await page.route('**/api/v1/donations?*',route=>route.fulfill({status:503,json:{error:'DONATIONS_UNAVAILABLE'}}));await tabs.getByRole('tab',{name:'Донаты',exact:true}).click();await page.getByRole('alert').filter({hasText:'DONATIONS_UNAVAILABLE'}).waitFor();await page.unroute('**/api/v1/donations?*');await tabs.getByRole('tab',{name:'Активность'}).click();await tabs.getByRole('tab',{name:'Донаты',exact:true}).click();const section=page.getByRole('region',{name:'Донаты человека'});await section.getByText('1–10 из 12',{exact:true}).waitFor();await section.getByRole('button',{name:'Следующие донаты'}).click();await section.getByText('11–12 из 12',{exact:true}).waitFor();assert.equal(await section.locator('article').count(),2);await section.getByRole('button',{name:'Предыдущие донаты'}).click();await section.getByText('1–10 из 12',{exact:true}).waitFor();

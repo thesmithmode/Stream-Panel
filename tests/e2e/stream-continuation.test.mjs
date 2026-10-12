@@ -27,8 +27,8 @@ test('stream continuation shows Moscow dates, a real break, participant interval
   const ranking=page.getByRole('region',{name:'Рейтинг участников'});await ranking.getByRole('button',{name:'Silent Viewer',exact:true}).waitFor();
   assert.equal(await ranking.locator('li strong').first().textContent(),'6 мин');
   await ranking.getByText('Интервалы в чате',{exact:true}).click();
-  assert.ok((await ranking.textContent()).includes('2026-09-13 11:04 — 2026-09-13 11:07'));
-  assert.ok((await ranking.textContent()).includes('2026-09-13 11:14 — 2026-09-13 11:17'));
+  assert.ok((await ranking.textContent()).includes('11:04 — 11:07'));
+  assert.ok((await ranking.textContent()).includes('11:14 — 11:17'));
   await page.getByText('История названий и категорий',{exact:true}).click();
   assert.ok((await page.locator('.stream-facts').textContent()).includes('First game · First title'));
   assert.ok((await page.locator('.stream-facts').textContent()).includes('Second game · Second title'));

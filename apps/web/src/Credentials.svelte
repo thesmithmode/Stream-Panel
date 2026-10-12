@@ -1,5 +1,5 @@
 <script lang="ts">
- import {api,getDataMode} from './api';
+ import {api} from './api';
  let data=$state<Record<string,Record<string,unknown>>|null>(null),busy=$state(false),visible=$state(false),error=$state('');
  const names:Record<string,string>={twitch:'Twitch',youtube:'YouTube',donationalerts:'DonationAlerts'};
  const labels:Record<string,string>={clientId:'Client ID',clientSecret:'Client secret',access:'Access token',refresh:'Refresh token',userId:'ID аккаунта',expiresAt:'Срок действия',scopes:'Разрешения'};
@@ -10,7 +10,7 @@
  <header><h2>Ключи интеграций</h2></header>
  <div class="settings-body">
   <p class="small muted">Ключи выбранного профиля. Полная резервная копия сохраняет подключения обоих профилей.</p>
-  {#if !data}<button class="outline" disabled={busy||getDataMode()==='demo'} onclick={load}>Загрузить ключи</button>
+  {#if !data}<button class="outline" disabled={busy} onclick={load}>Загрузить ключи</button>
   {:else}
    <div class="actions"><button class="outline" onclick={()=>visible=!visible}>{visible?'Скрыть значения':'Показать значения'}</button><button class="text-button" onclick={close}>Закрыть ключи</button></div>
    <div class="credentials">{#each Object.entries(data) as [provider,fields]}<div><h3>{names[provider]}</h3>

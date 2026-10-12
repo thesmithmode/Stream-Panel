@@ -11,13 +11,13 @@ test('per-platform follow status distinguishes unknown, complete negative, subsc
  s.followingSnapshot('twitch','owner',[],true,at+m);assert.equal(s.personFollowing(person,id)[0]!.status,false);
  s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:at+2*m},{id:'unlinked',name:'Other',followedAtMs:at+2*m}],true,at+3*m,2);
  s.endSession(id,at+4*m);s.followingSnapshot('twitch','owner',[],true,at+5*m,0);
- const state=s.personFollowing(person,id)[0]!;assert.equal(state.status,false);assert.equal(state.followedAtMs,at+2*m);assert.equal(state.streamStatus,true);assert.equal(state.firstMessageMs,at);assert.equal(state.firstSeenInChatMs,at+m);assert.equal(state.followedDuringStreamMs,at+2*m);assert.equal(state.history.length,4);
+ const state=s.personFollowing(person,id)[0]!;assert.equal(state.status,false);assert.equal(state.followedAtMs,at+2*m);assert.equal(state.streamStatus,true);assert.equal(state.followedDuringStreamMs,at+2*m);assert.equal(state.history.length,4);
  const analytics=s.followingAnalytics(id);assert.equal(analytics.newFollowers.length,2);assert.equal(analytics.newFollowers[0]!.personId,person);assert.equal(analytics.newFollowers[1]!.personId,null);assert.equal(analytics.polls.length,3);
  // YouTube hides private subscribers: absence never proves a negative.
  s.youtubeMessages('channel','chat',[{id:'yt',snippet:{type:'textMessageEvent',publishedAt:new Date(at).toISOString(),displayMessage:'Hello'},authorDetails:{channelId:'author',displayName:'YT'}}]);const yt=String(s.persons().find(p=>p.sources==='youtube')!.id);
  s.followingSnapshot('youtube','channel',[],true,at+3*m);assert.equal(s.personFollowing(yt,id)[0]!.status,null);
  s.followingSnapshot('youtube','channel',[{id:'author',name:'YT',followedAtMs:null}],false,at+4*m);
- assert.equal(s.personFollowing(yt)[0]!.status,true);assert.equal(s.personFollowing(yt)[0]!.firstSeenInChatMs,at);assert.equal(s.personFollowing(yt)[0]!.followedAtMs,null);
+ assert.equal(s.personFollowing(yt)[0]!.status,true);assert.equal(s.personFollowing(yt)[0]!.followedAtMs,null);
  s.merge(yt,person,s.personRevision(yt),s.personRevision(person),at+5*m);assert.equal(s.personFollowing(person,id).length,2);
  assert.throws(()=>s.personFollowing('missing'),/PERSON_NOT_FOUND/);assert.throws(()=>s.personFollowing(person,'missing'),/SESSION_NOT_FOUND/);assert.throws(()=>s.followingAnalytics('missing'),/SESSION_NOT_FOUND/);
  }finally{s.close();}
@@ -40,7 +40,7 @@ test('follower snapshots reject malformed input without overwriting existing raw
 test('live follow events without polls and public YouTube subscribers retain platform-specific dates',()=>{
  const s=new StreamStore(':memory:');try{
  const id=s.observePlatformStream('twitch','owner','one',at,at,null,'Stream')!,person=event(s,'follow-only','follow',at+m);
- const state=s.personFollowing(person,id)[0]!;assert.equal(state.status,true);assert.equal(state.streamStatus,true);assert.equal(state.followedDuringStreamMs,at+m);assert.equal(state.firstMessageMs,null);assert.equal(state.firstSeenInChatMs,null);
+ const state=s.personFollowing(person,id)[0]!;assert.equal(state.status,true);assert.equal(state.streamStatus,true);assert.equal(state.followedDuringStreamMs,at+m);
  s.youtubeMessages('channel','chat',[{id:'yt',snippet:{type:'textMessageEvent',publishedAt:new Date(at).toISOString(),displayMessage:'Hello'},authorDetails:{channelId:'author',displayName:'YT'}}]);
  const yt=String(s.persons().find(p=>p.sources==='youtube')!.id);
  s.followingSnapshot('youtube','channel',[{id:'author',name:'YT',followedAtMs:at+2*m},{id:'before',name:'Earlier',followedAtMs:at-m},{id:'future',name:'Later',followedAtMs:at+100*m}],true,at+3*m);
@@ -60,6 +60,6 @@ test('long stream history retains an early subscription after recent snapshot li
  s.endSession(id,at+211*m);
  const state=s.personFollowing(person,id)[0]!;
  assert.equal(state.status,false);assert.equal(state.streamStatus,false);assert.equal(state.followedAtMs,at+m);assert.equal(state.followedDuringStreamMs,at+m);
- assert.equal(state.history.length,1);
+ assert.equal(state.history.length,2);
  }finally{s.close();}
 });

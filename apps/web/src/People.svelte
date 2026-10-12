@@ -4,12 +4,10 @@
     date,
     money,
     type Person,
-    type Event,
     type PersonStats,
     type PersonTop,
   } from "./api";
   import { formatDuration } from "./duration";
-  import EventList from "./EventList.svelte";
   import PersonActivity from "./PersonActivity.svelte";
   import {untrack} from "svelte";
   import Icon from "./Icon.svelte";
@@ -119,7 +117,7 @@
     if (selectedId === id) stats = value;
   }
   async function refreshPerson(id:string) {
-    const person=await api(`persons/${id}`);
+    const person=await api(`persons/${id}?events=false`);
     if(selectedId===id){detail=person;await loadStats(id);}
     await onChange();
   }
@@ -132,7 +130,7 @@
     detail = null;
     detailLoading = true;
     try {
-      const [person, matches,metrics] = await Promise.all([api(`persons/${id}`),api<string[]>(`persons/${id}/candidates`),api<PersonStats>(`persons/${id}/stats${sessionFilter ? `?session=${sessionFilter}` : ""}`)]);
+      const [person, matches,metrics] = await Promise.all([api(`persons/${id}?events=false`),api<string[]>(`persons/${id}/candidates`),api<PersonStats>(`persons/${id}/stats${sessionFilter ? `?session=${sessionFilter}` : ""}`)]);
       if (selectedId !== id) return;
       detail = person;
       name = detail.display_name;
@@ -193,9 +191,9 @@
     <div class="tops-tabs" role="tablist" aria-label="Сортировка людей">
       {#each [
         ["default", "Все"],
-        ["messages", "Чат"],
-        ["donations", "Донаты"],
-        ["observed_minutes", "Набл. мин"],
+        ["messages", "Чаттеры"],
+        ["donations", "Донатеры"],
+        ["observed_minutes", "Зрители"],
       ] as const as [key, label]}<button
           type="button"
           role="tab"
@@ -249,7 +247,7 @@
         <p>Активность, донаты и связи аккаунтов.</p>
       </div>{:else}<header>
         <h2>{detail.display_name}</h2>
-        <span class="small muted">Группа активности</span>
+
       </header>
       {#if stats}<div class="kpi-strip" aria-label="Показатели человека">
           <div class="kpi">
@@ -379,8 +377,7 @@
        <PersonNotes personId={detail.id} />
       {:else}
        <PersonActivity personId={detail.id} />
-       <details bind:open={showFollowing}><summary>Подписки и первые наблюдения</summary>{#if showFollowing}<Following personId={detail.id} onPerson={(id)=>void select(id)} />{/if}</details>
-       <details><summary>Последние события</summary><EventList events={detail.events as Event[]} onPerson={(id)=>void select(id)}/></details>
+       <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} onPerson={(id)=>void select(id)} />{/if}</details>
       {/if}
       </div>{/if}
   </section>

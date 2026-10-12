@@ -14,20 +14,5 @@ export function personActivity(db:Database.Database,id:string){
  for(const span of spans)for(let at=span.from;at<span.to;){const next=Math.min(span.to,(Math.floor(at/3600000)+1)*3600000);hours[Number(clock.format(at))]!.minutes+=(next-at)/60000;at=next;}
  const visits=new Map<string,{session:string;at:number;minutes:number}>();
  for(const span of spans){const row=visits.get(span.session)??{session:span.session,at:span.from,minutes:0};row.at=Math.min(row.at,span.from);row.minutes+=(span.to-span.from)/60000;visits.set(span.session,row);}
- // Apply the limit after updates have been grouped, scoped to the channel.
- const redemptions=db.prepare(`WITH history AS (
- SELECT e.id,e.type,e.account_id,e.occurred_at_ms,e.payload_json,
- row_number() OVER(PARTITION BY e.account_id,coalesce(json_extract(e.payload_json,'$.raw.payload.event.id'),e.id) ORDER BY e.occurred_at_ms DESC,e.received_at_ms DESC,e.id DESC) AS position,
- min(e.occurred_at_ms) OVER(PARTITION BY e.account_id,coalesce(json_extract(e.payload_json,'$.raw.payload.event.id'),e.id)) AS at
- FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id=? AND e.type LIKE 'channel_points%redemption%')
- SELECT * FROM history WHERE position=1 ORDER BY at DESC,id DESC LIMIT 100`).all(id) as {id:string;type:string;account_id:string;at:number|null;payload_json:string}[];
- // Updates of the same redemption do not add its cost twice.
- const rewards=new Map<string,{id:string;at:number|null;title:string;cost:number|null;status:string}>();
- for(const row of redemptions){
-  const p=JSON.parse(row.payload_json),event=p.raw?.payload?.event??{},reward=p.reward??event.reward??{};
-  const key=JSON.stringify([row.account_id,event.id??row.id]);
-  const redeemedAt=Date.parse(event.redeemed_at),cost=reward.channel_points??reward.cost;
-  rewards.set(key,{id:key,at:Number.isFinite(redeemedAt)?redeemedAt:row.at,title:reward.title??reward.type??'Награда',cost:typeof cost==='number'?cost:null,status:event.status??(row.type==='channel_points_automatic_reward_redemption.add'?'FULFILLED':'UNKNOWN')});
- }
- return {hasEstimatedActivity:messages.length>0,hours,visits:[...visits.values()].sort((a,b)=>a.at-b.at),rewards:[...rewards.values()],balance:null};
+ return {hasEstimatedActivity:messages.length>0,hours,visits:[...visits.values()].sort((a,b)=>a.at-b.at)};
 }

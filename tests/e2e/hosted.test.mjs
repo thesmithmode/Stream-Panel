@@ -9,7 +9,7 @@ import { createHostedApplication } from "../../dist/apps/daemon/src/hosted.js";
 import { launchBrowser } from "../helpers/browser.mjs";
 import { goto, saveCoverage, reload, startCoverage } from "../helpers/browser-coverage.mjs";
 
-test("two browser accounts see only their own data; logout in demo revokes the real session", { timeout: 30000 }, async () => {
+test("two browser accounts see only their own data; logout revokes the session", { timeout: 30000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), "sp-hosted-browser-"));
   const port = await new Promise((resolve) => { const s = net.createServer(); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => resolve(p)); }); });
   const origin = `http://127.0.0.1:${port}`;
@@ -67,7 +67,9 @@ test("two browser accounts see only their own data; logout in demo revokes the r
       await page.getByText("Неверный логин или пароль", { exact: true }).waitFor();
       await page.getByLabel("Пароль", { exact: true }).fill(`${profile}-browser-password`);
       await page.getByRole("button", { name: "Войти", exact: true }).click();
-      await page.getByText(`Private ${profile}`, { exact: true }).waitFor();
+      await page.locator(".channel-metrics").waitFor();
+      await page.getByRole("button",{name:"Люди",exact:true}).click();
+      await page.locator(".person-row").filter({hasText:"Viewer"}).waitFor();
       assert.equal(await page.getByText(`Private ${profile === "ruslan" ? "gulnaz" : "ruslan"}`, { exact: true }).count(), 0);
       assert.equal(await page.title(), "Stream Panel");
       const ownName=profile==='ruslan'?'FullRandomName_Twitch':'AmaliaMelina',guestName=profile==='ruslan'?'AmaliaMelina':'FullRandomName_Twitch';
@@ -76,12 +78,11 @@ test("two browser accounts see only their own data; logout in demo revokes the r
       await page.getByRole("button", {name:"Интеграции",exact:true}).click();
       assert.equal(await page.getByRole("button",{name:"YouTube",exact:true}).count(),0);
       await page.getByRole("heading",{name:`YouTube Own ${profile}`}).waitFor();
-      await page.getByText(`YouTube private ${profile}`,{exact:false}).waitFor();
+      await page.getByText('Подписчики: 10 · Просмотры канала: 100',{exact:true}).waitFor();
       assert.equal(await page.getByText(`YouTube private ${profile === "ruslan" ? "gulnaz" : "ruslan"}`,{exact:false}).count(),0);
-      await page.getByRole("button", {name:"Демо",exact:true}).click();
-      await page.getByText('Подключите свой канал в разделе «Интеграции». Здесь появятся его отчёты и чат эфиров.',{exact:true}).waitFor();
+      assert.equal(await page.getByRole("button",{name:"Демо",exact:true}).count(),0);
       assert.equal(await page.getByText(`YouTube private ${profile}`,{exact:false}).count(),0);
-      await page.getByRole("button", {name:"Реальные",exact:true}).click();
+
       await page.getByRole("heading",{name:`YouTube Own ${profile}`}).waitFor();
       await page.route('**/api/v1/youtube/data',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'WORKER_UNAVAILABLE'})}));
       await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.getByRole('button',{name:'Интеграции',exact:true}).click();
@@ -100,7 +101,7 @@ test("two browser accounts see only their own data; logout in demo revokes the r
       await page.setViewportSize({width:390,height:844});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
       await page.setViewportSize({width:1280,height:800});
-      await page.getByRole("button", { name: "Демо", exact: true }).click();
+
       assert.equal(await page.getByRole("button", { name: "Выйти", exact: true }).count(),0);
       await page.evaluate(async()=>{const {csrf}=await fetch("/api/v1/auth/me").then(r=>r.json());await fetch("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},body:"{}"});});
       await reload(page);
@@ -135,13 +136,13 @@ test("profile switch reloads all views, preserves other clients and remains visi
       await page.getByLabel("Логин", { exact: true }).fill("ruslan");
       await page.getByLabel("Пароль", { exact: true }).fill("profile-browser-password");
       await page.getByRole("button", { name: "Войти", exact: true }).click();
-      await page.getByText("Message ruslan", { exact: true }).waitFor();
+      await page.getByRole("button",{name:"Люди",exact:true}).click();await page.locator(".person-row").filter({hasText:"Viewer ruslan"}).waitFor();
     }
     const [a, b] = pages;
     await a.getByLabel("Профиль", { exact: true }).selectOption("gulnaz");
-    await a.getByText("Message gulnaz", { exact: true }).waitFor();
+    await a.locator(".person-row").filter({hasText:"Viewer gulnaz"}).waitFor();
     assert.equal(await a.getByText("Message ruslan", { exact: true }).count(), 0);
-    assert.equal(await b.getByText("Message ruslan", { exact: true }).count(), 1);
+    assert.equal(await b.locator(".person-row").filter({hasText:"Viewer ruslan"}).count(),1);
     await a.getByRole("button", { name: "Люди", exact: true }).click();
     await a.getByText("Viewer gulnaz", { exact: true }).first().waitFor();
     assert.equal(await a.getByText("Viewer ruslan", { exact: true }).count(), 0);

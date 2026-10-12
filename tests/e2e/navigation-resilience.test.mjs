@@ -20,7 +20,7 @@ test('stream scope never flashes channel totals, reload/back retain the route an
   assert.ok(!(await page.locator('main').textContent()).includes('12 000'));
   await page.locator('.stream-metrics .metric').filter({hasText:'Донаты'}).getByText('0',{exact:true}).waitFor();await page.locator('.stream-metrics').getByText('Зрители (все)',{exact:true}).waitFor();
   assert.equal(await page.locator('.stream-metrics').getByText('Зрители (все)',{exact:true}).locator('..').locator('strong').textContent(),'10');
-  assert.ok(!/\d\.\d{5}/.test(await page.getByText('Полнота наблюдений',{exact:true}).locator('..').textContent()));
+  assert.equal(await page.getByText('Полнота наблюдений',{exact:true}).count(),0);
   await reload(page);await page.locator('.stream-metrics .metric').filter({hasText:'Донаты'}).getByText('0',{exact:true}).waitFor();assert.ok(new URL(page.url()).searchParams.get('stream')===id);
   const ranking=page.getByRole('region',{name:'Рейтинг участников'});await ranking.getByRole('button',{name:'Viewer',exact:true}).click();await page.getByRole('heading',{name:'Viewer',exact:true}).waitFor();
   await page.goBack();await page.locator('.stream-metrics .metric').filter({hasText:'Донаты'}).getByText('0',{exact:true}).waitFor();await page.goBack();await page.getByRole('heading',{name:'История стримов',exact:true}).waitFor();await page.goForward();await page.locator('.stream-metrics .metric').filter({hasText:'Донаты'}).getByText('0',{exact:true}).waitFor();
@@ -30,7 +30,7 @@ test('stream scope never flashes channel totals, reload/back retain the route an
   await page.getByLabel('Показатель графика стрима').selectOption('observed');await page.locator('.series-panel .chart-bar').first().click();
   await page.getByRole('region',{name:'Детали выбранного столбца'}).waitFor();assert.equal(await page.getByText('Участники по сигналам:',{exact:false}).count(),0);
   const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(evidence){await mkdir(evidence,{recursive:true});await page.screenshot({path:join(evidence,'stream-responsive-mobile.png'),fullPage:true});}
-  await context.setOffline(true);await page.evaluate(()=>window.dispatchEvent(new Event('offline')));await page.getByText('Связь прервана. Показываем последние загруженные данные.',{exact:true}).waitFor();
+  await context.setOffline(true);await page.evaluate(()=>window.dispatchEvent(new Event('offline')));assert.equal(await page.getByText('Связь прервана. Показываем последние загруженные данные.',{exact:true}).count(),0);
   assert.ok(!(await page.locator('main').textContent()).includes('Failed to fetch'));
   await context.setOffline(false);await page.evaluate(()=>window.dispatchEvent(new Event('online')));await page.waitForFunction(()=>!document.body.textContent.includes('Связь прервана.'));
   await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.goBack();await page.locator('.stream-metrics .metric').filter({hasText:'Донаты'}).getByText('0',{exact:true}).waitFor();assert.equal(await page.getByLabel('Профиль',{exact:true}).isEnabled(),true);

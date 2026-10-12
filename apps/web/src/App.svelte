@@ -16,12 +16,9 @@
     api,
     setCsrf,
     date,
-    getDataMode,
-    setDataMode,
     getProfile,
     setProfile,
     type Profile,
-    type DataMode,
     type Session,
     type Person,
     money,
@@ -48,18 +45,17 @@
     }),
     sessionFilter = $state(""),
     personId = $state(""),
-    busy = $state(false),
-    dataMode = $state<DataMode>(getDataMode());
+    busy = $state(false);
   let username = $state(""), password = $state(""), user = $state<any>(null);
   let profile = $state<Profile>(getProfile());
   let epoch = 0;
   let scopeReady=$state(false),connectionLost=$state(false);
   let outdated=$state(false);
   let refreshTask:{epoch:number;task:Promise<void>;controller:AbortController}|null=null;
-  function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile,mode:dataMode});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
+  function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
   function clearScope(){refreshTask?.controller.abort();busy=false;scopeReady=false;events=[];summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
-  function restoreRoute(){const route=readRoute(location.search,getProfile());epoch++;tab=route.view;sessionFilter=route.session;personId=route.person;setProfile(route.profile);profile=route.profile;setDataMode(route.mode);dataMode=route.mode;clearScope();}
-  function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}connectionLost=!navigator.onLine;error=authMessage((e as Error).message);}
+  function restoreRoute(){const route=readRoute(location.search,getProfile());epoch++;tab=route.view;sessionFilter=route.session;personId=route.person;setProfile(route.profile);profile=route.profile;clearScope();}
+  function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}connectionLost=!navigator.onLine;if(document.hidden||!navigator.onLine)return;error=authMessage((e as Error).message);}
 
   const authMessage = (code: string) => ({ INVALID_LOGIN: "Неверный логин или пароль", LOGIN_RATE_LIMIT: "Слишком много попыток. Попробуйте позже.", LOGIN_REQUIRED: "Войдите в свой профиль", LOCAL_LOGIN_REQUIRED: "Войдите в свой профиль" }[code] ?? code);
   async function login() {
@@ -69,7 +65,7 @@
       password="";
       epoch++; setCsrf(result.csrf); user = result.user;
       if (result.user?.profile) { setProfile(result.user.profile); profile = result.user.profile; }
-      setDataMode(dataMode);await refresh(); authorized = true;saveRoute(true);
+      await refresh(); authorized = true;saveRoute(true);
     } catch (e) { reportFailure(e); }
     finally { busy = false; }
   }
@@ -91,8 +87,8 @@
     connections: "Интеграции",
   };
   const descriptions: Record<string, string> = {
-    overview: "История чата, донаты и наблюдения.",
-    sessions: "История стримов и полнота собранных данных.",
+    overview: "Итоги за всю историю.",
+    sessions: "Все эфиры и их результаты.",
     people: "Активность людей и управляемые связи аккаунтов.",
     analytics: "Ядро аудитории, категории и время эфиров. Наблюдения и оценки показаны отдельно.",
     connections: "Twitch, DonationAlerts и YouTube — вход и статус сбора.",
@@ -111,7 +107,7 @@
     const task=(async()=>{
       const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter).map(async([key,path])=>[key,await api(path,undefined,controller.signal)])));
       if(current!==epoch)return;
-      status=values.status;if(dataMode==='real'){setCsrf(status.csrf);user=status.user??user;outdated=isOutdatedRelease(status.release);}
+      status=values.status;{setCsrf(status.csrf);user=status.user??user;outdated=isOutdatedRelease(status.release);}
       sessions=values.sessions??sessions;people=values.persons??people;events=values.events??events;summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';
     })();refreshTask={epoch:current,task,controller};
     try{await task;}finally{clearTimeout(deadline);if(refreshTask?.task===task)refreshTask=null;}
@@ -134,14 +130,6 @@
     window.scrollTo({top:0,behavior:'instant'});void action(async()=>{});
   }
   function openPerson(id:string){navigate('people',id);}
-  async function switchMode(mode: DataMode) {
-    if (mode === dataMode) return;
-    epoch++;sessionFilter="";personId="";if(tab==="stream")tab="overview";
-    setDataMode(mode);
-    dataMode=mode;clearScope();saveRoute();
-    error="";
-    await action(async () => {});
-  }
   async function switchProfile(next: Profile) {
     if (next === profile) return;
     epoch++;if(tab==="stream")tab="overview"; setProfile(next); profile = next;
@@ -156,7 +144,7 @@
     const timer=setInterval(update,15000);
     async function initialize() {
       if(initializing||busy)return;initializing=true;
-      restoreRoute();setDataMode("real");
+      restoreRoute();
       loading = true;
       error = "";
       try {
@@ -207,37 +195,15 @@
       <span class="dot" class:off={!authorized}></span>
       <div class="sidebar-status">
         {#if authorized}<label class="profile-label">Профиль<select aria-label="Профиль" value={profile} disabled={busy} onchange={(event) => void switchProfile(event.currentTarget.value as Profile)}><option value="ruslan">Руслан</option><option value="gulnaz">Гульназ</option></select></label>{:else}<span>Stream Panel</span>{/if}
-        <span class="small muted sidebar-hint"
-          >{dataMode === "demo"
-            ? "Демонстрационные данные"
-            : "Сбор продолжается, когда вкладка закрыта"}</span
-        >
       </div>
       <Icon name="arrow" size={17} />
     </div>
   </aside>
-  <main class:stream-page={tab==='stream'} class:people-page={tab==='people'}>
+  <main class:sessions-page={tab==='sessions'} class:stream-page={tab==='stream'} class:people-page={tab==='people'}>
     <div class="page-heading">
       <div>
         <h1>{titles[tab]}</h1>
         <p>{descriptions[tab]}</p>
-      </div>
-      <div class="inline" style="justify-content:flex-end">
-        {#if authorized}<div class="mode-toggle" role="group" aria-label="Режим данных">
-            <button
-              type="button"
-              class:active={dataMode === "real"}
-              disabled={busy}
-              onclick={() => switchMode("real")}>Реальные</button
-            >
-            <button
-              type="button"
-              class:active={dataMode === "demo"}
-              class:demo={true}
-              disabled={busy}
-              onclick={() => switchMode("demo")}>Демо</button
-            >
-          </div>{/if}
       </div>
     </div>
     {#if loading}<div class="panel empty">
@@ -252,14 +218,10 @@
         </form>
       {#if error}<p role="alert" class="small notice error">{error}</p>{/if}
       </section>{:else}
-      {#if dataMode==='real'&&status?.backup&&(status.backup.cloud?.state!=='success'||status.backup.pendingUploads>0)}<p role="status" class="notice backup-warning">Облачная резервная копия {status?.backup?.cloud?.state==='disabled'?'не настроена':status?.backup?.cloud?.state==='error'?'не загружается':'ожидает подтверждения'}. Проверьте раздел «Интеграции».</p>{/if}
-      {#if connectionLost}<p role="status" class="notice">Связь прервана. Показываем последние загруженные данные.</p>{/if}
+      {#if status?.backup&&(status.backup.cloud?.state!=='success'||status.backup.pendingUploads>0)}<p role="status" class="notice backup-warning">Облачная резервная копия {status?.backup?.cloud?.state==='disabled'?'не настроена':status?.backup?.cloud?.state==='error'?'не загружается':'ожидает подтверждения'}. Проверьте раздел «Интеграции».</p>{/if}
       {#if outdated}<div role="status" class="notice">Доступна новая версия панели для обоих профилей. <button class="outline small" onclick={()=>location.reload()}>Обновить панель</button></div>{/if}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}
-      {#if dataMode === "demo"}<p class="demo-banner" role="status">
-          Режим <strong>Демо</strong>: показаны примеры данных.
-        </p>{/if}
-      {#key `${profile}:${dataMode}:${tab}:${sessionFilter}`}
+      {#key `${profile}:${tab}:${sessionFilter}`}
       {#if !scopeReady}<div class="panel empty" role="status">Загружаем данные…</div>{:else}
       {#if tab === "people"}{#if sessions.length}<div
             class="session-picker"
@@ -278,7 +240,7 @@
               ></label
             >
           </div>{/if}{/if}
-      {#if tab === "overview"}<ChannelOverview {events} onPerson={openPerson} onStream={id=>{sessionFilter=id;navigate("stream");}} connect={()=>navigate("connections")} />
+      {#if tab === "overview"}<ChannelOverview connect={()=>navigate("connections")} />
       {:else if tab === "stream"}<Overview session={sessions.find(s=>s.id===sessionFilter)}
           {summary}
           {events}
@@ -287,12 +249,12 @@
           onPerson={openPerson}
         />
       {:else if tab === "analytics"}
-        <Analytics profile={profile} mode={dataMode} onPerson={openPerson} />
+        <Analytics profile={profile} onPerson={openPerson} />
       {:else if tab === "connections"}<Connections
           {status}
           onChange={refresh}
         />
-        <YouTube mode={dataMode} />
+        <YouTube />
       {:else if tab === "people"}<People
           {people}
           {sessionFilter}
@@ -318,21 +280,21 @@
                   ></thead
                 ><tbody
                   >{#each sessions as session,index}{#if index===0||sessionGroup(session.started_at_ms)!==sessionGroup(sessions[index-1]!.started_at_ms)}<tr class="session-group"><th colspan="8">{sessionGroup(session.started_at_ms)}</th></tr>{/if}<tr data-session-id={session.id}
-                      > <td>{streamRange(session.started_at_ms,session.ended_at_ms)}
+                      > <td data-label="Период · МСК">{streamRange(session.started_at_ms,session.ended_at_ms)}
                         {#each session.breaks??[] as pause}<small>Перерыв: {streamRange(pause.from,pause.to)}</small>{/each}
                         {#if session.end_quality==='estimated'}<small>Граница приблизительная</small>{/if}
                         </td
-                      ><td>{formatDuration((session.durationMs??((session.ended_at_ms??Date.now())-session.started_at_ms))/60000)}</td><td class="platform-labels"
+                      ><td data-label="Длительность">{formatDuration((session.durationMs??((session.ended_at_ms??Date.now())-session.started_at_ms))/60000)}</td><td data-label="Площадки" class="platform-labels"
                         >{session.platforms?.length
                           ? session.platforms.map((platform) => platform === "twitch" ? "Twitch" : "YouTube").join(", ")
                           : "Источник неизвестен"}</td
-                      ><td class="platform-details">
+                      ><td data-label="Название" class="platform-details">
                         {#if session.primaryTitle}<span>{session.primaryTitle}</span>{/if}
                         {#each (session.confirmedUrls ?? []).filter((entry) => isConfirmedPlatformUrl(entry)) as entry}
                           <a href={entry.url} target="_blank" rel="noopener noreferrer">{entry.platform === "twitch" ? "Twitch" : "YouTube"}</a>
                         {/each}
                       </td
-                      ><td>{session.viewerPeak??'—'} / {session.viewerMean==null?'—':session.viewerMean.toLocaleString('ru-RU',{maximumFractionDigits:1})}</td><td>{#each Object.entries(session.donationTotals??{}) as [currency,amount]}<div>{money(amount,currency)}</div>{:else}—{/each}<small>{session.donationCount??0} донатов</small></td><td>{session.event_count}</td><td
+                      ><td data-label="Зрители · пик / среднее">{session.viewerPeak??'—'} / {session.viewerMean==null?'—':session.viewerMean.toLocaleString('ru-RU',{maximumFractionDigits:1})}</td><td data-label="Донаты">{#each Object.entries(session.donationTotals??{}) as [currency,amount]}<div>{money(amount,currency)}</div>{:else}—{/each}<small>{session.donationCount??0} донатов</small></td><td data-label="События">{session.event_count}</td><td
                         ><button
                           class="outline small"
                           onclick={() => {

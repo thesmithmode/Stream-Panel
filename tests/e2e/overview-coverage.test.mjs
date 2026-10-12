@@ -4,7 +4,7 @@ import { application, seed } from "../helpers/application.mjs";
 import { launchBrowser } from "../helpers/browser.mjs";
 import { startCoverage, saveCoverage, goto, reload } from "../helpers/browser-coverage.mjs";
 
-test("Overview insights render loading, empty, error and person paths; close on Escape and outside click", { timeout: 60000 }, async () => {
+test("Overview insights render loading, empty, error and person paths; expand inline and cache until navigation", { timeout: 60000 }, async () => {
   const app = await application();
   let browser;
   try {
@@ -52,15 +52,16 @@ test("Overview insights render loading, empty, error and person paths; close on 
     await page.getByRole("button", { name: "Открыть", exact: true }).click();
     const trigger = page.getByRole("button", { name: "Показать паттерны", exact: true });
     await trigger.click();
-    const insightDialog = page.getByRole("dialog", { name: "Инсайты" });
-    await page.getByText("Считаем…", { exact: true }).waitFor();
-    await page.getByText("Пока нет заметных паттернов по текущим данным.", { exact: true }).waitFor();
-    await page.keyboard.press("Escape");
+    const insightDialog = page.locator(".insight-grid");
+    await page.locator(".insight-grid").getByText("Загружаем…", { exact: true }).waitFor();
+    await page.getByText("Пока недостаточно данных для заметных паттернов.", { exact: true }).waitFor();
+    await page.locator(".insights-section").getByRole("button",{name:"Скрыть",exact:true}).click();
     assert.equal(await insightDialog.count(), 0);
 
+    await reload(page);
     await page.getByRole("button", { name: "Показать паттерны", exact: true }).click();
     await page.getByRole("alert").filter({ hasText: "INSIGHTS_UNAVAILABLE" }).waitFor();
-    await page.getByRole("heading", { name: /Зрители и чат/ }).click();
+    await page.locator(".insights-section").getByRole("button",{name:"Скрыть",exact:true}).click();
     assert.equal(await insightDialog.count(), 0);
 
     await reload(page);

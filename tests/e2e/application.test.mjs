@@ -31,9 +31,7 @@ test(
         .getByRole("button", { name: "Открыть интеграции", exact: true })
         .waitFor();
       assert.equal(new URL(page.url()).hash, "");
-      await page.getByRole("button", { name: "Демо", exact: true }).click();
-      await page.getByText("Алиса").first().waitFor({ state: "visible", timeout: 5000 });
-      await page.getByRole("button", { name: "Реальные", exact: true }).click();
+      assert.equal(await page.getByRole("button",{name:"Демо",exact:true}).count(),0);
       checks.push("bootstrap exchanges nonce and removes fragment");
 
       await page

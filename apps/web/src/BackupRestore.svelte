@@ -1,5 +1,5 @@
 <script lang="ts">
- import {api,importBackup,getDataMode} from './api';
+ import {api,importBackup} from './api';
  let {available}:{available:boolean}=$props();
  let files=$state<FileList>(),key=$state(''),confirmed=$state(false),busy=$state(false),error=$state(''),message=$state(''),imported=$state(false);
  async function downloadKey(){
@@ -15,13 +15,13 @@
  }
 </script>
 <div class="restore" aria-label="Восстановление резервной копии">
- <button class="outline" disabled={busy||getDataMode()==='demo'||imported} onclick={downloadKey}>Скачать ключ восстановления</button>
+ <button class="outline" disabled={busy||imported} onclick={downloadKey}>Скачать ключ восстановления</button>
  <details><summary>Импорт резервной копии</summary>
   <p class="small">Восстановятся история, пользователи и подключения обоих профилей. Перед заменой сервис сохранит текущую базу в отдельную копию.</p>
   <label>Файл резервной копии<input type="file" accept=".spbk" bind:files disabled={busy||!available||imported}/></label>
   <label>Ключ восстановления<input type="password" bind:value={key} autocomplete="off" placeholder="Оставьте пустым для копии с этого сервера" disabled={busy||!available||imported}/></label>
   <label class="check"><input type="checkbox" bind:checked={confirmed} disabled={busy||!available||imported}/> Заменить текущие данные данными копии</label>
-  <button class="primary" disabled={busy||!available||!files?.length||!confirmed||imported||getDataMode()==='demo'} onclick={restore}>{busy?'Проверяем копию…':'Импортировать резервную копию'}</button>
+  <button class="primary" disabled={busy||!available||!files?.length||!confirmed||imported} onclick={restore}>{busy?'Проверяем копию…':'Импортировать резервную копию'}</button>
  </details>
  {#if error}<p role="alert">{error}</p>{/if}{#if message}<p role="status">{message}</p>{/if}
  {#if imported}<button class="outline" onclick={()=>location.reload()}>Открыть панель</button>{/if}

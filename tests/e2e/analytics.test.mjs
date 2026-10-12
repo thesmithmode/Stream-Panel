@@ -45,7 +45,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
     return url.pathname==='/api/v1/analytics'&&response.status()===status&&Object.entries(query).every(([key,value])=>url.searchParams.get(key)===String(value))&&extra(url);
    });
    const advanceAutoFilter=async(response)=>{await page.clock.fastForward(300);return response;};
-   const openAnalytics=async(query)=>{const response=watchAnalytics(query);await page.getByRole('button',{name:'Аналитика',exact:true}).click();const result=await advanceAutoFilter(response);await page.getByText('Сравнения и отчёты',{exact:true}).click();return result;};
+   const openAnalytics=async(query)=>{const response=watchAnalytics(query);await page.getByRole('button',{name:'Аналитика',exact:true}).click();const result=await advanceAutoFilter(response);return result;};
    const currentPeriod=async(values)=>page.evaluate(inputs=>Object.fromEntries(inputs.map(([key,value])=>[key,String(new Date(value).getTime())])),values);
    const presetPeriod=async(days)=>page.evaluate(span=>{
     const localInput=at=>{const d=new Date(at);return new Date(at-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
@@ -198,9 +198,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    const monthRange=await presetPeriod(30),presetFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...monthRange});
    await page.getByRole('button',{name:'30 дней',exact:true}).click();await advanceAutoFilter(presetFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);await page.setViewportSize({width:1280,height:800});
-   await page.getByRole('button',{name:'Демо',exact:true}).click();await page.clock.fastForward(300);await page.getByText('Сравнения и отчёты',{exact:true}).click();await page.getByRole('heading',{name:'Категории',exact:true}).locator('..').locator('..').getByRole('cell',{name:'Демо-игра',exact:true}).waitFor();
-   const realFilter=watchAnalytics({source:'all',category:'',timezone:'UTC'});
-   await page.getByRole('button',{name:'Реальные',exact:true}).click();await advanceAutoFilter(realFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
+   assert.equal(await page.getByRole('button',{name:'Демо',exact:true}).count(),0);
    await page.evaluate(()=>{Storage.prototype.getItem=()=>{throw new Error('storage unavailable');};Storage.prototype.setItem=()=>{throw new Error('storage unavailable');};});
    await page.getByRole('button',{name:'Обзор',exact:true}).click();await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
    await page.getByRole('button',{name:'О данных отчёта YouTube',exact:true}).click();

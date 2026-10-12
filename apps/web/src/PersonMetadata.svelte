@@ -1,5 +1,5 @@
 <script lang="ts">
-  import {api,getDataMode} from './api';
+  import {api} from './api';
   import Help from './Help.svelte';
   let {personId,onChange}: {personId:string;onChange:()=>Promise<void>}=$props();
   type Metadata={revision:number;tags:string[];manualCore:boolean|null};
@@ -29,7 +29,7 @@
   <label>Ядро аудитории<select aria-label="Ядро аудитории" bind:value={core} disabled={busy||!metadata}><option value="auto">Определять автоматически</option><option value="include">Включить в ядро</option><option value="exclude">Исключить из ядра</option></select></label>
   <label>Новый тег<div class="inline"><input bind:value={tag} maxlength="64" disabled={busy||!metadata} onkeydown={e=>{if(e.key==='Enter'){e.preventDefault();addTag();}}}/><button class="outline" disabled={busy||!metadata||!tag.trim()||tags.length>=50} onclick={addTag}>Добавить тег</button></div></label>
   <div class="tags">{#each tags as label}<span>{label}<button class="text-button" aria-label={`Удалить тег ${label}`} disabled={busy} onclick={()=>tags=tags.filter(t=>t!==label)}>×</button></span>{/each}</div>
-  <button class="primary" disabled={busy||!metadata||getDataMode()==='demo'} onclick={save}>Сохранить метки</button>
+  <button class="primary" disabled={busy||!metadata} onclick={save}>Сохранить метки</button>
   {#if error}<p role="alert">{error}</p><button class="outline" disabled={busy} onclick={reload}>Загрузить актуальные метки</button>{/if}
 </section>
 

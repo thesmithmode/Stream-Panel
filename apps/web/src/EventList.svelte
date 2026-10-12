@@ -1,10 +1,11 @@
 <script lang="ts">
   import { date, money, type Event } from "./api";
+  import {intervalRange} from "./stream-time";
   import { isAudioDonation, audioUrl } from "./labels";
   let {
     events,
-    onPerson,
-  }: { events: Event[]; onPerson?: (id: string) => void } = $props();
+    onPerson,streamStart,streamEnd,
+  }: { events: Event[]; onPerson?: (id: string) => void;streamStart?:number|undefined;streamEnd?:number } = $props();
   const labels: Record<string, string> = {
     "chat.message": "Сообщение",
     donation: "Донат",
@@ -65,7 +66,7 @@
           {/if}
         </p>
         <time class="small muted"
-          >{date(event.occurred_at_ms)}{#if event.occurred_at_ms === null}
+          >{event.occurred_at_ms!==null&&streamStart!==undefined&&streamEnd!==undefined?intervalRange(event.occurred_at_ms,event.occurred_at_ms,streamStart,streamEnd).split(" — ")[0]:date(event.occurred_at_ms)}{#if event.occurred_at_ms === null}
             · получено {date(event.received_at_ms)}{/if}</time
         >
       </div>

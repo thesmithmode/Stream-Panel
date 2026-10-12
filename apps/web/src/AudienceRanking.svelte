@@ -1,8 +1,8 @@
 <script lang="ts">
  import Help from './Help.svelte';
  import {audienceRanking,type RankMetric,type RankPerson} from './audience-ranking';
- import {streamRange} from './stream-time';
- let {people,onPerson,showIntervals=false}:{people:RankPerson[];onPerson:(id:string)=>void;showIntervals?:boolean}=$props();
+ import {intervalRange} from './stream-time';
+ let {people,onPerson,showIntervals=false,streamStart=0,streamEnd=0}:{people:RankPerson[];onPerson:(id:string)=>void;showIntervals?:boolean;streamStart?:number;streamEnd?:number}=$props();
  const id=$props.id();
  let metric=$state<RankMetric>('observedMinutes'),limit=$state(50);
  const ranked=$derived(audienceRanking(people,metric));
@@ -11,7 +11,7 @@
 <section class="panel audience-ranking" aria-label="Рейтинг участников">
  <header><h2>Участники чата</h2><Help id={`${id}-help`} label="О рейтинге участников" text="Минуты в чате — сохранённые наблюдения Twitch, включая молчавших участников. Пропуски опросов не добавляют минуты. YouTube показан отдельно как оценка по сообщениям. Это не подтверждённое время просмотра видео."/><label>Рейтинг по<select bind:value={metric}><option value="observedMinutes">Минутам в чате</option><option value="messages">Сообщениям</option><option value="estimatedChatMinutes">Оценке YouTube</option></select></label></header>
  <ol>{#each ranked.slice(0,limit) as person}<li><div class="rank-row"><button class="text-button" onclick={()=>onPerson(person.id)}>{person.name}</button><strong>{Number.isInteger(person[metric])?person[metric]:person[metric]?.toFixed(1)} {metric==='messages'?'сообщ.':'мин'}</strong></div>
- {#if showIntervals&&person.intervals?.length}<details class="compact-details"><summary>Интервалы в чате</summary>{#each person.intervals as span}<p class="small">{streamRange(span.from,span.to)} МСК · {span.kind==='observed'?'наблюдение Twitch':'оценка YouTube'}</p>{/each}</details>{/if}
+ {#if showIntervals&&person.intervals?.length}<details class="compact-details"><summary>Интервалы в чате</summary>{#each person.intervals as span}<p class="small">{intervalRange(span.from,span.to,streamStart,streamEnd)} · {span.kind==='observed'?'Twitch':'YouTube · оценка'}</p>{/each}</details>{/if}
  </li>{:else}<li class="muted">{metric==='messages'?'Сообщений пока нет':'Нет сохранённых данных о присутствии'}</li>{/each}</ol>
  {#if ranked.length>limit}<button class="outline small" onclick={()=>limit+=50}>Показать ещё ({ranked.length-limit})</button>{/if}
 </section>

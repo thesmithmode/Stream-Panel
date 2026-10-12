@@ -42,4 +42,4 @@ export class ReadCache {
  }
  close(){this.invalidate();if(this.redis?.isOpen)this.redis.destroy();}
 }
-export const cachedReads=new Set(['persons','person','personStats','personActivity','personMetadata','personNotes','donation','donations','donationAudit','sessions','analytics','summary','personFollowing','followingAnalytics','streamMetadata','personsTop','events','merges','splits','candidatePersons']);
+export const cachedReads=new Set(['channelOverview','persons','person','personStats','personActivity','personMetadata','personNotes','donation','donations','donationAudit','sessions','analytics','summary','personFollowing','followingAnalytics','streamMetadata','personsTop','events','merges','splits','candidatePersons']);

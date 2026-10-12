@@ -149,6 +149,16 @@ export class StreamStore {
     // Join only the latest contemporaneous Twitch sample; never borrow an old category.
     this.db.prepare("INSERT INTO stream_samples SELECT x.session_id,?,x.category_id,x.category_name,x.title,NULL,? FROM stream_samples x JOIN sessions s ON s.id=x.session_id WHERE s.ended_at_ms IS NULL AND x.twitch_viewers IS NOT NULL AND x.observed_at_ms<=? AND x.observed_at_ms>=? ORDER BY x.observed_at_ms DESC LIMIT 1 ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET youtube_viewers=excluded.youtube_viewers").run(at,viewers,at,at-180000);
   }
+  channelOverview(excludedBotLogins:readonly string[]=[]){
+    const summary=this.summary(undefined,excludedBotLogins);
+    const sessions=this.db.prepare("SELECT id,started_at_ms AS start,ended_at_ms AS end FROM sessions s WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)").all() as {id:string;start:number;end:number|null}[];
+    const excluded=this.botJson(excludedBotLogins);
+    const attendees=(this.db.prepare(`SELECT count(*) AS n FROM (
+      SELECT i.person_id FROM presence_members m JOIN presence_polls p ON p.id=m.poll_id JOIN identities i ON i.id=m.identity_id WHERE p.status='complete' AND ${this.notBotClause('i')} AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=p.session_id)
+      UNION SELECT value FROM json_each(?)
+    )`).get(excluded,JSON.stringify((summary.participants as {personId:string}[]).map(p=>p.personId))) as {n:number}).n;
+    return {streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+sessionWindows(this.db,s.id,s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees,messages:summary.messages,totals:summary.totals,donations:summary.donations};
+  }
   analytics(options: AnalyticsOptions) { return audienceAnalytics(this.db,options); }
 
   youtubeQuota(day: string, profile: string, cost = 1): boolean {
@@ -1598,7 +1608,7 @@ export class StreamStore {
       .all(botJson, botJson, botJson, term, term, key, key) as Record<string, unknown>[];
   }
 
-  person(id: string): Record<string, unknown> {
+  person(id: string,includeEvents=true): Record<string, unknown> {
     const row = this.db.prepare("SELECT * FROM persons WHERE id=?").get(id) as
       | Record<string, unknown>
       | undefined;
@@ -1613,7 +1623,7 @@ export class StreamStore {
           "SELECT a.* FROM identity_aliases a JOIN identities i ON i.id=a.identity_id WHERE i.person_id=? UNION ALL SELECT a.identity_id,a.name,a.match_key AS candidate_key,a.first_seen_ms,a.last_seen_ms FROM youtube_identity_aliases a JOIN youtube_identities y ON y.id=a.identity_id WHERE y.person_id=?",
         )
         .all(id,id),
-      events: this.events(undefined, id),
+      events: includeEvents?this.events(undefined, id):[],
     };
   }
 
@@ -2717,81 +2727,7 @@ export class StreamStore {
       }
     }
 
-    // First-timers this session
-    const sessionPeople = this.db
-      .prepare(
-        `SELECT DISTINCT i.person_id AS id, p.display_name FROM identities i
-         JOIN persons p ON p.id = i.person_id
-         WHERE ${this.notBotClause("i")} AND (
-           EXISTS(
-             SELECT 1 FROM effective_events e WHERE e.identity_id = i.id AND ${inSession}
-           ) OR EXISTS(
-             SELECT 1 FROM presence_members m
-             JOIN presence_polls poll ON poll.id = m.poll_id
-             WHERE m.identity_id = i.id AND poll.session_id = ? AND poll.status='complete'
-           )
-         )`,
-      )
-      .all(botJson, sid, sid) as { id: string; display_name: string }[];
-    for (const person of sessionPeople) {
-      const prior = this.db
-        .prepare(
-          `SELECT 1 AS ok WHERE EXISTS(
-             SELECT 1 FROM effective_events e
-             JOIN identities i ON i.id = e.identity_id
-             WHERE i.person_id = ? AND e.id NOT IN (
-               SELECT event_id FROM event_sessions WHERE session_id = ?
-             )
-           ) OR EXISTS(
-             SELECT 1 FROM presence_members m
-             JOIN presence_polls poll ON poll.id = m.poll_id
-             JOIN identities i ON i.id = m.identity_id
-             WHERE i.person_id = ? AND poll.session_id != ? AND poll.status='complete'
-           )`,
-        )
-        .get(person.id, sid, person.id, sid) as { ok: number } | undefined;
-      if (!prior) {
-        cards.push({
-          kind: "first_timer",
-          title: "Впервые в этой сессии",
-          detail: `${person.display_name}: нет более ранних событий или наблюдений`,
-          personId: person.id,
-          sessionId: sid,
-          metrics: {},
-        });
-      }
-    }
-
-    // Coverage holes / gaps
-    const cov = this.sessionCoverage(sid, window.fromMs, window.toMs);
-    if (cov.ratio !== null && cov.ratio < 0.7 && cov.totalMinutes >= 10) {
-      cards.push({
-        kind: "coverage_hole",
-        title: "Дыры в опросах присутствия",
-        detail: `Покрытие сессии: ${Math.round(cov.ratio * 100)}% (${cov.knownMinutes.toLocaleString("ru-RU",{maximumFractionDigits:1})}/${cov.totalMinutes.toLocaleString("ru-RU",{maximumFractionDigits:1})} мин)`,
-        personId: null,
-        sessionId: sid,
-        metrics: cov,
-      });
-    }
-    const gaps = this.db
-      .prepare(
-        `SELECT id, source, reason, started_at_ms, ended_at_ms FROM collection_gaps
-         WHERE started_at_ms < ? AND (ended_at_ms IS NULL OR ended_at_ms > ?)
-         ORDER BY started_at_ms DESC LIMIT 5`,
-      )
-      .all(window.toMs, focus.started_at_ms) as Record<string, unknown>[];
-    if (gaps.length) {
-      cards.push({
-        kind: "collection_gaps",
-        title: "Пропуски сбора",
-        detail: `${gaps.length} записей collection_gaps пересекают сессию`,
-        personId: null,
-        sessionId: sid,
-        metrics: { count: gaps.length, gaps },
-      });
-    }
-
+    const sessionPeople = [...new Map([...msgRows,...presentIds].map(p=>[p.id,p])).values()];
     // Returning after long gap (>= 14 days since prior activity)
     const fourteen = 14 * 86_400_000;
     for (const person of sessionPeople) {

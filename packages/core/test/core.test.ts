@@ -1161,9 +1161,9 @@ test("insights detectors surface first-timers, silent presence, donors without t
     const kinds = new Set(cards.map((c) => c.kind));
     assert.ok(kinds.has("silent_presence"));
     assert.ok(kinds.has("donor_no_twitch"));
-    assert.ok(kinds.has("first_timer"));
-    assert.ok(kinds.has("collection_gaps"));
-    assert.ok(kinds.has("coverage_hole") || kinds.has("collection_gaps"));
+    assert.equal(kinds.has("first_timer"),false);
+    assert.equal(kinds.has("collection_gaps"),false);
+    assert.equal(kinds.has("coverage_hole"),false);
   } finally {
     store.close();
   }

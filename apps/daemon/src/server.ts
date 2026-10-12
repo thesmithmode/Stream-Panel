@@ -255,6 +255,7 @@ export async function createApplication(
       return { csrf };
     },
   );
+  app.get("/api/v1/overview",()=>db.call("channelOverview",configuration.value.excludedBotLogins));
   app.get("/api/v1/analytics", async request => {
     const q=object(request.query);
     const sessionId=string(q.session);
@@ -367,7 +368,7 @@ export async function createApplication(
   );
 
   app.get("/api/v1/persons/:id", async (request) =>
-    db.call("person", string(object(request.params).id)),
+    db.call("person", string(object(request.params).id),string(object(request.query).events)!=="false"),
   );
   app.get("/api/v1/persons/:id/activity",async request=>db.call("personActivity",string(object(request.params).id)));
   app.get("/api/v1/persons/:id/metadata", async request => db.call("personMetadata",string(object(request.params).id)));
