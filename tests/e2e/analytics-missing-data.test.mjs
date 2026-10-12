@@ -23,6 +23,7 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
  const errors=[];page.on('pageerror',error=>errors.push(error.message));
  const now=Date.now(),person={id:'historical',name:'Исторический участник',source:'twitch',messages:0,observedMinutes:0,estimatedChatMinutes:0,sessionIds:[],intervals:[],donations:{},core:false};
  let data={summary:{entities:1,core:0,streams:1,messages:0},audience:[person],timeline:[],categories:[{id:'unknown',name:'Неизвестная категория',sessions:1,minutes:0,audience:1,core:0,messagesPerHour:0,observedMinutes:0,estimatedChatMinutes:0,observedPerKnownMinute:null,coverageRatio:null}],hours:[{day:'пн',hour:0,messages:0,sampleMinutes:0,observedKnownMinutes:0,observed:0,estimated:0,donationsPerHourMinor:{RUB:null}}],streamComparison:[{startedAt:now-60000,endedAt:now,categories:[],audience:1,core:0,returning:0,newInPeriod:0,uniqueChatters:0,peakChatters:0,meanChatters:null,viewers:{twitch:{mean:null,peak:null,coverageRatio:null},youtube:{mean:null,peak:null,coverageRatio:null}},messages:0,messagesPerHour:null,donationsPerHourMinor:{RUB:null}}],youtubeReport:{updatedAt:now,data:{start:'2026-10-01',end:'2026-10-02'}}};
+ data.streamComparison.push({...data.streamComparison[0],audience:0,viewers:{all:{mean:4,peak:6},twitch:{mean:3,peak:5,coverageRatio:1},youtube:{mean:1,peak:1,coverageRatio:1}}});
  // These responses model missing historical optional fields; authentication remains real.
  await page.route('**/api/v1/analytics?*',route=>route.fulfill({json:data}));
  page.setDefaultTimeout(8000);

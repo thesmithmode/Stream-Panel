@@ -71,6 +71,8 @@ test("stream history shows only confirmed Twitch and YouTube links from the plat
     await manualRow.waitFor({state:"detached"});
     assert.equal((await a.db.call("sessions")).some(s=>s.id===manualId),false);
     assert.equal((await a.db.call("sessions")).some(s=>s.id===bothId),true);
+    await page.route('**/api/v1/sessions',async route=>{const response=await route.fetch();const rows=await response.json();await route.fulfill({response,json:rows.map(({durationMs,breaks,confirmedUrls,viewerMean,viewerPeak,donationTotals,donationCount,...legacy})=>legacy)});});
+    await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.getByRole('button',{name:'Стримы',exact:true}).click();await bothRow.waitFor();assert.equal(await bothRow.getByRole('link').count(),0);assert.ok((await bothRow.textContent()).includes('— / —'));assert.ok((await bothRow.textContent()).includes('0 донатов'));
     assert.deepEqual(errors, []);
     await saveCoverage(page);
     await context.close();

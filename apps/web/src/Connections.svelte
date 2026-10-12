@@ -3,7 +3,6 @@
   import { statusLabel } from "./labels";
   import BackupFiles from './BackupFiles.svelte';
   import Credentials from './Credentials.svelte';
-  import CollectionGaps from './CollectionGaps.svelte';
   import IntegrationGuide from './IntegrationGuide.svelte';
   let { status, onChange }: { status: any; onChange: () => Promise<void> } =
     $props();
@@ -300,7 +299,6 @@
           })}>Создать резервную копию</button
       >
       {#if status.backup}<BackupFiles status={status.backup} />{/if}
-      <CollectionGaps gaps={status.gaps ?? []} />
     </div>
   </section>
 </div>
