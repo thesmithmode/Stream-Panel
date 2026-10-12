@@ -155,7 +155,7 @@ test("profile switch reloads all views, preserves other clients and remains visi
       await a.getByRole('button',{name:'Стримы',exact:true}).click();
       await a.locator('table thead').waitFor();headers.push(await a.locator('table thead th').allTextContents());
     }
-    assert.deepEqual(headers[0],headers[1]);assert.deepEqual(headers[0],['Период · МСК','Длительность','Площадки','Название и ссылка','Зрители · пик / среднее','Донаты','События','']);
+    assert.deepEqual(headers[0],headers[1]);assert.deepEqual(headers[0],['Период · МСК','Длительность','Площадки','Название и ссылка','Зрители · пик / среднее','Донаты','Сообщения','']);
     await a.getByLabel('Профиль',{exact:true}).selectOption('ruslan');await a.getByRole('button',{name:'Аналитика',exact:true}).click();
     await a.getByText('Настроить отображение',{exact:true}).click();await a.getByLabel('Сравнение стримов',{exact:true}).uncheck();
     await a.getByLabel('Только ядро',{exact:true}).check();
@@ -176,7 +176,7 @@ test("profile switch reloads all views, preserves other clients and remains visi
     assert.equal(await a.getByRole("button", { name: "Выйти", exact: true }).count(),0);
     let fakeRemaining=2;
     await a.route('**/api/v1/status',async route=>{const response=await route.fetch();const data=await response.json();if(fakeRemaining-->0)data.release='a'.repeat(40);await route.fulfill({response,json:data});});
-    await a.evaluate(()=>window.dispatchEvent(new Event('focus')));await a.getByRole('button',{name:'Обновить панель',exact:true}).waitFor();
+    await a.getByRole('button',{name:'Обновить данные',exact:true}).click();await a.getByRole('button',{name:'Обновить панель',exact:true}).waitFor();
     await saveCoverage(a);await startCoverage(a);const nextDocument=a.waitForEvent('load');await a.getByLabel('Профиль',{exact:true}).selectOption('ruslan');await nextDocument;
     await a.getByText('Viewer ruslan',{exact:true}).first().waitFor();assert.equal(await a.getByRole('button',{name:'Обновить панель',exact:true}).count(),0);await a.unroute('**/api/v1/status');
     await a.evaluate(async()=>{const {csrf}=await fetch("/api/v1/auth/me").then(r=>r.json());await fetch("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},body:"{}"});});

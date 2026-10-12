@@ -25,7 +25,7 @@ test("analytics accepts omitted optional filters and uses documented defaults", 
     const now = Date.now();
     const r = await f.a.app.inject({ url: `/api/v1/analytics?from=${now - 60_000}&to=${now}`, headers: f.headers });
     assert.equal(r.statusCode, 200, r.body);
-    assert.equal(r.json().filters.regularThresholdPercent, 50);
+    assert.equal(r.json().filters.regularThresholdPercent, 80);
     const status = await f.a.app.inject({ url: "/api/v1/status", headers: { ...f.headers, host: "localhost:47841" } });
     assert.equal(status.statusCode, 200);
     assert.equal(status.json().csrf, f.headers["x-csrf-token"]);
@@ -202,5 +202,16 @@ test('single-stream analytics derives its bounds server-side and never includes 
   assert.equal(r.json().filters.toMs,base+600000);
   const missing=await f.a.app.inject({url:'/api/v1/analytics?session=missing',headers:f.headers});
   assert.notEqual(missing.statusCode,200);assert.equal(missing.json().error,'SESSION_NOT_FOUND');
+ }finally{await f.close();}
+});
+
+test('manual donation refresh awaits collection and propagates failure instead of reporting false success',async()=>{
+ const f=await fixture();try{
+  let release!:()=>void,entered!:()=>void;const start=new Promise<void>(resolve=>entered=resolve),completion=new Promise<void>(resolve=>release=resolve);let finished=false;
+  f.a.da.scanHistory=async(recent=false)=>{assert.equal(recent,true);entered();await completion;};
+  const response=f.a.app.inject({method:'POST',url:'/api/v1/donationalerts/rescan?recent=1',headers:f.headers,payload:{}}).then(value=>{finished=true;return value;});
+  await start;assert.equal(finished,false);release();assert.equal((await response).statusCode,200);
+  f.a.da.scanHistory=async()=>{throw new Error('DA_HTTP_403');};
+  const failed=await f.a.app.inject({method:'POST',url:'/api/v1/donationalerts/rescan?recent=1',headers:f.headers,payload:{}});assert.notEqual(failed.statusCode,200);
  }finally{await f.close();}
 });

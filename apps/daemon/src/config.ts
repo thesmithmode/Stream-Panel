@@ -14,6 +14,7 @@ export interface Tokens {
 export interface Config {
   version: 1;
   analyticsSettings?: AnalyticsSettings;
+  coreAttendance80Applied?: boolean;
   youtubeClientId?: string;
   youtubeAccountId?: string;
   youtubeClientSecret?: string;
@@ -31,6 +32,7 @@ export interface Config {
 }
 const defaults: Config = {
   version: 1,
+  coreAttendance80Applied:true,
   twitchClientId: "",
   daClientId: "",
   daClientSecret: "",
@@ -59,6 +61,8 @@ export class Configuration {
       if (saved.version !== 1) throw new Error("UNSUPPORTED_CONFIG");
       this.value = { ...defaults, ...saved };
       this.value.analyticsSettings=analyticsSettings(this.value.analyticsSettings);
+      // One-time upgrade for both existing profile configurations; subsequent custom values persist.
+      if(!saved.coreAttendance80Applied){this.value.analyticsSettings.regularThresholdPercent=80;this.value.coreAttendance80Applied=true;await this.save();}
       this.value.youtubeAccountId = this.value.youtube?.userId ?? this.value.youtubeAccountId ?? "";
       this.value.chattersPollSeconds = clampChattersPollSeconds(
         this.value.chattersPollSeconds,

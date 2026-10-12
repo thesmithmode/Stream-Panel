@@ -13,7 +13,7 @@ test('YouTube memberships split and undo through the common Person card on mobil
   await app.db.call('merge',other,source,(await app.db.call('person',other)).revision,(await app.db.call('person',source)).revision,at);
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(10000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));await startCoverage(page);await goto(page,app.bootstrap());
-  await page.getByRole('button',{name:'Люди',exact:true}).click();await page.locator('.person-row').filter({hasText:'one'}).click();await page.getByRole('tab',{name:'Аккаунты',exact:true}).click();
+  await page.getByRole('button',{name:'Люди',exact:true}).click();await page.locator('.person-row').filter({hasText:'one'}).click();await page.getByRole('tab',{name:'Редактировать аккаунты',exact:true}).click();
   const identity=page.locator('.identity-row').filter({hasText:'two'});await identity.getByRole('checkbox').check();
   await page.getByLabel('Имя новой группы').fill('Separate YouTube');
   await page.getByRole('button',{name:'Разъединить выбранные',exact:true}).click();

@@ -66,6 +66,7 @@ export interface Session {
   started_at_ms: number;
   ended_at_ms: number | null;
   event_count: number;
+  messageCount?:number;
   end_quality: string;
   durationMs?:number;viewerMean?:number|null;viewerPeak?:number|null;donationTotals?:Record<string,string>;donationCount?:number;
   platforms?: Array<"twitch" | "youtube">;

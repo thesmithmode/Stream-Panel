@@ -187,8 +187,8 @@
             disabled={busy}
             onclick={() =>
               run(async () => {
-                await api("donationalerts/rescan", {});
-                message = "Обновление данных о донатах запущено.";
+                await api("donationalerts/rescan?recent=1", {},AbortSignal.timeout(60000));
+                message = "Данные о донатах обновлены.";
               })}>Обновить данные о донатах</button
           >
         </div>

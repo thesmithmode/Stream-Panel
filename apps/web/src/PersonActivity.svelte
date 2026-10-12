@@ -1,9 +1,11 @@
 <script lang="ts">
+ import {onMount} from 'svelte';
  import {api,date} from './api';
  import {formatDuration} from './duration';
  let {personId}:{personId:string}=$props();
  let data=$state<any>(null),error=$state('');
  $effect(()=>{const id=personId;let cancelled=false;data=null;error='';void api(`persons/${id}/activity`).then(result=>{if(!cancelled)data=result;}).catch(e=>{if(!cancelled)error=e.message;});return()=>{cancelled=true;};});
+ onMount(()=>{let alive=true;const update=()=>void api(`persons/${personId}/activity`).then(result=>{if(alive){data=result;error='';}}).catch(e=>{if(alive)error=e.message;});window.addEventListener('sp:data-refresh',update);return()=>{alive=false;window.removeEventListener('sp:data-refresh',update);};});
  const maximum=$derived(Math.max(1,...(data?.hours??[]).map((h:any)=>h.minutes)));
 </script>
 {#if error}<p role="alert">{error}</p>{:else if data}

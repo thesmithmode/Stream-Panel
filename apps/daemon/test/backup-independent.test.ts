@@ -68,7 +68,7 @@ test('cloud failure returns a restorable local backup and a later upload retry r
     assert.equal(backup.status.cloud.state, 'success');
     assert.equal(backup.status.cloud.filename, recovered.filename);
     assert.ok(backup.status.cloud.lastSuccessAt > 0);
-    await assert.rejects(readFile(localPath),/ENOENT/); // Replaced only after both copies uploaded.
+    assert.deepEqual(await readFile(localPath),blob); // The latest seven local recovery points stay restorable.
     assert.ok(uploaded.includes(recovered.filename));
 
     const cloudSuccessAt = backup.status.cloud.lastSuccessAt;

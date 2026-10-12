@@ -1,4 +1,4 @@
-export const defaultAnalyticsSettings={regularThresholdPercent:50,minSessions:3,minMinutes:30,minMessages:5,chatWindowMinutes:5,coreRule:'either' as 'either'|'both'|'frequency',timezone:'Europe/Moscow'};
+export const defaultAnalyticsSettings={regularThresholdPercent:80,minSessions:3,minMinutes:30,minMessages:5,chatWindowMinutes:5,coreRule:'either' as 'either'|'both'|'frequency',timezone:'Europe/Moscow'};
 export type AnalyticsSettings=typeof defaultAnalyticsSettings;
 /** The persisted profile rule and the API rule use one validated contract. */
 export function analyticsSettings(input:unknown={}):AnalyticsSettings{

@@ -40,6 +40,7 @@ test(
       await seed(a);
       await page.getByRole("button",{name:"Стримы",exact:true}).click();
       await a.db.stop();
+      await page.getByRole("button",{name:"Обновить данные",exact:true}).click();
       await page.evaluate(()=>window.dispatchEvent(new Event("focus")));
       await page
         .getByRole("alert")

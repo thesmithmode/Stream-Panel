@@ -14,10 +14,10 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11,schemaV12,schemaV13 } from "./schema.js";
+import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11,schemaV12,schemaV13,schemaV14 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
 import {personFollowing,followingAnalytics,type Follower} from './following.js';
-import { sessionWindows,sessionBreaks } from './session-windows.js';
+import { sessionWindows,sessionBreaks,windowsFromLinks } from './session-windows.js';
 import { presenceMinutes, pollCoveredMinutes, type PresencePoll } from "./presence.js";
 
 interface IdentityRow {
@@ -59,6 +59,8 @@ export class StreamStore {
         throw new Error("UNSUPPORTED_SCHEMA_VERSION");
       this.db.pragma("journal_mode = WAL");
       this.db.pragma("synchronous = FULL");
+      this.db.pragma("wal_autocheckpoint = 1000");
+      this.db.pragma("journal_size_limit = 67108864");
       if (version === 0) this.db.transaction(() => this.db.exec(schemaV1)).immediate();
       if ((this.db.pragma("user_version", { simple: true }) as number) < 2)
         this.db.transaction(() => this.db.exec(schemaV2)).immediate();
@@ -97,6 +99,8 @@ export class StreamStore {
       // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
       if ((this.db.pragma("user_version", { simple: true }) as number) < 13)
         this.db.transaction(() => this.db.exec(schemaV13)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 14)
+        this.db.transaction(() => this.db.exec(schemaV14)).immediate();
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
       this.db.transaction(() => {this.collapseDuplicateDaDonors();this.reconcileNicknameLinks();}).immediate();
     } catch (error) {
@@ -148,7 +152,7 @@ export class StreamStore {
 
   personActivity(id:string,chatWindowMinutes=5,timezone="Europe/Moscow"){return personActivity(this.db,id,chatWindowMinutes,timezone);}
   donation(id:string) {return new DonationLedger(this.db).donation(id);}
-  donations(personId?:string,offset=0,limit=50,includeDeleted=false) {return new DonationLedger(this.db).list(personId,offset,limit,includeDeleted);}
+  donations(personId?:string,offset=0,limit=50,includeDeleted=false,sessionId?:string) {return new DonationLedger(this.db).list(personId,offset,limit,includeDeleted,sessionId);}
   createDonation(input:DonationInput,atMs:number) {return new DonationLedger(this.db).create(input,atMs);}
   updateDonation(id:string,input:DonationInput,revision:number,atMs:number) {return new DonationLedger(this.db).update(id,input,revision,atMs);}
   deleteDonation(id:string,revision:number,atMs:number):void {new DonationLedger(this.db).remove(id,revision,atMs);}
@@ -182,7 +186,9 @@ export class StreamStore {
       SELECT i.person_id FROM presence_members m JOIN presence_polls p ON p.id=m.poll_id JOIN identities i ON i.id=m.identity_id WHERE p.status='complete' AND ${this.notBotClause('i')} AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=p.session_id)
       UNION SELECT value FROM json_each(?)
     )`).get(excluded,JSON.stringify((summary.participants as {personId:string}[]).map(p=>p.personId))) as {n:number}).n;
-    return {streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+sessionWindows(this.db,s.id,s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees,messages:summary.messages,totals:summary.totals,donations:summary.donations};
+    const links=this.db.prepare('SELECT session_id,started_at_ms,ended_at_ms FROM platform_streams').all() as {session_id:string;started_at_ms:number;ended_at_ms:number|null}[];
+    const windowsBySession=new Map<string,typeof links>();for(const link of links){const list=windowsBySession.get(link.session_id)??[];list.push(link);windowsBySession.set(link.session_id,list);}
+    return {streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+windowsFromLinks(windowsBySession.get(s.id)??[],s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees,messages:summary.messages,totals:summary.totals,donations:summary.donations};
   }
   analytics(options: AnalyticsOptions) { return audienceAnalytics(this.db,options); }
 
@@ -206,7 +212,15 @@ export class StreamStore {
   providerSnapshot(source:string,account:string,key:string,payload:unknown,at:number,sessionId:string|null=null):void {
     assertTimestamp(at);
     if(!['twitch','youtube','donationalerts'].includes(source)||!account||!key)throw new Error('INVALID_PROVIDER_SNAPSHOT');
-    this.db.prepare('INSERT INTO provider_snapshots VALUES (?,?,?,?,?,?,?)').run(randomUUID(),source,account,key,at,sessionId,JSON.stringify(payload));
+    const encoded=JSON.stringify(payload);
+    // Normalized events/samples retain each observation. Compress only repeated diagnostic responses.
+    if(key==='donation_history_page'||key.startsWith('api:')||['channel','broadcasts','liveVideoDetails','report','archivedVideoDetails','stream'].includes(key)){
+      const page=key==='donation_history_page'?(payload as {page?:number})?.page??null:null;
+      const request=key.startsWith('api:')?JSON.stringify((payload as {request?:unknown})?.request??null):null;
+      const prior=this.db.prepare(`SELECT id,payload_json,observed_at_ms FROM provider_snapshots WHERE source=? AND account_id=? AND key=? AND session_id IS ? AND (? IS NULL OR json_extract(payload_json,'$.page')=?) AND (? IS NULL OR json_extract(payload_json,'$.request')=?) ORDER BY observed_at_ms DESC,id DESC LIMIT 2`).all(source,account,key,sessionId,page,page,request,request) as {id:string;payload_json:string;observed_at_ms:number}[];
+      if(prior.length===2&&prior.every(row=>row.payload_json===encoded)&&at>=prior[0]!.observed_at_ms){this.db.prepare('UPDATE provider_snapshots SET observed_at_ms=? WHERE id=?').run(at,prior[0]!.id);return;}
+    }
+    this.db.prepare('INSERT INTO provider_snapshots VALUES (?,?,?,?,?,?,?)').run(randomUUID(),source,account,key,at,sessionId,encoded);
   }
   followingSnapshot(source:'twitch'|'youtube',account:string,followers:Follower[],complete:boolean,at:number,total:number|null=null):void {
     if(!['twitch','youtube'].includes(source)||!account||typeof complete!=='boolean'||followers.length>25000||total!==null&&(!Number.isSafeInteger(total)||total<0))throw new Error('INVALID_FOLLOWERS');
@@ -290,6 +304,16 @@ export class StreamStore {
         .prepare(`SELECT identity_id AS id FROM events WHERE id = ?`)
         .get(eventKey(event)) as { id: string | null } | undefined;
       if (previous) {
+        // A REST rescan can supply the configured time missing at first reception.
+        // Preserve the original payload, donor and every explicit correction.
+        if(event.source==='donationalerts' && event.type==='donation' && event.occurredAtMs!==null){
+          const repaired=this.db.prepare("UPDATE events SET occurred_at_ms=?,time_quality=? WHERE id=? AND occurred_at_ms IS NULL").run(event.occurredAtMs,event.timeQuality,eventKey(event));
+          if(repaired.changes){
+            this.db.prepare("UPDATE donation_corrections SET occurred_at_ms=? WHERE event_id=? AND occurred_at_ms IS NULL AND coalesce(json_extract(payload_json,'$.corrected'),0)=0").run(event.occurredAtMs,eventKey(event));
+            const effective=this.db.prepare('SELECT occurred_at_ms FROM effective_events WHERE id=?').get(eventKey(event)) as {occurred_at_ms:number|null}|undefined;
+            if(effective?.occurred_at_ms!=null)this.assignEvent(eventKey(event),event.accountId,effective.occurred_at_ms);
+          }
+        }
         const identity = previous.id
           ? (this.db
               .prepare("SELECT id, person_id FROM identities WHERE id = ?")
@@ -1197,18 +1221,26 @@ export class StreamStore {
       )
       .all() as Record<string, unknown>[];
     const ids=JSON.stringify(rows.map(row=>row.id));
+    const counts=this.db.prepare(`SELECT session_id,sum(n) AS n FROM (
+      SELECT es.session_id,count(*) AS n FROM effective_events e JOIN event_sessions es ON es.event_id=e.id WHERE e.type='chat.message' AND es.session_id IN(SELECT value FROM json_each(?)) AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id) GROUP BY es.session_id
+      UNION ALL SELECT ps.session_id,count(DISTINCT m.account_id||':'||m.id) AS n FROM youtube_messages m JOIN platform_streams ps ON ps.platform='youtube' AND ps.account_id=m.account_id AND ps.started_at_ms<=m.published_at_ms AND (ps.ended_at_ms IS NULL OR ps.ended_at_ms>m.published_at_ms) WHERE ps.session_id IN(SELECT value FROM json_each(?)) AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent') GROUP BY ps.session_id
+    ) GROUP BY session_id`).all(ids,ids) as {session_id:string;n:number}[];
+    const messagesBySession=new Map(counts.map(row=>[row.session_id,row.n]));
     const samples=this.db.prepare('SELECT session_id,observed_at_ms,twitch_viewers,youtube_viewers FROM stream_samples WHERE session_id IN(SELECT value FROM json_each(?)) ORDER BY observed_at_ms').all(ids) as {session_id:string;observed_at_ms:number;twitch_viewers:number|null;youtube_viewers:number|null}[];
     const platforms=this.db.prepare('SELECT session_id,platform,started_at_ms AS "from",coalesce(ended_at_ms,?) AS "to" FROM platform_streams WHERE session_id IN(SELECT value FROM json_each(?))').all(Date.now(),ids) as {session_id:string;platform:string;from:number;to:number}[];
     const tips=this.db.prepare("SELECT es.session_id,json_extract(e.payload_json,'$.currency') AS currency,json_extract(e.payload_json,'$.amountMinor') AS amount FROM effective_events e JOIN event_sessions es ON es.event_id=e.id WHERE e.type='donation' AND es.session_id IN(SELECT value FROM json_each(?))").all(ids) as {session_id:string;currency:string|null;amount:string|null}[];
+    const group=<T extends {session_id:string}>(values:T[])=>{const groups=new Map<string,T[]>();for(const value of values){const list=groups.get(value.session_id)??[];list.push(value);groups.set(value.session_id,list);}return groups;};
+    const samplesBySession=group(samples),platformsBySession=group(platforms),tipsBySession=group(tips);
     return rows.map(({platforms_json, urls_json, ...row}) => {
-      const windows=sessionWindows(this.db,String(row.id),Number(row.started_at_ms),Number(row.ended_at_ms??Date.now()));
+      const links=platformsBySession.get(String(row.id))??[];
+      const windows=windowsFromLinks(links.map(p=>({started_at_ms:p.from,ended_at_ms:p.to})),Number(row.started_at_ms),Number(row.ended_at_ms??Date.now()));
       const merged=new Map<number,{observed_at_ms:number;twitch_viewers:number|null;youtube_viewers:number|null}>();
-      for(const sample of samples.filter(s=>s.session_id===row.id)){const at=Math.floor(sample.observed_at_ms/60000)*60000,value=merged.get(at)??{observed_at_ms:at,twitch_viewers:null,youtube_viewers:null};if(sample.twitch_viewers!==null)value.twitch_viewers=sample.twitch_viewers;if(sample.youtube_viewers!==null)value.youtube_viewers=sample.youtube_viewers;merged.set(at,value);}
-      const viewers=streamMetrics(windows,[...merged.values()],new Map(),platforms.filter(p=>p.session_id===row.id)).viewers.all;
+      for(const sample of samplesBySession.get(String(row.id))??[]){const at=Math.floor(sample.observed_at_ms/60000)*60000,value=merged.get(at)??{observed_at_ms:at,twitch_viewers:null,youtube_viewers:null};if(sample.twitch_viewers!==null)value.twitch_viewers=sample.twitch_viewers;if(sample.youtube_viewers!==null)value.youtube_viewers=sample.youtube_viewers;merged.set(at,value);}
+      const viewers=streamMetrics(windows,[...merged.values()],new Map(),links).viewers.all;
       const donations:Record<string,string>={};let donationCount=0;
-      for(const tip of tips.filter(t=>t.session_id===row.id)){donationCount++;if(tip.currency&&tip.amount&&/^\d+$/.test(tip.amount))donations[tip.currency]=(BigInt(donations[tip.currency]??'0')+BigInt(tip.amount)).toString();}
+      for(const tip of tipsBySession.get(String(row.id))??[]){donationCount++;if(tip.currency&&tip.amount&&/^\d+$/.test(tip.amount))donations[tip.currency]=(BigInt(donations[tip.currency]??'0')+BigInt(tip.amount)).toString();}
       return ({
-      ...row, durationMs:windows.reduce((sum,w)=>sum+w.to-w.from,0),viewerMean:viewers.mean,viewerPeak:viewers.peak,donationTotals:donations,donationCount,
+      ...row,messageCount:messagesBySession.get(String(row.id))??0, durationMs:windows.reduce((sum,w)=>sum+w.to-w.from,0),viewerMean:viewers.mean,viewerPeak:viewers.peak,donationTotals:donations,donationCount,
       breaks:sessionBreaks(windows),
       platforms: JSON.parse(platforms_json as string) as string[],
       confirmedUrls: (JSON.parse(urls_json as string) as {platform:"twitch"|"youtube";url:string}[])
@@ -1500,8 +1532,31 @@ export class StreamStore {
       const active=this.activeLogicalStream() as {id:string;started_at_ms:number}|null;
       if(!active || active.id!==expectedSessionId || event.receivedAtMs<active.started_at_ms)return null;
       if(event.occurredAtMs===null ? !allowUnknownTime : event.occurredAtMs<active.started_at_ms)return null;
-      return this.ingest(event);
+      const result=this.ingest(event);
+      if(event.occurredAtMs===null && allowUnknownTime && event.transport==='centrifugo')
+        this.db.prepare('INSERT OR IGNORE INTO event_sessions VALUES (?,?)').run(eventKey(event),active.id);
+      return result;
     }).immediate();
+  }
+
+  donationCandidates(id:string,excludedBotLogins:readonly string[]=[]):{id:string;name:string;messages:number;lastMessageAt:number}[]{
+    const donation=this.donation(id);
+    // Unknown timestamps cannot establish a reliable ±2 minute window.
+    if(donation.occurredAtMs===null)return [];
+    const at=donation.occurredAtMs,botJson=this.botJson(excludedBotLogins);
+    return this.db.prepare(`WITH nearby AS (
+      SELECT i.person_id AS id,p.display_name AS name,e.occurred_at_ms AS at
+      FROM effective_events e JOIN identities i ON i.id=e.identity_id JOIN persons p ON p.id=i.person_id
+      WHERE e.type='chat.message' AND e.occurred_at_ms BETWEEN ? AND ? AND ${this.notBotClause('i')}
+        AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id)
+        AND EXISTS(SELECT 1 FROM event_sessions chat JOIN event_sessions tip ON tip.session_id=chat.session_id WHERE chat.event_id=e.id AND tip.event_id=?)
+      UNION ALL
+      SELECT y.person_id,p.display_name,m.published_at_ms
+      FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id JOIN persons p ON p.id=y.person_id
+      WHERE m.published_at_ms BETWEEN ? AND ? AND json_extract(m.payload_json,'$.snippet.type')='textMessageEvent'
+        AND NOT EXISTS(SELECT 1 FROM youtube_identities z LEFT JOIN youtube_identity_aliases a ON a.identity_id=z.id WHERE z.person_id=y.person_id AND (z.is_owner=1 OR z.external_id=z.account_id OR z.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))))
+        AND EXISTS(SELECT 1 FROM platform_streams ps JOIN event_sessions tip ON tip.session_id=ps.session_id WHERE tip.event_id=? AND ps.platform='youtube' AND ps.account_id=m.account_id AND ps.started_at_ms<=m.published_at_ms AND (ps.ended_at_ms IS NULL OR ps.ended_at_ms>m.published_at_ms))
+    ) SELECT id,name,count(*) AS messages,max(at) AS lastMessageAt FROM nearby GROUP BY id ORDER BY min(abs(at-?)),messages DESC,id LIMIT 100`).all(at-120000,at+120000,botJson,id,at-120000,at+120000,botJson,botJson,id,at) as {id:string;name:string;messages:number;lastMessageAt:number}[];
   }
 
   activeLogicalStream(): Record<string, unknown> | null {
@@ -1667,6 +1722,7 @@ export class StreamStore {
     personId?: string,
     fromMs?: number,
     toMs?: number,
+    type?:string,
   ): Record<string, unknown>[] {
     if (fromMs !== undefined) assertTimestamp(fromMs);
     if (toMs !== undefined) assertTimestamp(toMs);
@@ -1676,7 +1732,7 @@ export class StreamStore {
       .prepare(
         `SELECT e.*, i.display_name, i.person_id FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id
       WHERE (? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?)) AND (? IS NULL OR i.person_id=?)
-      AND (? IS NULL OR e.occurred_at_ms>=?) AND (? IS NULL OR e.occurred_at_ms<?)
+      AND (? IS NULL OR e.occurred_at_ms>=?) AND (? IS NULL OR e.occurred_at_ms<?) AND (? IS NULL OR e.type=?)
       ORDER BY coalesce(e.occurred_at_ms,e.received_at_ms) DESC, e.id DESC LIMIT 200`,
       )
       .all(
@@ -1688,6 +1744,7 @@ export class StreamStore {
         fromMs ?? null,
         toMs ?? null,
         toMs ?? null,
+        type??null,type??null,
       )
       .map((value) => {
         const row = value as Record<string, unknown>;
@@ -1697,7 +1754,7 @@ export class StreamStore {
           payload_json: undefined,
         };
       });
-    const yt = this.db.prepare(`SELECT m.*,y.person_id,y.display_name,
+    const yt = type&&type!=='chat.message'?[]:this.db.prepare(`SELECT m.*,y.person_id,y.display_name,
       (SELECT s.id FROM sessions s JOIN platform_streams ps ON ps.session_id=s.id
        WHERE ps.platform='youtube' AND ps.account_id=m.account_id
        AND m.published_at_ms>=ps.started_at_ms AND (ps.ended_at_ms IS NULL OR m.published_at_ms<ps.ended_at_ms)
@@ -2189,6 +2246,29 @@ export class StreamStore {
     return { observedMinutes: observed.size, firstObservedMs, lastObservedMs };
   }
 
+  /** Load presence once, then union minute buckets in memory. Query count is independent of people/streams. */
+  private batchObserved(personIds?:readonly string[],sessionId?:string,beforeMs?:number) {
+    const now=Date.now(),ids=personIds?JSON.stringify(personIds):null;
+    const polls=this.db.prepare(`SELECT DISTINCT i.person_id,p.session_id,p.started_at_ms,p.completed_at_ms,s.started_at_ms AS stream_start,s.ended_at_ms AS stream_end
+      FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id JOIN sessions s ON s.id=p.session_id
+      WHERE p.status='complete' AND (? IS NOT NULL OR s.kind='platform') AND (? IS NULL OR i.person_id IN(SELECT value FROM json_each(?))) AND (? IS NULL OR p.session_id=?)`).all(sessionId??null,ids,ids,sessionId??null,sessionId??null) as {person_id:string;session_id:string;started_at_ms:number;completed_at_ms:number;stream_start:number;stream_end:number|null}[];
+    const links=this.db.prepare('SELECT session_id,started_at_ms,ended_at_ms FROM platform_streams WHERE (? IS NULL OR session_id=?)').all(sessionId??null,sessionId??null) as {session_id:string;started_at_ms:number;ended_at_ms:number|null}[];
+    const bySession=new Map<string,typeof links>();for(const link of links){const rows=bySession.get(link.session_id)??[];rows.push(link);bySession.set(link.session_id,rows);}
+    const windows=new Map<string,{fromMs:number;toMs:number;spans:{from:number;to:number}[]}>();
+    const result=new Map<string,Map<string,{minutes:Set<number>;first:number|null;last:number|null;startedAt:number}>>();
+    for(const poll of polls){
+      let w=windows.get(poll.session_id);
+      if(!w){const fromMs=Math.floor(poll.stream_start/60000)*60000,toMs=Math.min(Math.ceil((poll.stream_end??now)/60000)*60000,beforeMs??Infinity);w={fromMs,toMs,spans:windowsFromLinks(bySession.get(poll.session_id)??[],fromMs,toMs)};windows.set(poll.session_id,w);}
+      if(w.toMs<=w.fromMs||w.toMs-w.fromMs>31*86400000)continue;
+      const person=result.get(poll.person_id)??new Map();result.set(poll.person_id,person);
+      const observation=person.get(poll.session_id)??{minutes:new Set<number>(),first:null,last:null,startedAt:poll.stream_start};person.set(poll.session_id,observation);
+      for(const minute of pollCoveredMinutes(poll.started_at_ms,poll.completed_at_ms,w.fromMs,w.toMs))if(w.spans.some(span=>minute<span.to&&minute+60000>span.from)){
+        observation.minutes.add(minute);observation.first=observation.first===null?minute:Math.min(observation.first,minute);observation.last=observation.last===null?minute:Math.max(observation.last,minute);
+      }
+    }
+    return result;
+  }
+
   private analyticsExclusions(excludedBotLogins: readonly string[] = []): ReadonlySet<string> {
     const keys=new Set(botExclusionSet(excludedBotLogins));
     const json=JSON.stringify([...keys]);
@@ -2334,29 +2414,12 @@ export class StreamStore {
     const attended = new Set(youtube.sessionIds);
     let offsetSum = 0;
     let offsetSessions = 0;
-    for (const session of excludedPerson?[]:sessions) {
-      const fromMs = Math.floor(session.started_at_ms / 60_000) * 60_000;
-      const endMs = session.ended_at_ms ?? Date.now();
-      let toMs = Math.ceil(endMs / 60_000) * 60_000;
-      if (toMs - fromMs > 31 * 86_400_000) continue;
-      if (toMs <= fromMs) continue;
-      const obs = this.observedMinutesForPerson(
-        session.id,
-        personId,
-        fromMs,
-        toMs,
-      );
-      if (followedAtMs !== null && followedAtMs > fromMs) {
-        observedBeforeFollowMinutes += this.observedMinutesForPerson(session.id, personId, fromMs, Math.min(toMs, followedAtMs)).observedMinutes;
-      }
-      if (obs.observedMinutes > 0) {
-        attended.add(session.id);
-        observedSum += obs.observedMinutes;
-        observedSessions += 1;
-        if (obs.firstObservedMs !== null) {
-          offsetSum += Math.max(0, obs.firstObservedMs - session.started_at_ms);
-          offsetSessions += 1;
-        }
+    const observations=excludedPerson?new Map():this.batchObserved([personId]).get(personId)??new Map();
+    const beforeFollow=followedAtMs===null||excludedPerson?new Map():this.batchObserved([personId],undefined,followedAtMs).get(personId)??new Map();
+    for (const [id,obs] of observations) {
+      observedBeforeFollowMinutes+=beforeFollow.get(id)?.minutes.size??0;
+      if(obs.minutes.size){attended.add(id);observedSum+=obs.minutes.size;observedSessions++;
+        if(obs.first!==null){offsetSum+=Math.max(0,obs.first-obs.startedAt);offsetSessions++;}
       }
     }
     return {
@@ -2425,76 +2488,18 @@ export class StreamStore {
              ORDER BY poll_count DESC, p.display_name`,
           )
           .all(botJson) as Record<string, unknown>[];
-        return rows.map((row) => {
-          const sessions = this.db
-            .prepare(
-              `SELECT DISTINCT poll.session_id AS id FROM presence_polls poll
-               JOIN presence_members m ON m.poll_id = poll.id
-               JOIN identities i ON i.id = m.identity_id
-               WHERE i.person_id = ? AND poll.status='complete'`,
-            )
-            .all(row.id) as { id: string }[];
-          let minutes = 0;
-          for (const s of sessions) {
-            try {
-              const w = this.sessionMinuteWindow(s.id);
-              minutes += this.observedMinutesForPerson(
-                s.id,
-                String(row.id),
-                w.fromMs,
-                w.toMs,
-              ).observedMinutes;
-            } catch {
-              /* skip missing */
-            }
-          }
-          return {
-            id: row.id,
-            display_name: row.display_name,
-            revision: row.revision,
-            sources: row.sources,
-            messageCount: 0,
-            donationCount: 0,
-            donationTotals: {},
-            observedMinutes: minutes,
-          };
-        }).sort((a, b) => (b.observedMinutes as number) - (a.observedMinutes as number)).slice(0,capped);
+        const observations=this.batchObserved(rows.map(row=>String(row.id)));
+        return rows.map(row=>({id:row.id,display_name:row.display_name,revision:row.revision,sources:row.sources,messageCount:0,donationCount:0,donationTotals:{},observedMinutes:[...(observations.get(String(row.id))?.values()??[])].reduce((sum,obs)=>sum+obs.minutes.size,0)}))
+          .sort((a,b)=>b.observedMinutes-a.observedMinutes).slice(0,capped);
       }
-      const window = this.sessionMinuteWindow(sessionId);
-      const candidates = this.db
-        .prepare(
-          `SELECT DISTINCT p.id, p.display_name, p.revision,
-             (SELECT group_concat(DISTINCT i2.source) FROM identities i2 WHERE i2.person_id=p.id) AS sources
-           FROM persons p
-           JOIN identities i ON i.person_id = p.id
-           JOIN presence_members m ON m.identity_id = i.id
-           JOIN presence_polls poll ON poll.id = m.poll_id
-           WHERE poll.session_id = ? AND poll.status = 'complete'
-             AND ${this.notBotClause("i")}`,
-        )
-        .all(sessionId, botJson) as Record<string, unknown>[];
-      return candidates
-        .map((row) => {
-          const obs = this.observedMinutesForPerson(
-            sessionId,
-            String(row.id),
-            window.fromMs,
-            window.toMs,
-          );
-          return {
-            id: row.id,
-            display_name: row.display_name,
-            revision: row.revision,
-            sources: row.sources,
-            messageCount: 0,
-            donationCount: 0,
-            donationTotals: {},
-            observedMinutes: obs.observedMinutes,
-          };
-        })
-        .filter((row) => row.observedMinutes > 0)
-        .sort((a, b) => b.observedMinutes - a.observedMinutes)
-        .slice(0, capped);
+      this.sessionMinuteWindow(sessionId); // Preserve invalid-session validation.
+      const candidates=this.db.prepare(`SELECT DISTINCT p.id,p.display_name,p.revision,
+        (SELECT group_concat(DISTINCT source) FROM identities WHERE person_id=p.id) AS sources
+        FROM persons p JOIN identities i ON i.person_id=p.id JOIN presence_members m ON m.identity_id=i.id JOIN presence_polls poll ON poll.id=m.poll_id
+        WHERE poll.session_id=? AND poll.status='complete' AND ${this.notBotClause('i')}`).all(sessionId,botJson) as Record<string,unknown>[];
+      const observations=this.batchObserved(candidates.map(row=>String(row.id)),sessionId);
+      return candidates.map(row=>({id:row.id,display_name:row.display_name,revision:row.revision,sources:row.sources,messageCount:0,donationCount:0,donationTotals:{},observedMinutes:observations.get(String(row.id))?.get(sessionId)?.minutes.size??0}))
+        .filter(row=>row.observedMinutes>0).sort((a,b)=>b.observedMinutes-a.observedMinutes).slice(0,capped);
     }
 
     const typeFilter =
@@ -2533,56 +2538,18 @@ export class StreamStore {
       )
       .all(sid, sid, botJson, capped) as Record<string, unknown>[];
 
+    const selectedIds=JSON.stringify(rows.map(row=>row.id));
+    const donations=this.db.prepare(`SELECT i.person_id,json_extract(e.payload_json,'$.currency') AS currency,json_extract(e.payload_json,'$.amountMinor') AS amount_minor FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id IN(SELECT value FROM json_each(?)) AND ${inSession} AND e.type='donation' AND json_extract(e.payload_json,'$.currency') IS NOT NULL AND json_extract(e.payload_json,'$.amountMinor') IS NOT NULL`).all(selectedIds,sid,sid) as {person_id:string;currency:string;amount_minor:string}[];
+    const tipsByPerson=new Map<string,typeof donations>();for(const tip of donations){const list=tipsByPerson.get(tip.person_id)??[];list.push(tip);tipsByPerson.set(tip.person_id,list);}
+    const counts=sortBy==='messages'?[]:this.db.prepare(`SELECT i.person_id,count(*) AS n FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id IN(SELECT value FROM json_each(?)) AND ${inSession} AND e.type='chat.message' AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id) AND ${this.notBotClause('i')} GROUP BY i.person_id`).all(selectedIds,sid,sid,botJson) as {person_id:string;n:number}[];
+    const messages=new Map(counts.map(row=>[row.person_id,row.n]));
+    const observations=sessionId?this.batchObserved(rows.map(row=>String(row.id)),sessionId):null;
     return rows.map((row) => {
-      const donationRows = this.db
-        .prepare(
-          `SELECT json_extract(e.payload_json, '$.currency') AS currency,
-                  json_extract(e.payload_json, '$.amountMinor') AS amount_minor
-           FROM effective_events e
-           JOIN identities i ON i.id = e.identity_id
-           WHERE i.person_id = ? AND ${inSession} AND e.type = 'donation'
-             AND json_extract(e.payload_json, '$.currency') IS NOT NULL
-             AND json_extract(e.payload_json, '$.amountMinor') IS NOT NULL`,
-        )
-        .all(row.id, sid, sid) as { currency: string; amount_minor: string }[];
-      const donationTotals: Record<string, string> = {};
-      for (const d of donationRows) {
-        donationTotals[d.currency] = (
-          BigInt(donationTotals[d.currency] ?? "0") + BigInt(d.amount_minor)
-        ).toString();
-      }
-      const messageCount =
-        sortBy === "messages"
-          ? Number(row.metric_count)
-          : (
-              this.db
-                .prepare(
-                  `SELECT count(*) AS n FROM effective_events e
-                   JOIN identities i ON i.id = e.identity_id
-                   WHERE i.person_id = ? AND ${inSession}
-                     AND e.type = 'chat.message'
-                     AND (
-                       json_extract(e.payload_json, '$.originChannelId') IS NULL
-                       OR json_extract(e.payload_json, '$.originChannelId') = e.account_id
-                     )
-                     AND ${this.notBotClause("i")}`,
-                )
-                .get(row.id, sid, sid, botJson) as { n: number }
-            ).n;
-      let observedMinutes = 0;
-      if (sessionId) {
-        try {
-          const w = this.sessionMinuteWindow(sessionId);
-          observedMinutes = this.observedMinutesForPerson(
-            sessionId,
-            String(row.id),
-            w.fromMs,
-            w.toMs,
-          ).observedMinutes;
-        } catch {
-          observedMinutes = 0;
-        }
-      }
+      const donationRows=tipsByPerson.get(String(row.id))??[];
+      const donationTotals:Record<string,string>={};
+      for(const tip of donationRows)donationTotals[tip.currency]=(BigInt(donationTotals[tip.currency]??'0')+BigInt(tip.amount_minor)).toString();
+      const messageCount=sortBy==='messages'?Number(row.metric_count):messages.get(String(row.id))??0;
+      const observedMinutes=sessionId?observations?.get(String(row.id))?.get(sessionId)?.minutes.size??0:0;
       return {
         id: row.id,
         display_name: row.display_name,

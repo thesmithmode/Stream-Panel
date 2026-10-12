@@ -1,5 +1,5 @@
 // Migration 1. All times are UTC epoch milliseconds; names are never unique identifiers.
-export const CURRENT_SCHEMA_VERSION = 13;
+export const CURRENT_SCHEMA_VERSION = 14;
 
 export const schemaV1 = `
 CREATE TABLE persons (
@@ -258,4 +258,12 @@ CREATE TABLE donor_bindings (
  identity_id TEXT REFERENCES identities(id),updated_at_ms INTEGER NOT NULL
 ) STRICT;
 PRAGMA user_version = 13;
+`;
+
+/** Time-range donation/chat reads and author lookups must stay indexed as history grows. */
+export const schemaV14 = `
+CREATE INDEX events_type_time ON events(type,occurred_at_ms,id);
+CREATE INDEX events_type_received ON events(type,received_at_ms,id);
+CREATE INDEX youtube_messages_author_time ON youtube_messages(account_id,author_id,published_at_ms);
+PRAGMA user_version = 14;
 `;

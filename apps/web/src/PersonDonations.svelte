@@ -1,5 +1,5 @@
 <script lang="ts">
- import {untrack} from 'svelte';
+ import {untrack,onMount} from 'svelte';
  import {api,date,money,type Person} from './api';
  import {donationAuditChanges} from './donation-form';
  type Donation={id:string;personId:string|null;personName:string|null;amountMinor:string;currency:string;occurredAtMs:number|null;message:string;sourceName:string;originalActorName:string;revision:number;deleted:boolean};
@@ -16,6 +16,7 @@
   finally{if(ticket===generation)loading=false;}
  }
  $effect(()=>{personId;offset;revision;untrack(()=>void refresh().catch(()=>{}));return()=>{generation++;};});
+ onMount(()=>{const update=()=>{if(!editing)void refresh().catch(()=>{});};window.addEventListener('sp:data-refresh',update);return()=>window.removeEventListener('sp:data-refresh',update);});
  async function audit(id:string){histories[id]=await api(`donations/${encodeURIComponent(id)}/audit`);}
  async function assign(row:Donation,target:string|null){busy=true;error='';conflict=false;try{await api(`donations/${encodeURIComponent(row.id)}/assign`,{personId:target,revision:row.revision});editing=null;await refresh();await onChange();}catch(e){conflict=(e as Error).message.includes('DONATION_CONFLICT');error=conflict?'Привязка изменилась в другом окне. Загрузите актуальный донат.':(e as Error).message;if(!conflict)await refresh().catch(()=>{});}finally{busy=false;}}
  const value=(row:Donation)=>/^\d+$/.test(row.amountMinor)?money(row.amountMinor,row.currency):'Сумма неизвестна';

@@ -1,5 +1,6 @@
 <script lang="ts">
   import {ConnectionError} from "./request";
+  import StreamDonations from "./StreamDonations.svelte";
   import Following from "./Following.svelte";
   import Icon from "./Icon.svelte";
   import Help from "./Help.svelte";
@@ -22,7 +23,7 @@
     sessionFilter = "",
     connect,
     onPerson,
-    session,
+    session,changed,
   }: {
     summary: Summary;
     events: Event[];
@@ -30,6 +31,7 @@
     connect: () => void;
     onPerson: (id: string) => void;
     session?:Session|undefined;
+    changed:()=>Promise<void>;
   } = $props();
   let audienceData=$state<any>(null),audienceError=$state(''),audienceBusy=$state(false),barOpen=$state(false);
   let audienceMetric=$state<ChartMetric>('viewers');
@@ -54,8 +56,14 @@
   let insights = $state<InsightCard[]>([]);
   let insightsLoading = $state(false);
   let insightsError = $state("");
+  let filteredEvents=$state<Event[]|null>(null);
+  $effect(()=>{const current=sessionFilter,type=filter;void events;let cancelled=false;filteredEvents=null;
+    if(type==='all')return;
+    void api<Event[]>(`events?${new URLSearchParams({session:current,type})}`).then(rows=>{if(!cancelled)filteredEvents=rows;}).catch(e=>{if(!cancelled)audienceError=e.message;});
+    return()=>{cancelled=true;};
+  });
   const visible = $derived(
-    events.filter((e) => !e.type.startsWith('channel_points') && (filter === "all" || e.type === filter) && (sourceFilter === "all" || e.source === sourceFilter)),
+    (filteredEvents??events).filter((e) => !e.type.startsWith('channel_points') && (filter === "all" || e.type === filter) && (sourceFilter === "all" || e.source === sourceFilter)),
   );
   async function loadInsights() {
     insightsOpen = !insightsOpen;
@@ -105,7 +113,7 @@
   <div class="metric">
     <Icon name="heart" size={27} />
     <div>
-      <span>Донаты</span><strong class:muted={!summary.donations}
+      <span>Донаты</span><strong
         >{Object.keys(summary.totals).length
           ? Object.entries(summary.totals)
               .map(([c, a]) => money(a, c))
@@ -115,6 +123,7 @@
     </div>
   </div>
 </section>
+{#if sessionFilter}<StreamDonations sessionId={sessionFilter} {onPerson} {changed} />{/if}
 <section class="metrics secondary-metrics">
   <div class="metric">
     <div>

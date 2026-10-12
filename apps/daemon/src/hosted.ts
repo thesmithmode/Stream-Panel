@@ -54,6 +54,7 @@ export async function createHostedApplication(
           return session && selectedProfile(request, session.profile) === profile ? { csrf: session.csrf, expires: Number.MAX_SAFE_INTEGER } : null;
         },
       });
+      if(backup)runtime.db.setStorageCleanup(()=>backup.purgeLocal());
       await runtime.app.ready();
       runtimes.set(profile, runtime);
     }

@@ -5,6 +5,7 @@ export class StoreClient {
   private worker: Worker;
   private cache=new ReadCache();
   private storage:StorageGuard;
+  setStorageCleanup(cleanup:()=>Promise<void>){this.storage.setCleanup(cleanup);}
   storageStatus(){return this.storage.status();}
   private sequence = 0;
   private dead = false;

@@ -67,7 +67,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     if(options.sessionId&&!recording)throw new Error('SESSION_NOT_FOUND');
     const from=recording?Math.max(options.fromMs,recording.started_at_ms):options.fromMs,to=recording?Math.min(options.toMs,recording.ended_at_ms??options.toMs):options.toMs;
     const source = options.source ?? 'all', category = options.category ?? '', timezone = options.timezone ?? 'Europe/Moscow';
-    const regularThresholdPercent=options.regularThresholdPercent??50;
+    const regularThresholdPercent=options.regularThresholdPercent??80;
     const minSessions = options.minSessions ?? 3, minMinutes = options.minMinutes ?? 30, minMessages = options.minMessages ?? 5, window = options.chatWindowMinutes ?? 5, rule = options.coreRule ?? 'either';
     if (!Number.isFinite(regularThresholdPercent) || regularThresholdPercent<0 || regularThresholdPercent>100 || !Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to <= from || to > 8640000000000000 || !['all', 'twitch', 'youtube'].includes(source) || !['either', 'both', 'frequency'].includes(rule) || category.length > 256 || [minSessions, minMinutes, minMessages, window].some(n => !Number.isInteger(n) || n < 0) || minSessions > 1000 || minMinutes > 129600 || minMessages > 1000000 || window < 1 || window > 30)
         throw new Error('INVALID_ANALYTICS_FILTER');
@@ -287,7 +287,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         }
         e.arrivalHours=[...arrivals.values()].sort((a,b)=>b.visits-a.visits||a.hour-b.hour);
         const long=activityMinutes>=minMinutes,chatty=e.messages>=minMessages;
-        const automatic=e.attendanceSessionIds.size>=minSessions && e.attendanceSessionIds.size>0 && e.attendanceSessionIds.size/selectedStreamCount*100>regularThresholdPercent && (rule==='frequency'||(rule==='both'?long&&chatty:long||chatty));
+        const automatic=e.attendanceSessionIds.size>=minSessions && e.attendanceSessionIds.size>0 && e.attendanceSessionIds.size/selectedStreamCount*100+1e-10>=regularThresholdPercent && (rule==='frequency'||(rule==='both'?long&&chatty:long||chatty));
         const override=preferences.get(e.id);
         e.manualCore=override==null?null:override===1;
         e.core=e.manualCore??automatic;

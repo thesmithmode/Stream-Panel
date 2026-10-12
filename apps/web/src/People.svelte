@@ -30,7 +30,7 @@
     onSelect:(id:string)=>void;
     onChange: () => Promise<void>;
   } = $props();
-  let detailTab=$state("activity"),showFollowing=$state(false),detailLoading=$state(false);
+  let detailTab=$state("overview"),showFollowing=$state(false),detailLoading=$state(false),showDonorLinks=$state(false);
   let search = $state(""),
     selectedId = $state(""),
     detail = $state<any>(null),
@@ -118,13 +118,14 @@
     const value = await api<PersonStats>(`persons/${id}/stats${q}`);
     if (selectedId === id) stats = value;
   }
-  async function refreshPerson(id:string) {
+  async function refreshPerson(id:string,notify=true) {
     const person=await api(`persons/${id}?events=false`);
     if(selectedId===id){detail=person;await loadStats(id);}
-    await onChange();
+    if(notify)await onChange();
   }
   async function select(id: string) {
     if(selectedId!==id)onSelect(id);
+    if(selectedId!==id){detailTab="overview";showDonorLinks=false;}
     selectedId = id;
     selectedSession = sessionFilter;
     error = "";
@@ -154,7 +155,9 @@
     busy = true;
     error = "";
     try {
+      const editingTab=detailTab;
       await action();
+      detailTab=editingTab;
       await onChange();
       await loadAudit();
     } catch (e) {
@@ -180,7 +183,9 @@
   });
   import { onMount } from "svelte";
   onMount(() => {
-    void loadAudit().catch((e) => (error = e.message));
+    const update=()=>{if(selectedId)void refreshPerson(selectedId,false).catch(e=>error=e.message);};
+    window.addEventListener('sp:data-refresh',update);
+    return()=>window.removeEventListener('sp:data-refresh',update);
   });
 </script>
 
@@ -280,16 +285,22 @@
           </div>
           <div class="kpi">
             <span>Посещаемость</span><strong>{stats.attendanceRatio == null ? "—" : `${Math.round(stats.attendanceRatio * 100)}%`}</strong>
-            <small>{stats.sessionsWithAttendance ?? stats.sessionsWithObservation} из {stats.recordedStreams} стримов</small>
+
           </div>
           {#if stats.estimatedChatMinutes != null && stats.estimatedChatMinutes > 0}
           <div class="kpi"><span>Оценка активности YouTube</span><strong>{formatDuration(stats.estimatedChatMinutes)}</strong></div>
           {/if}
 
         </div>{/if}
-      <div class="person-tabs" role="tablist" aria-label="Разделы человека">{#each [["activity","Активность"],["donations","Донаты"],["notes","Заметки и метки"],["accounts","Аккаунты" ]] as const as [key,label]}<button role="tab" aria-selected={detailTab===key} class:active={detailTab===key} onclick={()=>detailTab=key}>{label}</button>{/each}</div>
+      <div class="person-tabs" role="tablist" aria-label="Разделы человека">{#each [["overview","Обзор"],["activity","Активность"],["donations","Донаты"],["notes","Заметки и метки"],["accounts","Редактировать аккаунты" ]] as const as [key,label]}<button role="tab" aria-selected={detailTab===key} class:active={detailTab===key} onclick={()=>{detailTab=key;if(key==='accounts')void loadAudit().catch(e=>error=e.message);}}>{label}</button>{/each}</div>
       <div class="settings-body person-scroll">
-      {#if detailTab==='accounts'}
+      {#if detailTab==='overview'}
+        <h3>Связанные аккаунты</h3>
+        <div class="account-summary">{#each detail.identities as identity}<span><strong>{identity.display_name}</strong><small class="muted">{identity.source==='twitch'?'Twitch':identity.source==='youtube'?'YouTube':'DonationAlerts'}</small></span>{/each}</div>
+        <div class="actions"><button class="outline small" onclick={()=>detailTab='donations'}>История донатов</button><button class="outline small" onclick={()=>{detailTab='donations';showDonorLinks=true;}}>Привязать донаты</button><button class="outline small" onclick={()=>{detailTab='accounts';void loadAudit().catch(e=>error=e.message);}}>Редактировать аккаунты</button></div>
+        <PersonActivity personId={detail.id} />
+        <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} sessionId={sessionFilter} onPerson={(id)=>void select(id)} />{/if}</details>
+      {:else if detailTab==='accounts'}
         <label
           >Имя группы
           <div class="inline">
@@ -373,7 +384,8 @@
       </div>{/each}
   </section>{/if}
       {:else if detailTab==='donations'}
-       <DonorLinks personId={detail.id} onChange={()=>refreshPerson(detail.id)} />
+       <button class="outline small" aria-expanded={showDonorLinks} onclick={()=>showDonorLinks=!showDonorLinks}>{showDonorLinks?'Скрыть привязку':'Привязать донаты по нику'}</button>
+       {#if showDonorLinks}<DonorLinks personId={detail.id} onChange={()=>refreshPerson(detail.id)} />{/if}
        <PersonDonations personId={detail.id} revision={detail.revision} {people} onChange={()=>refreshPerson(detail.id)} />
       {:else if detailTab==='notes'}
        <PersonMetadata personId={detail.id} onChange={()=>refreshPerson(detail.id)} />
@@ -388,5 +400,5 @@
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 
 <style>
-.people-grid{height:calc(100dvh - 230px);min-height:360px;}.people-grid>section{min-height:0;display:flex;flex-direction:column;overflow:hidden;margin-bottom:0;}.people-list{min-height:0;flex:1;max-height:none;}.person-scroll{min-height:0;overflow-y:auto;flex:1;}.person-tabs{display:flex;gap:.4rem;padding:.6rem 1rem;border-bottom:1px solid var(--border);flex-wrap:wrap;}.person-tabs button{background:transparent;border:0;padding:.5rem .7rem;}.person-tabs button.active{background:#292438;color:var(--accent);}.person-detail .kpi-strip{padding:12px 16px;gap:12px;}.person-detail .kpi span{font-size:11px;}.person-detail .kpi strong{font-size:18px;}@media(max-width:760px){.people-grid{height:auto;min-height:0;}.people-grid>section{overflow:visible;}.people-list{max-height:260px;}.person-scroll{overflow:visible;}}
+.people-grid{height:calc(100dvh - 180px);min-height:360px;}.people-grid>section{min-height:0;display:flex;flex-direction:column;overflow:hidden;margin-bottom:0;}.people-list{min-height:0;flex:1;max-height:none;}.person-scroll{min-height:0;overflow-y:auto;flex:1;}.person-tabs{display:flex;gap:.4rem;padding:.6rem 1rem;border-bottom:1px solid var(--border);flex-wrap:wrap;}.person-tabs button{background:transparent;border:0;padding:.5rem .7rem;}.person-tabs button.active{background:#292438;color:var(--accent);}.person-detail .kpi-strip{padding:12px 16px;gap:12px;}.person-detail .kpi span{font-size:11px;}.person-detail .kpi strong{font-size:18px;color:#fff;}.account-summary{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;}.account-summary>span{display:grid;gap:4px;}.account-summary small{font-size:11px;}@media(max-width:760px){.people-grid{height:auto;min-height:0;}.people-grid>section{overflow:visible;}.people-list{max-height:260px;}.person-scroll{overflow:visible;}}
 </style>

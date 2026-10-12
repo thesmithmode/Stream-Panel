@@ -10,7 +10,7 @@
     try { const result = await api("youtube/data"); if (id === requestId) { data = result; error = ""; } }
     catch (e) { if (id === requestId && !(e instanceof ConnectionError)) { error = (e as Error).message; data = null; } }
   }
-  onMount(() => { mounted = true; const timer = setInterval(() => {if(!document.hidden&&navigator.onLine)void refresh();}, 60000); return () => { requestId++; clearInterval(timer); }; });
+  onMount(() => { mounted = true; const update=()=>void refresh();window.addEventListener('sp:data-refresh',update);return()=>{requestId++;window.removeEventListener('sp:data-refresh',update);}; });
   const channel = $derived(data?.snapshots?.channel?.data);
 </script>
 <section class="panel settings wide">

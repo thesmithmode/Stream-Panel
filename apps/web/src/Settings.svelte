@@ -10,18 +10,19 @@
  {#if rules}<form class="settings-body" onsubmit={e=>{e.preventDefault();void save();}}>
   <p class="small muted">Правила применяются к истории выбранного профиля. Ручная отметка ядра в карточке человека имеет приоритет.</p>
   <div class="settings-fields">
-   <label>Порог посещаемости, %<input type="number" min="0" max="100" step="1" required bind:value={rules.regularThresholdPercent}/><small>Для ядра доля посещённых эфиров должна быть выше порога.</small></label>
-   <label>Минимум посещённых стримов<input type="number" min="0" max="1000" step="1" required bind:value={rules.minSessions}/></label>
-   <label>Минимум минут активности<input type="number" min="0" max="129600" step="1" required bind:value={rules.minMinutes}/></label>
-   <label>Минимум сообщений<input type="number" min="0" max="1000000" step="1" required bind:value={rules.minMessages}/></label>
-   <label>Дополнительное условие ядра<select bind:value={rules.coreRule}><option value="either">Минуты или сообщения</option><option value="both">Минуты и сообщения</option><option value="frequency">Только посещаемость</option></select></label>
+   <label>Порог посещаемости, %<input type="number" min="0" max="100" step="1" required bind:value={rules.regularThresholdPercent}/><small>Для ядра доля посещённых эфиров должна быть не ниже порога.</small></label>
+   <label>Минимум посещённых стримов<input type="number" min="0" max="1000" step="1" required bind:value={rules.minSessions}/><small>Число посещённых эфиров за выбранный период.</small></label>
+   <label>Дополнительное условие ядра<select bind:value={rules.coreRule}><option value="frequency">Только посещаемость</option><option value="either">Минуты или сообщения</option><option value="both">Минуты и сообщения</option></select><small>{rules.coreRule==='frequency'?'Учитываем только долю посещений и минимум стримов.':rules.coreRule==='either'?'Достаточно одного из двух условий ниже.':'Нужно выполнить оба условия ниже.'}</small></label>
+   {#if rules.coreRule!=='frequency'}<label>Минимум минут активности<input type="number" min="0" max="129600" step="1" required bind:value={rules.minMinutes}/><small>Суммарно за выбранный период.</small></label>
+   <label>Минимум сообщений<input type="number" min="0" max="1000000" step="1" required bind:value={rules.minMessages}/><small>Суммарно за выбранный период.</small></label>
+   {/if}
    <label>Окно активности YouTube, мин<input type="number" min="1" max="30" required bind:value={rules.chatWindowMinutes}/><small>Оценка по сообщениям, а не подтверждённое время просмотра.</small></label>
    <label>Часовой пояс аналитики<select bind:value={rules.timezone}><option value="Europe/Moscow">Москва</option><option value="UTC">UTC</option><option value="Asia/Yekaterinburg">Екатеринбург</option></select></label>
   </div><button class="primary" disabled={busy}>{busy?'Сохраняем…':'Сохранить настройки'}</button>
  </form>{:else}<p class="settings-body" role="status">Загружаем настройки…</p>{/if}
  {#if message}<p class="settings-body" role="status">{message}</p>{/if}{#if error}<p class="settings-body notice error" role="alert">{error}</p>{/if}
 </section>
-{#if status.storage?.freeBytes!==null&&status.storage?.freeBytes!==undefined}<section class="panel"><header><h2>Хранение на сервере</h2></header><div class="settings-body"><p>Свободно: {(status.storage.freeBytes/1024**3).toFixed(1)} ГБ</p><p class="small muted">Резерв для файловой системы — 1 ГБ. При его достижении панель приостанавливает свои записи. Redis: до 128 МБ, без записи на диск; локальный кэш: до 8 МБ на профиль.</p><p class="small muted">Очередь облачных копий ограничена 20 файлами. При переполнении новые копии не создаются; сохранённые остаются целыми.</p></div></section>{/if}
+{#if status.storage?.freeBytes!==null&&status.storage?.freeBytes!==undefined}<section class="panel"><header><h2>Хранение на сервере</h2></header><div class="settings-body"><p>Свободно: {(status.storage.freeBytes/1024**3).toFixed(1)} ГБ</p><p class="small muted">При свободном месте меньше 1 ГБ запускается очистка старых копий; сбор продолжает работать. Запись останавливается только при критическом остатке 16 МБ. Redis: до 128 МБ, без записи на диск; локальный кэш: до 8 МБ на профиль.</p><p class="small muted">Локальные копии очищаются автоматически: сохраняются семь последних точек восстановления и выбранные дневные/недельные копии. Дополнительные копии ограничены бюджетом 2 ГБ; семь последних имеют приоритет.</p></div></section>{/if}
 <section class="panel"><header><h2>Резервные копии</h2></header><div class="settings-body"><button class="outline" disabled={busy} onclick={backup}>Создать резервную копию</button>
 {#if status.backup}<p class="small muted">Резервная копия общая для обоих профилей.</p><BackupFiles status={status.backup}/>{/if}</div></section>
 <style>.settings-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px;margin:16px 0;}label{display:grid;gap:6px;align-content:start;}small{font-size:11px;color:var(--muted);}input,select{width:100%;min-width:0;}</style>

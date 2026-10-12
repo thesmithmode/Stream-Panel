@@ -28,6 +28,9 @@
   } from "./api";
   import {sessionGroup} from "./session-group";
   import {formatDuration} from "./duration";
+  let retryInitialization=()=>{};
+  let autoRefresh=$state(false),refreshSeconds=$state(30);
+  function toggleRefresh(){autoRefresh=!autoRefresh;if(autoRefresh)void action(async()=>{});}
   let tab = $state("overview"),
     authorized = $state(false),
     loading = $state(true),
@@ -68,7 +71,7 @@
       if (result.user?.profile) { setProfile(result.user.profile); profile = result.user.profile; }
       await refresh(); authorized = true;saveRoute(true);
     } catch (e) { reportFailure(e); }
-    finally { busy = false; }
+    finally { busy = false;retryInitialization(); }
   }
   function isConfirmedPlatformUrl(entry: { platform: string; url: string }): boolean {
     try {
@@ -112,7 +115,7 @@
       const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter).map(async([key,path])=>[key,await api(path,undefined,controller.signal)])));
       if(current!==epoch)return;
       status=values.status;{setCsrf(status.csrf);user=status.user??user;outdated=isOutdatedRelease(status.release);}
-      sessions=values.sessions??sessions;people=values.persons??people;events=values.events??events;summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';
+      sessions=values.sessions??sessions;people=values.persons??people;events=values.events??events;summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';window.dispatchEvent(new Event('sp:data-refresh'));
     })();refreshTask={epoch:current,task,controller};
     try{await task;}finally{clearTimeout(deadline);if(refreshTask?.task===task)refreshTask=null;}
   }
@@ -126,7 +129,7 @@
     } catch (e) {
       if(current===epoch)reportFailure(e);
     } finally {
-      if (current === epoch) busy = false;
+      if (current === epoch) busy = false;retryInitialization();
     }
   }
   function navigate(next:string,person='') {
@@ -143,11 +146,11 @@
     if(outdated)location.reload();
   }
   onMount(() => {
-    let alive=true,initializing=false;
-    const update=()=>{if(!alive||busy||initializing||document.hidden||!navigator.onLine)return;if(!authorized){if(connectionLost&&!username&&!password)void initialize();return;}const current=epoch;void refresh().catch(e=>{if(current!==epoch||!alive)return;if(['LOGIN_REQUIRED','LOCAL_LOGIN_REQUIRED'].includes(e.message)){epoch++;authorized=false;people=[];events=[];sessions=[];clearScope();}reportFailure(e);});};
-    const timer=setInterval(update,15000);
+    let alive=true,initializing=false,pendingInitialization=false,lastRefresh=0;
+    const update=()=>{if(!alive||!autoRefresh||busy||initializing||document.hidden||!navigator.onLine)return;if(!authorized){if(connectionLost&&!username&&!password)void initialize();return;}const current=epoch;void refresh().catch(e=>{if(current!==epoch||!alive)return;if(['LOGIN_REQUIRED','LOCAL_LOGIN_REQUIRED'].includes(e.message)){epoch++;authorized=false;people=[];events=[];sessions=[];clearScope();}reportFailure(e);});};
+    const timer=setInterval(()=>{if(Date.now()-lastRefresh>=refreshSeconds*1000){lastRefresh=Date.now();update();}},1000);
     async function initialize() {
-      if(initializing||busy)return;initializing=true;
+      if(initializing||busy){pendingInitialization=true;return;}pendingInitialization=false;initializing=true;
       restoreRoute();
       loading = true;
       error = "";
@@ -165,22 +168,26 @@
         authorized=true;saveRoute(true);
       } catch(e){reportFailure(e);
       } finally {
-        loading=false;initializing=false;
+        loading=false;initializing=false;if(pendingInitialization&&alive)void initialize();
       }
     }
+    retryInitialization=()=>{if(pendingInitialization&&alive)void initialize();};
     void initialize();
     const onHashChange = () => {
       if (new URLSearchParams(location.hash.slice(1)).has("key"))
         void initialize();
     };
-    const back=()=>{restoreRoute();update();};
-    const offline=()=>connectionLost=true;window.addEventListener('offline',offline);window.addEventListener('popstate',back);window.addEventListener('online',update);window.addEventListener('focus',update);document.addEventListener('visibilitychange',update);
+    const back=()=>{if(new URLSearchParams(location.hash.slice(1)).has('key')){void initialize();return;}restoreRoute();void action(async()=>{});};
+    const leave=()=>{autoRefresh=false;};
+    const visibility=()=>{if(document.hidden)leave();};
+    window.addEventListener("pagehide",leave);document.addEventListener("visibilitychange",visibility);
+    const offline=()=>connectionLost=true;window.addEventListener('offline',offline);window.addEventListener('popstate',back);window.addEventListener('online',update);window.addEventListener('focus',update);
     window.addEventListener("hashchange", onHashChange);
     return () => {
-      alive = false;
+      alive = false;retryInitialization=()=>{};
       refreshTask?.controller.abort();
       window.removeEventListener("hashchange", onHashChange);
-      window.removeEventListener('offline',offline);window.removeEventListener('popstate',back);window.removeEventListener('online',update);window.removeEventListener('focus',update);document.removeEventListener('visibilitychange',update);clearInterval(timer);
+      window.removeEventListener('offline',offline);window.removeEventListener('popstate',back);window.removeEventListener('online',update);window.removeEventListener('focus',update);document.removeEventListener("visibilitychange",visibility);window.removeEventListener("pagehide",leave);clearInterval(timer);
     };
   });
 </script>
@@ -196,11 +203,15 @@
         >{/each}
     </nav>
     <div class="sidebar-bottom">
-      <span class="dot" class:off={!authorized}></span>
-      <div class="sidebar-status">
-        {#if authorized}<label class="profile-label">Профиль<select aria-label="Профиль" value={profile} disabled={busy} onchange={(event) => void switchProfile(event.currentTarget.value as Profile)}><option value="ruslan">Руслан</option><option value="gulnaz">Гульназ</option></select></label>{:else}<span>Stream Panel</span>{/if}
-      </div>
-      <Icon name="arrow" size={17} />
+      {#if authorized}
+        <div class="refresh-controls">
+          <button class="refresh-toggle" aria-pressed={autoRefresh} onclick={toggleRefresh}><span class="dot" class:off={!autoRefresh}></span>Автообновление <strong>{autoRefresh?'Вкл':'Выкл'}</strong></button>
+          {#if autoRefresh}<label class="small muted">Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={15}>15 секунд</option><option value={30}>30 секунд</option><option value={60}>1 минута</option></select></label>{/if}
+          <button class="text-button small" disabled={busy} onclick={()=>void action(async()=>{})}>{busy?'Обновляем…':'Обновить данные'}</button>
+          {#if autoRefresh&&connectionLost}<span class="small muted" role="status">Не удалось обновить данные</span>{/if}
+        </div>
+        <label class="profile-label"><span class="small muted">Профиль</span><select aria-label="Профиль" value={profile} disabled={busy} onchange={(event) => void switchProfile(event.currentTarget.value as Profile)}><option value="ruslan">Руслан</option><option value="gulnaz">Гульназ</option></select></label>
+      {/if}
     </div>
   </aside>
   <main class:sessions-page={tab==='sessions'} class:stream-page={tab==='stream'} class:people-page={tab==='people'}>
@@ -223,7 +234,7 @@
       {#if error}<p role="alert" class="small notice error">{error}</p>{/if}
       </section>{:else}
       {#if status?.backup&&(status.backup.cloud?.state!=='success'||status.backup.pendingUploads>0)}<p role="status" class="notice backup-warning">Облачная резервная копия {status?.backup?.cloud?.state==='disabled'?'не настроена':status?.backup?.cloud?.state==='error'?'не загружается':'ожидает подтверждения'}. Проверьте раздел «Настройки».</p>{/if}
-      {#if status?.storage?.freeBytes!==null&&status?.storage?.freeBytes<status?.storage?.reserveBytes}<p class="notice" role="status">На сервере осталось меньше 1 ГБ. Панель приостановила свои записи, чтобы сохранить резерв диска. Проверьте «Настройки».</p>{/if}
+      {#if status?.storage?.freeBytes!==null&&status?.storage?.freeBytes<status?.storage?.reserveBytes}<p class="notice" role="status">{status.storage.freeBytes<(status.storage.minFreeBytes??16777216)?'Критически мало места: запись временно остановлена, чтобы не повредить БД. Проверьте «Настройки».':'На сервере мало свободного места. Панель очищает старые копии; сбор данных продолжается. Проверьте «Настройки». '}</p>{/if}
       {#if outdated}<div role="status" class="notice">Доступна новая версия панели для обоих профилей. <button class="outline small" onclick={()=>location.reload()}>Обновить панель</button></div>{/if}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}
       {#key `${profile}:${tab}:${sessionFilter}`}
@@ -252,6 +263,7 @@
           {sessionFilter}
           connect={() => navigate("connections")}
           onPerson={openPerson}
+          changed={refresh}
         />
       {:else if tab === "analytics"}
         <Analytics profile={profile} defaultTimezone={status.config.analyticsSettings?.timezone??"Europe/Moscow"} onPerson={openPerson} />
@@ -282,13 +294,13 @@
                 <thead
                   ><tr
                     ><th>Период · МСК</th><th>Длительность</th><th>Площадки</th
-                    ><th>Название и ссылка</th><th>Зрители · пик / среднее</th><th>Донаты</th><th>События</th><th></th></tr
+                    ><th>Название и ссылка</th><th>Зрители · пик / среднее</th><th>Донаты</th><th>Сообщения</th><th></th></tr
                   ></thead
                 ><tbody
                   >{#each sessions as session,index}{#if index===0||sessionGroup(session.started_at_ms)!==sessionGroup(sessions[index-1]!.started_at_ms)}<tr class="session-group"><th colspan="8">{sessionGroup(session.started_at_ms)}</th></tr>{/if}<tr data-session-id={session.id}
                       > <td data-label="Период · МСК">{streamRange(session.started_at_ms,session.ended_at_ms)}
                         {#each session.breaks??[] as pause}<small>Перерыв: {streamRange(pause.from,pause.to)}</small>{/each}
-                        {#if session.end_quality==='estimated'}<small>Граница приблизительная</small>{/if}
+
                         </td
                       ><td data-label="Длительность">{formatDuration((session.durationMs??((session.ended_at_ms??Date.now())-session.started_at_ms))/60000)}</td><td data-label="Площадки" class="platform-labels"
                         >{session.platforms?.length
@@ -300,7 +312,7 @@
                           <a href={entry.url} target="_blank" rel="noopener noreferrer">{entry.platform === "twitch" ? "Twitch" : "YouTube"}</a>
                         {/each}
                       </td
-                      ><td data-label="Зрители · пик / среднее">{session.viewerPeak??'—'} / {session.viewerMean==null?'—':session.viewerMean.toLocaleString('ru-RU',{maximumFractionDigits:1})}</td><td data-label="Донаты">{#each Object.entries(session.donationTotals??{}) as [currency,amount]}<div>{money(amount,currency)}</div>{:else}—{/each}<small>{session.donationCount??0} донатов</small></td><td data-label="События">{session.event_count}</td><td
+                      ><td data-label="Зрители · пик / среднее">{session.viewerPeak??'—'} / {session.viewerMean==null?'—':session.viewerMean.toLocaleString('ru-RU',{maximumFractionDigits:1})}</td><td data-label="Донаты">{#each Object.entries(session.donationTotals??{}) as [currency,amount]}<div>{money(amount,currency)}</div>{:else}—{/each}<small>{session.donationCount??0} донатов</small></td><td data-label="Сообщения">{session.messageCount??0}</td><td
                         ><button
                           class="outline small"
                           onclick={() => {

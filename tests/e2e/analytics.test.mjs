@@ -156,8 +156,11 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await page.getByLabel('Поиск участника').fill('');
    for(const metric of ['estimated','messages','viewers','observed']){await page.getByLabel('Метрика графика').selectOption(metric);await page.getByLabel('Метрика карты').selectOption(metric);if(metric==='observed'||metric==='messages')assert.ok(await page.locator('.trend-chart rect.regular-segment').count()>0);else assert.equal(await page.locator('.trend-chart rect.regular-segment').count(),0);}
    assert.equal(await page.getByLabel('Обновлять каждую минуту').count(),0);
+   const initialRefresh=page.waitForResponse(r=>r.url().includes('/api/v1/analytics?')&&r.status()===200);
+   await page.getByRole('button',{name:/Автообновление/}).click();await initialRefresh;
+   await page.getByLabel('Интервал автообновления').selectOption('60');
    const previousEnd=await page.getByLabel('Конец периода').inputValue();
-   const refreshed=page.waitForResponse(r=>r.url().includes('/api/v1/analytics?')&&r.status()===200);await page.clock.fastForward(60300);await refreshed;
+   const refreshed=page.waitForResponse(r=>r.url().includes('/api/v1/analytics?')&&r.status()===200);const statusUpdate=page.waitForResponse(r=>r.url().endsWith('/api/v1/status')&&r.status()===200);await page.clock.fastForward(60000);await statusUpdate;await page.waitForFunction(previous=>[...document.querySelectorAll('input[type=\"datetime-local\"]')][1]?.value>previous,previousEnd);await page.clock.fastForward(300);await refreshed;
    assert.ok(await page.getByLabel('Конец периода').inputValue()>previousEnd,'live analytics must include newly recorded minutes');
    await page.getByRole('button',{name:`Интервалы YT ${profile}`,exact:true}).click();await page.getByText('Оценка по чату YouTube',{exact:true}).first().waitFor();assert.ok(await page.locator('.minute-dot.estimated').count()>0);await page.getByRole('button',{name:'Закрыть детализацию'}).click();
    const autoFilter=watchAnalytics({source:'all',category:'game',timezone:'UTC'});

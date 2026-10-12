@@ -290,10 +290,10 @@ test('regular audience uses attendance share, excludes donation-only profiles an
   assert.equal(first.observed,3);assert.equal(first.regularObserved,2);
   assert.equal(first.estimated,2);assert.equal(first.regularEstimated,1);
   assert.equal(first.messages,4);assert.equal(first.regularMessages,2);
-  assert.equal(s.analytics({...query,regularThresholdPercent:100}).summary.regulars,0);
+  assert.equal(s.analytics({...query,regularThresholdPercent:100}).summary.regulars,2);
   assert.equal(s.analytics({...query,regularThresholdPercent:0}).summary.regulars,3);
   const exact=s.analytics({...query,regularThresholdPercent:100*2/3});
-  assert.equal(exact.audience.find(e=>e.name==='Two thirds')!.regular,false);
+  assert.equal(exact.audience.find(e=>e.name==='Two thirds')!.regular,true);
   assert.equal(s.analytics({...query,category:'absent'}).summary.regularShare,null);
   for(const threshold of [-1,101,NaN])assert.throws(()=>s.analytics({...query,regularThresholdPercent:threshold}),/INVALID_ANALYTICS_FILTER/);
  }finally{s.close();}

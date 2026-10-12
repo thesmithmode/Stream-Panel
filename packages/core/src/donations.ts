@@ -12,27 +12,31 @@ export class DonationLedger {
   this.db.prepare("INSERT OR IGNORE INTO identities VALUES (?,'donationalerts',?,'anonymous:donor','Аноним','',?,?)").run(identity,account,person,`anonymous:${account}`);
   this.db.prepare('INSERT INTO anonymous_donors VALUES (?,?)').run(account,identity);
  }
- private raw(id:string):Raw {
-  const row=this.db.prepare(`SELECT e.id,e.source,e.account_id,e.external_id,coalesce(c.identity_id,e.identity_id,a.identity_id) AS identity_id,
+ private selection = `SELECT e.id,e.source,e.account_id,e.external_id,coalesce(c.identity_id,e.identity_id,a.identity_id) AS identity_id,
     CASE WHEN c.event_id IS NULL THEN e.occurred_at_ms ELSE c.occurred_at_ms END AS occurred_at_ms,
     coalesce(c.payload_json,e.payload_json) AS payload_json,e.payload_json AS original_payload,
     coalesce(c.revision,0) AS revision,coalesce(c.deleted,0) AS deleted,i.person_id,p.display_name
     FROM events e LEFT JOIN donation_corrections c ON c.event_id=e.id LEFT JOIN anonymous_donors a ON a.account_id=e.account_id AND e.source='donationalerts' AND e.type='donation'
     LEFT JOIN identities i ON i.id=coalesce(c.identity_id,e.identity_id,a.identity_id) LEFT JOIN persons p ON p.id=i.person_id
-    WHERE e.id=? AND e.type='donation'`).get(id) as Raw|undefined;
+    WHERE e.type='donation'`;
+ private raw(id:string):Raw {
+  const row=this.db.prepare(this.selection+' AND e.id=?').get(id) as Raw|undefined;
   if(!row)throw new Error('DONATION_NOT_FOUND');return row;
  }
  donation(id:string) {
-  const row=this.raw(id),payload=JSON.parse(row.payload_json),original=JSON.parse(row.original_payload);
+  return this.present(this.raw(id));
+ }
+ private present(row:Raw) {
+  const payload=JSON.parse(row.payload_json),original=JSON.parse(row.original_payload);
   return {id:row.id,personId:row.person_id,personName:row.display_name,amountMinor:String(payload.amountMinor??''),currency:String(payload.currency??''),occurredAtMs:row.occurred_at_ms,message:String(payload.text??''),sourceName:String(payload.sourceName??(row.account_id==='manual'?'Manual':'DonationAlerts')),originalActorName:String(original.actorName??''),provider:row.source,providerAccount:row.account_id,providerId:row.external_id,revision:row.revision,deleted:row.deleted===1};
  }
- list(personId?:string,offset=0,limit=50,includeDeleted=false) {
+ list(personId?:string,offset=0,limit=50,includeDeleted=false,sessionId?:string) {
   if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>100||typeof includeDeleted!=='boolean')throw new Error('INVALID_DONATION_PAGE');
-  const scope=`e.type='donation' AND (? IS NULL OR i.person_id=?) AND (?=1 OR coalesce(c.deleted,0)=0)`;
-  const args=[personId??null,personId??null,Number(includeDeleted)] as const;
-  const ids=this.db.prepare(`SELECT e.id FROM events e LEFT JOIN donation_corrections c ON c.event_id=e.id LEFT JOIN anonymous_donors a ON a.account_id=e.account_id AND e.source='donationalerts' AND e.type='donation' LEFT JOIN identities i ON i.id=coalesce(c.identity_id,e.identity_id,a.identity_id) WHERE ${scope} ORDER BY coalesce(CASE WHEN c.event_id IS NULL THEN e.occurred_at_ms ELSE c.occurred_at_ms END,e.received_at_ms) DESC,e.id DESC LIMIT ? OFFSET ?`).all(...args,limit,offset) as {id:string}[];
-  const total=(this.db.prepare(`SELECT count(*) AS n FROM events e LEFT JOIN donation_corrections c ON c.event_id=e.id LEFT JOIN anonymous_donors a ON a.account_id=e.account_id AND e.source='donationalerts' AND e.type='donation' LEFT JOIN identities i ON i.id=coalesce(c.identity_id,e.identity_id,a.identity_id) WHERE ${scope}`).get(...args) as {n:number}).n;
-  return {items:ids.map(row=>this.donation(row.id)),total,offset,limit};
+  const scope=` AND (? IS NULL OR i.person_id=?) AND (?=1 OR coalesce(c.deleted,0)=0) AND (? IS NULL OR EXISTS(SELECT 1 FROM event_sessions es WHERE es.event_id=e.id AND es.session_id=?))`;
+  const args=[personId??null,personId??null,Number(includeDeleted),sessionId??null,sessionId??null] as const;
+  const rows=this.db.prepare(this.selection+scope+` ORDER BY coalesce(CASE WHEN c.event_id IS NULL THEN e.occurred_at_ms ELSE c.occurred_at_ms END,e.received_at_ms) DESC,e.id DESC LIMIT ? OFFSET ?`).all(...args,limit,offset) as Raw[];
+  const total=(this.db.prepare('SELECT count(*) AS n FROM ('+this.selection+scope+')').get(...args) as {n:number}).n;
+  return {items:rows.map(row=>this.present(row)),total,offset,limit};
  }
  private validate(input:DonationInput,manual=false):string {
   if(typeof input.personId!=='string'||typeof input.amount!=='string'||input.amount.length>50||typeof input.currency!=='string'||typeof input.message!=='string'||input.message.length>10000||typeof input.sourceName!=='string'||!input.sourceName.trim()||input.sourceName.length>200)throw new Error('INVALID_DONATION');
@@ -96,7 +100,9 @@ export class DonationLedger {
    const target=personId??(this.db.prepare('SELECT i.person_id FROM anonymous_donors a JOIN identities i ON i.id=a.identity_id WHERE a.account_id=?').get(row.account_id) as {person_id:string}).person_id;
    const before=this.donation(id),identity=this.identity(target,id,'correction',at);
    this.db.prepare(`INSERT INTO donation_corrections VALUES (?,?,?,?,0,?,?) ON CONFLICT(event_id) DO UPDATE SET identity_id=excluded.identity_id,deleted=0,revision=excluded.revision,updated_at_ms=MAX(updated_at_ms,excluded.updated_at_ms)`).run(id,identity,row.occurred_at_ms,row.payload_json,revision+1,at);
-   this.assign(id,row.occurred_at_ms);const result=this.donation(id);this.audit(id,revision+1,'assignment',before,result,at);return result;
+   // Changing the person does not change stream membership, including untimed realtime alerts.
+   if(row.deleted)this.assign(id,row.occurred_at_ms);
+   const result=this.donation(id);this.audit(id,revision+1,'assignment',before,result,at);return result;
   }).immediate();
  }
  private validRevision(revision:number):void {if(!Number.isSafeInteger(revision)||revision<0)throw new Error('INVALID_DONATION_REVISION');}

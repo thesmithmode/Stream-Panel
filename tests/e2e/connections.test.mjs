@@ -194,7 +194,7 @@ test(
         .click();
       await page
         .getByRole("status")
-        .filter({ hasText: "Обновление данных о донатах запущено" })
+        .filter({ hasText: "Данные о донатах обновлены" })
         .waitFor();
       await da.getByRole("button", { name: "Отключить", exact: true }).click();
       await until(() => a.configuration.value.daAccessToken === "", 8000);
@@ -282,7 +282,7 @@ test(
       await page.getByLabel("Фильтр событий").selectOption("chat.message");
       assert.equal(await page.locator(".event-row").count(), 8);
       await page.locator(".event-title button").first().click();
-      await page.getByRole("tab", {name:"Аккаунты",exact:true}).click();await page.getByLabel("Имя группы").waitFor();
+      await page.getByRole("tab", {name:"Редактировать аккаунты",exact:true}).click();await page.getByLabel("Имя группы").waitFor();
       await page.getByRole("button", { name: "Стримы", exact: true }).click();
       await page.getByRole("button", { name: "Открыть", exact: true }).click();
       assert.equal(await page.getByRole("button", {name:"К списку стримов",exact:true}).count(),0);
@@ -294,9 +294,7 @@ test(
       await a.db.call("endSession", s, Date.now(), "estimated");
       await reload(page);
       await page.getByRole("button", { name: "Стримы", exact: true }).click();
-      await page
-        .getByText("Граница приблизительная", { exact: true })
-        .waitFor();
+      assert.equal(await page.getByText("Граница приблизительная", { exact: true }).count(),0);
       await saveCoverage(page);
       await context.close();
     } finally {

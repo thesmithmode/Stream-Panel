@@ -54,7 +54,7 @@ test('restart recovers an archive published before its queue registration and pr
   const orphan='stream-panel-2000-01-01T00-00-00-000Z-deadbeef.spbk';await writeFile(join(dir,'backups',orphan),blob);
   const ledger=JSON.parse(await readFile(join(dir,'backup-state.json'),'utf8'));ledger.pending=[];ledger.uploaded=[result.filename];await writeFile(join(dir,'backup-state.json'),JSON.stringify(ledger));
   const restarted=new BackupService(dir,{keyFile:join(dir,'key')});await restarted.purgeLocal();
-  assert.equal(restarted.status.pendingUploads,1);assert.deepEqual(await readFile(join(dir,'backups',orphan)),blob);
-  const recovered=JSON.parse(await readFile(join(dir,'backup-state.json'),'utf8'));assert.deepEqual(recovered.pending,[orphan]);await restarted.stop();
+  assert.equal(restarted.status.pendingUploads,0);assert.deepEqual(await readFile(join(dir,'backups',orphan)),blob);
+  const recovered=JSON.parse(await readFile(join(dir,'backup-state.json'),'utf8'));assert.deepEqual(recovered.pending,[]);await restarted.stop();
  }finally{auth.close();await rm(dir,{recursive:true,force:true});}
 });

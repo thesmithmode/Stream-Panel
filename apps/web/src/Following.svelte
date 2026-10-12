@@ -10,9 +10,9 @@
  $effect(()=>{
   const person=personId,session=sessionId;let cancelled=false,pending=false;data=null;error='';
   const path=person?`persons/${person}/following?${new URLSearchParams({session})}`:`sessions/${session}/followers`;
-  const load=()=>{if(pending||document.hidden||!navigator.onLine)return;pending=true;void api(path).then(result=>{if(!cancelled){data=result;error='';}}).catch(e=>{if(!cancelled&&!(e instanceof ConnectionError))error=e.message;}).finally(()=>pending=false);};
-  load();const timer=setInterval(load,60000);window.addEventListener('online',load);document.addEventListener('visibilitychange',load);
-  return()=>{cancelled=true;clearInterval(timer);window.removeEventListener('online',load);document.removeEventListener('visibilitychange',load);};
+  const load=()=>{if(pending)return;pending=true;void api(path).then(result=>{if(!cancelled){data=result;error='';}}).catch(e=>{if(!cancelled&&!(e instanceof ConnectionError))error=e.message;}).finally(()=>pending=false);};
+  load();window.addEventListener('sp:data-refresh',load);
+  return()=>{cancelled=true;window.removeEventListener('sp:data-refresh',load);};
  });
 </script>
 <section class="panel following" aria-label="Подписки на канал">

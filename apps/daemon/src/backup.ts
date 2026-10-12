@@ -1,3 +1,4 @@
+import {STORAGE_MIN_FREE_BYTES} from './storage-guard.js';
 import Database from "better-sqlite3";
 import {CloudBackup} from "./cloud-backup.js";
 import {retainedBackups,backupDue} from "./backup-policy.js";
@@ -52,6 +53,8 @@ export class BackupService {
     local: { state: "pending", lastSuccessAt: 0, filename: "", error: "" },
     cloud: { state: "disabled", lastSuccessAt: 0, filename: "", error: "" },
   };
+  private uploading:string|undefined;
+  private purgeTask:Promise<void>|undefined;
   private active: Promise<{filename:string;cloudError?:string}> | undefined;
   private uploadTask:Promise<void>|undefined;
   private stateTask:Promise<void>|undefined;
@@ -73,12 +76,17 @@ export class BackupService {
         this.ledger={version:1,installationId:randomBytes(16).toString('hex'),uploaded:[],pending,attempts:0,retryAt:0};
         await this.save();
       }
+      // Only known backup staging files belong to this service. A completed archive is never temporary.
+      try{for(const entry of await readdir(join(this.dir,'backups'),{withFileTypes:true}))if(entry.isFile()&&(/^(snapshot\.tmp\.sqlite(?:-wal|-shm)?|stream-panel-[\dTZ-]+-[a-f0-9]{8}\.spbk\.(tmp|verify\.tmp))$/.test(entry.name)))await rm(join(this.dir,'backups',entry.name),{force:true});}
+      catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+      for(const entry of await readdir(this.dir,{withFileTypes:true}))if(entry.isFile()&&/^backup-state\.json\.[a-f0-9]{8}\.tmp$/.test(entry.name))await rm(join(this.dir,entry.name),{force:true});
       // Recover archives published just before a crash interrupted queue registration.
       let found:string[]=[];
       try{found=(await readdir(join(this.dir,'backups'),{withFileTypes:true})).filter(e=>e.isFile()&&backupFilename.test(e.name)).map(e=>e.name);}
       catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
       const known=new Set([...this.ledger!.uploaded,...this.ledger!.pending]),unregistered=found.filter(name=>!known.has(name));
       if(unregistered.length){this.ledger!.pending.push(...unregistered);await this.save();}
+      if(!this.options.url&&this.ledger!.pending.length){this.ledger!.pending=[];await this.save();}
       this.status.pendingUploads=this.ledger!.pending.length;this.status.nextRetryAt=this.ledger!.retryAt;
       if(this.ledger!.local){this.status.local=this.ledger!.local;this.status.filename=this.status.local.filename;this.status.lastSuccessAt=this.status.local.lastSuccessAt;}
       if(this.options.url&&this.ledger!.cloud)this.status.cloud=this.ledger!.cloud;
@@ -110,7 +118,7 @@ export class BackupService {
       try{
         const cloud=new CloudBackup({url:this.options.url!,serviceKeyFile:this.options.serviceKeyFile,bucket:this.options.bucket,prefix:'stream-panel/'+this.ledger!.installationId},this.request);
         for(const filename of [...this.ledger!.pending].sort().slice(0,4)){
-          await cloud.uploadFile(filename,join(this.dir,'backups',filename));
+          this.uploading=filename;try{await cloud.uploadFile(filename,join(this.dir,'backups',filename));}finally{this.uploading=undefined;}
           this.ledger!.pending=this.ledger!.pending.filter(n=>n!==filename);
           this.ledger!.uploaded=[...new Set([...this.ledger!.uploaded,filename])];
           this.ledger!.attempts=0;this.ledger!.retryAt=0;
@@ -143,15 +151,28 @@ export class BackupService {
     }).finally(() => { this.active = undefined; });
     return this.active;
   }
-  async purgeLocal(now=Date.now()):Promise<void>{
+  purgeLocal(now=Date.now()):Promise<void>{
+    if(this.purgeTask)return this.purgeTask;
+    const task=this.purgeLocalNow(now);this.purgeTask=task;
+    return task.finally(()=>{if(this.purgeTask===task)this.purgeTask=undefined;});
+  }
+  private async purgeLocalNow(now:number):Promise<void>{
     await this.ready();
     const directory=join(this.dir,'backups');let entries;
     try{entries=await readdir(directory,{withFileTypes:true});}
     catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return;throw error;}
     const names=entries.filter(e=>e.isFile()&&backupFilename.test(e.name)).map(e=>e.name);
-    const keep=retainedBackups(names,now,this.status.local.filename),pending=new Set(this.ledger!.pending);
-    for(const name of names)if(!keep.has(name)&&!pending.has(name))await rm(join(directory,name),{force:true});
-    this.ledger!.uploaded=this.ledger!.uploaded.filter(n=>keep.has(n)||pending.has(n));await this.save();
+    const ordered=[...names].sort().reverse(),minimum=new Set(ordered.slice(0,7));
+    const keep=retainedBackups(names,now,this.status.local.filename);
+    for(const name of minimum)keep.add(name);
+    if(this.uploading)keep.add(this.uploading);
+    // Nominal archive budget is 2 GiB; seven latest recovery points take priority.
+    let bytes=0;const sizes=new Map<string,number>();
+    for(const name of names){const size=(await lstat(join(directory,name))).size;sizes.set(name,size);if(keep.has(name))bytes+=size;}
+    for(const name of [...ordered].reverse())if(bytes>2*1024**3&&keep.has(name)&&!minimum.has(name)&&name!==this.uploading){keep.delete(name);bytes-=sizes.get(name)!;}
+    for(const name of names)if(!keep.has(name))await rm(join(directory,name),{force:true});
+    this.ledger!.pending=this.options.url?this.ledger!.pending.filter(n=>!names.includes(n)||keep.has(n)):[];
+    this.ledger!.uploaded=this.ledger!.uploaded.filter(n=>keep.has(n));await this.save();
   }
   async files() {
     await this.purgeLocal();
@@ -200,6 +221,7 @@ export class BackupService {
   private async perform() {
     const directory = join(this.dir, "backups"); await mkdir(directory, {recursive:true,mode:0o700});
     await this.ready();
+    await this.purgeLocal();
     if(this.ledger!.pending.length>=20)throw new Error("BACKUP_QUEUE_LIMIT");
     const encodedKey = (await readFile(this.options.keyFile, "utf8")).trim();
     if (!/^[a-fA-F0-9]{64}$/.test(encodedKey)) throw new Error("INVALID_BACKUP_KEY");
@@ -209,7 +231,7 @@ export class BackupService {
     let walSize=0;
     try {walSize=(await stat(join(this.dir,"data.sqlite-wal"))).size;}
     catch(error){if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error;}
-    if(await this.freeSpace()<1024*1024*1024+3*(databaseSize+walSize))throw new Error("BACKUP_STORAGE_LIMIT");
+    if(await this.freeSpace()<STORAGE_MIN_FREE_BYTES+3*(databaseSize+walSize))throw new Error("BACKUP_STORAGE_LIMIT");
     const snapshot = join(directory, "snapshot.tmp.sqlite");
     let pendingFile:string|undefined;
     try {
@@ -281,7 +303,7 @@ export class BackupService {
         error: "",
         local: { state: "success", lastSuccessAt: localSuccessAt, filename, error: "" },
       };
-      this.ledger!.pending.push(filename);this.ledger!.local=this.status.local;this.ledger!.schemaSignature=signature;await this.save();
+      if(this.options.url)this.ledger!.pending.push(filename);this.ledger!.local=this.status.local;this.ledger!.schemaSignature=signature;await this.save();
       if(!this.options.url){await this.purgeLocal();return {filename};}
       // Creating a snapshot explicitly retries pending uploads; the timer respects backoff.
       await this.retryPending(Date.now(),true);

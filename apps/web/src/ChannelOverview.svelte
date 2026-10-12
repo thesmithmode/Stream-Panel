@@ -8,9 +8,9 @@
  let data=$state<Totals|null>(null),error=$state('');
  onMount(()=>{
   let alive=true,pending=false;
-  const refresh=async()=>{if(pending||document.hidden||!navigator.onLine)return;pending=true;try{const value=await api<Totals>('overview');if(alive){data=value;error='';}}catch(e){if(alive&&!(e instanceof ConnectionError))error=(e as Error).message;}finally{pending=false;}};
-  void refresh();const timer=setInterval(()=>void refresh(),60000);window.addEventListener('online',refresh);document.addEventListener('visibilitychange',refresh);
-  return()=>{alive=false;clearInterval(timer);window.removeEventListener('online',refresh);document.removeEventListener('visibilitychange',refresh);};
+  const refresh=async()=>{if(pending)return;pending=true;try{const value=await api<Totals>('overview');if(alive){data=value;error='';}}catch(e){if(alive&&!(e instanceof ConnectionError))error=(e as Error).message;}finally{pending=false;}};
+  void refresh();window.addEventListener('sp:data-refresh',refresh);
+  return()=>{alive=false;window.removeEventListener('sp:data-refresh',refresh);};
  });
 </script>
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}

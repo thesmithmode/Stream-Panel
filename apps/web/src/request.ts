@@ -1,5 +1,5 @@
 export class ConnectionError extends Error {
- constructor(){super('Нет связи с сервером. Данные обновятся после восстановления соединения.');this.name='ConnectionError';}
+ constructor(){super('Не удалось получить данные с сервера.');this.name='ConnectionError';}
 }
 /** Only reads retry automatically: mutations must never be replayed after an uncertain response. */
 export async function requestJson<T>(url:string,options:RequestInit={},fetcher:typeof fetch=fetch,wait:(ms:number)=>Promise<void>=ms=>new Promise(resolve=>setTimeout(resolve,ms))):Promise<T>{
