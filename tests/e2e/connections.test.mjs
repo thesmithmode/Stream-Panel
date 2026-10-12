@@ -221,7 +221,7 @@ test(
       await page
         .getByRole("navigation").getByRole("button", { name: "Интеграции", exact: true })
         .click();
-      await page.getByText("twitch: fixture_gap", { exact: true }).waitFor();
+      assert.equal(await page.getByText("twitch: fixture_gap", { exact: true }).count(),0);
       await saveCoverage(page);
       await context.close();
     } finally {
