@@ -378,7 +378,7 @@
        <PersonNotes personId={detail.id} />
       {:else}
        <PersonActivity personId={detail.id} />
-       <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} onPerson={(id)=>void select(id)} />{/if}</details>
+       <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} sessionId={sessionFilter} onPerson={(id)=>void select(id)} />{/if}</details>
       {/if}
       </div>{/if}
   </section>

@@ -1,11 +1,11 @@
 <script lang="ts">
  import {date} from './api';
- interface ComparisonStream {startedAt:number;title?:string;audience?:number;returning?:number;viewers?:{all?:{mean?:number|null;peak?:number|null}}}
- interface ComparisonCategory {name:string;minutes?:number;sessions?:number;messagesPerHour?:number|null}
+ interface ComparisonStream {startedAt:number;title?:string;audience:number;returning:number;viewers?:{all?:{mean?:number|null;peak?:number|null}}}
+ interface ComparisonCategory {name:string;minutes:number;sessions:number;messagesPerHour:number}
  let {streams,categories}:{streams:ComparisonStream[];categories:ComparisonCategory[]}=$props();
  const comparisons=$derived([
-  {title:'Возвращаемость по эфирам',unit:'%',rows:streams.map(s=>({label:date(s.startedAt).split(',')[0]!,value:s.audience&&s.returning!==undefined?s.returning*100/s.audience:null,detail:`${s.returning??'—'} из ${s.audience??'—'} участников`}))},
-  {title:'Активность чата по категориям',unit:'сообщ./ч',rows:categories.map(c=>({label:c.name,value:c.minutes?c.messagesPerHour??null:null,detail:`${c.sessions??'—'} эфиров · ${c.minutes===undefined?'—':Math.round(c.minutes)} мин`}))},
+  {title:'Возвращаемость по эфирам',unit:'%',rows:streams.map(s=>({label:date(s.startedAt).split(',')[0]!,value:s.audience?s.returning*100/s.audience:null,detail:`${s.returning} из ${s.audience} участников`}))},
+  {title:'Активность чата по категориям',unit:'сообщ./ч',rows:categories.map(c=>({label:c.name,value:c.minutes?c.messagesPerHour:null,detail:`${c.sessions} эфиров · ${Math.round(c.minutes)} мин`}))},
   {title:'Зрители по эфирам',unit:'в среднем',rows:streams.map(s=>({label:s.title||date(s.startedAt).split(',')[0]!,value:s.viewers?.all?.mean??null,detail:`Пик ${s.viewers?.all?.peak??'—'}`}))}
  ]);
 </script>
