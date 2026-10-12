@@ -1,5 +1,14 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {ReadCache} from '../src/read-cache.js';
 import net from 'node:net';
+test('local-only cache preserves cloneable values without requiring JSON serialization',async()=>{
+ const cache=new ReadCache('');try{
+  const value={amount:100n};let loads=0;
+  const first=await cache.read('native',async()=>{loads++;return value;});
+  first.amount=0n;
+  assert.deepEqual(await cache.read('native',async()=>{loads++;return value;}),{amount:100n});
+  assert.equal(loads,1);
+ }finally{cache.close();}
+});
 test('cached reads deduplicate, clone results, and invalidate immediately after writes',async()=>{
  const cache=new ReadCache('');let count=0;
  const load=async()=>{count++;return {rows:[count]};};

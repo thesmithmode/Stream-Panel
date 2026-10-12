@@ -30,8 +30,10 @@ export class ReadCache {
    if(version===this.version){
     if(this.local.size>=128)this.local.delete(this.local.keys().next().value!);
     this.local.set(cacheKey,{until:Date.now()+3000,value:structuredClone(value)});
-    const raw=JSON.stringify(value);
-    if(this.redis?.isReady&&raw!==undefined&&Buffer.byteLength(raw)<=2_000_000)void this.redis.set(redisKey,raw,{PX:30000}).catch(()=>{});
+    if(this.redis?.isReady){
+     const raw=JSON.stringify(value);
+     if(raw!==undefined&&Buffer.byteLength(raw)<=2_000_000)void this.redis.set(redisKey,raw,{PX:30000}).catch(()=>{});
+    }
    }
    return value;
   })();
