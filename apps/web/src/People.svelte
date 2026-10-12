@@ -237,7 +237,7 @@
         ><span
           ><strong>{person.display_name}</strong><small>{person.sources}</small
           ></span
-        ><span class="count">{sortBy==='default'?person.event_count:rankLabels.get(person.id)}</span></button
+        >{#if sortBy!=='default'}<span class="count">{rankLabels.get(person.id)}</span>{/if}</button
       >{/each}
     </div>
   </section>
