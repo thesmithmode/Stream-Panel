@@ -1,4 +1,4 @@
-export const views=['overview','stream','sessions','people','analytics','connections','settings'] as const;
+export const views=['overview','stream','sessions','people','analytics','donations','connections','settings'] as const;
 export type View=typeof views[number];
 export interface Route {view:View;session:string;person:string;profile:'ruslan'|'gulnaz'}
 export function readRoute(search:string,profile:Route['profile']='ruslan'):Route{

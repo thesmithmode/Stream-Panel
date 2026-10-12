@@ -180,15 +180,15 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    const streamFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC'},200,url=>Number(url.searchParams.get('to'))-Number(url.searchParams.get('from'))===20*minute);
    await page.getByRole('heading',{name:'Сравнение стримов',exact:true}).locator('..').locator('..').getByRole('button').first().click();await advanceAutoFilter(streamFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    const weekRange=await presetPeriod(7),weekFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...weekRange});
-   await page.getByRole('button',{name:'7 дней',exact:true}).click();await advanceAutoFilter(weekFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
+   await page.getByLabel('Период аналитики').selectOption('7');await advanceAutoFilter(weekFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    const quarterRange=await presetPeriod(90),quarterFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...quarterRange});
-   await page.getByRole('button',{name:'90 дней',exact:true}).click();await advanceAutoFilter(quarterFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
+   await page.getByLabel('Период аналитики').selectOption('90');await advanceAutoFilter(quarterFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    for(const days of [180,365]){
     const range=await presetPeriod(days),filter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...range});
-    await page.getByRole('button',{name:`${days} дней`,exact:true}).click();await advanceAutoFilter(filter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
+    await page.getByLabel('Период аналитики').selectOption(String(days));await advanceAutoFilter(filter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    }
    const allRange=await presetPeriod('all'),allFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...allRange});
-   await page.getByRole('button',{name:'Все время',exact:true}).click();await advanceAutoFilter(allFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
+   await page.getByLabel('Период аналитики').selectOption('all');await advanceAutoFilter(allFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    const emptyRange=await currentPeriod([['from','2000-01-01T00:00'],['to','2000-01-02T00:00']]);
    const emptyFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...emptyRange});
    await page.getByLabel('Начало периода').fill('2000-01-01T00:00');await page.getByLabel('Конец периода').fill('2000-01-02T00:00');await advanceAutoFilter(emptyFilter);await page.getByText('Пока нет точек для графика',{exact:true}).waitFor();
@@ -199,7 +199,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    const invalidFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...invalidRange},400);
    await page.getByLabel('Начало периода').fill('2002-01-01T00:00');await page.getByLabel('Конец периода').fill('2000-01-01T00:00');await advanceAutoFilter(invalidFilter);await page.getByRole('alert').filter({hasText:'INVALID_ANALYTICS_FILTER'}).waitFor();
    const monthRange=await presetPeriod(30),presetFilter=watchAnalytics({source:'youtube',category:'',timezone:'UTC',...monthRange});
-   await page.getByRole('button',{name:'30 дней',exact:true}).click();await advanceAutoFilter(presetFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
+   await page.getByLabel('Период аналитики').selectOption('30');await advanceAutoFilter(presetFilter);await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();
    await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);await page.setViewportSize({width:1280,height:800});
    assert.equal(await page.getByRole('button',{name:'Демо',exact:true}).count(),0);
    await page.evaluate(()=>{Storage.prototype.getItem=()=>{throw new Error('storage unavailable');};Storage.prototype.setItem=()=>{throw new Error('storage unavailable');};});

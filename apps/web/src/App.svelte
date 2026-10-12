@@ -9,6 +9,7 @@
   import Overview from "./Overview.svelte";
   import ChannelOverview from "./ChannelOverview.svelte";
   import Settings from "./Settings.svelte";
+  import StreamDonations from './StreamDonations.svelte';
   import Analytics from "./Analytics.svelte";
   import YouTube from "./YouTube.svelte";
   import Connections from "./Connections.svelte";
@@ -88,22 +89,16 @@
     sessions: "Стримы",
     people: "Люди",
     analytics: "Аналитика аудитории",
+    donations: "Донаты",
     connections: "Интеграции",
     settings: "Настройки",
-  };
-  const descriptions: Record<string, string> = {
-    overview: "Итоги за всю историю.",
-    sessions: "Все эфиры и их результаты.",
-    people: "Активность людей и управляемые связи аккаунтов.",
-    analytics: "Ядро аудитории, категории и время эфиров. Наблюдения и оценки показаны отдельно.",
-    settings: "Правила аналитики выбранного профиля и резервные копии.",
-    connections: "Twitch, DonationAlerts и YouTube — вход и статус сбора.",
   };
   const nav = [
     ["overview", "Обзор"],
     ["sessions", "Стримы"],
     ["people", "Люди"],
     ["analytics", "Аналитика"],
+    ["donations", "Донаты"],
     ["connections", "Интеграции"],
     ["settings", "Настройки"],
   ] as const;
@@ -205,9 +200,9 @@
     <div class="sidebar-bottom">
       {#if authorized}
         <div class="refresh-controls">
-          <button class="refresh-toggle" aria-pressed={autoRefresh} onclick={toggleRefresh}><span class="dot" class:off={!autoRefresh}></span>Автообновление <strong>{autoRefresh?'Вкл':'Выкл'}</strong></button>
+          <button class="refresh-toggle" aria-label={`Автообновление ${autoRefresh?'Вкл':'Выкл'}`} aria-pressed={autoRefresh} onclick={toggleRefresh}><span class="dot" class:off={!autoRefresh}></span><span class="refresh-label">Автообновление</span> <strong>{autoRefresh?'Вкл':'Выкл'}</strong></button>
           {#if autoRefresh}<label class="small muted">Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={15}>15 секунд</option><option value={30}>30 секунд</option><option value={60}>1 минута</option></select></label>{/if}
-          <button class="text-button small" disabled={busy} onclick={()=>void action(async()=>{})}>{busy?'Обновляем…':'Обновить данные'}</button>
+          <button class="text-button small manual-refresh" aria-label="Обновить данные" title="Обновить данные" disabled={busy} onclick={()=>void action(async()=>{})}><Icon name="refresh" size={18}/><span>{busy?'Обновляем…':'Обновить данные'}</span></button>
           {#if autoRefresh&&connectionLost}<span class="small muted" role="status">Не удалось обновить данные</span>{/if}
         </div>
         <label class="profile-label"><span class="small muted">Профиль</span><select aria-label="Профиль" value={profile} disabled={busy} onchange={(event) => void switchProfile(event.currentTarget.value as Profile)}><option value="ruslan">Руслан</option><option value="gulnaz">Гульназ</option></select></label>
@@ -218,7 +213,7 @@
     <div class="page-heading">
       <div>
         <h1>{titles[tab]}</h1>
-        <p>{descriptions[tab]}</p>
+
       </div>
     </div>
     {#if loading}<div class="panel empty">
@@ -267,6 +262,7 @@
         />
       {:else if tab === "analytics"}
         <Analytics profile={profile} defaultTimezone={status.config.analyticsSettings?.timezone??"Europe/Moscow"} onPerson={openPerson} />
+      {:else if tab === "donations"}<StreamDonations onPerson={openPerson} changed={refresh} />
       {:else if tab === "settings"}<Settings {profile} {status} />
       {:else if tab === "connections"}<Connections
           {status}

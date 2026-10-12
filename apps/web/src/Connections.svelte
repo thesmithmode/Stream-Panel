@@ -192,9 +192,8 @@
               })}>Обновить данные о донатах</button
           >
         </div>
-        {#if status.config.daUtcOffsetMinutes != null}<p class="small muted">
-            UTC offset: {status.config.daUtcOffsetMinutes} мин
-          </p>{/if}
+        <label>Часовой пояс дат DA<select aria-label="Часовой пояс дат DA" bind:value={offset}><option value="">Не задан</option><option value="0">UTC (GMT)</option><option value="180">Москва (UTC+3)</option>{#if offset&&!['0','180'].includes(offset)}<option value={offset}>UTC {Number(offset)/60>0?'+':''}{Number(offset)/60}</option>{/if}</select></label>
+        <button class="outline small" disabled={busy||offset===''} onclick={()=>run(async()=>{const result=await api('donationalerts/timezone',{utcOffsetMinutes:Number(offset)});message=`Время восстановлено: ${result.resolved} донатов.`;})}>Сохранить время DA</button>
       {:else}
         <label
           >Client ID<input

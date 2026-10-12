@@ -3,7 +3,7 @@ import {application,seed} from '../helpers/application.mjs';import {launchBrowse
 test('real data screens fit small phones and desktop without duplicated overview content',{timeout:90000},async()=>{
  const app=await application();let browser;try{
   const sid=await seed(app);browser=await launchBrowser();const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));await goto(page,app.bootstrap());
-  for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:844});for(const name of ['Обзор','Стримы','Люди','Аналитика','Интеграции','Настройки']){
+  for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:844});for(const name of ['Обзор','Стримы','Люди','Аналитика','Донаты','Интеграции','Настройки']){
    await page.getByRole('button',{name,exact:true}).click();await page.getByRole('status').filter({hasText:'Загружаем данные…'}).waitFor({state:'detached'});
    if(name==='Обзор'){await page.locator('.channel-metrics').waitFor();assert.equal(await page.locator('.trend-chart,.event-list,.audience-ranking,input[type="datetime-local"]').count(),0);}
    if(name==='Стримы'){const row=page.locator(`tr[data-session-id="${sid}"]`);await row.waitFor();if(width<=720){const box=await row.boundingBox();const panel=await page.locator(".sessions-page .panel").boundingBox(),heading=await page.locator(".page-heading").boundingBox();assert.ok(box.y<480&&box.x+box.width<=width,JSON.stringify(box));assert.ok(panel.y-(heading.y+heading.height)<=24,"No blank vertical space before stream history");}}

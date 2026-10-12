@@ -15,6 +15,7 @@
   let search=$state(""),liveEnd=$state(true),data=$state<any>(null),error=$state(""),busy=$state(false),selected=$state<any>(null),day=$state("");
   let heatCurrency=$state("RUB");
   let barOpen=$state(false),heatCalculation=$state("average"),selectedHour=$state<{day:string;hour:number}|null>(null);
+  let period=$state<number|'all'|'custom'>('all');
   let requestId=0, mounted=$state(false);
   $effect(()=>{
     const filters=[mounted,from,to,source,category,timezone].join("|");
@@ -52,7 +53,7 @@
     });
   });
   function selectEntity(e:any){selected=e;day=localInput(e.intervals.at(-1)?.from??new Date(to).getTime()).slice(0,10);}
-  function preset(days:number|'all'){liveEnd=true;const now=Date.now();from=localInput(days==='all'?0:now-days*86400000);to=localInput(now);}
+  function preset(days:number|'all'){period=days;liveEnd=true;const now=Date.now();from=localInput(days==='all'?0:now-days*86400000);to=localInput(now);}
   async function refresh(){
     const id=++requestId;busy=true;error="";
     const fromMs=new Date(from).getTime(),toMs=new Date(to).getTime();
@@ -71,10 +72,10 @@
   });
 </script>
 <section class="panel analytics-filter">
-  <header><h2>Период и фильтры</h2><div class="actions">{#each [1,7,14,30,60,90,180,365] as days}<button class="outline small" onclick={()=>preset(days)}>{days} {days===1?"день":"дней"}</button>{/each}<button class="outline small" onclick={()=>preset('all')}>Все время</button></div></header>
+  <header><h2>Период и фильтры</h2><label class="period-select">Период<select aria-label="Период аналитики" value={period} onchange={e=>{const value=e.currentTarget.value;if(value==='custom'){period='custom';}else preset(value==='all'?'all':Number(value));}}>{#each [1,7,14,30,60,90,180,365] as days}<option value={days}>{days} {days===1?'день':'дней'}</option>{/each}<option value="all">Все время</option><option value="custom">Свои даты</option></select></label></header>
   <div class="analytics-controls">
-    <label>Начало периода<input type="datetime-local" value={from===localInput(0)&&data?.sessions?.length?localInput(data.sessions[0].started_at_ms):from} oninput={e=>from=e.currentTarget.value} required /></label>
-    <label>Конец периода<input type="datetime-local" bind:value={to} onchange={()=>liveEnd=false} required /></label>
+    <label>Начало периода<input type="datetime-local" value={from===localInput(0)&&data?.sessions?.length?localInput(data.sessions[0].started_at_ms):from} oninput={e=>{period='custom';from=e.currentTarget.value;}} required /></label>
+    <label>Конец периода<input type="datetime-local" bind:value={to} onchange={()=>{liveEnd=false;period='custom';}} required /></label>
     <label>Площадка<select bind:value={source}><option value="all">Все площадки</option><option value="twitch">Twitch / DA</option><option value="youtube">YouTube</option></select></label>
     <label>Категория Twitch<select bind:value={category}><option value="">Все категории</option>{#each categoryOptions.filter((c:any)=>c.id) as c}<option value={c.id}>{c.name}</option>{/each}</select></label>
     <span class="small muted" role="status">{busy?"Обновляем аналитику…":""}</span>
@@ -105,8 +106,12 @@
   </section>
   {/if}
   {#if view.audience}<section class="panel"><header><h2>Возвращаемость участников</h2><Help id="analytics-audience" label="О минутах в чате" text="Наблюдаемые минуты Twitch учитывают молчавших участников и исключают неизвестные промежутки. Оценка YouTube показана отдельно. Выберите сортировку по минутам или сообщениям; нажмите имя для подробностей."/><span>{visible.length} профилей</span></header>
-    <div class="analytics-controls"><div class="actions"><button class="outline small" class:active={view.sort==='observedMinutes'} onclick={()=>view.sort='observedMinutes'}>По минутам</button><button class="outline small" class:active={view.sort==='messages'} onclick={()=>view.sort='messages'}>По сообщениям</button></div><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label>Сортировка<select bind:value={view.sort}><option value="observedMinutes">Минуты в чате</option><option value="estimatedChatMinutes">Оценка активности YouTube</option><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option><option value="attendanceRatio">Доля посещённых эфиров</option></select></label><label class="check"><input type="checkbox" bind:checked={view.coreOnly} /> Только ядро</label></div>
-    <div class="table-wrap"><table class="analytics-table"><thead><tr><th>Участник</th><th>Площадка</th><th>Посещаемость</th><th>Минуты в чате / на эфир</th><th>Оценка YouTube, мин</th><th>Сообщения</th><th>Часы появления</th><th>Сегменты активности</th></tr></thead><tbody>{#each visible.slice(0,200) as e}<tr><td data-label="Участник"><button class="text-button" disabled={busy} onclick={()=>onPerson(e.id)}>{e.name}</button>{#each e.tags??[] as tag}<span class="person-tag">{tag}</span>{/each}{#if e.core}<span class="core-badge">Ядро</span>{:else if e.follower}<span class="follower-badge">Подписчик</span>{/if}</td><td data-label="Площадка">{(e.sources??[e.source]).map((source:string)=>source==="youtube"?"YouTube":"Twitch / DA").join(" · ")}</td><td data-label="Посещаемость">{Math.round((e.attendanceRatio??0)*100)}%</td><td data-label="Минуты в чате / на эфир">{e.observedMinutes} / {(e.observedMinutesPerSession??0).toFixed(1)}</td><td data-label="Оценка YouTube, мин">{e.estimatedChatMinutes}</td><td data-label="Сообщения">{e.messages}</td><td data-label="Часы появления">{(e.arrivalHours??[]).slice(0,3).map((h:any)=>`${h.day} ${h.hour}:00 (${h.visits})`).join(" · ")||"—"}</td><td data-label="Сегменты активности"><button class="text-button" aria-label={`Интервалы ${e.name}`} onclick={()=>selectEntity(e)}>{e.visits??e.intervals?.length??0}</button></td></tr>{/each}</tbody></table></div>
+    <div class="analytics-controls"><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label>Сортировка<select bind:value={view.sort}><option value="observedMinutes">Минуты в чате</option><option value="estimatedChatMinutes">Оценка активности YouTube</option><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option><option value="attendanceRatio">Доля посещённых эфиров</option></select></label><label class="check"><input type="checkbox" bind:checked={view.coreOnly} /> Только ядро</label></div>
+    <div class="table-wrap"><table class="analytics-table audience-table"><thead><tr><th>Участник</th><th>Посещаемость</th><th>Минуты в чате</th><th>Сообщения</th><th>Подробности</th></tr></thead><tbody>{#each visible.slice(0,200) as e}<tr>
+      <td class="audience-name" data-label="Участник"><div><button class="text-button" disabled={busy} onclick={()=>onPerson(e.id)}>{e.name}</button>{#if e.core}<span class="core-badge">Ядро</span>{:else if e.follower}<span class="follower-badge">Подписчик</span>{/if}{#each e.tags??[] as tag}<span class="person-tag">{tag}</span>{/each}</div><small>{(e.sources??[e.source]).map((source:string)=>source==='youtube'?'YouTube':source==='donationalerts'?'DA':'Twitch').join(' · ')}</small></td>
+      <td class="audience-stat" data-label="Посещаемость">{Math.round((e.attendanceRatio??0)*100)}%</td><td class="audience-stat" data-label="Минуты в чате">{e.observedMinutes}</td><td class="audience-stat" data-label="Сообщения">{e.messages}</td>
+      <td class="audience-more"><button class="text-button small" aria-label={`Интервалы ${e.name}`} onclick={()=>selectEntity(e)}>Интервалы · {e.visits??e.intervals?.length??0}</button><details class="compact-details"><summary>Ещё</summary><dl><dt>Минут / посещённый эфир</dt><dd>{(e.observedMinutesPerSession??0).toFixed(1)}</dd><dt>YouTube · оценка, мин</dt><dd>{e.estimatedChatMinutes}</dd><dt>Часы появления</dt><dd>{(e.arrivalHours??[]).slice(0,3).map((h:any)=>`${h.day} ${h.hour}:00 (${h.visits})`).join(' · ')||'—'}</dd></dl></details></td>
+    </tr>{/each}</tbody></table></div>
     {#if !visible.length}<p class="muted analytics-empty">Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.</p>{/if}
     {#if visible.length>200}<p class="small muted">Показаны первые 200; используйте поиск или меньший период.</p>{/if}
   </section>
