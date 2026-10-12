@@ -8,6 +8,7 @@
   import {streamRange} from "./stream-time";
   import Overview from "./Overview.svelte";
   import ChannelOverview from "./ChannelOverview.svelte";
+  import Settings from "./Settings.svelte";
   import Analytics from "./Analytics.svelte";
   import YouTube from "./YouTube.svelte";
   import Connections from "./Connections.svelte";
@@ -85,12 +86,14 @@
     people: "Люди",
     analytics: "Аналитика аудитории",
     connections: "Интеграции",
+    settings: "Настройки",
   };
   const descriptions: Record<string, string> = {
     overview: "Итоги за всю историю.",
     sessions: "Все эфиры и их результаты.",
     people: "Активность людей и управляемые связи аккаунтов.",
     analytics: "Ядро аудитории, категории и время эфиров. Наблюдения и оценки показаны отдельно.",
+    settings: "Правила аналитики выбранного профиля и резервные копии.",
     connections: "Twitch, DonationAlerts и YouTube — вход и статус сбора.",
   };
   const nav = [
@@ -99,6 +102,7 @@
     ["people", "Люди"],
     ["analytics", "Аналитика"],
     ["connections", "Интеграции"],
+    ["settings", "Настройки"],
   ] as const;
   async function refresh() {
     const current=epoch;if(refreshTask?.epoch===current)return refreshTask.task;
@@ -218,7 +222,8 @@
         </form>
       {#if error}<p role="alert" class="small notice error">{error}</p>{/if}
       </section>{:else}
-      {#if status?.backup&&(status.backup.cloud?.state!=='success'||status.backup.pendingUploads>0)}<p role="status" class="notice backup-warning">Облачная резервная копия {status?.backup?.cloud?.state==='disabled'?'не настроена':status?.backup?.cloud?.state==='error'?'не загружается':'ожидает подтверждения'}. Проверьте раздел «Интеграции».</p>{/if}
+      {#if status?.backup&&(status.backup.cloud?.state!=='success'||status.backup.pendingUploads>0)}<p role="status" class="notice backup-warning">Облачная резервная копия {status?.backup?.cloud?.state==='disabled'?'не настроена':status?.backup?.cloud?.state==='error'?'не загружается':'ожидает подтверждения'}. Проверьте раздел «Настройки».</p>{/if}
+      {#if status?.storage?.freeBytes!==null&&status?.storage?.freeBytes<status?.storage?.reserveBytes}<p class="notice" role="status">На сервере осталось меньше 1 ГБ. Панель приостановила свои записи, чтобы сохранить резерв диска. Проверьте «Настройки».</p>{/if}
       {#if outdated}<div role="status" class="notice">Доступна новая версия панели для обоих профилей. <button class="outline small" onclick={()=>location.reload()}>Обновить панель</button></div>{/if}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}
       {#key `${profile}:${tab}:${sessionFilter}`}
@@ -249,7 +254,8 @@
           onPerson={openPerson}
         />
       {:else if tab === "analytics"}
-        <Analytics profile={profile} onPerson={openPerson} />
+        <Analytics profile={profile} defaultTimezone={status.config.analyticsSettings?.timezone??"Europe/Moscow"} onPerson={openPerson} />
+      {:else if tab === "settings"}<Settings {profile} {status} />
       {:else if tab === "connections"}<Connections
           {status}
           onChange={refresh}

@@ -20,7 +20,7 @@ test('authenticated backup UI lists server files, separates cloud status and dow
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844},acceptDownloads:true});page.setDefaultTimeout(10000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));await startCoverage(page);await goto(page,origin);
   await page.getByLabel('Логин',{exact:true}).fill('ruslan');await page.getByLabel('Пароль',{exact:true}).fill('backup-download-password');await page.getByRole('button',{name:'Войти',exact:true}).click();
-  await page.getByRole('button',{name:'Интеграции',exact:true}).click();
+  await page.getByRole('button',{name:'Настройки',exact:true}).click();
   const region=page.getByLabel('Файлы резервных копий');await region.getByText(filename,{exact:true}).waitFor();
   assert.equal(await region.getByText(join(dir,'backups'),{exact:true}).count(),1);
   assert.equal(await region.getByText('Сохранена',{exact:true}).count(),1);assert.equal(await region.getByText('Ошибка',{exact:true}).count(),1);

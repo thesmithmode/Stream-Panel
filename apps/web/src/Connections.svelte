@@ -1,7 +1,6 @@
 <script lang="ts">
   import { api } from "./api";
   import { statusLabel } from "./labels";
-  import BackupFiles from './BackupFiles.svelte';
   import Credentials from './Credentials.svelte';
   import IntegrationGuide from './IntegrationGuide.svelte';
   let { status, onChange }: { status: any; onChange: () => Promise<void> } =
@@ -288,21 +287,7 @@
       {/if}
     </div>
   </section>
-  <section class="panel settings wide">
-    <header><h2>Резервные копии</h2></header>
-    <div class="settings-body">
-      <button
-        class="outline"
-        disabled={busy}
-        onclick={() =>
-          run(async () => {
-            const result = await api("backup", {});
-            message = result.cloudError ? 'Локальная копия сохранена. Облачная загрузка не удалась.' : `Резервная копия: ${result.filename}`;
-          })}>Создать резервную копию</button
-      >
-      {#if status.backup}<BackupFiles status={status.backup} />{/if}
-    </div>
-  </section>
+
 </div>
 {#if error}<p role="alert" class="notice error">{error}</p>{/if}{#if message}<p
     role="status"

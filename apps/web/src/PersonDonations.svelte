@@ -4,7 +4,7 @@
  import {donationAuditChanges} from './donation-form';
  type Donation={id:string;personId:string|null;personName:string|null;amountMinor:string;currency:string;occurredAtMs:number|null;message:string;sourceName:string;originalActorName:string;revision:number;deleted:boolean};
  type Audit={id:string;revision:number;kind:string;created_at_ms:number;before_json:string;after_json:string};
- let {personId,people,onChange}:{personId:string;people:Person[];onChange:()=>Promise<void>}=$props();
+ let {personId,people,revision=0,onChange}:{personId:string;people:Person[];revision?:number;onChange:()=>Promise<void>}=$props();
  let rows=$state<Donation[]>([]),total=$state(0),offset=$state(0),busy=$state(false),error=$state(''),conflict=$state(false);
  let loading=$state(true),loadedOffset=$state(0);
  let editing=$state<Donation|null>(null),recipient=$state('');
@@ -15,7 +15,7 @@
   catch(e){if(ticket===generation)error=(e as Error).message;throw e;}
   finally{if(ticket===generation)loading=false;}
  }
- $effect(()=>{personId;offset;untrack(()=>void refresh().catch(()=>{}));return()=>{generation++;};});
+ $effect(()=>{personId;offset;revision;untrack(()=>void refresh().catch(()=>{}));return()=>{generation++;};});
  async function audit(id:string){histories[id]=await api(`donations/${encodeURIComponent(id)}/audit`);}
  async function assign(row:Donation,target:string|null){busy=true;error='';conflict=false;try{await api(`donations/${encodeURIComponent(row.id)}/assign`,{personId:target,revision:row.revision});editing=null;await refresh();await onChange();}catch(e){conflict=(e as Error).message.includes('DONATION_CONFLICT');error=conflict?'Привязка изменилась в другом окне. Загрузите актуальный донат.':(e as Error).message;if(!conflict)await refresh().catch(()=>{});}finally{busy=false;}}
  const value=(row:Donation)=>/^\d+$/.test(row.amountMinor)?money(row.amountMinor,row.currency):'Сумма неизвестна';

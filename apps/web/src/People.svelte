@@ -1,4 +1,5 @@
 <script lang="ts">
+  import DonorLinks from "./DonorLinks.svelte";
   import {
     api,
     date,
@@ -372,7 +373,8 @@
       </div>{/each}
   </section>{/if}
       {:else if detailTab==='donations'}
-       <PersonDonations personId={detail.id} {people} onChange={()=>refreshPerson(detail.id)} />
+       <DonorLinks personId={detail.id} onChange={()=>refreshPerson(detail.id)} />
+       <PersonDonations personId={detail.id} revision={detail.revision} {people} onChange={()=>refreshPerson(detail.id)} />
       {:else if detailTab==='notes'}
        <PersonMetadata personId={detail.id} onChange={()=>refreshPerson(detail.id)} />
        <PersonNotes personId={detail.id} />
