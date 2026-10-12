@@ -3,6 +3,7 @@
 import json
 import sqlite3
 from pathlib import Path
+from datetime import datetime, timezone
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
@@ -29,6 +30,26 @@ for profile in ('ruslan', 'gulnaz'):
                 if audit and json.loads(audit[1]).get('occurredAtMs') is None:
                     facts['emptyTimeUpdatesPreservedUnknown' if json.loads(audit[0]).get('occurredAtMs') is None else 'explicitTimeClears']+=1
         print('da attribution_facts='+json.dumps(facts,sort_keys=True))
+        if profile == 'gulnaz':
+            streams=db.execute(f"SELECT started_at_ms,ended_at_ms FROM p_{profile}_sessions s WHERE NOT EXISTS(SELECT 1 FROM p_{profile}_session_tombstones t WHERE t.session_id=s.id)").fetchall()
+            def parsed(raw,offset):
+                if not isinstance(raw,str):return None
+                try:
+                    stamp=datetime.fromisoformat(raw.replace('Z','+00:00'))
+                    return int(stamp.timestamp()*1000) if stamp.tzinfo else int(stamp.replace(tzinfo=timezone.utc).timestamp()*1000)-offset*60000
+                except ValueError:return None
+            def fits(at):
+                return at is not None and any(start<=at and (end is None or at<end) for start,end in streams)
+            target=db.execute(f"SELECT e.source_time,e.payload_json,e.occurred_at_ms,(SELECT count(*) FROM p_{profile}_event_sessions es WHERE es.event_id=e.id) FROM {table} e WHERE e.source='donationalerts' AND e.type='donation' AND json_extract(e.payload_json,'$.amountMinor')='22800' AND json_extract(e.payload_json,'$.currency')='RUB'").fetchall()
+            report={'matchingPayments':len(target),'linkedPayments':sum(links>0 for raw,payload,stored,links in target),'createdFitsByOffset':{},'shownFitsByOffset':{},'hasShownTime':0,'rawSourceMatchesStoredCreated':0}
+            for raw,payload,stored,links in target:
+                original=json.loads(payload).get('raw',{})
+                if original.get('shown_at'):report['hasShownTime']+=1
+                if original.get('created_at')==raw:report['rawSourceMatchesStoredCreated']+=1
+            for offset in [180,0,-180]:
+                report['createdFitsByOffset'][str(offset)]=sum(fits(parsed(raw,offset)) for raw,payload,stored,links in target)
+                report['shownFitsByOffset'][str(offset)]=sum(fits(parsed(json.loads(payload).get('raw',{}).get('shown_at'),offset)) for raw,payload,stored,links in target)
+            print('da selected_payment_time_comparison='+json.dumps(report,sort_keys=True))
     if not token:
         continue
     for endpoint in ('user/oauth', 'alerts/donations?page=1'):
