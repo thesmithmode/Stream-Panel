@@ -25,7 +25,7 @@ test('late Twitch detection restores confirmed category changes without inventin
   assert.equal(store.observePlatformStream('twitch','twitch-account','stream',1000,2000,null,'Twitch'),session);
   assert.deepEqual(db.prepare('SELECT * FROM stream_samples WHERE session_id=? ORDER BY observed_at_ms').all(session).length,2);
   const categories=store.analytics({fromMs:1000,toMs:2000}).categories.map(row=>row.id);
-  assert.deepEqual(new Set(categories),new Set(['','wow','dota']),'the interval before the first confirmed category remains unknown');
+  assert.deepEqual(new Set(categories),new Set(['wow','dota']),'unclassified intervals do not create a synthetic category');
   assert.equal(store.events().filter(row=>row.type==='channel.update').length,5,'all original raw events remain available');
  }finally{db.close();store.close();await rm(dir,{recursive:true,force:true});}
 });
@@ -52,7 +52,7 @@ test('confirmed categories before first recording do not fabricate event or pres
   assert.deepEqual(store.events(session),[],'raw facts before recording are not falsely assigned as recorded events');
   const result=store.analytics({fromMs:1000,toMs:3000});
   assert.ok(result.categories.some(row=>row.id==='wow'));
-  assert.ok(result.categories.some(row=>row.id===''));
+  assert.equal(result.categories.some(row=>row.id===''),false);
   assert.equal(result.summary.entities,0);
   assert.equal(result.summary.messages,0);
   assert.ok(result.timeline.every(row=>row.twitchViewers===null&&row.youtubeViewers===null));
@@ -70,7 +70,7 @@ test('category reconstruction stays profile-scoped with identical provider IDs a
   for(const [index,store] of stores.entries()){
    store.observePlatformStream('twitch','twitch-account','same-stream',1000,2500,null,'Twitch');
    const ids=store.analytics({fromMs:1000,toMs:3000}).categories.map(row=>row.id);
-   assert.deepEqual(new Set(ids),new Set(['',index===0?'wow':'dota']));
+   assert.deepEqual(new Set(ids),new Set([index===0?'wow':'dota']));
    assert.equal(store.events().filter(row=>row.type==='channel.update').length,1);
   }
  }finally{for(const store of stores)store.close();await rm(dir,{recursive:true,force:true});}

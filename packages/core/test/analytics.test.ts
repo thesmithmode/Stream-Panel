@@ -71,7 +71,10 @@ test('analytics validates bounds and timezone, unknown categories remain unknown
         const spans = unionSpans([{ from: 0, to: 10, session: 's', kind: 'chat_proxy' }, { from: 2, to: 4, session: 's', kind: 'chat_proxy' }, { from: 10, to: 12, session: 's', kind: 'chat_proxy' }, { from: 3, to: 3, session: 's', kind: 'chat_proxy' }]);
         assert.equal(spans.length, 1);
         assert.equal(spans[0]!.to, 12);
-        assert.equal(s.analytics(opts).categories.find(x => x.id === '')?.minutes, 1);
+        const report=s.analytics(opts);
+        assert.equal(report.categories.some(x=>x.id===''),false);
+        assert.equal(report.summary.streams,1);
+        assert.equal(report.timeline[0]!.at,base);
         assert.throws(() => s.streamSample(sid, -1, '', '', '', 1), /INVALID_TIMESTAMP/);
         assert.throws(() => s.streamSample(sid, base, '', '', '', -1), /INVALID_STREAM_SAMPLE/);
         assert.throws(() => s.youtubeViewers(base, -1), /INVALID_VIEWER_COUNT/);
@@ -243,7 +246,7 @@ test('asynchronous YouTube counts retain their actual sample minute rather than 
  }finally{s.close();}
 });
 
-test('unnamed categories and YouTube authors stay readable, while chat outside recorded streams is excluded',()=>{
+test('missing category names never create synthetic categories or discard audience history',()=>{
  const s=new StreamStore(':memory:');
  try {
   const sid=recordedStream(s,'channel','unnamed',base,'platform',base);
@@ -254,8 +257,11 @@ test('unnamed categories and YouTube authors stay readable, while chat outside r
   s.youtubeMessages('yt-owner','chat',[{id:'unnamed',snippet:{type:'textMessageEvent',publishedAt:new Date(base+minute).toISOString()},authorDetails:{channelId:'unnamed-author'}},{id:'outside',snippet:{type:'textMessageEvent',publishedAt:new Date(base+10*minute).toISOString()},authorDetails:{channelId:'outside-author'}}]);
   const result=s.analytics({...opts,toMs:base+2*minute});
   assert.equal(result.audience[0]?.name,'unnamed-author');
-  assert.ok(result.categories.every(c=>c.name==='Категория неизвестна'));
-  assert.equal(s.analytics({...opts,fromMs:base+minute/2,toMs:base+2*minute}).categories[0]?.name,'Категория неизвестна');
+  assert.deepEqual(result.categories,[]);
+  assert.deepEqual(result.availableCategories,[]);
+  assert.deepEqual(result.streamComparison[0]!.categories,[]);
+  assert.deepEqual(s.analytics({...opts,fromMs:base+minute/2,toMs:base+2*minute}).categories,[]);
+  assert.deepEqual(s.analytics(opts).categories.map(c=>c.name),['Future']);
   assert.equal(s.analytics(opts).audience.some(e=>e.id==='youtube:outside-author'),false);
   assert.deepEqual(unionSpans([{from:base,to:base+minute,session:sid,kind:'observed'},{from:base,to:base+2*minute,session:sid,kind:'observed'}]),[{from:base,to:base+2*minute,session:sid,kind:'observed'}]);
  } finally {s.close();}

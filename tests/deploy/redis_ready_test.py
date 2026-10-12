@@ -39,3 +39,27 @@ wait_for_redis() {
         self.assertEqual(count, 50)
         self.assertIn('service status', result.stdout)
         self.assertIn('cache diagnostic', result.stdout)
+
+
+class RedisIsolationTest(unittest.TestCase):
+    def run_preflight(self, listener, service_pid, redis_pid):
+        source = (ROOT / 'ops/install-redis.sh').read_text()
+        function = source.split('ensure_private_cache_port() {', 1)[1].split('\n}\nensure_private_cache_port', 1)[0]
+        script = """set -euo pipefail
+ss() { printf '%s' "$LISTENER"; }
+systemctl() { printf '%s' "$SERVICE_PID"; }
+redis-cli() { printf 'process_id:%s\\r\\n' "$REDIS_PID"; }
+ensure_private_cache_port() {
+""" + function + '\n}\nensure_private_cache_port\n'
+        return subprocess.run(['bash', '-c', script], env={'PATH': '/usr/bin:/bin', 'LISTENER': listener, 'SERVICE_PID': service_pid, 'REDIS_PID': redis_pid}, capture_output=True, text=True)
+
+    def test_unused_port_and_own_service_are_allowed(self):
+        for listener, service_pid, redis_pid in [('', '0', ''), ('LISTEN', '123', '123')]:
+            result = self.run_preflight(listener, service_pid, redis_pid)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_other_listener_is_left_unchanged(self):
+        for service_pid, redis_pid in [('0', '123'), ('124', '123'), ('0', '')]:
+            result = self.run_preflight('LISTEN', service_pid, redis_pid)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn('another service', result.stdout)

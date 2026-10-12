@@ -2,6 +2,18 @@
 # Dedicated volatile cache. Bind loopback only; never replace a pre-existing service.
 set -euo pipefail
 [[ $EUID == 0 ]] || { echo 'Root required'; exit 1; }
+ensure_private_cache_port() {
+  if [[ -n $(ss -H -ltn 'sport = :6380') ]]; then
+    local cache_pid redis_pid
+    cache_pid=$(systemctl show stream-panel-cache.service --property=MainPID --value)
+    redis_pid=$(redis-cli -h 127.0.0.1 -p 6380 INFO server 2>/dev/null | tr -d '\r' | sed -n 's/^process_id://p')
+    [[ "$cache_pid" =~ ^[1-9][0-9]*$ && "$cache_pid" == "$redis_pid" ]] || {
+      echo 'Cache port 6380 belongs to another service; leaving it unchanged'
+      return 1
+    }
+  fi
+}
+ensure_private_cache_port
 if ! command -v redis-server >/dev/null; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq

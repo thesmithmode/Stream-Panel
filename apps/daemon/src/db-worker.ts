@@ -19,6 +19,7 @@ const allowed = new Set([
   "recordPoll",
   "updateChatterNames",
   "persons", "createPerson",
+  "donorNicknames", "donorBindings", "bindDonorNickname",
   "person",
   "personNotes", "createPersonNote", "updatePersonNote", "deletePersonNote",
   "personMetadata", "setPersonMetadata",

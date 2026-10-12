@@ -155,6 +155,7 @@ test('linked Twitch and YouTube category durations retain their signal kind inst
  const s=new StreamStore(':memory:');try{
   const sid=s.observePlatformStream('youtube','channel','video',at,at,null,'Stream')!;
   s.observePlatformStream('twitch','owner','stream',at,at,null,'Stream');const tw=twitch(s);
+  s.streamSample(sid,at,'game','Game','Stream',null);
   s.youtubeMessages('channel','chat',[message('yt-kind','author','YouTube',at+minute)]);
   s.merge('youtube:author',tw,s.personRevision('youtube:author'),s.personRevision(tw),at+minute);
   s.endSession(sid,at+3*minute);
