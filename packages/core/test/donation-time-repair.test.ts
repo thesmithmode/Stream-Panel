@@ -9,13 +9,13 @@ test('timezone repair distributes imported tips across closed streams, preserves
  const s=new StreamStore(':memory:');try{
  const earlier=s.startSession('owner','early',at-3*3600000,'platform',at-3*3600000);s.endSession(earlier,at-2*3600000);
  const sid=s.startSession('owner','late',at,'platform',at);s.endSession(sid,at+10*minute);
- for(const id of ['normal','assigned','edited','deleted'])s.ingest(tip(id));s.ingest(tip('invalid','broken'));s.ingest({...tip('no-source'),sourceTime:null});
+ for(const id of ['normal','assigned','deleted'])s.ingest(tip(id));s.ingest({...tip('edited'),occurredAtMs:at+minute,timeQuality:'configured'});s.ingest(tip('invalid','broken'));s.ingest({...tip('no-source'),sourceTime:null});
  const viewer=String(s.createPerson('Chosen viewer').id);
  s.reassignDonation(eventKey(tip('assigned')),viewer,0,at);
  s.updateDonation(eventKey(tip('edited')),{personId:viewer,amount:'500',currency:'RUB',message:'explicit edit',sourceName:'DA',occurredAtMs:null},0,at);
  s.deleteDonation(eventKey(tip('deleted')),0,at);
  assert.equal(s.summary(sid).donations,0);
- assert.deepEqual(s.resolveDonationTimes(0),{resolved:4,invalid:1});
+ assert.deepEqual(s.resolveDonationTimes(0),{resolved:3,invalid:1});
  assert.equal(s.summary(sid).donations,2);assert.equal((s.summary(sid).totals as Record<string,string>).RUB,'20000');
  assert.equal(s.donation(eventKey(tip('assigned'))).personId,viewer);
  assert.equal(s.donation(eventKey(tip('edited'))).occurredAtMs,null);
@@ -43,4 +43,18 @@ test('repair stays within the selected profile in a shared database',async()=>{
  const a=new StreamStore(join(dir,'shared.sqlite'),'ruslan'),b=new StreamStore(join(dir,'shared.sqlite'),'gulnaz');
  try{a.ingest(tip('same'));b.ingest(tip('same'));a.resolveDonationTimes(0);assert.equal(a.donation(eventKey(tip('same'))).occurredAtMs,at+minute);assert.equal(b.donation(eventKey(tip('same'))).occurredAtMs,null);}
  finally{a.close();b.close();await rm(dir,{recursive:true,force:true});}
+});
+
+test('repair recovers unchanged dates carried through amount edits, even after reimport; later explicit time clears stay cleared',()=>{
+ const s=new StreamStore(':memory:','ruslan');try{
+ const sid=s.startSession('owner','live',at,'platform',at);s.endSession(sid,at+10*minute);
+ const e=tip('amount-edit'),id=eventKey(e);s.ingest(e);const person=String(s.createPerson('Chosen viewer').id);
+ s.updateDonation(id,{personId:person,amount:'500',currency:'RUB',message:'Keep my text',sourceName:'DA',occurredAtMs:null},0,at);
+ s.ingest({...e,occurredAtMs:at+minute,timeQuality:'configured'});assert.equal(s.donation(id).occurredAtMs,null);
+ assert.deepEqual(s.resolveDonationTimes(0),{resolved:1,invalid:0});const d=s.donation(id);assert.equal(d.occurredAtMs,at+minute);assert.equal(d.amountMinor,'50000');assert.equal(d.message,'Keep my text');assert.equal(d.personId,person);assert.equal(d.revision,1);assert.equal(s.summary(sid).donations,1);
+ assert.deepEqual(s.resolveDonationTimes(0),{resolved:0,invalid:0});
+ s.updateDonation(id,{personId:person,amount:'500',currency:'RUB',message:'Explicitly cleared time',sourceName:'DA',occurredAtMs:null},1,at);
+ s.updateDonation(id,{personId:person,amount:'600',currency:'RUB',message:'Later text edit',sourceName:'DA',occurredAtMs:null},2,at);
+ assert.deepEqual(s.resolveDonationTimes(0),{resolved:0,invalid:0});assert.equal(s.donation(id).occurredAtMs,null);assert.equal(s.summary(sid).donations,0);
+ }finally{s.close();}
 });

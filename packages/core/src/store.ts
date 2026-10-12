@@ -161,9 +161,19 @@ export class StreamStore {
       let resolved=0,invalid=0;
       for(const row of rows){
         let at:number|null;try{at=parseDonationTime(row.source_time,offset);}catch{invalid++;continue;}
-        if(at===null||at===row.occurred_at_ms)continue;
-        this.db.prepare("UPDATE events SET occurred_at_ms=?,time_quality='configured' WHERE id=?").run(at,row.id);
-        this.db.prepare("UPDATE donation_corrections SET occurred_at_ms=? WHERE event_id=? AND coalesce(json_extract(payload_json,'$.corrected'),0)=0").run(at,row.id);
+        if(at===null)continue;
+        const originalChanged=at!==row.occurred_at_ms;
+        if(originalChanged)this.db.prepare("UPDATE events SET occurred_at_ms=?,time_quality='configured' WHERE id=?").run(at,row.id);
+        // A text/amount edit can carry forward an unknown date. Preserve only actual time edits.
+        const correctionChanged=this.db.prepare(`UPDATE donation_corrections SET occurred_at_ms=? WHERE event_id=? AND occurred_at_ms IS NOT ? AND (
+          coalesce(json_extract(payload_json,'$.corrected'),0)=0 OR (
+            EXISTS(SELECT 1 FROM donation_audit a WHERE a.event_id=donation_corrections.event_id AND a.kind='update') AND
+            NOT EXISTS(SELECT 1 FROM donation_audit a WHERE a.event_id=donation_corrections.event_id AND a.kind='update' AND (
+              json_type(a.before_json,'$.occurredAtMs') IS NULL OR json_type(a.after_json,'$.occurredAtMs') IS NULL OR
+              json_extract(a.before_json,'$.occurredAtMs') IS NOT json_extract(a.after_json,'$.occurredAtMs')
+            ))
+          ))`).run(at,row.id,at).changes>0;
+        if(!originalChanged&&!correctionChanged)continue;
         const effective=this.db.prepare('SELECT occurred_at_ms FROM effective_events WHERE id=?').get(row.id) as {occurred_at_ms:number|null}|undefined;
         if(effective?.occurred_at_ms!=null){this.db.prepare('DELETE FROM event_sessions WHERE event_id=?').run(row.id);this.assignEvent(row.id,row.account_id,effective.occurred_at_ms);}
         resolved++;
