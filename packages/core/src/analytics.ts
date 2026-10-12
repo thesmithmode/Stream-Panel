@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import {currencyRates} from './rates.js';
 import {streamMetrics} from './stream-metrics.js';
-import {sessionWindows,sessionBreaks} from './session-windows.js';
+import {windowsFromLinks,sessionBreaks} from './session-windows.js';
 import { botExclusionSet, isExcludedBot } from './bots.js';
 export interface AnalyticsOptions {
     fromMs: number;
@@ -55,6 +55,11 @@ export function unionSpans(spans: Span[]): Span[] {
     }
     return out;
 }
+function groupBySession<T extends {session_id:string}>(rows:T[]):Map<string,T[]> {
+    const groups=new Map<string,T[]>();
+    for(const row of rows){const group=groups.get(row.session_id);if(group)group.push(row);else groups.set(row.session_id,[row]);}
+    return groups;
+}
 export function audienceAnalytics(db: Database.Database, options: AnalyticsOptions) {
     const recording=options.sessionId?db.prepare('SELECT started_at_ms,ended_at_ms FROM sessions WHERE id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id)').get(options.sessionId) as {started_at_ms:number;ended_at_ms:number|null}|undefined:undefined;
     if(options.sessionId&&!recording)throw new Error('SESSION_NOT_FOUND');
@@ -89,6 +94,8 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     const allowed = new Map(people.map(p => [p.id, p.display_name]));
     const platformWindows=db.prepare('SELECT session_id,platform,started_at_ms,ended_at_ms FROM platform_streams WHERE session_id IN(SELECT value FROM json_each(?))').all(sessionIds) as {session_id:string;platform:string;started_at_ms:number;ended_at_ms:number|null}[];
     const samples = db.prepare('SELECT * FROM stream_samples WHERE session_id IN(SELECT value FROM json_each(?)) ORDER BY observed_at_ms').all(sessionIds) as any[];
+    const samplesBySession=groupBySession(samples),platformsBySession=groupBySession(platformWindows);
+    const windows=(id:string,start:number,end:number)=>windowsFromLinks(platformsBySession.get(id)??[],start,end);
     const segments: {
         session: string;
         categoryId: string;
@@ -98,7 +105,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     }[] = [];
     for (const s of sessions) {
         let start = Math.max(from, s.started_at_ms), end = Math.min(to, s.ended_at_ms ?? to), id = '', name = 'Категория неизвестна';
-        for (const sample of samples.filter(x => x.session_id === s.id && (x.twitch_viewers !== null || x.category_id || x.category_name))) {
+        for (const sample of (samplesBySession.get(s.id)??[]).filter(x => x.twitch_viewers !== null || x.category_id || x.category_name)) {
             if (sample.observed_at_ms < start) {
                 id = sample.category_id;
                 name = sample.category_name || 'Категория неизвестна';
@@ -117,10 +124,14 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         if (end > start)
             segments.push({ session: s.id, categoryId: id, name, from: start, to: end });
     }
-    const breaks=sessions.flatMap(s=>sessionBreaks(sessionWindows(db,s.id,s.started_at_ms,Math.min(to,s.ended_at_ms??to))).map(span=>({...span,session:s.id})));
-    const liveSegments=segments.flatMap(segment=>sessionWindows(db,segment.session,segment.from,segment.to).map(span=>({...segment,...span})));
-    const selected = liveSegments.filter(s => !category || s.categoryId === category), contains = (sid: string, at: number) => selected.some(s => s.session === sid && at >= s.from && at < s.to);
-    const clip = (span: Span) => selected.filter(s => s.session === span.session && s.from < span.to && s.to > span.from).map(s => ({ ...span, from: Math.max(span.from, s.from), to: Math.min(span.to, s.to) }));
+    const breaks=sessions.flatMap(s=>sessionBreaks(windows(s.id,s.started_at_ms,Math.min(to,s.ended_at_ms??to))).map(span=>({...span,session:s.id})));
+    const liveSegments=segments.flatMap(segment=>windows(segment.session,segment.from,segment.to).map(span=>({...segment,...span})));
+    const selected = liveSegments.filter(s => !category || s.categoryId === category);
+    const selectedBySession=new Map<string,typeof selected>();
+    for(const segment of selected){const group=selectedBySession.get(segment.session);if(group)group.push(segment);else selectedBySession.set(segment.session,[segment]);}
+    const segmentAt=(sid:string,at:number)=>(selectedBySession.get(sid)??[]).find(s=>at>=s.from&&at<s.to);
+    const contains = (sid: string, at: number) => segmentAt(sid,at)!==undefined;
+    const clip = (span: Span) => (selectedBySession.get(span.session)??[]).filter(s => s.from < span.to && s.to > span.from).map(s => ({ ...span, from: Math.max(span.from, s.from), to: Math.min(span.to, s.to) }));
     const selectedStreamCount=new Set(selected.map(segment=>segment.session)).size;
     const messageAuthors=new Map<number,Map<string,number>>();
     const streamAuthors=new Map<string,Map<number,Set<string>>>();
@@ -133,7 +144,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     const addDonation=(totals:Map<string,Record<string,string>>,counts:Map<string,number>,key:string,currency:string,amount:string)=>{
         const values=totals.get(key)??{};values[currency]=(BigInt(values[currency]??'0')+BigInt(amount)).toString();totals.set(key,values);counts.set(key,(counts.get(key)??0)+1);
     };
-    const addMessages = (sid: string, at: number, n: number, id: string) => { const segment = selected.find(s => s.session === sid && at >= s.from && at < s.to); if (segment) {
+    const addMessages = (sid: string, at: number, n: number, id: string) => { const segment = segmentAt(sid,at); if (segment) {
         if(n>0){const atMinute=Math.floor(at/60000)*60000,authors=messageAuthors.get(atMinute)??new Map<string,number>();authors.set(id,(authors.get(id)??0)+n);messageAuthors.set(atMinute,authors);
             const minutes=streamAuthors.get(sid)??new Map<number,Set<string>>(),ids=minutes.get(atMinute)??new Set<string>();ids.add(id);minutes.set(atMinute,ids);streamAuthors.set(sid,minutes);
         }
@@ -198,7 +209,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             const e = entity(tip.person_id, name, 'twitch');
             e.donations[tip.currency] = (BigInt(e.donations[tip.currency] ?? '0') + BigInt(tip.amount)).toString();
             e.sessionIds.add(tip.session_id);
-            const segment=selected.find(segment=>segment.session===tip.session_id&&tip.at>=segment.from&&tip.at<segment.to)!;
+            const segment=segmentAt(tip.session_id,tip.at)!;
             addDonation(categoryDonations,categoryDonationCounts,segment.categoryId,tip.currency,tip.amount);
             addDonation(streamDonations,streamDonationCounts,tip.session_id,tip.currency,tip.amount);
             const atMinute=Math.floor(tip.at/60000)*60000,totals=minuteDonations.get(atMinute)??{};
@@ -236,10 +247,12 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     }
     let expanded = 0;
     const activityDurations = new Map<number, { observed: number; estimated: number }>();
+    const elapsedMinutes=new Map<number,number>();
     // Materialize the selected recording interval, including empty samples and gaps.
     for (const segment of selected) for (let at = Math.floor(segment.from / 60000) * 60000; at < segment.to; at += 60000) {
         if (++expanded > 2000000) throw new Error('ANALYTICS_RANGE_TOO_LARGE');
         minute(at);
+        elapsedMinutes.set(at,(elapsedMinutes.get(at)??0)+Math.max(0,Math.min(at+60000,segment.to)-Math.max(at,segment.from))/60000);
     }
     const followRows=db.prepare("SELECT p.source,p.account_id,p.payload_json FROM provider_snapshots p WHERE key='followers' AND id=(SELECT q.id FROM provider_snapshots q WHERE q.source=p.source AND q.account_id=p.account_id AND q.key='followers' ORDER BY observed_at_ms DESC,id DESC LIMIT 1)").all() as {source:string;account_id:string;payload_json:string}[];
     const followerPeople=new Set<string>();
@@ -332,7 +345,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             const point = minute(sample.observed_at_ms);
             if(source!=='youtube'&&sample.twitch_viewers !== null)point.twitchViewers=sample.twitch_viewers;
             if(source!=='twitch'&&sample.youtube_viewers !== null)point.youtubeViewers=sample.youtube_viewers;
-            const active=platformWindows.filter(p=>p.session_id===sample.session_id&&p.started_at_ms<point.at+60000&&(p.ended_at_ms===null||p.ended_at_ms>point.at));
+            const active=(platformsBySession.get(sample.session_id)??[]).filter(p=>p.started_at_ms<point.at+60000&&(p.ended_at_ms===null||p.ended_at_ms>point.at));
             const keys=active.length?[...new Set(active.map(p=>p.platform==='twitch'?'twitchViewers':'youtubeViewers'))]:['twitchViewers'];
             const known=[point.twitchViewers,point.youtubeViewers].filter((value):value is number=>value!==null);
             point.viewers = source === 'twitch' ? point.twitchViewers : source === 'youtube' ? point.youtubeViewers : known.length?known.reduce((sum,value)=>sum+value,0):null;
@@ -373,7 +386,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             cell = { day, hour, observed: 0, estimated: 0, messages: 0, sampleMinutes: 0, observedKnownMinutes: 0, viewersTotal: 0, viewerSamples: 0,donationTotals:{},donationCount:0 };
             hourly.set(key, cell);
         }
-        const elapsed=selected.reduce((n,segment)=>n+Math.max(0,Math.min(point.at+60000,segment.to)-Math.max(point.at,segment.from)),0)/60000;
+        const elapsed=elapsedMinutes.get(point.at)??0;
         cell.observed += activityDurations.get(point.at)?.observed ?? 0;
         cell.estimated += activityDurations.get(point.at)?.estimated ?? 0;
         for(const [currency,total] of Object.entries(minuteDonations.get(point.at)??{}))cell.donationTotals[currency]=(BigInt(cell.donationTotals[currency]??'0')+BigInt(total)).toString();
@@ -387,16 +400,16 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     const audience = [...entities.values()].filter(e => e.sessionIds.size || e.messages).sort((a, b) => Number(b.core) - Number(a.core) || b.observedMinutes - a.observedMinutes || b.messages - a.messages).map(e => ({ ...e, sessionIds: [...e.sessionIds], attendanceSessionIds: [...e.attendanceSessionIds], attendanceRatio: selectedStreamCount?e.attendanceSessionIds.size/selectedStreamCount:0, visits: e.intervals.length, observedMinutesPerSession: e.attendanceSessionIds.size ? e.observedMinutes/e.attendanceSessionIds.size : 0, sessionRatio: e.sessionIds.size/selectedStreamCount, observedMinutes: Math.round(e.observedMinutes * 10) / 10, estimatedChatMinutes: Math.round(e.estimatedChatMinutes * 10) / 10 }));
     const attendees=audience.filter(e=>e.attendanceSessionIds.length>0),regulars=audience.filter(e=>e.core).length;
     const seen = new Set<string>();
-    const streamComparison = sessions.filter(s => selected.some(segment => segment.session === s.id)).map(s => {
+    const streamComparison = sessions.filter(s => selectedBySession.has(s.id)).map(s => {
         const visitors = audience.filter(e => e.attendanceSessionIds.includes(s.id)), newInPeriod = visitors.filter(e => !seen.has(e.id)).length;
         for (const e of visitors)
             seen.add(e.id);
-        const durationMs=selected.filter(segment=>segment.session===s.id).reduce((n,segment)=>n+segment.to-segment.from,0);
+        const durationMs=(selectedBySession.get(s.id)??[]).reduce((n,segment)=>n+segment.to-segment.from,0);
         const donations=streamDonations.get(s.id)??{},messages=sessionMessages.get(s.id)??0;
-        const metrics=streamMetrics(selected.filter(segment=>segment.session===s.id),samples.filter(sample=>sample.session_id===s.id),streamAuthors.get(s.id)??new Map());
-        const aggregate=streamMetrics(selected.filter(segment=>segment.session===s.id),[...timeline.values()].filter(p=>contains(s.id,p.at)).map(p=>({observed_at_ms:p.at,twitch_viewers:p.viewersPartial?null:p.viewers,youtube_viewers:0})),new Map());
+        const metrics=streamMetrics((selectedBySession.get(s.id)??[]),(samplesBySession.get(s.id)??[]),streamAuthors.get(s.id)??new Map());
+        const aggregate=streamMetrics((selectedBySession.get(s.id)??[]),[...timeline.values()].filter(p=>contains(s.id,p.at)).map(p=>({observed_at_ms:p.at,twitch_viewers:p.viewersPartial?null:p.viewers,youtube_viewers:0})),new Map());
         metrics.viewers.all=aggregate.viewers.all;
-        return { ...metrics,durationMs,messagesPerHour:durationMs?messages*3600000/durationMs:null,donationCount:streamDonationCounts.get(s.id)??0,donationTotals:donations,donationsPerHourMinor:currencyRates(donations,durationMs),id: s.id, startedAt: s.started_at_ms, endedAt: s.ended_at_ms ?? to, title: samples.find(x => x.session_id === s.id)?.title ?? "", audience: visitors.length, core: visitors.filter(e => e.core).length, newInPeriod, returning: visitors.length - newInPeriod, messages: sessionMessages.get(s.id) ?? 0, categories: [...new Set(selected.filter(segment => segment.session === s.id).map(segment => segment.name))] };
+        return { ...metrics,durationMs,messagesPerHour:durationMs?messages*3600000/durationMs:null,donationCount:streamDonationCounts.get(s.id)??0,donationTotals:donations,donationsPerHourMinor:currencyRates(donations,durationMs),id: s.id, startedAt: s.started_at_ms, endedAt: s.ended_at_ms ?? to, title: samplesBySession.get(s.id)?.[0]?.title ?? "", audience: visitors.length, core: visitors.filter(e => e.core).length, newInPeriod, returning: visitors.length - newInPeriod, messages: sessionMessages.get(s.id) ?? 0, categories: [...new Set((selectedBySession.get(s.id)??[]).map(segment => segment.name))] };
     });
     const report=source!=='twitch'&&options.youtubeAccount ? db.prepare("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {payload_json:string;updated_at_ms:number}|undefined : undefined;
     const youtubeReport=report ? {data:JSON.parse(report.payload_json),updatedAt:report.updated_at_ms} : null;

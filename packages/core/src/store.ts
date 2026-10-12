@@ -1164,7 +1164,7 @@ export class StreamStore {
       for(const tip of tips.filter(t=>t.session_id===row.id)){donationCount++;if(tip.currency&&tip.amount&&/^\d+$/.test(tip.amount))donations[tip.currency]=(BigInt(donations[tip.currency]??'0')+BigInt(tip.amount)).toString();}
       return ({
       ...row, durationMs:windows.reduce((sum,w)=>sum+w.to-w.from,0),viewerMean:viewers.mean,viewerPeak:viewers.peak,donationTotals:donations,donationCount,
-      breaks:sessionBreaks(sessionWindows(this.db,String(row.id),Number(row.started_at_ms),Number(row.ended_at_ms??Date.now()))),
+      breaks:sessionBreaks(windows),
       platforms: JSON.parse(platforms_json as string) as string[],
       confirmedUrls: (JSON.parse(urls_json as string) as {platform:"twitch"|"youtube";url:string}[])
         .filter(link=>this.validPlatformStreamUrl(link.platform,link.url)),

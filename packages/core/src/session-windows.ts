@@ -3,9 +3,13 @@ export interface TimeWindow {from:number;to:number}
 /** Union of provider broadcasts. A platform interruption is not a break if another stays live. */
 export function sessionWindows(db:Database.Database,id:string,from:number,to:number):TimeWindow[]{
  const links=db.prepare('SELECT started_at_ms,ended_at_ms FROM platform_streams WHERE session_id=? ORDER BY started_at_ms').all(id) as {started_at_ms:number;ended_at_ms:number|null}[];
+ return windowsFromLinks(links,from,to);
+}
+/** Reuse already loaded provider windows during batch analytics. Input order is immaterial. */
+export function windowsFromLinks(links:readonly {started_at_ms:number;ended_at_ms:number|null}[],from:number,to:number):TimeWindow[]{
  if(!links.length)return to>from?[{from,to}]:[];
  const out:TimeWindow[]=[];
- for(const link of links){
+ for(const link of [...links].sort((a,b)=>a.started_at_ms-b.started_at_ms)){
   const span={from:Math.max(from,link.started_at_ms),to:Math.min(to,link.ended_at_ms??to)};
   if(span.to<=span.from)continue;
   const last=out.at(-1);
