@@ -14,7 +14,7 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11,schemaV12 } from "./schema.js";
+import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11,schemaV12,schemaV13 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
 import {personFollowing,followingAnalytics,type Follower} from './following.js';
 import { sessionWindows,sessionBreaks } from './session-windows.js';
@@ -95,6 +95,8 @@ export class StreamStore {
         this.db.transaction(() => this.db.exec(schemaV12)).immediate();
       this.db.exec("CREATE TABLE IF NOT EXISTS sp_youtube_quota (day TEXT NOT NULL, profile TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(day,profile)) WITHOUT ROWID");
       // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 13)
+        this.db.transaction(() => this.db.exec(schemaV13)).immediate();
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
       this.db.transaction(() => {this.collapseDuplicateDaDonors();this.reconcileNicknameLinks();}).immediate();
     } catch (error) {
@@ -121,7 +123,30 @@ export class StreamStore {
     }).immediate();
   }
 
-  personActivity(id:string){return personActivity(this.db,id);}
+  donorNicknames(){
+    return this.db.prepare("SELECT match_key AS key,max(display_name) AS name,count(*) AS accounts FROM identities WHERE source='donationalerts' AND match_key!='' AND external_id!='anonymous:donor' AND account_id NOT LIKE 'manual:%' AND account_id NOT LIKE 'correction:%' GROUP BY match_key ORDER BY name").all() as {key:string;name:string;accounts:number}[];
+  }
+  donorBindings(person:string){
+    this.personRevision(person);
+    return this.db.prepare('SELECT b.name_key AS key,b.name,b.updated_at_ms AS at FROM donor_bindings b LEFT JOIN identities i ON i.id=b.identity_id WHERE coalesce(i.person_id,b.person_id)=? ORDER BY b.name').all(person) as {key:string;name:string;at:number}[];
+  }
+  bindDonorNickname(person:string,name:string,revision:number,at:number){
+    assertTimestamp(at);const key=matchKey(name);
+    if(!key||name.length>200||['аноним','anonymous','anon'].includes(key))throw new Error('INVALID_DONOR_NICKNAME');
+    return this.db.transaction(()=>{
+      if(this.personRevision(person)!==revision)throw new Error('REVISION_CONFLICT');
+      const members=this.db.prepare("SELECT id,person_id AS personId FROM identities WHERE source='donationalerts' AND match_key=? AND account_id NOT LIKE 'manual:%' AND account_id NOT LIKE 'correction:%' UNION SELECT i.id,i.person_id FROM identities i JOIN donation_corrections c ON c.identity_id=i.id JOIN events e ON e.id=c.event_id JOIN identities original ON original.id=e.identity_id WHERE e.source='donationalerts' AND original.match_key=?").all(key,key) as {id:string;personId:string}[];
+      const anchor=members[0]?.id??null;
+      for(const member of members)this.db.prepare('UPDATE identities SET person_id=? WHERE id=?').run(person,member.id);
+      const affected=JSON.stringify([...new Set([person,...members.map(m=>m.personId)])]);
+      this.db.prepare('UPDATE persons SET revision=revision+1 WHERE id IN(SELECT value FROM json_each(?))').run(affected);
+      this.db.prepare('INSERT INTO donor_bindings VALUES (?,?,?,?,?) ON CONFLICT(name_key) DO UPDATE SET name=excluded.name,person_id=excluded.person_id,identity_id=excluded.identity_id,updated_at_ms=excluded.updated_at_ms').run(key,name.trim(),person,anchor,at);
+      this.db.prepare('INSERT INTO membership_operations VALUES (?,?,?,?,?)').run(randomUUID(),'donor_bind',JSON.stringify(members),JSON.stringify({key,personId:person}),at);
+      return this.donorBindings(person);
+    }).immediate();
+  }
+
+  personActivity(id:string,chatWindowMinutes=5,timezone="Europe/Moscow"){return personActivity(this.db,id,chatWindowMinutes,timezone);}
   donation(id:string) {return new DonationLedger(this.db).donation(id);}
   donations(personId?:string,offset=0,limit=50,includeDeleted=false) {return new DonationLedger(this.db).list(personId,offset,limit,includeDeleted);}
   createDonation(input:DonationInput,atMs:number) {return new DonationLedger(this.db).create(input,atMs);}
@@ -289,6 +314,10 @@ export class StreamStore {
             .get(event.source, event.accountId, event.actor.externalId) as
             | IdentityRow
             | undefined) ?? null;
+        if(event.source==='donationalerts'){
+          const key=matchKey(event.actor.displayName),bound=this.db.prepare('SELECT coalesce(i.person_id,b.person_id) AS personId FROM donor_bindings b LEFT JOIN identities i ON i.id=b.identity_id WHERE b.name_key=?').get(key) as {personId:string}|undefined;
+          if(identity&&bound&&identity.person_id!==bound.personId){this.db.prepare('UPDATE identities SET person_id=? WHERE id=?').run(bound.personId,identity.id);identity.person_id=bound.personId;}
+        }
         // Legacy DA rows keyed donation id per tip — reuse Donor by match_key.
         if (!identity && event.source === "donationalerts") {
           const key = matchKey(event.actor.displayName);
@@ -476,6 +505,7 @@ export class StreamStore {
         this.db.prepare("INSERT INTO stream_samples(session_id,observed_at_ms,category_id,category_name,title,twitch_viewers,youtube_viewers) SELECT session_id,?,?,?,?,NULL,NULL FROM event_sessions WHERE event_id=? ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET category_id=excluded.category_id,category_name=excluded.category_name,title=excluded.title").run(event.occurredAtMs,categoryId,categoryName,title,eventKey(event));
       }
       // Membership changes invalidate outstanding undo revisions, including arrival of a new identity.
+      if(identity&&event.source==='donationalerts'&&event.actor)this.db.prepare('UPDATE donor_bindings SET identity_id=coalesce(identity_id,?) WHERE name_key=?').run(identity.id,matchKey(event.actor.displayName));
       // Auto-link already bumped revision when attaching to an existing person.
       if (identity && newIdentity && !autoLinked)
         this.db
@@ -902,6 +932,10 @@ export class StreamStore {
       const anonymous=this.db.prepare('SELECT i.person_id FROM anonymous_donors a JOIN identities i ON i.id=a.identity_id WHERE a.account_id=?').get(accountId) as {person_id:string}|undefined;
       return anonymous?{personId:anonymous.person_id,how:"anonymous_label"}:null;
     }
+    if(source==='donationalerts'){
+      const bound=this.db.prepare('SELECT coalesce(i.person_id,b.person_id) AS personId FROM donor_bindings b LEFT JOIN identities i ON i.id=b.identity_id WHERE b.name_key=?').get(key) as {personId:string}|undefined;
+      if(bound)return {personId:bound.personId,how:'donor_nickname'};
+    }
     const other = source;
     const rows = this.db
       .prepare(
@@ -929,6 +963,7 @@ export class StreamStore {
   private reconcileNicknameLinks(onlyKey?:string):void {
     const donors=this.db.prepare("SELECT DISTINCT person_id,match_key FROM identities WHERE source='donationalerts' AND match_key!='' AND external_id!='anonymous:donor' AND account_id NOT LIKE 'manual:%' AND account_id NOT LIKE 'correction:%' AND (? IS NULL OR match_key=?)").all(onlyKey??null,onlyKey??null) as {person_id:string;match_key:string}[];
     for(const donor of donors){
+      if(this.db.prepare("SELECT 1 FROM donor_bindings WHERE name_key=?").get(donor.match_key))continue;
       const protectedGroup=this.db.prepare("SELECT 1 FROM identities WHERE person_id=? AND (source!='donationalerts' OR account_id LIKE 'manual:%' OR account_id LIKE 'correction:%') UNION SELECT 1 FROM youtube_identities WHERE person_id=? UNION SELECT 1 FROM person_merges WHERE source_person_id=? OR target_person_id=? UNION SELECT 1 FROM membership_operations o,json_each(o.before_json) b WHERE o.kind!='auto_link' AND CASE WHEN b.type='object' THEN json_extract(b.value,'$.personId') END=? LIMIT 1").get(donor.person_id,donor.person_id,donor.person_id,donor.person_id,donor.person_id);
       if(protectedGroup)continue;
       const targets=this.db.prepare("SELECT DISTINCT person_id FROM identities WHERE source='twitch' AND match_key=? AND person_id!=? UNION SELECT person_id FROM youtube_identities WHERE match_key=? AND person_id!=?").all(donor.match_key,donor.person_id,donor.match_key,donor.person_id) as {person_id:string}[];
@@ -2177,7 +2212,7 @@ export class StreamStore {
   private notBotClause(alias = "i"): string {
     return `${alias}.match_key NOT IN (SELECT value FROM json_each(?))`;
   }
-  private youtubePersonActivity(personId: string, sessionId?: string, botJson = this.botJson()) {
+  private youtubePersonActivity(personId: string, sessionId?: string, botJson = this.botJson(),chatWindowMinutes=5) {
     const excluded = this.db.prepare(`SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=? AND (y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))) LIMIT 1`).get(personId,botJson,botJson);
     if (excluded) return {messageCount:0,estimatedChatMinutes:0,sessionIds:new Set<string>(),firstSeenMs:null};
     const now = Date.now();
@@ -2187,7 +2222,7 @@ export class StreamStore {
       JOIN platform_streams ps ON ps.platform='youtube' AND ps.account_id=m.account_id AND m.published_at_ms>=ps.started_at_ms AND (ps.ended_at_ms IS NULL OR m.published_at_ms<ps.ended_at_ms)
       JOIN sessions s ON s.id=ps.session_id
       WHERE y.person_id=? AND (? IS NULL OR s.id=?) AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(now,personId,sessionId??null,sessionId??null) as {id:string;published_at_ms:number;session_id:string;started_at_ms:number;ended_at_ms:number}[];
-    const spans = unionSpans(matched.map(row=>({session:row.session_id,kind:'chat_proxy' as const,from:Math.max(row.started_at_ms,row.published_at_ms),to:Math.min(row.ended_at_ms,row.published_at_ms+5*60000)})));
+    const spans = unionSpans(matched.map(row=>({session:row.session_id,kind:'chat_proxy' as const,from:Math.max(row.started_at_ms,row.published_at_ms),to:Math.min(row.ended_at_ms,row.published_at_ms+chatWindowMinutes*60000)})));
     return {messageCount:sessionId?new Set(matched.map(row=>row.id)).size:rows.length,
       estimatedChatMinutes:spans.reduce((total,span)=>total+(span.to-span.from)/60000,0),
       sessionIds:new Set(matched.map(row=>row.session_id)),firstSeenMs:rows.length?rows.reduce((first,row)=>Math.min(first,row.published_at_ms),Infinity):null};
@@ -2197,6 +2232,7 @@ export class StreamStore {
     personId: string,
     sessionId?: string,
     excludedBotLogins: readonly string[] = [],
+    chatWindowMinutes=5,
   ): Record<string, unknown> {
     const person = this.db
       .prepare("SELECT id, display_name FROM persons WHERE id=?")
@@ -2207,7 +2243,7 @@ export class StreamStore {
     const sid = sessionId ?? null;
     const inSession =
       "(? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?))";
-    const youtube = this.youtubePersonActivity(personId,sessionId,botJson);
+    const youtube = this.youtubePersonActivity(personId,sessionId,botJson,chatWindowMinutes);
     const messageCount = youtube.messageCount + (
       this.db
         .prepare(

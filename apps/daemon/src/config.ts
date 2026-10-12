@@ -1,3 +1,4 @@
+import {analyticsSettings,type AnalyticsSettings} from "./analytics-settings.js";
 import { clampChattersPollSeconds } from "../../../packages/core/src/presence.js";
 import { normalizeBotLogin } from "../../../packages/core/src/bots.js";
 import { mkdir, readFile, rename, open, rm } from "node:fs/promises";
@@ -12,6 +13,7 @@ export interface Tokens {
 }
 export interface Config {
   version: 1;
+  analyticsSettings?: AnalyticsSettings;
   youtubeClientId?: string;
   youtubeAccountId?: string;
   youtubeClientSecret?: string;
@@ -56,6 +58,7 @@ export class Configuration {
       ) as Config;
       if (saved.version !== 1) throw new Error("UNSUPPORTED_CONFIG");
       this.value = { ...defaults, ...saved };
+      this.value.analyticsSettings=analyticsSettings(this.value.analyticsSettings);
       this.value.youtubeAccountId = this.value.youtube?.userId ?? this.value.youtubeAccountId ?? "";
       this.value.chattersPollSeconds = clampChattersPollSeconds(
         this.value.chattersPollSeconds,
@@ -108,6 +111,7 @@ export class Configuration {
     return {
       youtubeClientId: this.value.youtubeClientId ?? "",
       hasYoutubeSecret: !!this.value.youtubeClientSecret,
+      analyticsSettings: analyticsSettings(this.value.analyticsSettings),
       twitchClientId: this.value.twitchClientId,
       daClientId: this.value.daClientId,
       hasDaSecret: !!this.value.daClientSecret,

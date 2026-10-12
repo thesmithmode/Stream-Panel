@@ -1,3 +1,4 @@
+import {analyticsSettings} from "./analytics-settings.js";
 import Fastify, { type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
 import staticFiles from "@fastify/static";
@@ -255,14 +256,21 @@ export async function createApplication(
       return { csrf };
     },
   );
+  app.get('/api/v1/settings',()=>analyticsSettings(configuration.value.analyticsSettings));
+  app.post('/api/v1/settings',async request=>{
+    const next=analyticsSettings(request.body);const previous=analyticsSettings(configuration.value.analyticsSettings);
+    configuration.value.analyticsSettings=next;
+    try{await configuration.save();}catch(error){configuration.value.analyticsSettings=previous;throw error;}
+    return next;
+  });
   app.get("/api/v1/overview",()=>db.call("channelOverview",configuration.value.excludedBotLogins));
   app.get("/api/v1/analytics", async request => {
     const q=object(request.query);
-    const sessionId=string(q.session);
+    const sessionId=string(q.session),defaults=analyticsSettings(configuration.value.analyticsSettings);
     return db.call("analytics", {
       sessionId:sessionId||undefined,fromMs:sessionId?0:Number(q.from),toMs:sessionId?Date.now():Math.min(Number(q.to),Date.now()),source:string(q.source)||"all",category:string(q.category),
-      regularThresholdPercent:q.regularThresholdPercent===undefined?50:Number(q.regularThresholdPercent),minSessions:q.minSessions===undefined?3:Number(q.minSessions),minMinutes:q.minMinutes===undefined?30:Number(q.minMinutes),minMessages:q.minMessages===undefined?5:Number(q.minMessages),
-      chatWindowMinutes:q.chatWindowMinutes===undefined?5:Number(q.chatWindowMinutes),coreRule:string(q.coreRule)||"either",timezone:string(q.timezone)||"Europe/Moscow",
+      regularThresholdPercent:q.regularThresholdPercent===undefined?defaults.regularThresholdPercent:Number(q.regularThresholdPercent),minSessions:q.minSessions===undefined?defaults.minSessions:Number(q.minSessions),minMinutes:q.minMinutes===undefined?defaults.minMinutes:Number(q.minMinutes),minMessages:q.minMessages===undefined?defaults.minMessages:Number(q.minMessages),
+      chatWindowMinutes:q.chatWindowMinutes===undefined?defaults.chatWindowMinutes:Number(q.chatWindowMinutes),coreRule:string(q.coreRule)||defaults.coreRule,timezone:string(q.timezone)||defaults.timezone,
       excludedLogins:configuration.value.excludedBotLogins,ownerId:configuration.value.twitch?.userId??"",youtubeAccount:configuration.value.youtube?.userId??configuration.value.youtubeAccountId??"",
     });
   });
@@ -338,6 +346,9 @@ export async function createApplication(
       q.to === undefined ? undefined : Number(q.to),
     );
   });
+  app.get('/api/v1/donor-nicknames',()=>db.call('donorNicknames'));
+  app.get('/api/v1/persons/:id/donor-bindings',request=>db.call('donorBindings',string(object(request.params).id)));
+  app.post('/api/v1/persons/:id/donor-bindings',request=>{const b=object(request.body);return db.call('bindDonorNickname',string(object(request.params).id),string(b.name),Number(b.revision),Date.now());});
   app.get("/api/v1/persons", async (request) =>
     db.call(
       "persons",
@@ -371,7 +382,7 @@ export async function createApplication(
   app.get("/api/v1/persons/:id", async (request) =>
     db.call("person", string(object(request.params).id),string(object(request.query).events)!=="false"),
   );
-  app.get("/api/v1/persons/:id/activity",async request=>db.call("personActivity",string(object(request.params).id)));
+  app.get("/api/v1/persons/:id/activity",async request=>db.call("personActivity",string(object(request.params).id),analyticsSettings(configuration.value.analyticsSettings).chatWindowMinutes,analyticsSettings(configuration.value.analyticsSettings).timezone));
   app.get("/api/v1/persons/:id/metadata", async request => db.call("personMetadata",string(object(request.params).id)));
   app.post("/api/v1/persons/:id/metadata", async request => {
     const b=object(request.body);
@@ -396,6 +407,7 @@ export async function createApplication(
       id,
       session,
       configuration.value.excludedBotLogins,
+      analyticsSettings(configuration.value.analyticsSettings).chatWindowMinutes,
     );
   });
   app.get("/api/v1/persons/:id/candidates", async (request) => {

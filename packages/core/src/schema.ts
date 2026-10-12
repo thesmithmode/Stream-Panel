@@ -1,5 +1,5 @@
 // Migration 1. All times are UTC epoch milliseconds; names are never unique identifiers.
-export const CURRENT_SCHEMA_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 13;
 
 export const schemaV1 = `
 CREATE TABLE persons (
@@ -250,4 +250,12 @@ CREATE TABLE provider_snapshots (
 CREATE INDEX provider_snapshots_session_time ON provider_snapshots(session_id,observed_at_ms);
 CREATE INDEX provider_snapshots_account_time ON provider_snapshots(source,account_id,key,observed_at_ms);
 PRAGMA user_version = 12;
+`;
+
+export const schemaV13 = `
+CREATE TABLE donor_bindings (
+ name_key TEXT PRIMARY KEY,name TEXT NOT NULL,person_id TEXT NOT NULL REFERENCES persons(id),
+ identity_id TEXT REFERENCES identities(id),updated_at_ms INTEGER NOT NULL
+) STRICT;
+PRAGMA user_version = 13;
 `;
