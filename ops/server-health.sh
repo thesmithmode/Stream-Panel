@@ -59,6 +59,11 @@ for line in Path('/etc/stream-panel/server.env').read_text().splitlines():
     if '=' in line:
         key,value=line.split('=',1)
         config[key]=value.strip().strip('"').strip("'")
+for profile in ('ruslan','gulnaz'):
+    path=Path(config.get('STREAM_PANEL_DATA_DIR','/var/lib/stream-panel'))/'profiles'/profile/'secrets.json'
+    if path.exists():
+        token=json.loads(path.read_text()).get('twitch')
+        print('twitch profile='+profile+' connected='+str(bool(token)).lower()+' followers_scope='+str(bool(token and 'moderator:read:followers' in token.get('scopes',[]))).lower())
 url=config.get('STREAM_PANEL_SUPABASE_URL','')
 keyfile=config.get('STREAM_PANEL_SUPABASE_KEY_FILE','')
 if not url or not keyfile:

@@ -14,14 +14,21 @@ test('stream subscriptions show platform totals, exact follow dates and independ
   await app.db.call('endSession',id,at+4*m);await app.db.call('followingSnapshot','twitch','owner',[],true,at+5*m,0);
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(10000);const errors=[];page.on('pageerror',e=>errors.push(e.message));await goto(page,app.bootstrap());
   await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`tr[data-session-id="${id}"]`).getByRole('button',{name:'Открыть',exact:true}).click();
+  const wideLast=async selector=>{
+   const cards=page.locator(selector);const first=await cards.first().boundingBox(),last=await cards.last().boundingBox();
+   assert.ok(await cards.count()%2 ? last.width>first.width*1.8 : Math.abs(last.width-first.width)<2,JSON.stringify({first,last}));
+  };
+  await wideLast('.stream-metrics > .metric');
+  const evidenceStream=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(evidenceStream){await mkdir(evidenceStream,{recursive:true});await page.screenshot({path:join(evidenceStream,'stream-tiles-mobile.png'),fullPage:true});}
   const following=page.getByRole('region',{name:'Подписки на канал'});await following.getByText('Новых подписок за стрим:',{exact:false}).waitFor();assert.ok((await following.textContent()).includes('Unlinked subscriber'));assert.ok((await following.textContent()).includes('частично'));
   assert.equal(await following.locator('.meter').count(),0);await following.getByRole('button',{name:'О подписках на канал',exact:true}).click();await page.getByRole('dialog',{name:'О подписках на канал'}).waitFor();await page.keyboard.press('Escape');
   await following.getByRole('button',{name:'Follow Viewer',exact:true}).click();await page.getByRole('heading',{name:'Follow Viewer',exact:true}).waitFor();
+  await wideLast('.person-detail .kpi-strip > .kpi');
   await page.locator('summary').filter({hasText:'Подписки на канал'}).click();const card=page.getByRole('region',{name:'Подписки на канал'});await card.getByText('Последняя известная дата подписки:',{exact:false}).first().waitFor();
   assert.ok((await card.locator('article').first().textContent()).includes('Не подписан'));assert.ok((await card.locator('article').first().textContent()).includes('Последняя известная дата подписки')); assert.ok((await card.locator('article').nth(1).textContent()).includes('Неизвестно'));
   await card.locator('summary').first().click();assert.equal(await card.getByText('Первое сообщение',{exact:true}).count(),0);
   const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(evidence){await mkdir(evidence,{recursive:true});await page.screenshot({path:join(evidence,'following-mobile.png'),fullPage:true});}
-  await page.getByRole('button',{name:'Silent',exact:true}).click();await card.getByText('Не подписан',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'Silent',exact:true}).click();await card.getByText('Не подписан',{exact:true}).waitFor();await wideLast('.person-detail .kpi-strip > .kpi');
   // A follower whose date is private remains positive with an unknown date.
   await app.db.call('followingSnapshot','youtube','youtube',[{id:'author',name:'YT Viewer',followedAtMs:null}],true,at+6*m,null);
   await page.getByRole('button',{name:'Follow Viewer',exact:true}).first().click();await card.locator('article').nth(1).getByText('Подписан',{exact:true}).waitFor();

@@ -122,6 +122,12 @@ test(
       await page
         .getByText("Код: ABCD", { exact: true })
         .waitFor({ state: "hidden" });
+      a.twitch.status={state:'connected',account:'Owner',detail:'Сбор событий включён',capabilities:{followers:'Для проверки подписок нужен повторный вход в Twitch с разрешением читать подписчиков'}};
+      await reload(page);
+      await twitch.getByText('Для проверки подписок нужен повторный вход в Twitch с разрешением читать подписчиков',{exact:true}).waitFor();
+      await twitch.getByRole('button',{name:'Разрешить чтение подписчиков',exact:true}).click();
+      await twitch.getByText('Код: ABCD',{exact:true}).waitFor();
+      await twitch.getByRole('button',{name:'Отменить',exact:true}).click();
       await da
         .getByRole("button", { name: "Подключить DonationAlerts" })
         .click();

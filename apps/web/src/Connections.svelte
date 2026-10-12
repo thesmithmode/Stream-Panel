@@ -99,7 +99,9 @@
             >{/if}
           <span class="muted">{status.twitch.detail}</span>
         </p>
+        {#if status.twitch.capabilities.followers}<p class="small muted">{status.twitch.capabilities.followers}</p>{/if}
         <div class="actions">
+          {#if status.twitch.capabilities.followers === "Для проверки подписок нужен повторный вход в Twitch с разрешением читать подписчиков"}<button class="primary" disabled={busy} onclick={() => run(twitch)}>Разрешить чтение подписчиков</button>{/if}
           <button
             class="outline"
             disabled={busy}

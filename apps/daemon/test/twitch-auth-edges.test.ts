@@ -106,3 +106,17 @@ test('cancelled Twitch 401 responses never refresh credentials and periodic fail
   runtime.stopped=false;runtime.report(new Error('retired generation'),runtime.authGeneration-1);assert.equal(JSON.stringify(c.status),prior);
  }finally{await c.stop();}
 });
+
+// Followers are part of the basic panel, regardless of optional event collection.
+test('Twitch always requests follower permission in basic and extended login',async()=>{
+ for(const extended of [false,true]){
+  const {connection}=fixture(async(_input,init)=>{
+   const scopes=new URLSearchParams(init!.body as URLSearchParams).get('scopes')!.split(' ');
+   assert.ok(scopes.includes('moderator:read:followers'));
+   assert.equal(scopes.filter(s=>s==='moderator:read:followers').length,1);
+   assert.equal(scopes.includes('bits:read'),extended);
+   return Response.json({user_code:'ABCD'});
+  });
+  try{await assert.rejects(connection.beginAuth('client123',extended),/INVALID_DEVICE_RESPONSE/);}finally{await connection.stop();}
+ }
+});

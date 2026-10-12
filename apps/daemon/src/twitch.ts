@@ -35,9 +35,8 @@ export function messageText(value: unknown): string {
     return string((value as Record<string, unknown>).text);
   return "";
 }
-const baseScopes = ["user:read:chat", "moderator:read:chatters"];
+const baseScopes = ["user:read:chat", "moderator:read:chatters", "moderator:read:followers"];
 const optionalScopes = [
-  "moderator:read:followers",
   "channel:read:subscriptions",
   "bits:read",
   ...extraTwitchScopes,
@@ -658,7 +657,7 @@ export class TwitchConnection {
     }
   }
   private async collectFollowers(account:string,current:()=>boolean,at:number){
-    if(!this.token?.scopes.includes('moderator:read:followers')){this.status.capabilities.followers='Для проверки подписок нужны права чтения followers';return;}
+    if(!this.token?.scopes.includes('moderator:read:followers')){this.status.capabilities.followers='Для проверки подписок нужен повторный вход в Twitch с разрешением читать подписчиков';return;}
     if(this.lastFollowersPollAt!==null&&at-this.lastFollowersPollAt<15*60000)return;
     try{
       const followers:{id:string;name:string;followedAtMs:number|null;raw:unknown}[]=[],seen=new Set<string>();let cursor='',complete=false,total:number|null=null;
