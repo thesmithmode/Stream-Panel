@@ -55,9 +55,9 @@
   let epoch = 0;
   let scopeReady=$state(false),connectionLost=$state(false);
   let outdated=$state(false);
-  let refreshTask:{epoch:number;task:Promise<void>}|null=null;
+  let refreshTask:{epoch:number;task:Promise<void>;controller:AbortController}|null=null;
   function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile,mode:dataMode});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
-  function clearScope(){busy=false;scopeReady=false;events=[];summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
+  function clearScope(){refreshTask?.controller.abort();busy=false;scopeReady=false;events=[];summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
   function restoreRoute(){const route=readRoute(location.search,getProfile());epoch++;tab=route.view;sessionFilter=route.session;personId=route.person;setProfile(route.profile);profile=route.profile;setDataMode(route.mode);dataMode=route.mode;clearScope();}
   function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}connectionLost=!navigator.onLine;error=authMessage((e as Error).message);}
 
@@ -106,13 +106,15 @@
   ] as const;
   async function refresh() {
     const current=epoch;if(refreshTask?.epoch===current)return refreshTask.task;
+    const controller=new AbortController();
+    const deadline=setTimeout(()=>controller.abort(new ConnectionError()),12000);
     const task=(async()=>{
-      const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter).map(async([key,path])=>[key,await api(path)])));
+      const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter).map(async([key,path])=>[key,await api(path,undefined,controller.signal)])));
       if(current!==epoch)return;
       status=values.status;if(dataMode==='real'){setCsrf(status.csrf);user=status.user??user;outdated=isOutdatedRelease(status.release);}
       sessions=values.sessions??sessions;people=values.persons??people;events=values.events??events;summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';
-    })();refreshTask={epoch:current,task};
-    try{await task;}finally{if(refreshTask?.task===task)refreshTask=null;}
+    })();refreshTask={epoch:current,task,controller};
+    try{await task;}finally{clearTimeout(deadline);if(refreshTask?.task===task)refreshTask=null;}
   }
   async function action(fn: () => Promise<void>) {
     const current = epoch;
@@ -184,6 +186,7 @@
     window.addEventListener("hashchange", onHashChange);
     return () => {
       alive = false;
+      refreshTask?.controller.abort();
       window.removeEventListener("hashchange", onHashChange);
       window.removeEventListener('offline',offline);window.removeEventListener('popstate',back);window.removeEventListener('online',update);window.removeEventListener('focus',update);document.removeEventListener('visibilitychange',update);clearInterval(timer);
     };
@@ -196,6 +199,7 @@
     <nav aria-label="Разделы">
       {#each nav as [key, label]}<button
           class:active={tab === key}
+          aria-current={tab===key?'page':undefined}
           onclick={() => navigate(key)}><Icon name={key} />{label}</button
         >{/each}
     </nav>
@@ -253,8 +257,7 @@
       {#if outdated}<div role="status" class="notice">Доступна новая версия панели для обоих профилей. <button class="outline small" onclick={()=>location.reload()}>Обновить панель</button></div>{/if}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}
       {#if dataMode === "demo"}<p class="demo-banner" role="status">
-          Режим <strong>Демо</strong>: показаны фикстуры. Запись в SQLite и
-          secrets.json отключена.
+          Режим <strong>Демо</strong>: показаны примеры данных.
         </p>{/if}
       {#key `${profile}:${dataMode}:${tab}:${sessionFilter}`}
       {#if !scopeReady}<div class="panel empty" role="status">Загружаем данные…</div>{:else}
@@ -332,11 +335,10 @@
                       ><td>{session.viewerPeak??'—'} / {session.viewerMean==null?'—':session.viewerMean.toLocaleString('ru-RU',{maximumFractionDigits:1})}</td><td>{#each Object.entries(session.donationTotals??{}) as [currency,amount]}<div>{money(amount,currency)}</div>{:else}—{/each}<small>{session.donationCount??0} донатов</small></td><td>{session.event_count}</td><td
                         ><button
                           class="outline small"
-                          onclick={() =>
-                            action(async () => {
+                          onclick={() => {
                               sessionFilter = session.id;
                               navigate("stream");
-                            })}>Открыть</button
+                            }}>Открыть</button
                           >{#if session.kind === "manual"}<button class="outline small" onclick={()=>action(async()=>{await api(`sessions/${session.id}/delete`,{});if(sessionFilter===session.id)sessionFilter="";await refresh();})}>Удалить</button>{/if}
                         </td
                       ></tr

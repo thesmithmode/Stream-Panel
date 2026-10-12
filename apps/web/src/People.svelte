@@ -31,7 +31,7 @@
     onSelect:(id:string)=>void;
     onChange: () => Promise<void>;
   } = $props();
-  let detailTab=$state("activity"),showFollowing=$state(false);
+  let detailTab=$state("activity"),showFollowing=$state(false),detailLoading=$state(false);
   let search = $state(""),
     selectedId = $state(""),
     detail = $state<any>(null),
@@ -49,6 +49,7 @@
     ),
     tops = $state<PersonTop[]>([]);
   let searchResults = $state<Person[]>([]);
+  let selectedSession = '';
   const visible = $derived(
     sortBy === "default"
       ? search.trim()
@@ -125,9 +126,11 @@
   async function select(id: string) {
     if(selectedId!==id)onSelect(id);
     selectedId = id;
+    selectedSession = sessionFilter;
     error = "";
     stats = null;
     detail = null;
+    detailLoading = true;
     try {
       const [person, matches,metrics] = await Promise.all([api(`persons/${id}`),api<string[]>(`persons/${id}/candidates`),api<PersonStats>(`persons/${id}/stats${sessionFilter ? `?session=${sessionFilter}` : ""}`)]);
       if (selectedId !== id) return;
@@ -139,6 +142,8 @@
       stats=metrics;
     } catch (e) {
       if (selectedId === id) error = (e as Error).message;
+    } finally {
+      if (selectedId === id) detailLoading = false;
     }
   }
   async function loadAudit() {
@@ -170,23 +175,8 @@
     await select(other.id);
   }
   $effect(() => {
-    if (initialId) untrack(()=>{if(selectedId!==initialId)void select(initialId);});
-  });
-  $effect(() => {
-    // reload stats when session filter changes while a person is open
-    const id = selectedId;
-    const session = sessionFilter;
-    if (!id) return;
-    let cancelled = false;
-    const q = session ? `?session=${session}` : "";
-    void api<PersonStats>(`persons/${id}/stats${q}`)
-      .then((s) => {
-        if (!cancelled) stats = s;
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
+    const id=initialId,session=sessionFilter;
+    if (id) untrack(()=>{if(selectedId!==id||selectedSession!==session)void select(id);});
   });
   import { onMount } from "svelte";
   onMount(() => {
@@ -234,9 +224,9 @@
     <div class="people-list">
     {#if !visible.length}<div class="empty-small">
         <Icon name="people" size={36} />
-        <p>Пока никого нет</p>
+        <p>{search.trim()?'Никого не найдено':'Пока никого нет'}</p>
         <span class="small muted"
-          >Аккаунты и донаты появятся после подключения.</span
+          >{search.trim()?'Попробуйте другое имя.':'Аккаунты и донаты появятся после подключения.'}</span
         >
       </div>{/if}{#each visible as person}<button
         class:chosen={selectedId === person.id}
@@ -253,7 +243,7 @@
     </div>
   </section>
   <section class="panel person-detail">
-    {#if !detail}<div class="empty">
+    {#if detailLoading}<div class="empty" role="status">Загружаем карточку…</div>{:else if !detail}<div class="empty">
         <Icon name="people" size={48} />
         <h3>Выберите человека</h3>
         <p>Активность, донаты и связи аккаунтов.</p>
@@ -389,8 +379,8 @@
        <PersonNotes personId={detail.id} />
       {:else}
        <PersonActivity personId={detail.id} />
-       <details bind:open={showFollowing}><summary>Подписки и первые наблюдения</summary><Following personId={detail.id} onPerson={onSelect} /></details>
-       <details><summary>Последние события</summary><EventList events={detail.events as Event[]} onPerson={onSelect}/></details>
+       <details bind:open={showFollowing}><summary>Подписки и первые наблюдения</summary>{#if showFollowing}<Following personId={detail.id} onPerson={(id)=>void select(id)} />{/if}</details>
+       <details><summary>Последние события</summary><EventList events={detail.events as Event[]} onPerson={(id)=>void select(id)}/></details>
       {/if}
       </div>{/if}
   </section>

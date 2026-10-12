@@ -11,8 +11,15 @@ test('person detail tabs retain immutable donations, paginate and recover from u
   for(const status of ['CANCELED','UNFULFILLED'])await app.db.call('ingest',{...event,externalId:`reward-${status}`,type:'channel_points_custom_reward_redemption.add',payload:{reward:{title:`${status}${'X'.repeat(300)}`,cost:50},raw:{payload:{event:{id:status,status}}}}});
   for(let i=0;i<12;i++)await app.db.call('ingest',{...event,source:'donationalerts',accountId:'da',externalId:`tip-${i}`,type:'donation',actor:{externalId:'name:viewer',displayName:'Viewer'},payload:{actorName:'Viewer',amountMinor:'10000',currency:'RUB',text:`Tip ${i}`}});
   const yt=await app.db.call('observePlatformStream','youtube','yt-owner','video',at+180000,at+180000,null,'YT');await app.db.call('youtubeMessages','yt-owner','chat',[{id:'yt-message',snippet:{type:'textMessageEvent',publishedAt:new Date(at+180000).toISOString()},authorDetails:{channelId:'yt-viewer',displayName:'Viewer'}}]);await app.db.call('endSession',yt,at+360000);
-  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:800}});page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));await goto(page,app.bootstrap());
+  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:800}});page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const reads=[];page.on('request',request=>{if(request.method()==='GET')reads.push(new URL(request.url()).pathname);});await goto(page,app.bootstrap());
   await page.getByRole('button',{name:'Люди',exact:true}).click();await page.locator('.person-row').filter({hasText:'Viewer'}).click();await page.getByRole('heading',{name:'Обычно в чате · МСК',exact:true}).waitFor();
+  assert.equal(reads.filter(path=>path===`/api/v1/persons/${viewer}/stats`).length,1,'opening a person must not fetch statistics twice');
+  assert.equal(reads.filter(path=>path.endsWith('/following')).length,0,'collapsed following details must not query history');
+  const followingResponse=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/v1/persons/${viewer}/following`);
+  await page.getByText('Подписки и первые наблюдения',{exact:true}).click();await followingResponse;await page.getByRole('region',{name:'Подписки на канал'}).waitFor();
+  assert.equal(reads.filter(path=>path===`/api/v1/persons/${viewer}/following`).length,1);
+  await page.getByText('Подписки и первые наблюдения',{exact:true}).click();
   await page.getByText('Активность YouTube оценена по сообщениям.',{exact:true}).waitFor();await page.getByText('Баллы канала и награды',{exact:true}).click();await page.locator('.rewards article').filter({hasText:'Music'}).filter({hasText:'250 баллов · Выполнена'}).waitFor();
   await page.getByText('50 баллов · Отменена · баллы возвращены',{exact:true}).waitFor();await page.getByText('50 баллов · Ожидает выполнения',{exact:true}).waitFor();
   for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:800});await assertUiLayout(page);}await page.setViewportSize({width:1280,height:800});await page.screenshot({path:'/tmp/sp-points-desktop.png',fullPage:true});

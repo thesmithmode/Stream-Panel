@@ -35,11 +35,12 @@
   const hourMax=$derived(Math.max(1,...(data?.hours??[]).map((h:any)=>heatValue(h)??0)));
   function hourTitle(day:string,hour:number){const value=heatValue(hourCells.get(`${day}:${hour}`));return `${day} ${hour}:00 — ${value===null?"нет данных":value.toFixed(1)}`;}
   const categoryOptions=$derived(data?.availableCategories??data?.categories??[]);
+  const timelineByMinute=$derived(new Map((data?.timeline??[]).map((point:any)=>[point.at,point])) as Map<number,any>);
   const detailMinutes=$derived.by(()=>{
     if(!selected||!day)return [];
     const start=new Date(`${day}T00:00:00`).getTime();
     return Array.from({length:1440},(_,i)=>{
-      const at=start+i*60000,span=selected.intervals.find((s:any)=>s.from<at+60000&&s.to>at),known=data.timeline.find((p:any)=>p.at===at)?.presenceKnown;
+      const at=start+i*60000,span=selected.intervals.find((s:any)=>s.from<at+60000&&s.to>at),known=timelineByMinute.get(at)?.presenceKnown;
       return {at,state:span?.kind==="chat_proxy"?"estimated":span?"observed":selected.source==="twitch"&&known?"not_observed":"unknown"};
     });
   });

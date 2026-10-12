@@ -43,6 +43,13 @@ test('demo uses one core classification in summary, audience, categories and cha
  }
 });
 
+test('demo overview provides iterable stream history with safe optional viewer metrics',async()=>{
+ const data=await demoApi(`analytics?from=0&to=${Date.now()}`) as any;
+ assert.equal(data.streamComparison.length,2);
+ assert.ok(data.streamComparison.every((stream:any)=>stream.id&&stream.startedAt<stream.endedAt&&stream.viewers.twitch.mean===null));
+ assert.ok(data.streamComparison[0].startedAt<data.streamComparison[1].startedAt);
+});
+
 test('demo analytics respects source and strict audience thresholds',async()=>{
  const range=`from=${Date.now()-7200000}&to=${Date.now()}`;
  const empty=await demoApi(`analytics?${range}&source=youtube`) as any;

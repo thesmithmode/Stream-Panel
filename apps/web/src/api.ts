@@ -14,7 +14,7 @@ export async function importBackup(file:File,key:string){
   if(file.size>2*1024*1024*1024)throw new Error('BACKUP_SIZE_LIMIT');
   return requestJson('/api/v1/backups/restore',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-CSRF-Token':csrf,'X-Stream-Panel-Profile':getProfile(),...(key?{'X-Backup-Key':key}:{})},body:file,signal:new AbortController().signal});
 }
-export async function api<T = any>(path: string, body?: unknown): Promise<T> {
+export async function api<T = any>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   if (getDataMode() === "demo" && !path.startsWith("auth/")) {
     return (await demoApi(path, body)) as T;
   }
@@ -25,6 +25,7 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
         ? { "X-Stream-Panel-Profile": getProfile() }
         : { "Content-Type": "application/json", "X-CSRF-Token": csrf, "X-Stream-Panel-Profile": getProfile() },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(signal ? {signal} : {}),
   });
 
 }

@@ -335,7 +335,13 @@ export async function demoApi(path: string, body?: unknown): Promise<unknown> {
     }).filter(()=>source!=="youtube");
     const timeline=Array.from({length:90},(_,i)=>{const observed=Math.min(rows.length,1+i%3),regularObserved=rows.slice(0,observed).filter(r=>r.regular).length,messages=rows.length?i%4:0;return {at:Math.floor(start/minute)*minute+i*minute,messages,regularMessages:rows[0]?.regular?messages:0,observed,regularObserved,estimated:0,regularEstimated:0,viewers:8+i%5,presenceKnown:i%13!==0};});
     const regulars=rows.filter(r=>r.regular).length;
-    return {filters:{regularThresholdPercent},summary:{entities:rows.length,attendees:rows.length,regulars,regularShare:rows.length?regulars/rows.length:null,core:rows.filter(r=>r.core).length,streams:session?1:2,messages:rows.reduce((a,r)=>a+r.messages,0)},audience:rows,timeline,hours:[{day:"пн",hour:20,observed:120,observedKnownMinutes:60,estimated:0,messages:40,sampleMinutes:60}],categories:[{id:"demo-game",name:"Демо-игра",minutes:120,sessions:2,audience:rows.length,core:rows.filter(r=>r.core).length,messagesPerHour:30,observedMinutes:150,estimatedChatMinutes:0}]};
+    const streamComparison=(session?[session]:sessions).filter(s=>s.started_at_ms<to&&(s.ended_at_ms??to)>from).slice().sort((a,b)=>a.started_at_ms-b.started_at_ms).map(s=>({
+      id:s.id,title:'Демо-стрим',startedAt:s.started_at_ms,endedAt:s.ended_at_ms??to,categories:['Демо-игра'],
+      audience:rows.length,core:regulars,returning:0,newInPeriod:rows.length,uniqueChatters:rows.length,peakChatters:rows.length,meanChatters:rows.length,
+      viewers:{all:{mean:null,peak:null,coverageRatio:null},twitch:{mean:null,peak:null,coverageRatio:null},youtube:{mean:null,peak:null,coverageRatio:null}},
+      messages:rows.reduce((n,row)=>n+row.messages,0),messagesPerHour:null,donationsPerHourMinor:{},
+    }));
+    return {streamComparison,filters:{regularThresholdPercent},summary:{entities:rows.length,attendees:rows.length,regulars,regularShare:rows.length?regulars/rows.length:null,core:rows.filter(r=>r.core).length,streams:session?1:2,messages:rows.reduce((a,r)=>a+r.messages,0)},audience:rows,timeline,hours:[{day:"пн",hour:20,observed:120,observedKnownMinutes:60,estimated:0,messages:40,sampleMinutes:60}],categories:[{id:"demo-game",name:"Демо-игра",minutes:120,sessions:2,audience:rows.length,core:rows.filter(r=>r.core).length,messagesPerHour:30,observedMinutes:150,estimatedChatMinutes:0}]};
   }
 
   if (p === "status") {

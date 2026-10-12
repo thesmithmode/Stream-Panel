@@ -18,3 +18,12 @@ test('permanent server failures preserve actionable codes and supplied abort sig
  const signal=new AbortController().signal;await requestJson('/fixture',{signal},async(_url,init)=>{assert.equal(init?.signal,signal);return Response.json({});});
  await assert.rejects(requestJson('/fixture',{},async()=>Response.json({},{status:400}),async()=>{}),/HTTP_400/);
 });
+
+test('cancelled navigation requests stop without retrying or reporting lost connectivity',async()=>{
+ const controller=new AbortController();let calls=0,waits=0;
+ const fetcher=async()=>{calls++;controller.abort();throw controller.signal.reason;};
+ await assert.rejects(requestJson('/fixture',{signal:controller.signal},fetcher as typeof fetch,async()=>{waits++;}),{name:'AbortError'});
+ assert.equal(calls,1);assert.equal(waits,0);
+ await assert.rejects(requestJson('/fixture',{signal:controller.signal},fetcher as typeof fetch),{name:'AbortError'});
+ assert.equal(calls,1);
+});
