@@ -15,7 +15,7 @@ test('writes never repeat; auth is not retried and unusable responses become a c
 test('permanent server failures preserve actionable codes and supplied abort signals',async()=>{
  await assert.rejects(requestJson('/fixture',{},async()=>Response.json({error:'WORKER_UNAVAILABLE'},{status:503}),async()=>{}),/WORKER_UNAVAILABLE/);
  await assert.rejects(requestJson('/fixture',{},async()=>Response.json({},{status:503}),async()=>{}),ConnectionError);
- const signal=new AbortController().signal;await requestJson('/fixture',{signal},async(_url,init)=>{assert.equal(init?.signal,signal);return Response.json({});});
+ const signal=new AbortController().signal;await requestJson('/fixture',{signal},async(_url,init)=>{assert.ok(init?.signal);assert.equal(init?.cache,'no-store');assert.equal(init.signal.aborted,false);return Response.json({});});
  await assert.rejects(requestJson('/fixture',{},async()=>Response.json({},{status:400}),async()=>{}),/HTTP_400/);
 });
 
@@ -26,4 +26,11 @@ test('cancelled navigation requests stop without retrying or reporting lost conn
  assert.equal(calls,1);assert.equal(waits,0);
  await assert.rejects(requestJson('/fixture',{signal:controller.signal},fetcher as typeof fetch),{name:'AbortError'});
  assert.equal(calls,1);
+});
+
+test('a supplied navigation signal retains its own request deadline',async(t)=>{
+ const external=new AbortController();let calls=0;
+ t.mock.method(AbortSignal,'timeout',()=>{const deadline=new AbortController();queueMicrotask(()=>deadline.abort(new DOMException('Timeout','TimeoutError')));return deadline.signal;});
+ const fetcher=async(_url:unknown,init?:RequestInit)=>{calls++;return new Promise<Response>((_resolve,reject)=>{init!.signal!.addEventListener('abort',()=>reject(init!.signal!.reason),{once:true});});};
+ await assert.rejects(requestJson('/slow',{signal:external.signal},fetcher as typeof fetch,async()=>{}),ConnectionError);assert.equal(calls,3);assert.equal(external.signal.aborted,false);
 });

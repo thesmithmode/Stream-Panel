@@ -108,7 +108,7 @@ export async function createHostedApplication(
   });
   app.get("/healthz", async (_request, reply) => {
     try {
-      await Promise.all([...runtimes.values()].map((r) => r.db.call("sessions")));
+      await Promise.all([...runtimes.values()].map((r) => r.db.call("activeLogicalStream")));
       return { ok: true, release: process.env.STREAM_PANEL_RELEASE ?? "development" };
     } catch { return reply.code(503).send({ ok: false }); }
   });

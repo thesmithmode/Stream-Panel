@@ -15,7 +15,7 @@
   let timezone=$state(untrack(()=>defaultTimezone));
   let search=$state(""),liveEnd=$state(true),data=$state<any>(null),error=$state(""),busy=$state(false),selected=$state<any>(null),day=$state("");
   let heatCurrency=$state("RUB");
-  let barOpen=$state(false),heatCalculation=$state("average"),selectedHour=$state<{day:string;hour:number}|null>(null);
+  let heatCalculation=$state("average"),selectedHour=$state<{day:string;hour:number}|null>(null);
   let period=$state<number|'all'|'custom'>('all');
   let requestId=0, mounted=$state(false);
   $effect(()=>{
@@ -69,7 +69,7 @@
   onMount(()=>{
     try{const saved=JSON.parse(localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved?.timezone)timezone=saved.timezone;}catch{/* private browser may deny storage */}
     view=loadAnalyticsView(()=>localStorage,profile);
-    mounted=true;const update=()=>{if(!document.hidden&&navigator.onLine&&!busy&&!selected&&!barOpen){if(liveEnd){const next=localInput(Date.now());if(next===to)void refresh();else to=next;}else void refresh();}};window.addEventListener('sp:data-refresh',update);return ()=>{requestId++;window.removeEventListener('sp:data-refresh',update);};
+    mounted=true;const update=()=>{if(!document.hidden&&navigator.onLine&&!busy){if(liveEnd){const next=localInput(Date.now());if(next===to)void refresh();else to=next;}else void refresh();}};window.addEventListener('sp:data-refresh',update);return ()=>{requestId++;window.removeEventListener('sp:data-refresh',update);};
   });
 </script>
 <section class="panel analytics-filter">
@@ -102,7 +102,7 @@
   <ComparisonCharts streams={data.streamComparison??[]} categories={(data.categories??[]).filter((c:any)=>c.id&&c.name!=="Категория неизвестна")} />
   {#if view.trend}<section class="panel analytics-chart"><header><h2>Активность по времени</h2><Help id="analytics-signals" label="О сигналах активности" text="Twitch — присутствие в опросах чата. YouTube — окно после сообщения, оценка активности. Эти сигналы не подтверждают просмотр видео. Счётчик площадки агрегатный и не раскрывает личности зрителей."/><label>Метрика графика<select bind:value={view.metric}>{#each chartMetrics as choice}<option value={choice.value}>{choice.label}</option>{/each}</select></label></header>
     <p class="small regular-summary">Ядро аудитории: <strong>{data.summary.regulars??0} из {data.summary.entities??0} ({data.summary.regularShare==null?"нет данных":(data.summary.regularShare*100).toFixed(1)+"%"})</strong></p>
-    <AudienceChart points={data.timeline} audience={data.audience} metric={view.metric} bind:resolution={view.resolution} showRegulars={view.showRegulars} {timezone} {onPerson} onselection={(open)=>barOpen=open}/>
+    <AudienceChart points={data.timeline} audience={data.audience} metric={view.metric} bind:resolution={view.resolution} showRegulars={view.showRegulars} {timezone} {onPerson}/>
 
   </section>
   {/if}

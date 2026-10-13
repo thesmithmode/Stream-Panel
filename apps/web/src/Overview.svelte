@@ -1,4 +1,5 @@
 <script lang="ts">
+  import {untrack} from 'svelte';
   import {ConnectionError} from "./request";
   import StreamDonations from "./StreamDonations.svelte";
   import Following from "./Following.svelte";
@@ -31,7 +32,7 @@
     session?:Session|undefined;
     changed:()=>Promise<void>;
   } = $props();
-  let audienceData=$state<any>(null),audienceError=$state(''),audienceBusy=$state(false),barOpen=$state(false);
+  let audienceData=$state<any>(null),audienceError=$state(''),audienceBusy=$state(false);
   let audienceMetric=$state<ChartMetric>('viewers');
   const viewers=$derived(audienceData?.streamComparison?.[0]?.viewers?.all);
   let resolution=$state(1);
@@ -40,14 +41,17 @@
   let audienceRequest=0,lastAudienceSession='';
   $effect(()=>{
     const current=sessionFilter;void summary;
-    if(current===lastAudienceSession&&(barOpen||document.hidden||!navigator.onLine))return;
+    return untrack(()=>{
+    if(current===lastAudienceSession&&(document.hidden||!navigator.onLine))return;
     const id=++audienceRequest;audienceBusy=audienceData===null;audienceError='';
     if(current!==lastAudienceSession){audienceData=null;metadata=[];lastAudienceSession=current;}
     if(!current){audienceData=null;audienceBusy=false;return;}
-    void Promise.all([api(`analytics?${new URLSearchParams({session:current,source:'all',timezone:'Europe/Moscow'})}`),api<Array<{at:number;title:string;categoryName:string}>>(`sessions/${current}/metadata`)]).then(([result,history])=>{
+    const controller=new AbortController();
+    void Promise.all([api(`analytics?${new URLSearchParams({session:current,source:'all',timezone:'Europe/Moscow'})}`,undefined,controller.signal),api<Array<{at:number;title:string;categoryName:string}>>(`sessions/${current}/metadata`,undefined,controller.signal)]).then(([result,history])=>{
       if(id===audienceRequest){audienceData=result;metadata=history.filter((row,i)=>!i||row.title!==history[i-1]!.title||row.categoryName!==history[i-1]!.categoryName);}
     }).catch(error=>{if(id===audienceRequest&&!(error instanceof ConnectionError)){audienceError=(error as Error).message;}}).finally(()=>{if(id===audienceRequest)audienceBusy=false;});
-    return()=>{audienceRequest++;};
+    return()=>{audienceRequest++;controller.abort();};
+    });
   });
   let filter = $state("all");
   const sourceFilter=$derived(metricSource(audienceMetric));
@@ -114,7 +118,7 @@
 <section class="panel series-panel">
   <header><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Поэтому 10 зрителей и 4 ника в чате возможны одновременно. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2><div class="chart-controls"><select aria-label="Показатель графика стрима" bind:value={audienceMetric}>{#each chartMetrics as choice}<option value={choice.value}>{choice.label}</option>{/each}</select><select aria-label="Детализация графика" bind:value={resolution}><option value={1}>1м</option><option value={5}>5м</option><option value={15}>15м</option></select></div></header>
   {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceData}
-    <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric={audienceMetric} {resolution} showResolution={false} showRegulars={true} {onPerson} onselection={(open)=>barOpen=open} oninterval={(interval)=>eventInterval=interval}/>
+    <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric={audienceMetric} {resolution} showResolution={false} showRegulars={true} {onPerson} oninterval={(interval)=>eventInterval=interval}/>
   {:else}<p class="empty-small" role="status">{audienceBusy?'Загружаем график…':'Выберите стрим'}</p>{/if}
   <section class="feed stream-feed">
     <header>

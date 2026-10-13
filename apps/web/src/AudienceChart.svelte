@@ -8,10 +8,10 @@
  const id=$props.id();
  let bucket=$state<ReturnType<typeof chartSeries>[number]|null>(null),minute=$state<number|null>(null);
  const minutePoints=$derived(bucket?points.filter(p=>p.at>=bucket!.at&&p.at<bucket!.at+bucket!.width):[]);
- const selected=$derived(minute===null?bucket:chartSeries(minutePoints.filter(p=>p.at===minute),metric,1)[0]??null);
+ const selected=$derived(bucket?(minute===null?chartSeries(minutePoints,metric,bucket.width/60000)[0]:chartSeries(minutePoints.filter(p=>p.at===minute),metric,1)[0])??null:null);
  const people=$derived(selected?participantsAt(audience,selected.at,selected.at+selected.width).filter(p=>metricSource(metric)==='twitch'||metric==='observed'?p.observed:metricSource(metric)==='youtube'||metric==='estimated'?p.estimated:true):[]);
  const label=(at:number)=>new Date(at).toLocaleString('ru-RU',{timeZone:timezone});
- $effect(()=>{void points;void metric;void resolution;bucket=null;minute=null;});
+ $effect(()=>{void metric;void resolution;bucket=null;minute=null;});
  $effect(()=>onselection?.(bucket!==null));
  $effect(()=>oninterval?.(selected?{from:selected.at,to:selected.at+selected.width}:null));
  onDestroy(()=>onselection?.(false));

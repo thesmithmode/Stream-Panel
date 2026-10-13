@@ -620,7 +620,7 @@ export class StreamStore {
       const id = randomUUID();
       this.db.prepare("INSERT INTO person_notes VALUES (?,?,?,?,?,0)").run(id,personId,text,nowMs,nowMs);
       return this.db.prepare("SELECT * FROM person_notes WHERE id=?").get(id);
-    })();
+    }).immediate();
   }
 
   updatePersonNote(personId: string, id: string, body: string, revision: number, nowMs = Date.now()): unknown {
@@ -630,14 +630,14 @@ export class StreamStore {
       const note = this.requirePersonNote(personId,id,revision);
       this.db.prepare("UPDATE person_notes SET body=?,updated_at_ms=?,revision=revision+1 WHERE id=?").run(text,Math.max(nowMs,note.updated_at_ms),id);
       return this.db.prepare("SELECT * FROM person_notes WHERE id=?").get(id);
-    })();
+    }).immediate();
   }
 
   deletePersonNote(personId: string, id: string, revision: number): void {
     this.db.transaction(() => {
       this.requirePersonNote(personId,id,revision);
       this.db.prepare("DELETE FROM person_notes WHERE id=?").run(id);
-    })();
+    }).immediate();
   }
 
   private noteText(body: string): string {
@@ -1237,7 +1237,7 @@ export class StreamStore {
     }).immediate();
   }
 
-  sessions(): Record<string, unknown>[] {
+  sessions(sessionId?: string): Record<string, unknown>[] {
     const rows = this.db
       .prepare(
         `SELECT s.*,
@@ -1245,9 +1245,9 @@ export class StreamStore {
           (SELECT title FROM platform_streams p WHERE p.session_id=s.id AND trim(title)<>'' ORDER BY CASE platform WHEN 'twitch' THEN 0 ELSE 1 END,last_observed_at_ms DESC,account_id,external_id LIMIT 1) AS primaryTitle,
           (SELECT json_group_array(platform) FROM (SELECT DISTINCT platform FROM platform_streams p WHERE p.session_id=s.id ORDER BY platform)) AS platforms_json,
           (SELECT json_group_array(json_object('platform',platform,'url',url)) FROM (SELECT DISTINCT platform,url FROM platform_streams p WHERE p.session_id=s.id AND url IS NOT NULL ORDER BY platform,url)) AS urls_json
-        FROM sessions s WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) ORDER BY started_at_ms DESC,s.id DESC LIMIT 100`,
+        FROM sessions s WHERE (? IS NULL OR s.id=?) AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) ORDER BY started_at_ms DESC,s.id DESC LIMIT 100`,
       )
-      .all() as Record<string, unknown>[];
+      .all(sessionId??null,sessionId??null) as Record<string, unknown>[];
     const ids=JSON.stringify(rows.map(row=>row.id));
     const counts=this.db.prepare(`SELECT session_id,sum(n) AS n FROM (
       SELECT es.session_id,count(*) AS n FROM effective_events e JOIN event_sessions es ON es.event_id=e.id WHERE e.type='chat.message' AND es.session_id IN(SELECT value FROM json_each(?)) AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id) GROUP BY es.session_id
@@ -1811,8 +1811,10 @@ export class StreamStore {
     const botKeys = [...excluded];
     const botJson = JSON.stringify(botKeys);
     const sid = sessionId ?? null;
-    const inSession =
-      "(? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?))";
+    const scope = sessionId ? [sessionId] : [];
+    const inSession = sessionId
+      ? "e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?)"
+      : "1";
     // SQL aggregates — avoid loading/parsing every event row in JS.
     const counts = this.db
       .prepare(
@@ -1833,7 +1835,7 @@ export class StreamStore {
         ) AS messages,
         (SELECT count(*) FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))) AS donations`,
       )
-      .get(sid, sid, sid, sid, botJson, sid, sid, botJson) as {
+      .get(...scope, ...scope, botJson, ...scope, botJson) as {
       event_count: number;
       messages: number;
       donations: number;
@@ -1844,12 +1846,6 @@ export class StreamStore {
         AND y.is_owner=0 AND y.external_id<>y.account_id AND y.match_key NOT IN(SELECT value FROM json_each(?))
         AND (? IS NULL OR EXISTS(SELECT 1 FROM platform_streams ps WHERE ps.session_id=? AND ps.platform='youtube' AND ps.account_id=m.account_id AND m.published_at_ms>=ps.started_at_ms AND (ps.ended_at_ms IS NULL OR m.published_at_ms<ps.ended_at_ms)))
       GROUP BY y.person_id`).all(botJson,sid,sid) as {person_id:string;display_name:string;messages:number}[];
-    const participants=this.db.prepare(`SELECT i.person_id,i.display_name,count(*) AS messages FROM effective_events e JOIN identities i ON i.id=e.identity_id
-      WHERE ${inSession} AND e.type='chat.message' AND i.match_key NOT IN(SELECT value FROM json_each(?))
-        AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id)
-      GROUP BY i.person_id`).all(sid,sid,botJson) as {person_id:string;display_name:string;messages:number}[];
-    const combinedParticipants=new Map(participants.map(row=>[row.person_id,{personId:row.person_id,name:row.display_name,messages:row.messages}]));
-    for(const row of youtubeParticipants){const previous=combinedParticipants.get(row.person_id);if(previous)previous.messages+=row.messages;else combinedParticipants.set(row.person_id,{personId:row.person_id,name:row.display_name,messages:row.messages});}
     const youtubeMessageCount=youtubeParticipants.reduce((sum,row)=>sum+row.messages,0);
     const donationRows = this.db
       .prepare(
@@ -1860,7 +1856,7 @@ export class StreamStore {
            AND json_extract(e.payload_json, '$.currency') IS NOT NULL
            AND json_extract(e.payload_json, '$.amountMinor') IS NOT NULL`,
       )
-      .all(sid, sid, botJson) as { currency: string; amount_minor: string }[];
+      .all(...scope, botJson) as { currency: string; amount_minor: string }[];
     const totals: Record<string, string> = {};
     for (const row of donationRows) {
       totals[row.currency] = (
@@ -1869,6 +1865,12 @@ export class StreamStore {
     }
     // Stream cards do not need a second expansion of minute presence data.
     if(!details)return {messages:counts.messages+youtubeMessageCount,donations:counts.donations,totals,chatters:null,lastPollAtMs:null,events:counts.event_count+youtubeMessageCount};
+    const participants=this.db.prepare(`SELECT i.person_id,i.display_name,count(*) AS messages FROM effective_events e JOIN identities i ON i.id=e.identity_id
+      WHERE ${inSession} AND e.type='chat.message' AND i.match_key NOT IN(SELECT value FROM json_each(?))
+        AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id)
+      GROUP BY i.person_id`).all(...scope,botJson) as {person_id:string;display_name:string;messages:number}[];
+    const combinedParticipants=new Map(participants.map(row=>[row.person_id,{personId:row.person_id,name:row.display_name,messages:row.messages}]));
+    for(const row of youtubeParticipants){const previous=combinedParticipants.get(row.person_id);if(previous)previous.messages+=row.messages;else combinedParticipants.set(row.person_id,{personId:row.person_id,name:row.display_name,messages:row.messages});}
     const latest = this.db
       .prepare(
         `SELECT p.id, p.completed_at_ms FROM presence_polls p
@@ -1903,7 +1905,7 @@ export class StreamStore {
               AND i.match_key NOT IN (SELECT value FROM json_each(?))
           ) AS unique_identities_events`,
       )
-      .get(sid, sid, botJson, sid, sid, botJson) as {
+      .get(...scope, botJson, ...scope, botJson) as {
       unique_persons_events: number;
       unique_identities_events: number;
     };
@@ -1994,7 +1996,7 @@ export class StreamStore {
         }
       ).n;
     }
-    const uniquePeople=new Set((this.db.prepare(`SELECT DISTINCT i.person_id FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND i.match_key NOT IN(SELECT value FROM json_each(?))`).all(sid,sid,botJson) as {person_id:string}[]).map(row=>row.person_id));
+    const uniquePeople=new Set((this.db.prepare(`SELECT DISTINCT i.person_id FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND i.match_key NOT IN(SELECT value FROM json_each(?))`).all(...scope,botJson) as {person_id:string}[]).map(row=>row.person_id));
     for(const row of youtubeParticipants)uniquePeople.add(row.person_id);
     return {
       messages: counts.messages + youtubeMessageCount,

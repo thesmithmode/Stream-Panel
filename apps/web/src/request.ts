@@ -7,7 +7,7 @@ export async function requestJson<T>(url:string,options:RequestInit={},fetcher:t
  for(let attempt=0;attempt<retries;attempt++){
   options.signal?.throwIfAborted();
   let response:Response;
-  try{response=await fetcher(url,{...options,signal:options.signal??AbortSignal.timeout(12000)});}
+  try{response=await fetcher(url,{cache:'no-store',...options,signal:options.signal?AbortSignal.any([options.signal,AbortSignal.timeout(12000)]):AbortSignal.timeout(12000)});}
   catch{options.signal?.throwIfAborted();if(attempt+1===retries)throw new ConnectionError();await wait(250*(attempt+1));continue;}
   if([408,429,502,503,504].includes(response.status)){
    if(attempt+1===retries){

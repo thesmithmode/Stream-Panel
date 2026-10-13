@@ -39,6 +39,7 @@ export class StoreClient {
       });
       this.worker.on("exit", () => {
         this.dead = true;
+        reject(new Error("DB_WORKER_STOPPED"));
         for (const p of this.pending.values())
           p.reject(new Error("DB_WORKER_STOPPED"));
         this.pending.clear();
@@ -72,7 +73,7 @@ export class StoreClient {
   async stop(): Promise<void> {
     this.cache.close();
     if (this.dead) return;
-    await this.call("close");
-    await this.worker.terminate();
+    try { await this.call("close"); }
+    finally { await this.worker.terminate(); }
   }
 }

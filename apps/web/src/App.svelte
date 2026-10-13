@@ -104,8 +104,14 @@
     ["connections", "Интеграции"],
     ["settings", "Настройки"],
   ] as const;
-  async function refresh() {
-    const current=epoch;if(refreshTask?.epoch===current)return refreshTask.task;
+  async function refresh(fresh=false) {
+    const current=epoch;
+    if(refreshTask?.epoch===current){
+      if(!fresh)return refreshTask.task;
+      // A click or completed mutation needs a read started after that action.
+      await refreshTask.task.catch(()=>{});
+      if(current!==epoch)return;
+    }
     const controller=new AbortController();
     const deadline=setTimeout(()=>controller.abort(new ConnectionError()),12000);
     const task=(async()=>{
@@ -122,7 +128,7 @@
     error = "";
     try {
       await fn();
-      await refresh();
+      if(current===epoch)await refresh(true);
     } catch (e) {
       if(current===epoch)reportFailure(e);
     } finally {
@@ -262,15 +268,15 @@
           {sessionFilter}
           connect={() => navigate("connections")}
           onPerson={openPerson}
-          changed={refresh}
+          changed={()=>refresh(true)}
         />
       {:else if tab === "analytics"}
         <Analytics profile={profile} defaultTimezone={status.config.analyticsSettings?.timezone??"Europe/Moscow"} onPerson={openPerson} />
-      {:else if tab === "donations"}<StreamDonations onPerson={openPerson} changed={refresh} />
+      {:else if tab === "donations"}<StreamDonations onPerson={openPerson} changed={()=>refresh(true)} />
       {:else if tab === "settings"}<Settings {profile} {status} />
       {:else if tab === "connections"}<Connections
           {status}
-          onChange={refresh}
+          onChange={()=>refresh(true)}
         />
         <YouTube />
       {:else if tab === "people"}<People
@@ -278,7 +284,7 @@
           {sessionFilter}
           initialId={personId}
           onSelect={(id)=>{personId=id;saveRoute();}}
-          onChange={refresh}
+          onChange={()=>refresh(true)}
         />
       {:else if tab === "sessions"}<section class="panel">
           <header>
