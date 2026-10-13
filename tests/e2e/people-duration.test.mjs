@@ -56,7 +56,7 @@ test("People duration cards render the period and average observations as hours"
     await page.getByLabel("Показатели человека").waitFor();
     assert.equal(await page.getByText("Наблюдаемое время", {exact:true}).locator("..").locator("strong").textContent(), "2 ч");
     assert.equal(await page.getByText("Посещаемость", {exact:true}).locator("..").locator("strong").textContent(), "100%");
-    assert.deepEqual(await page.getByLabel("Период аналитики").locator("option").allTextContents(), ["Вся история", "Последние 7 дней", "Последние 30 дней"]);
+    assert.deepEqual(await page.getByLabel("Период аналитики").locator("option").allTextContents(), ["Последние 7 дней", "Последние 30 дней", "Вся история"]);
     await page.getByLabel("Период аналитики").selectOption("7");
     await personRow.click();
     await page.getByLabel("Показатели человека").waitFor();

@@ -27,5 +27,6 @@ export function donorRanking(db:Database.Database,sessionId:string|undefined,bot
   AND json_extract(e.payload_json,'$.currency') IS NOT NULL AND json_extract(e.payload_json,'$.amountMinor') IS NOT NULL GROUP BY p.id,currency`).all(sessionId??null,sessionId??null,...window.args,botJson) as {id:string;display_name:string;revision:number;currency:string;amount:string;n:number;sources:string}[];
  const people=new Map<string,{id:string;display_name:string;revision:number;sources:string;messageCount:number;observedMinutes:number;donationCount:number;donationTotals:Record<string,string>}>();
  for(const g of groups){const row=people.get(g.id)??{id:g.id,display_name:g.display_name,revision:g.revision,sources:g.sources,messageCount:0,observedMinutes:0,donationCount:0,donationTotals:{}};row.donationCount+=g.n;row.donationTotals[g.currency]=g.amount;people.set(g.id,row);}
- return [...people.values()].sort((a,b)=>{const x=BigInt(a.donationTotals[currency]??'0'),y=BigInt(b.donationTotals[currency]??'0');return x===y?a.display_name.localeCompare(b.display_name):x>y?-1:1;}).slice(0,limit);
+ const rankCurrency=groups.some(g=>g.currency===currency)?currency:groups[0]?.currency??currency;
+ return [...people.values()].sort((a,b)=>{const x=BigInt(a.donationTotals[rankCurrency]??'0'),y=BigInt(b.donationTotals[rankCurrency]??'0');return x===y?a.display_name.localeCompare(b.display_name):x>y?-1:1;}).slice(0,limit);
 }

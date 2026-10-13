@@ -16,5 +16,5 @@ test('time buckets cross local midnight, deduplicate overlapping stream segments
 });
 test('periods and platform labels are reused consistently and do not guess a platform for linked accounts',()=>{
  assert.deepEqual(periodRange(7,20*86400000),{from:13*86400000,to:20*86400000});assert.equal(periodRange('all',100).from,0);assert.equal(periodRange('custom',100).from,0);
- assert.equal(platformClass('twitch,donationalerts'),'twitch');assert.equal(platformClass(['youtube']),'youtube');assert.equal(platformClass('twitch,youtube'),'');assert.equal(platformClass('donationalerts'),'');
+ assert.equal(platformClass('twitch,donationalerts'),'twitch');assert.equal(platformClass(['youtube']),'youtube');assert.equal(platformClass('twitch,youtube'),'');assert.equal(platformClass('donationalerts'),'');assert.equal(platformClass(null),'');assert.equal(platformClass(undefined),'');
 });

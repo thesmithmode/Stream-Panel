@@ -37,7 +37,7 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
   assert.ok(await page.getByText('0 из 1 (нет данных)',{exact:true}).count());
   const report=page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).locator('..').locator('..');
   assert.equal(await report.locator('th').count(),0);assert.equal(await report.locator('tbody tr').count(),0);
-  const hours=page.getByRole('heading',{name:'Активность по дням и часам',exact:true}).locator('..').locator('..');
+  const hours=page.locator('.hour-table');await hours.locator('summary').click();
   for(const metric of ['observed','estimated','messages','viewers']){
    await page.getByLabel('Метрика карты').selectOption(metric);
    assert.equal((await hours.locator('tbody tr td').nth(1).textContent()).trim(),'нет данных');
