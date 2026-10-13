@@ -60,7 +60,7 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   assert.equal(await page.getByRole('button',{name:'Все донаты',exact:true}).count(),0);
   await rank.locator('tbody tr').first().getByText('Интервалы',{exact:true}).click();
   await rank.getByText(/Пауза/).waitFor();
-  await page.getByLabel('Показатель графика стрима').selectOption('observed');
+  await page.getByLabel('Показатель графика стрима').selectOption('twitchViewers');
   const bars=page.locator('.series-panel .chart-bar');
   await bars.first().click();
   const detail=page.getByRole('region',{name:'Детали выбранного столбца'});

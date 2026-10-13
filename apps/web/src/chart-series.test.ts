@@ -61,3 +61,11 @@ test('minute default and explicit 1/5/15 minute buckets preserve sums and separa
  assert.equal(chartSeries(points,'viewers',5)[0]!.partial,true);
  assert.equal(chartSeries(points,'messages',15)[0]!.value,5);
 });
+
+test('platform message charts sum counts and disjoint groups at all supported resolutions',()=>{
+ const points=[{at:0,messages:12,twitchMessages:9,youtubeMessages:3,regularMessages:3,regularTwitchMessages:2,regularYoutubeMessages:1,followerMessages:4,followerTwitchMessages:3,followerYoutubeMessages:1,unknownMessages:1,unknownTwitchMessages:0,unknownYoutubeMessages:1},{at:60000,messages:2,twitchMessages:1,youtubeMessages:1,regularMessages:0,regularTwitchMessages:0,regularYoutubeMessages:0,followerMessages:0,followerTwitchMessages:0,followerYoutubeMessages:0,unknownMessages:2,unknownTwitchMessages:1,unknownYoutubeMessages:1}];
+ for(const resolution of [1,5,15]){
+  const all=chartSeries(points,'messages',resolution),tw=chartSeries(points,'twitchMessages',resolution),yt=chartSeries(points,'youtubeMessages',resolution);
+  for(let i=0;i<all.length;i++)for(const key of ['value','regularValue','followerValue','unknownValue'] as const)assert.equal(all[i]![key],tw[i]![key]!+yt[i]![key]!);
+ }
+});

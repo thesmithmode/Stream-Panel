@@ -1751,16 +1751,18 @@ export class StreamStore {
     fromMs?: number,
     toMs?: number,
     type?:string,
+    source?:string,
   ): Record<string, unknown>[] {
+    if(source!==undefined&&!['all','twitch','youtube','donationalerts'].includes(source))throw new Error('INVALID_EVENT_SOURCE');
     if (fromMs !== undefined) assertTimestamp(fromMs);
     if (toMs !== undefined) assertTimestamp(toMs);
     if (fromMs !== undefined && toMs !== undefined && toMs <= fromMs)
       throw new Error("INVALID_EVENT_WINDOW");
-    const events: Record<string,unknown>[] = this.db
+    const events: Record<string,unknown>[] = source==='youtube'?[]:this.db
       .prepare(
         `SELECT e.*, i.display_name, i.person_id FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id
       WHERE (? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?)) AND (? IS NULL OR i.person_id=?)
-      AND (? IS NULL OR e.occurred_at_ms>=?) AND (? IS NULL OR e.occurred_at_ms<?) AND (? IS NULL OR e.type=?)
+      AND (? IS NULL OR e.occurred_at_ms>=?) AND (? IS NULL OR e.occurred_at_ms<?) AND (? IS NULL OR e.type=?) AND (? IS NULL OR e.source=?)
       ORDER BY coalesce(e.occurred_at_ms,e.received_at_ms) DESC, e.id DESC LIMIT 200`,
       )
       .all(
@@ -1773,6 +1775,7 @@ export class StreamStore {
         toMs ?? null,
         toMs ?? null,
         type??null,type??null,
+        source&&source!=='all'?source:null,source&&source!=='all'?source:null,
       )
       .map((value) => {
         const row = value as Record<string, unknown>;
@@ -1782,7 +1785,7 @@ export class StreamStore {
           payload_json: undefined,
         };
       });
-    const yt = type&&type!=='chat.message'?[]:this.db.prepare(`SELECT m.*,y.person_id,y.display_name,
+    const yt = (source&&source!=='all'&&source!=='youtube')||(type&&type!=='chat.message')?[]:this.db.prepare(`SELECT m.*,y.person_id,y.display_name,
       (SELECT s.id FROM sessions s JOIN platform_streams ps ON ps.session_id=s.id
        WHERE ps.platform='youtube' AND ps.account_id=m.account_id
        AND m.published_at_ms>=ps.started_at_ms AND (ps.ended_at_ms IS NULL OR m.published_at_ms<ps.ended_at_ms)

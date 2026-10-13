@@ -6,6 +6,7 @@
   import Help from "./Help.svelte";
   import TimePatterns from "./TimePatterns.svelte";
   import ComparisonCharts from "./ComparisonCharts.svelte";
+  import {chartMetrics} from './chart-series';
   import AudienceChart from "./AudienceChart.svelte";
   let { profile = "local", defaultTimezone="Europe/Moscow", onPerson }: {profile?:string;defaultTimezone?:string;onPerson:(id:string)=>void} = $props();
   let view=$state(analyticsView(null));
@@ -99,7 +100,7 @@
 {#if data}
   {#if data.patterns&&data.composition}<TimePatterns {data} {onPerson} />{/if}
   <ComparisonCharts streams={data.streamComparison??[]} categories={(data.categories??[]).filter((c:any)=>c.id&&c.name!=="Категория неизвестна")} />
-  {#if view.trend}<section class="panel analytics-chart"><header><h2>Активность по времени</h2><Help id="analytics-signals" label="О сигналах активности" text="Twitch — присутствие в опросах чата. YouTube — окно после сообщения, оценка активности. Эти сигналы не подтверждают просмотр видео. Счётчик площадки агрегатный и не раскрывает личности зрителей."/><label>Метрика графика<select bind:value={view.metric}><option value="viewers">Зрители (все)</option><option value="participants">Участники (все)</option><option value="twitchViewers">Зрители Twitch</option><option value="youtubeViewers">Зрители YouTube</option><option value="observed">Участники Twitch</option><option value="estimated">Оценка активности YouTube</option><option value="messages">Сообщения</option></select></label></header>
+  {#if view.trend}<section class="panel analytics-chart"><header><h2>Активность по времени</h2><Help id="analytics-signals" label="О сигналах активности" text="Twitch — присутствие в опросах чата. YouTube — окно после сообщения, оценка активности. Эти сигналы не подтверждают просмотр видео. Счётчик площадки агрегатный и не раскрывает личности зрителей."/><label>Метрика графика<select bind:value={view.metric}>{#each chartMetrics as choice}<option value={choice.value}>{choice.label}</option>{/each}</select></label></header>
     <p class="small regular-summary">Ядро аудитории: <strong>{data.summary.regulars??0} из {data.summary.entities??0} ({data.summary.regularShare==null?"нет данных":(data.summary.regularShare*100).toFixed(1)+"%"})</strong></p>
     <AudienceChart points={data.timeline} audience={data.audience} metric={view.metric} bind:resolution={view.resolution} showRegulars={view.showRegulars} {timezone} {onPerson} onselection={(open)=>barOpen=open}/>
 

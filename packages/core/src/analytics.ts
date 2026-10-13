@@ -135,7 +135,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     const contains = (sid: string, at: number) => segmentAt(sid,at)!==undefined;
     const clip = (span: Span) => (selectedBySession.get(span.session)??[]).filter(s => s.from < span.to && s.to > span.from).map(s => ({ ...span, from: Math.max(span.from, s.from), to: Math.min(span.to, s.to) }));
     const selectedStreamCount=new Set(selected.map(segment=>segment.session)).size;
-    const messageAuthors=new Map<number,Map<string,number>>();
+    const platformMessageAuthors={twitch:new Map<number,Map<string,number>>(),youtube:new Map<number,Map<string,number>>()};
     const streamAuthors=new Map<string,Map<number,Set<string>>>();
     const sessionMessages = new Map<string, number>();
     const categoryAudience = new Map<string, Set<string>>();
@@ -146,8 +146,9 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     const addDonation=(totals:Map<string,Record<string,string>>,counts:Map<string,number>,key:string,currency:string,amount:string)=>{
         const values=totals.get(key)??{};values[currency]=(BigInt(values[currency]??'0')+BigInt(amount)).toString();totals.set(key,values);counts.set(key,(counts.get(key)??0)+1);
     };
-    const addMessages = (sid: string, at: number, n: number, id: string) => { const segment = segmentAt(sid,at); if (segment) {
-        if(n>0){const atMinute=Math.floor(at/60000)*60000,authors=messageAuthors.get(atMinute)??new Map<string,number>();authors.set(id,(authors.get(id)??0)+n);messageAuthors.set(atMinute,authors);
+    const addMessages = (sid: string, at: number, n: number, id: string, platform: 'twitch'|'youtube') => { const segment = segmentAt(sid,at); if (segment) {
+        if(n>0){const atMinute=Math.floor(at/60000)*60000;
+            const platformAuthors=platformMessageAuthors[platform].get(atMinute)??new Map<string,number>();platformAuthors.set(id,(platformAuthors.get(id)??0)+n);platformMessageAuthors[platform].set(atMinute,platformAuthors);
             const minutes=streamAuthors.get(sid)??new Map<number,Set<string>>(),ids=minutes.get(atMinute)??new Set<string>();ids.add(id);minutes.set(atMinute,ids);streamAuthors.set(sid,minutes);
         }
         sessionMessages.set(sid, (sessionMessages.get(sid) ?? 0) + n);
@@ -159,6 +160,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     const timeline = new Map<number, {
         at: number;
         messages: number;
+        twitchMessages:number;youtubeMessages:number;regularTwitchMessages:number;regularYoutubeMessages:number;followerTwitchMessages:number;followerYoutubeMessages:number;unknownMessages:number;unknownTwitchMessages:number;unknownYoutubeMessages:number;
         observed: number;
         estimated: number;
         regularObserved: number;
@@ -173,7 +175,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         isBreak?: boolean;
     }>();
     const minute = (at: number) => { at = Math.floor(at / 60000) * 60000; let row = timeline.get(at); if (!row) {
-        row = { at, messages: 0, observed: 0, estimated: 0, regularObserved: 0, regularEstimated: 0, regularMessages: 0, viewers: null, twitchViewers: null, youtubeViewers: null, presenceKnown: false,participants:0,regularParticipants:0,followerParticipants:0,followerObserved:0,followerEstimated:0,followerMessages:0 };
+        row = { at, messages: 0, twitchMessages:0,youtubeMessages:0,regularTwitchMessages:0,regularYoutubeMessages:0,followerTwitchMessages:0,followerYoutubeMessages:0,unknownMessages:0,unknownTwitchMessages:0,unknownYoutubeMessages:0, observed: 0, estimated: 0, regularObserved: 0, regularEstimated: 0, regularMessages: 0, viewers: null, twitchViewers: null, youtubeViewers: null, presenceKnown: false,participants:0,regularParticipants:0,followerParticipants:0,followerObserved:0,followerEstimated:0,followerMessages:0 };
         timeline.set(at, row);
     } return row; };
     if (source !== 'youtube') {
@@ -199,7 +201,8 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             e.sessionIds.add(row.session_id);
             e.attendanceSessionIds.add(row.session_id);
             minute(row.at).messages += row.n;
-            addMessages(row.session_id, row.at, row.n, row.person_id);
+            minute(row.at).twitchMessages += row.n;
+            addMessages(row.session_id, row.at, row.n, row.person_id, 'twitch');
         }
         const tips = db.prepare(`SELECT i.person_id,es.session_id,e.occurred_at_ms AS at,json_extract(e.payload_json,'$.currency') AS currency,json_extract(e.payload_json,'$.amountMinor') AS amount FROM effective_events e JOIN identities i ON i.id=e.identity_id JOIN event_sessions es ON es.event_id=e.id WHERE e.type='donation' AND e.occurred_at_ms>=? AND e.occurred_at_ms<? AND es.session_id IN(SELECT value FROM json_each(?)) LIMIT 50001`).all(from, to, sessionIds) as any[];
         if (tips.length > 50000)
@@ -242,7 +245,8 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
                 e.sessionIds.add(chat.sid);
                 e.attendanceSessionIds.add(chat.sid);
                 minute(chat.message_at).messages += chat.n;
-                addMessages(chat.sid, chat.message_at, chat.n, e.id);
+                minute(chat.message_at).youtubeMessages += chat.n;
+                addMessages(chat.sid, chat.message_at, chat.n, e.id, 'youtube');
             }
             e.intervals.push(...spans);
         }
@@ -258,13 +262,15 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     }
     const followRows=db.prepare("SELECT p.source,p.account_id,p.payload_json FROM provider_snapshots p WHERE key='followers' AND id=(SELECT q.id FROM provider_snapshots q WHERE q.source=p.source AND q.account_id=p.account_id AND q.key='followers' ORDER BY observed_at_ms DESC,id DESC LIMIT 1)").all() as {source:string;account_id:string;payload_json:string}[];
     const followerPeople=new Set<string>(),negativeFollowers=new Set<string>();
+    const platformFollowers={twitch:new Set<string>(),youtube:new Set<string>()};
+    const platformNonFollowers={twitch:new Set<string>(),youtube:new Set<string>()};
     for(const snapshot of followRows){
       const data=JSON.parse(snapshot.payload_json);const ids=JSON.stringify((data.followers??[]).map((f:any)=>f.id));
       const members=snapshot.source==='youtube'?db.prepare('SELECT person_id FROM youtube_identities WHERE account_id=? AND external_id IN(SELECT value FROM json_each(?))').all(snapshot.account_id,ids):db.prepare("SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id IN(SELECT value FROM json_each(?))").all(snapshot.account_id,ids);
-      for(const member of members as {person_id:string}[])followerPeople.add(member.person_id);
+      for(const member of members as {person_id:string}[]){followerPeople.add(member.person_id);if(snapshot.source==='twitch'||snapshot.source==='youtube')platformFollowers[snapshot.source].add(member.person_id);}
       if(snapshot.source==='twitch'&&data.complete){
         const absent=db.prepare("SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id NOT IN(SELECT value FROM json_each(?))").all(snapshot.account_id,ids) as {person_id:string}[];
-        for(const member of absent)negativeFollowers.add(member.person_id);
+        for(const member of absent){negativeFollowers.add(member.person_id);platformNonFollowers.twitch.add(member.person_id);}
       }
     }
     const entityIds=JSON.stringify([...entities.keys()]);
@@ -313,7 +319,12 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             }
         }
     }
-    for(const [at,authors] of messageAuthors)for(const [id,n] of authors)if(entities.get(id)?.regular)minute(at).regularMessages+=n;else if(entities.get(id)?.follower)minute(at).followerMessages+=n;
+    for(const platform of ['twitch','youtube'] as const)for(const [at,authors] of platformMessageAuthors[platform])for(const [id,n] of authors){
+        const point=minute(at),core=entities.get(id)?.core;
+        if(core){point.regularMessages+=n;if(platform==='twitch')point.regularTwitchMessages+=n;else point.regularYoutubeMessages+=n;}
+        else if(platformFollowers[platform].has(id)){point.followerMessages+=n;if(platform==='twitch')point.followerTwitchMessages+=n;else point.followerYoutubeMessages+=n;}
+        else if(!platformNonFollowers[platform].has(id)){point.unknownMessages+=n;if(platform==='twitch')point.unknownTwitchMessages+=n;else point.unknownYoutubeMessages+=n;}
+    }
     const categories = new Map<string, {
         id: string;
         name: string;
