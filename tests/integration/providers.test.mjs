@@ -227,7 +227,7 @@ test(
       assert.equal(summary.donations, 2);
       assert.equal(summary.totals.RUB, "58");
       assert.equal(
-        (await f.db.call("events")).every((e) => e.occurred_at_ms === null),
+        (await f.db.call("events")).every((e) => e.occurred_at_ms === Date.parse(donation.created_at.replace(" ","T")+"Z")),
         true,
       );
       await c.scanHistory();
