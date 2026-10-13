@@ -1,4 +1,5 @@
 <script lang="ts">
+  import {platformClass} from './period';
   import DonorLinks from "./DonorLinks.svelte";
   import {
     api,
@@ -48,6 +49,8 @@
       "default",
     ),
     tops = $state<PersonTop[]>([]);
+  let donorCurrency=$state('RUB'),rankRefresh=$state(0);
+  const donorCurrencies=$derived([...new Set(tops.flatMap(p=>Object.keys(p.donationTotals)))].sort());
   const rankLabels=$derived(new Map(tops.map(t=>[t.id,sortBy==='donations'?Object.entries(t.donationTotals).map(([currency,amount])=>money(amount,currency)).join(' · ')||`${t.donationCount} донатов`:sortBy==='observed_minutes'?formatDuration(t.observedMinutes):`${t.messageCount} сообщ.`])));
   let searchResults = $state<Person[]>([]);
   let selectedSession = '';
@@ -94,7 +97,7 @@
     };
   });
   $effect(() => {
-    const by = sortBy;
+    const by = sortBy,currency=donorCurrency;void rankRefresh;
     const session = period;
     let cancelled = false;
     if (by === "default") {
@@ -103,6 +106,7 @@
     }
     const q = new URLSearchParams({ by });
     if (session) q.set("period", session);
+    if(by==='donations')q.set('currency',currency);
     void api<PersonTop[]>(`persons/tops?${q}`)
       .then((rows) => {
         if (!cancelled) tops = rows;
@@ -184,7 +188,7 @@
   });
   import { onMount } from "svelte";
   onMount(() => {
-    const update=()=>{if(selectedId)void refreshPerson(selectedId,false).catch(e=>error=e.message);};
+    const update=()=>{rankRefresh++;if(selectedId)void refreshPerson(selectedId,false).catch(e=>error=e.message);};
     window.addEventListener('sp:data-refresh',update);
     return()=>window.removeEventListener('sp:data-refresh',update);
   });
@@ -210,11 +214,12 @@
           onclick={() => (sortBy = key)}>{label}</button
         >{/each}
     </div>
+    {#if sortBy==='donations'}<div class="donor-filters">{#if donorCurrencies.length>1}<label>Сортировать по валюте<select aria-label="Валюта сортировки донатеров" bind:value={donorCurrency}>{#each [...new Set(['RUB',...donorCurrencies])] as c}<option value={c}>{c}</option>{/each}</select></label>{/if}</div>{/if}
     {#if sortBy !== "default"}<p class="small muted tops-hint">
         Топ по {sortBy === "messages"
           ? "сообщениям"
           : sortBy === "donations"
-            ? "донатам"
+            ? "общей сумме донатов"
             : "наблюдаемым минутам"}{period
           ? ` за последние ${period} дней`
           : " (вся история)"}
@@ -242,7 +247,7 @@
         ><span class="avatar"
           >{person.display_name.slice(0, 1).toUpperCase()}</span
         ><span
-          ><strong>{person.display_name}</strong><small>{person.sources}</small
+          ><strong class={platformClass(person.sources)}>{person.display_name}</strong><small>{person.sources}</small
           ></span
         >{#if sortBy!=='default'}<span class="count">{rankLabels.get(person.id)}</span>{/if}</button
       >{/each}
@@ -254,7 +259,7 @@
         <h3>Выберите человека</h3>
         <p>Активность, донаты и связи аккаунтов.</p>
       </div>{:else}<header>
-        <h2>{detail.display_name}</h2>
+        <h2 class={platformClass(detail.identities.map((i:any)=>i.source))}>{detail.display_name}</h2>
 
       </header>
       {#if stats}<div class="kpi-strip" aria-label="Показатели человека">
@@ -402,6 +407,6 @@
 </div>
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 
-<style>.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}
+<style>.donor-filters{display:flex;gap:12px;flex-wrap:wrap;padding:12px 16px}.donor-filters label{display:grid;gap:6px;font-size:12px}.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}
 .people-grid{height:calc(100dvh - 180px);min-height:360px;}.people-grid>section{min-height:0;display:flex;flex-direction:column;overflow:hidden;margin-bottom:0;}.people-list{min-height:0;flex:1;max-height:none;}.person-scroll{min-height:0;overflow-y:auto;flex:1;}.person-tabs{display:flex;gap:.4rem;padding:.6rem 1rem;border-bottom:1px solid var(--border);flex-wrap:wrap;}.person-tabs button{background:transparent;border:0;padding:.5rem .7rem;}.person-tabs button.active{background:#292438;color:var(--accent);}.person-detail .kpi-strip{padding:12px 16px;gap:12px;}.person-detail .kpi span{font-size:11px;}.person-detail .kpi strong{font-size:18px;color:#fff;}.account-summary{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;}.account-summary>span{display:grid;gap:4px;}@media(max-width:760px){.people-grid{height:auto;min-height:0;}.people-grid>section{overflow:visible;}.people-list{max-height:260px;}.person-scroll{overflow:visible;}}
 </style>

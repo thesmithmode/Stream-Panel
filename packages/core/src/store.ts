@@ -1,3 +1,4 @@
+import {registerDonationSum,donorRanking} from './donation-statistics.js';
 import {parseDonationTime} from './donation-time.js';
 import {streamMetrics} from "./stream-metrics.js";
 import {personActivity} from "./person-activity.js";
@@ -52,6 +53,7 @@ export class StreamStore {
 
   constructor(path: string, private readonly profile?: string) {
     this.db = openProfileDatabase(path, profile);
+    registerDonationSum(this.db);
     try {
       this.db.pragma("foreign_keys = ON");
       this.db.pragma("busy_timeout = 5000");
@@ -2501,7 +2503,7 @@ export class StreamStore {
     sessionId?: string,
     excludedBotLogins: readonly string[] = [],
     limit = 50,
-    fromMs=0,
+    fromMs=0,toMs?:number,currency='RUB',
   ): Record<string, unknown>[] {
     if(!Number.isSafeInteger(fromMs)||fromMs<0)throw new Error("INVALID_PERIOD");
     if (!["messages", "donations", "observed_minutes"].includes(sortBy))
@@ -2511,6 +2513,7 @@ export class StreamStore {
     const sid = sessionId ?? null;
     const inSession =
       `(coalesce(e.occurred_at_ms,e.received_at_ms)>=${fromMs} AND (? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?)))`;
+    if(sortBy==='donations')return donorRanking(this.db,sessionId,botJson,capped,fromMs,toMs,currency);
     if (sortBy === "observed_minutes") {
       if (!sessionId) {
         // Rank exact lifetime minutes across all confirmed observations.

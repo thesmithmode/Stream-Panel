@@ -30,6 +30,18 @@ for profile in ('ruslan', 'gulnaz'):
                 if audit and json.loads(audit[1]).get('occurredAtMs') is None:
                     facts['emptyTimeUpdatesPreservedUnknown' if json.loads(audit[0]).get('occurredAtMs') is None else 'explicitTimeClears']+=1
         print('da attribution_facts='+json.dumps(facts,sort_keys=True))
+        # Profile-local rules and the explicitly reported donor/viewer pair. Counts only; no names or provider IDs are logged.
+        rule_table=f'p_{profile}_donor_bindings'
+        if db.execute('SELECT 1 FROM sqlite_master WHERE name=?',(rule_table,)).fetchone():
+            broken=db.execute(f'SELECT count(*) FROM {rule_table} b LEFT JOIN p_{profile}_persons p ON p.id=b.person_id LEFT JOIN p_{profile}_identities i ON i.id=b.identity_id WHERE p.id IS NULL OR (b.identity_id IS NOT NULL AND i.id IS NULL)').fetchone()[0]
+            keys=('егор4ик','egor4ik','егор4ик','egor4ик')
+            viewers=db.execute(f"SELECT DISTINCT person_id FROM p_{profile}_identities WHERE source='twitch' AND match_key='chikist007'").fetchall()
+            rules=db.execute(f'SELECT count(*) FROM {rule_table} WHERE name_key IN(?,?,?,?)',keys).fetchone()[0]
+            donor_rows=db.execute(f"SELECT coalesce(c.identity_id,e.identity_id) FROM {table} e LEFT JOIN p_{profile}_donation_corrections c ON c.event_id=e.id JOIN p_{profile}_identities original ON original.id=e.identity_id WHERE e.type='donation' AND original.match_key IN(?,?,?,?) AND coalesce(c.deleted,0)=0",keys).fetchall()
+            owners=[db.execute(f'SELECT person_id FROM p_{profile}_identities WHERE id=?',(row[0],)).fetchone() for row in donor_rows]
+            requested={'orphanRules':broken,'reportedNicknameRules':rules,'reportedViewerMatches':len(viewers),'reportedNicknameDonations':len(donor_rows),'reportedViewerDonations':sum(owner is not None and owner in viewers for owner in owners)}
+            print('da binding_facts='+json.dumps(requested,sort_keys=True))
+
         if profile == 'gulnaz':
             streams=db.execute(f"SELECT started_at_ms,ended_at_ms FROM p_{profile}_sessions s WHERE NOT EXISTS(SELECT 1 FROM p_{profile}_session_tombstones t WHERE t.session_id=s.id)").fetchall()
             def parsed(raw,offset):

@@ -109,7 +109,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await page.getByLabel('Только ядро').check();assert.equal(await page.getByRole('button',{name:`Occasional ${profile}`,exact:true}).count(),0);
    await page.getByLabel('Сортировка').selectOption('attendanceRatio');
    await page.getByLabel('Вид дней и часов').selectOption('table');assert.equal(await page.locator('.hour-heatmap').count(),0);
-   const hourSection=page.getByRole('heading',{name:'Активность по дням и часам',exact:true}).locator('..').locator('..');
+   const hourSection=page.locator('.hour-table');await hourSection.locator('summary').click();
    const firstHour=analyticsData.hours[0],metricValue=(cell,metric)=>metric==='viewers'?(cell.viewerSamples?cell.viewersTotal/cell.viewerSamples:null):metric==='messages'?(cell.sampleMinutes?cell.messages*60/cell.sampleMinutes:null):metric==='estimated'?(cell.sampleMinutes?cell.estimated/cell.sampleMinutes:null):(cell.observedKnownMinutes?cell.observed/cell.observedKnownMinutes:null);
    for(const metric of ['observed','estimated','messages','viewers']){await page.getByLabel('Метрика карты').selectOption(metric);const displayed=(await hourSection.locator('.analytics-table tbody tr').first().locator('td').nth(1).textContent()).trim(),value=metricValue(firstHour,metric);assert.equal(displayed,value===null?'нет данных':value.toFixed(1),`hour table should render ${metric} from API data`);}
    await page.getByLabel('Вид дней и часов').selectOption('map');assert.equal(await page.locator('.hour-heatmap').count(),1);
@@ -143,11 +143,11 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await page.getByLabel('Только ядро').check();
    const defaultCoreCount=parseInt(await page.locator('.regular-summary strong').textContent(),10);
    const audienceSection=page.getByRole('heading',{name:'Возвращаемость участников',exact:true}).locator('..').locator('..');
-   const visibleCoreRows=await audienceSection.locator('.analytics-table tbody tr').count();
+   const visibleCoreRows=await audienceSection.locator('.compact-audience-table tbody tr').count();
    assert.equal(visibleCoreRows,defaultCoreCount,'core-only filter must use default-qualified audience');
-   assert.equal(await audienceSection.locator('.analytics-table tbody tr').evaluateAll(rows=>rows.every(row=>row.querySelector('.core-badge'))),true);
+   assert.equal(await audienceSection.locator('.compact-audience-table tbody tr').evaluateAll(rows=>rows.every(row=>row.querySelector('.core-badge'))),true);
    await page.getByLabel('Только ядро').uncheck();
-   for(const sort of ['observedMinutes','estimatedChatMinutes','sessions','messages','attendanceRatio']){await page.getByLabel('Сортировка').selectOption(sort);const names=await audienceSection.locator('.analytics-table tbody tr').evaluateAll(rows=>rows.map(row=>row.cells[0].querySelector('button')?.textContent?.trim()??'')),expected=[...analyticsData.audience].sort((a,b)=>sort==='sessions'?b.sessionIds.length-a.sessionIds.length:(b[sort]??0)-(a[sort]??0)).map(entity=>entity.name);assert.deepEqual(names,expected,`${sort} order follows descending API metric`);}
+   for(const sort of ['observedMinutes','estimatedChatMinutes','sessions','messages','attendanceRatio']){await page.getByLabel('Сортировка').selectOption(sort);const names=await audienceSection.locator('.compact-audience-table tbody tr').evaluateAll(rows=>rows.map(row=>row.cells[0].querySelector('button')?.textContent?.trim()??'')),expected=[...analyticsData.audience].sort((a,b)=>sort==='sessions'?b.sessionIds.length-a.sessionIds.length:(b[sort]??0)-(a[sort]??0)).map(entity=>entity.name);assert.deepEqual(names,expected,`${sort} order follows descending API metric`);}
    await page.getByLabel('Поиск участника').fill('Regular');await page.getByRole('button',{name:`Интервалы Regular ${profile}`,exact:true}).click();
    await page.getByRole('heading',{name:`Активность: Regular ${profile}`}).waitFor();assert.equal(await page.locator('.minute-dot').count(),1440);
    for(const state of ['observed','unknown'])assert.ok(await page.locator(`.minute-dot.${state}`).count()>0,`selected regular viewer timeline includes ${state}`);

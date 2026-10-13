@@ -2,7 +2,7 @@ name: Read-only server health
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [dev, main]
 permissions:
   contents: read
 concurrency:

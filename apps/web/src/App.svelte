@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PeriodSelect from './PeriodSelect.svelte';
   import { onMount } from "svelte";
   import {readRoute,routeUrl,type View} from "./route";
   import {ConnectionError} from "./request";
@@ -242,20 +243,12 @@
       {#if status?.storage?.freeBytes!==null&&status?.storage?.freeBytes<status?.storage?.reserveBytes}<p class="notice" role="status">{status.storage.freeBytes<(status.storage.minFreeBytes??16777216)?'Критически мало места: запись временно остановлена, чтобы не повредить БД. Проверьте «Настройки».':'На сервере мало свободного места. Панель очищает старые копии; сбор данных продолжается. Проверьте «Настройки». '}</p>{/if}
       {#if outdated}<div role="status" class="notice">Доступна новая версия панели для обоих профилей. <button class="outline small" onclick={()=>location.reload()}>Обновить панель</button></div>{/if}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}
-      {#key `${profile}:${tab}:${sessionFilter}:${tab === "people" ? peoplePeriod : ""}`}
+      {#key `${profile}:${tab}:${sessionFilter}`}
       {#if !scopeReady}<div class="panel empty" role="status">Загружаем данные…</div>{:else}
       {#if tab === "people"}<div
             class="session-picker"
           >
-            <label
-              >Период<select
-                aria-label="Период аналитики"
-                bind:value={peoplePeriod}
-                onchange={()=>{epoch++;clearScope();saveRoute();void action(async()=>{});}}
-                ><option value="">Вся история</option
-                ><option value="7">Последние 7 дней</option><option value="30">Последние 30 дней</option></select
-              ></label
-            >
+            <PeriodSelect label="Период аналитики" value={peoplePeriod?Number(peoplePeriod):'all'} onchange={value=>{peoplePeriod=value==='all'?'':String(value);epoch++;saveRoute();void action(async()=>{});}}/>
           </div>{/if}
       {#if tab === "overview"}<ChannelOverview connect={()=>navigate("connections")} />
       {:else if tab === "stream"}<Overview session={sessions.find(s=>s.id===sessionFilter)}

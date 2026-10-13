@@ -389,7 +389,7 @@ export async function createApplication(
       string(q.session) || undefined,
       configuration.value.excludedBotLogins,
       q.limit === undefined ? 50 : Number(q.limit),
-      peopleFrom(request.query),
+      q.from===undefined?peopleFrom(request.query):Number(q.from),q.to===undefined?undefined:Number(q.to),string(q.currency)||'RUB',
     );
   });
   app.get("/api/v1/insights", async (request) =>
