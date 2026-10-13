@@ -38,6 +38,11 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   assert.equal(await rank.locator('tbody td:nth-child(2) strong').first().textContent(),'5 мин');
   await assertUiLayout(page);
   assert.equal(await page.evaluate(() => {
+    const ranking = document.querySelector('.audience-ranking').getBoundingClientRect();
+    const feed = document.querySelector('.stream-feed').getBoundingClientRect();
+    return ranking.bottom <= feed.top;
+  }), true, 'audience ranking appears before the event feed on desktop');
+  assert.equal(await page.evaluate(() => {
     const panels = [...document.querySelectorAll('.stream-details-grid > .panel')].map(p => p.getBoundingClientRect());
     return panels.length === 2 && panels[0].bottom <= panels[1].top;
   }), true, 'audience table and follower panel align vertically');
@@ -79,6 +84,12 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   assert.equal(await detail.getByRole('button',{name:'Silent Viewer',exact:true}).count(),0);
   await page.getByRole('button',{name:'Закрыть детализацию',exact:true}).click();
   await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(() => {
+    const ranking = document.querySelector('.audience-ranking').getBoundingClientRect();
+    const feed = document.querySelector('.stream-feed').getBoundingClientRect();
+    const events = document.querySelector('.stream-feed .event-list');
+    return ranking.bottom <= feed.top && events.getBoundingClientRect().height <= Math.min(360, innerHeight / 2) + 1 && getComputedStyle(events).overflowY === 'auto';
+  }), true, 'mobile ranking precedes a compact scrollable event feed');
   assert.equal(await page.evaluate(() => {
     const nav = [...document.querySelectorAll('.sidebar nav button')].map(b => b.getBoundingClientRect());
     const cards = [...document.querySelectorAll('.stream-metrics .metric')].map(c => c.getBoundingClientRect());

@@ -120,7 +120,10 @@
   {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceData}
     <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric={audienceMetric} {resolution} showResolution={false} showRegulars={true} {onPerson} oninterval={(interval)=>eventInterval=interval}/>
   {:else}<p class="empty-small" role="status">{audienceBusy?'Загружаем график…':'Выберите стрим'}</p>{/if}
-  <section class="feed stream-feed">
+</section>
+<div class="stream-details-grid"><AudienceRanking people={audienceData?.audience??[]} {onPerson} showIntervals streamStart={session?.started_at_ms??0} streamEnd={session?.ended_at_ms??Date.now()}/>
+{#if sessionFilter}<Following sessionId={sessionFilter} {onPerson} />{/if}</div>
+<section class="panel feed stream-feed">
     <header>
       <h2>{isMessageMetric(audienceMetric)?'История сообщений':'Лента событий'}</h2>
       <div class="event-filters"><span class="small muted">{sourceFilter==='all'?'Все площадки':sourceFilter==='twitch'?'Twitch':'YouTube'}</span>
@@ -132,10 +135,5 @@
         streamStart={session?.started_at_ms} streamEnd={session?.ended_at_ms??Date.now()}
       />{:else}<p class="empty-small">Событий этого типа нет</p>{/if}
   </section>
-
-
-</section>
-<div class="stream-details-grid"><AudienceRanking people={audienceData?.audience??[]} {onPerson} showIntervals streamStart={session?.started_at_ms??0} streamEnd={session?.ended_at_ms??Date.now()}/>
-{#if sessionFilter}<Following sessionId={sessionFilter} {onPerson} />{/if}</div>
 
 <style>.stream-feed{border-top:1px solid var(--border);margin-top:16px}.stream-feed header{gap:12px;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;border-bottom:1px solid var(--border)}.stream-feed h2{font-size:16px;margin:0}.series-panel header{flex-wrap:wrap;gap:12px}.chart-controls{display:flex;gap:8px;min-width:0}.chart-controls select{border-radius:999px;width:auto;max-width:100%;padding:8px 30px 8px 12px;font-size:13px}.chart-controls select:first-child{min-width:0;flex:1}.chart-controls select:last-child{flex-shrink:0}.stream-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}@media(max-width:600px){.chart-controls{width:100%;justify-content:space-between}}.stream-details-grid{display:grid;grid-template-columns:1fr;gap:20px;margin-bottom:20px;align-items:start}@media(max-width:900px){.stream-details-grid{grid-template-columns:1fr}}</style>
