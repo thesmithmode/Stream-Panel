@@ -362,11 +362,18 @@ export async function createApplication(
   app.get('/api/v1/donor-nicknames',()=>db.call('donorNicknames'));
   app.get('/api/v1/persons/:id/donor-bindings',request=>db.call('donorBindings',string(object(request.params).id)));
   app.post('/api/v1/persons/:id/donor-bindings',request=>{const b=object(request.body);return db.call('bindDonorNickname',string(object(request.params).id),string(b.name),Number(b.revision),Date.now());});
+  function peopleFrom(query: unknown): number {
+    const period=string(object(query).period);
+    if (!period) return 0;
+    if (period!=="7" && period!=="30") throw new Error("INVALID_PERIOD");
+    return Date.now()-Number(period)*86400000;
+  }
   app.get("/api/v1/persons", async (request) =>
     db.call(
       "persons",
       string(object(request.query).search),
       configuration.value.excludedBotLogins,
+      peopleFrom(request.query),
     ),
   );
   app.get("/api/v1/persons/tops", async (request) => {
@@ -382,6 +389,7 @@ export async function createApplication(
       string(q.session) || undefined,
       configuration.value.excludedBotLogins,
       q.limit === undefined ? 50 : Number(q.limit),
+      peopleFrom(request.query),
     );
   });
   app.get("/api/v1/insights", async (request) =>
@@ -421,6 +429,7 @@ export async function createApplication(
       session,
       configuration.value.excludedBotLogins,
       analyticsSettings(configuration.value.analyticsSettings).chatWindowMinutes,
+      peopleFrom(request.query),
     );
   });
   app.get("/api/v1/persons/:id/candidates", async (request) => {

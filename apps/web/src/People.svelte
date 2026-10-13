@@ -20,13 +20,13 @@
   import PersonMetadata from "./PersonMetadata.svelte";
   let {
     people,
-    sessionFilter = "",
+    period = "",
     initialId = "",
     onChange,
     onSelect,
   }: {
     people: Person[];
-    sessionFilter?: string;
+    period?: string;
     initialId?: string;
     onSelect:(id:string)=>void;
     onChange: () => Promise<void>;
@@ -80,7 +80,7 @@
       return;
     }
     const timer = setTimeout(() => {
-      void api<Person[]>(`persons?search=${encodeURIComponent(term)}`)
+      void api<Person[]>(`persons?search=${encodeURIComponent(term)}&period=${period}`)
         .then((rows) => {
           if (!cancelled) searchResults = rows;
         })
@@ -95,14 +95,14 @@
   });
   $effect(() => {
     const by = sortBy;
-    const session = sessionFilter;
+    const session = period;
     let cancelled = false;
     if (by === "default") {
       tops = [];
       return;
     }
     const q = new URLSearchParams({ by });
-    if (session) q.set("session", session);
+    if (session) q.set("period", session);
     void api<PersonTop[]>(`persons/tops?${q}`)
       .then((rows) => {
         if (!cancelled) tops = rows;
@@ -115,7 +115,7 @@
     };
   });
   async function loadStats(id: string) {
-    const q = sessionFilter ? `?session=${sessionFilter}` : "";
+    const q = period ? `?period=${period}` : "";
     const value = await api<PersonStats>(`persons/${id}/stats${q}`);
     if (selectedId === id) stats = value;
   }
@@ -128,13 +128,13 @@
     if(selectedId!==id)onSelect(id);
     if(selectedId!==id){detailTab="overview";showDonorLinks=false;}
     selectedId = id;
-    selectedSession = sessionFilter;
+    selectedSession = period;
     error = "";
     stats = null;
     detail = null;
     detailLoading = true;
     try {
-      const [person, matches,metrics] = await Promise.all([api(`persons/${id}?events=false`),api<string[]>(`persons/${id}/candidates`),api<PersonStats>(`persons/${id}/stats${sessionFilter ? `?session=${sessionFilter}` : ""}`)]);
+      const [person, matches,metrics] = await Promise.all([api(`persons/${id}?events=false`),api<string[]>(`persons/${id}/candidates`),api<PersonStats>(`persons/${id}/stats${period ? `?period=${period}` : ""}`)]);
       if (selectedId !== id) return;
       detail = person;
       name = detail.display_name;
@@ -179,7 +179,7 @@
     await select(other.id);
   }
   $effect(() => {
-    const id=initialId,session=sessionFilter;
+    const id=initialId,session=period;
     if (id) untrack(()=>{if(selectedId!==id||selectedSession!==session)void select(id);});
   });
   import { onMount } from "svelte";
@@ -215,8 +215,8 @@
           ? "сообщениям"
           : sortBy === "donations"
             ? "донатам"
-            : "наблюдаемым минутам"}{sessionFilter
-          ? " за выбранную сессию"
+            : "наблюдаемым минутам"}{period
+          ? ` за последние ${period} дней`
           : " (вся история)"}
       </p>{/if}
     <div class="search">
@@ -275,8 +275,8 @@
             >
           </div>
           <div class="kpi">
-            <span>{sessionFilter ? "Время в этом стриме" : "Всего наблюдаемого времени"}</span><strong
-              >{formatDuration(sessionFilter ? stats.observedMinutesThisSession : stats.totalObservedMinutes)}</strong
+            <span>Наблюдаемое время</span><strong
+              >{formatDuration(stats.totalObservedMinutes)}</strong
             >
           </div>
           <div class="kpi">
@@ -300,7 +300,7 @@
         <div class="account-summary">{#each detail.identities as identity}<span><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong></span>{/each}</div>
         <div class="actions"><button class="outline small" onclick={()=>{detailTab='donations';showDonorLinks=true;}}>Привязать донаты</button></div>
         <PersonActivity personId={detail.id} />
-        <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} sessionId={sessionFilter} onPerson={(id)=>void select(id)} />{/if}</details>
+        <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} sessionId="" onPerson={(id)=>void select(id)} />{/if}</details>
       {:else if detailTab==='accounts'}
         <label
           >Имя группы
@@ -395,7 +395,7 @@
        <PersonNotes personId={detail.id} />
       {:else}
        <PersonActivity personId={detail.id} />
-       <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} sessionId={sessionFilter} onPerson={(id)=>void select(id)} />{/if}</details>
+       <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} sessionId="" onPerson={(id)=>void select(id)} />{/if}</details>
       {/if}
       </div>{/if}
   </section>

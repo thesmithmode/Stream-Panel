@@ -1689,7 +1689,9 @@ export class StreamStore {
   persons(
     search = "",
     excludedBotLogins: readonly string[] = [],
+    fromMs=0,
   ): Record<string, unknown>[] {
+    if(!Number.isSafeInteger(fromMs)||fromMs<0)throw new Error("INVALID_PERIOD");
     const excluded = this.analyticsExclusions(excludedBotLogins);
     const botJson = JSON.stringify([...excluded]);
     const term = search;
@@ -1698,7 +1700,7 @@ export class StreamStore {
     return this.db
       .prepare(
         `SELECT p.id, p.display_name, p.revision,
-          coalesce(ec.event_count, 0) + (SELECT count(*) FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE y.person_id=p.id) AS event_count,
+          coalesce(ec.event_count, 0) + (SELECT count(*) FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE y.person_id=p.id AND m.published_at_ms>=${fromMs}) AS event_count,
           (SELECT group_concat(DISTINCT source) FROM (SELECT source FROM identities WHERE person_id=p.id UNION ALL SELECT 'youtube' AS source FROM youtube_identities WHERE person_id=p.id)) AS sources,
           CASE WHEN EXISTS(
             SELECT 1 FROM identities ib
@@ -1708,7 +1710,7 @@ export class StreamStore {
         LEFT JOIN (
           SELECT i.person_id, count(e.id) AS event_count
           FROM identities i
-          LEFT JOIN effective_events e ON e.identity_id = i.id
+          LEFT JOIN effective_events e ON e.identity_id = i.id AND coalesce(e.occurred_at_ms,e.received_at_ms)>=${fromMs}
           GROUP BY i.person_id
         ) ec ON ec.person_id = p.id
         WHERE (EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id) OR EXISTS(SELECT 1 FROM youtube_identities y WHERE y.person_id=p.id) OR (NOT EXISTS(SELECT 1 FROM person_merges m WHERE m.source_person_id=p.id AND m.undone_at_ms IS NULL) AND (EXISTS(SELECT 1 FROM person_notes n WHERE n.person_id=p.id) OR EXISTS(SELECT 1 FROM person_tags t WHERE t.person_id=p.id) OR EXISTS(SELECT 1 FROM person_preferences pref WHERE pref.person_id=p.id))))
@@ -1720,6 +1722,7 @@ export class StreamStore {
               WHERE i.person_id=p.id AND instr(a.candidate_key, ?) > 0
             ) OR EXISTS(SELECT 1 FROM youtube_identities y JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND instr(a.match_key,?)>0)
           )
+          AND (${fromMs}=0 OR coalesce(ec.event_count,0)>0 OR EXISTS(SELECT 1 FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE y.person_id=p.id AND m.published_at_ms>=${fromMs}) OR EXISTS(SELECT 1 FROM presence_members m JOIN presence_polls poll ON poll.id=m.poll_id JOIN identities i ON i.id=m.identity_id WHERE i.person_id=p.id AND poll.status='complete' AND poll.completed_at_ms>=${fromMs}))
         ORDER BY event_count DESC, p.display_name
         LIMIT 500`,
       )
@@ -2280,18 +2283,18 @@ export class StreamStore {
   }
 
   /** Load presence once, then union minute buckets in memory. Query count is independent of people/streams. */
-  private batchObserved(personIds?:readonly string[],sessionId?:string,beforeMs?:number) {
+  private batchObserved(personIds?:readonly string[],sessionId?:string,beforeMs?:number,fromMs=0) {
     const now=Date.now(),ids=personIds?JSON.stringify(personIds):null;
     const polls=this.db.prepare(`SELECT DISTINCT i.person_id,p.session_id,p.started_at_ms,p.completed_at_ms,s.started_at_ms AS stream_start,s.ended_at_ms AS stream_end
       FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id JOIN sessions s ON s.id=p.session_id
-      WHERE p.status='complete' AND (? IS NOT NULL OR s.kind='platform') AND (? IS NULL OR i.person_id IN(SELECT value FROM json_each(?))) AND (? IS NULL OR p.session_id=?)`).all(sessionId??null,ids,ids,sessionId??null,sessionId??null) as {person_id:string;session_id:string;started_at_ms:number;completed_at_ms:number;stream_start:number;stream_end:number|null}[];
+      WHERE p.status='complete' AND p.completed_at_ms>=${fromMs} AND (? IS NOT NULL OR s.kind='platform') AND (? IS NULL OR i.person_id IN(SELECT value FROM json_each(?))) AND (? IS NULL OR p.session_id=?)`).all(sessionId??null,ids,ids,sessionId??null,sessionId??null) as {person_id:string;session_id:string;started_at_ms:number;completed_at_ms:number;stream_start:number;stream_end:number|null}[];
     const links=this.db.prepare('SELECT session_id,started_at_ms,ended_at_ms FROM platform_streams WHERE (? IS NULL OR session_id=?)').all(sessionId??null,sessionId??null) as {session_id:string;started_at_ms:number;ended_at_ms:number|null}[];
     const bySession=new Map<string,typeof links>();for(const link of links){const rows=bySession.get(link.session_id)??[];rows.push(link);bySession.set(link.session_id,rows);}
     const windows=new Map<string,{fromMs:number;toMs:number;spans:{from:number;to:number}[]}>();
     const result=new Map<string,Map<string,{minutes:Set<number>;first:number|null;last:number|null;startedAt:number}>>();
     for(const poll of polls){
       let w=windows.get(poll.session_id);
-      if(!w){const fromMs=Math.floor(poll.stream_start/60000)*60000,toMs=Math.min(Math.ceil((poll.stream_end??now)/60000)*60000,beforeMs??Infinity);w={fromMs,toMs,spans:windowsFromLinks(bySession.get(poll.session_id)??[],fromMs,toMs)};windows.set(poll.session_id,w);}
+      if(!w){const rangeStart=Math.max(fromMs,Math.floor(poll.stream_start/60000)*60000),toMs=Math.min(Math.ceil((poll.stream_end??now)/60000)*60000,beforeMs??Infinity);w={fromMs:rangeStart,toMs,spans:windowsFromLinks(bySession.get(poll.session_id)??[],rangeStart,toMs)};windows.set(poll.session_id,w);}
       if(w.toMs<=w.fromMs||w.toMs-w.fromMs>31*86400000)continue;
       const person=result.get(poll.person_id)??new Map();result.set(poll.person_id,person);
       const observation=person.get(poll.session_id)??{minutes:new Set<number>(),first:null,last:null,startedAt:poll.stream_start};person.set(poll.session_id,observation);
@@ -2325,17 +2328,17 @@ export class StreamStore {
   private notBotClause(alias = "i"): string {
     return `${alias}.match_key NOT IN (SELECT value FROM json_each(?))`;
   }
-  private youtubePersonActivity(personId: string, sessionId?: string, botJson = this.botJson(),chatWindowMinutes=5) {
+  private youtubePersonActivity(personId: string, sessionId?: string, botJson = this.botJson(),chatWindowMinutes=5,fromMs=0) {
     const excluded = this.db.prepare(`SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=? AND (y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))) LIMIT 1`).get(personId,botJson,botJson);
     if (excluded) return {messageCount:0,estimatedChatMinutes:0,sessionIds:new Set<string>(),firstSeenMs:null};
     const now = Date.now();
-    const rows = this.db.prepare(`SELECT m.id,m.published_at_ms FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE y.person_id=? AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(personId) as {id:string;published_at_ms:number}[];
+    const rows = this.db.prepare(`SELECT m.id,m.published_at_ms FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE m.published_at_ms>=${fromMs} AND y.person_id=? AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(personId) as {id:string;published_at_ms:number}[];
     const matched = this.db.prepare(`SELECT DISTINCT m.id,m.published_at_ms,s.id AS session_id,s.started_at_ms,coalesce(s.ended_at_ms,?) AS ended_at_ms
       FROM youtube_identities y JOIN youtube_messages m ON m.account_id=y.account_id AND m.author_id=y.external_id
       JOIN platform_streams ps ON ps.platform='youtube' AND ps.account_id=m.account_id AND m.published_at_ms>=ps.started_at_ms AND (ps.ended_at_ms IS NULL OR m.published_at_ms<ps.ended_at_ms)
       JOIN sessions s ON s.id=ps.session_id
-      WHERE y.person_id=? AND (? IS NULL OR s.id=?) AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(now,personId,sessionId??null,sessionId??null) as {id:string;published_at_ms:number;session_id:string;started_at_ms:number;ended_at_ms:number}[];
-    const spans = unionSpans(matched.map(row=>({session:row.session_id,kind:'chat_proxy' as const,from:Math.max(row.started_at_ms,row.published_at_ms),to:Math.min(row.ended_at_ms,row.published_at_ms+chatWindowMinutes*60000)})));
+      WHERE m.published_at_ms>=${fromMs} AND y.person_id=? AND (? IS NULL OR s.id=?) AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(now,personId,sessionId??null,sessionId??null) as {id:string;published_at_ms:number;session_id:string;started_at_ms:number;ended_at_ms:number}[];
+    const spans = unionSpans(matched.map(row=>({session:row.session_id,kind:'chat_proxy' as const,from:Math.max(fromMs,row.started_at_ms,row.published_at_ms),to:Math.min(row.ended_at_ms,row.published_at_ms+chatWindowMinutes*60000)})));
     return {messageCount:sessionId?new Set(matched.map(row=>row.id)).size:rows.length,
       estimatedChatMinutes:spans.reduce((total,span)=>total+(span.to-span.from)/60000,0),
       sessionIds:new Set(matched.map(row=>row.session_id)),firstSeenMs:rows.length?rows.reduce((first,row)=>Math.min(first,row.published_at_ms),Infinity):null};
@@ -2346,7 +2349,9 @@ export class StreamStore {
     sessionId?: string,
     excludedBotLogins: readonly string[] = [],
     chatWindowMinutes=5,
+    fromMs=0,
   ): Record<string, unknown> {
+    if(!Number.isSafeInteger(fromMs)||fromMs<0)throw new Error("INVALID_PERIOD");
     const person = this.db
       .prepare("SELECT id, display_name FROM persons WHERE id=?")
       .get(personId) as { id: string; display_name: string } | undefined;
@@ -2355,8 +2360,8 @@ export class StreamStore {
     const excludedPerson=Boolean(this.db.prepare(`SELECT 1 FROM identities WHERE person_id=? AND match_key IN(SELECT value FROM json_each(?)) UNION ALL SELECT 1 FROM youtube_identities WHERE person_id=? AND (is_owner=1 OR external_id=account_id OR match_key IN(SELECT value FROM json_each(?))) LIMIT 1`).get(personId,botJson,personId,botJson));
     const sid = sessionId ?? null;
     const inSession =
-      "(? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?))";
-    const youtube = this.youtubePersonActivity(personId,sessionId,botJson,chatWindowMinutes);
+      `(coalesce(e.occurred_at_ms,e.received_at_ms)>=${fromMs} AND (? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?)))`;
+    const youtube = this.youtubePersonActivity(personId,sessionId,botJson,chatWindowMinutes,fromMs);
     const messageCount = youtube.messageCount + (
       this.db
         .prepare(
@@ -2424,7 +2429,7 @@ export class StreamStore {
            FROM presence_polls p
            JOIN presence_members m ON m.poll_id = p.id
            JOIN identities i ON i.id = m.identity_id
-           WHERE i.person_id = ? AND p.status = 'complete'`,
+           WHERE i.person_id = ? AND p.status = 'complete' AND p.completed_at_ms>=${fromMs}`,
         )
         .get(personId) as { first_ms: number | null; last_ms: number | null };
       firstObservedMs = bounds.first_ms;
@@ -2433,7 +2438,7 @@ export class StreamStore {
     const sessions = this.db
       .prepare(
         `SELECT id, started_at_ms, ended_at_ms FROM sessions
-         WHERE kind='platform' ORDER BY started_at_ms DESC`,
+         WHERE kind='platform' AND coalesce(ended_at_ms,${Date.now()})>${fromMs} ORDER BY started_at_ms DESC`,
       )
       .all() as {
       id: string;
@@ -2447,8 +2452,8 @@ export class StreamStore {
     const attended = new Set(youtube.sessionIds);
     let offsetSum = 0;
     let offsetSessions = 0;
-    const observations=excludedPerson?new Map():this.batchObserved([personId]).get(personId)??new Map();
-    const beforeFollow=followedAtMs===null||excludedPerson?new Map():this.batchObserved([personId],undefined,followedAtMs).get(personId)??new Map();
+    const observations=excludedPerson?new Map():this.batchObserved([personId],undefined,undefined,fromMs).get(personId)??new Map();
+    const beforeFollow=followedAtMs===null||excludedPerson?new Map():this.batchObserved([personId],undefined,followedAtMs,fromMs).get(personId)??new Map();
     for (const [id,obs] of observations) {
       observedBeforeFollowMinutes+=beforeFollow.get(id)?.minutes.size??0;
       if(obs.minutes.size){attended.add(id);observedSum+=obs.minutes.size;observedSessions++;
@@ -2496,14 +2501,16 @@ export class StreamStore {
     sessionId?: string,
     excludedBotLogins: readonly string[] = [],
     limit = 50,
+    fromMs=0,
   ): Record<string, unknown>[] {
+    if(!Number.isSafeInteger(fromMs)||fromMs<0)throw new Error("INVALID_PERIOD");
     if (!["messages", "donations", "observed_minutes"].includes(sortBy))
       throw new Error("INVALID_SORT");
     const capped = Math.min(Math.max(1, Math.floor(limit) || 50), 100);
     const botJson = this.botJson(excludedBotLogins);
     const sid = sessionId ?? null;
     const inSession =
-      "(? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?))";
+      `(coalesce(e.occurred_at_ms,e.received_at_ms)>=${fromMs} AND (? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?)))`;
     if (sortBy === "observed_minutes") {
       if (!sessionId) {
         // Rank exact lifetime minutes across all confirmed observations.
@@ -2516,12 +2523,12 @@ export class StreamStore {
              JOIN identities i ON i.person_id = p.id
              JOIN presence_members m ON m.identity_id = i.id
              JOIN presence_polls poll ON poll.id = m.poll_id AND poll.status='complete'
-             WHERE ${this.notBotClause("i")}
+             WHERE poll.completed_at_ms>=${fromMs} AND ${this.notBotClause("i")}
              GROUP BY p.id
              ORDER BY poll_count DESC, p.display_name`,
           )
           .all(botJson) as Record<string, unknown>[];
-        const observations=this.batchObserved(rows.map(row=>String(row.id)));
+        const observations=this.batchObserved(rows.map(row=>String(row.id)),undefined,undefined,fromMs);
         return rows.map(row=>({id:row.id,display_name:row.display_name,revision:row.revision,sources:row.sources,messageCount:0,donationCount:0,donationTotals:{},observedMinutes:[...(observations.get(String(row.id))?.values()??[])].reduce((sum,obs)=>sum+obs.minutes.size,0)}))
           .sort((a,b)=>b.observedMinutes-a.observedMinutes).slice(0,capped);
       }
@@ -2548,7 +2555,7 @@ export class StreamStore {
       WHERE ${inSession} AND ${typeFilter} AND ${this.notBotClause("i")} GROUP BY i.person_id
       UNION ALL
       SELECT y.person_id,count(*) AS n FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id
-      WHERE json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
+      WHERE m.published_at_ms>=${fromMs} AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
        AND (? IS NULL OR EXISTS(SELECT 1 FROM platform_streams ps JOIN sessions ss ON ss.id=ps.session_id WHERE ps.platform='youtube' AND ps.account_id=m.account_id AND ps.session_id=? AND ps.started_at_ms<=m.published_at_ms AND coalesce(ps.ended_at_ms,ss.ended_at_ms,?)>m.published_at_ms))
        AND NOT EXISTS(SELECT 1 FROM youtube_identities z LEFT JOIN youtube_identity_aliases a ON a.identity_id=z.id WHERE z.person_id=y.person_id AND (z.is_owner=1 OR z.external_id=z.account_id OR z.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))))
       GROUP BY y.person_id

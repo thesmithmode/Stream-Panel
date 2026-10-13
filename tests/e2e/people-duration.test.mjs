@@ -7,7 +7,7 @@ import { formatDuration } from "../../apps/web/src/duration.ts";
 
 const minute = 60_000;
 
-test("People duration cards render the session and average observations as hours", { timeout: 60_000 }, async () => {
+test("People duration cards render the period and average observations as hours", { timeout: 60_000 }, async () => {
   const app = await application();
   let browser;
   try {
@@ -54,9 +54,10 @@ test("People duration cards render the session and average observations as hours
     await personRow.waitFor();
     await personRow.click();
     await page.getByLabel("Показатели человека").waitFor();
-    assert.equal(await page.getByText("Всего наблюдаемого времени", {exact:true}).locator("..").locator("strong").textContent(), "2 ч");
+    assert.equal(await page.getByText("Наблюдаемое время", {exact:true}).locator("..").locator("strong").textContent(), "2 ч");
     assert.equal(await page.getByText("Посещаемость", {exact:true}).locator("..").locator("strong").textContent(), "100%");
-    await page.getByLabel("Период аналитики").selectOption(sessionId);
+    assert.deepEqual(await page.getByLabel("Период аналитики").locator("option").allTextContents(), ["Вся история", "Последние 7 дней", "Последние 30 дней"]);
+    await page.getByLabel("Период аналитики").selectOption("7");
     await personRow.click();
     await page.getByLabel("Показатели человека").waitFor();
 
@@ -65,13 +66,13 @@ test("People duration cards render the session and average observations as hours
         rows.find((row) => row.display_name === "Duration Viewer"),
       ),
     );
-    const stats = await page.evaluate(async ({ personId, selectedSession }) => {
+    const stats = await page.evaluate(async ({ personId }) => {
       const response = await fetch(
-        `/api/v1/persons/${encodeURIComponent(personId)}/stats?session=${encodeURIComponent(selectedSession)}`,
+        `/api/v1/persons/${encodeURIComponent(personId)}/stats?period=7`,
       );
       return response.json();
-    }, { personId: person.id, selectedSession: sessionId });
-    assert.equal(stats.observedMinutesThisSession, 120);
+    }, { personId: person.id });
+    assert.equal(stats.totalObservedMinutes, 120);
     assert.equal(stats.avgObservedMinutes, 120);
 
     const rendered = await page.getByLabel("Показатели человека").locator(".kpi").evaluateAll((cards) =>
@@ -80,9 +81,9 @@ test("People duration cards render the session and average observations as hours
         card.querySelector("strong")?.textContent?.trim(),
       ])),
     );
-    assert.equal(rendered["Время в этом стриме"], formatDuration(stats.observedMinutesThisSession));
+    assert.equal(rendered["Наблюдаемое время"], formatDuration(stats.totalObservedMinutes));
     assert.equal(rendered["Среднее за посещённый стрим"], formatDuration(stats.avgObservedMinutes));
-    assert.equal(rendered["Время в этом стриме"], "2 ч");
+    assert.equal(rendered["Наблюдаемое время"], "2 ч");
     assert.equal(rendered["Среднее за посещённый стрим"], "2 ч");
 
     await saveCoverage(page);

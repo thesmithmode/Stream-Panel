@@ -15,11 +15,11 @@
   import Analytics from "./Analytics.svelte";
   import YouTube from "./YouTube.svelte";
   import Connections from "./Connections.svelte";
+  let peoplePeriod = $state("");
   import People from "./People.svelte";
   import {
     api,
     setCsrf,
-    date,
     getProfile,
     setProfile,
     type Profile,
@@ -115,7 +115,7 @@
     const controller=new AbortController();
     const deadline=setTimeout(()=>controller.abort(new ConnectionError()),12000);
     const task=(async()=>{
-      const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter).map(async([key,path])=>[key,await api(path,undefined,controller.signal)])));
+      const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter,peoplePeriod).map(async([key,path])=>[key,await api(path,undefined,controller.signal)])));
       if(current!==epoch)return;
       status=values.status;{setCsrf(status.csrf);user=status.user??user;outdated=isOutdatedRelease(status.release);}
       sessions=values.sessions??sessions;people=values.persons??people;events=values.events??events;summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';window.dispatchEvent(new Event('sp:data-refresh'));
@@ -242,25 +242,21 @@
       {#if status?.storage?.freeBytes!==null&&status?.storage?.freeBytes<status?.storage?.reserveBytes}<p class="notice" role="status">{status.storage.freeBytes<(status.storage.minFreeBytes??16777216)?'Критически мало места: запись временно остановлена, чтобы не повредить БД. Проверьте «Настройки».':'На сервере мало свободного места. Панель очищает старые копии; сбор данных продолжается. Проверьте «Настройки». '}</p>{/if}
       {#if outdated}<div role="status" class="notice">Доступна новая версия панели для обоих профилей. <button class="outline small" onclick={()=>location.reload()}>Обновить панель</button></div>{/if}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}
-      {#key `${profile}:${tab}:${sessionFilter}`}
+      {#key `${profile}:${tab}:${sessionFilter}:${tab === "people" ? peoplePeriod : ""}`}
       {#if !scopeReady}<div class="panel empty" role="status">Загружаем данные…</div>{:else}
-      {#if tab === "people"}{#if sessions.length}<div
+      {#if tab === "people"}<div
             class="session-picker"
           >
             <label
               >Период<select
                 aria-label="Период аналитики"
-                bind:value={sessionFilter}
+                bind:value={peoplePeriod}
                 onchange={()=>{epoch++;clearScope();saveRoute();void action(async()=>{});}}
                 ><option value="">Вся история</option
-                >{#each sessions as session}<option value={session.id}
-                    >{date(session.started_at_ms)}{session.ended_at_ms === null
-                      ? " · запись идёт"
-                      : ""}</option
-                  >{/each}</select
+                ><option value="7">Последние 7 дней</option><option value="30">Последние 30 дней</option></select
               ></label
             >
-          </div>{/if}{/if}
+          </div>{/if}
       {#if tab === "overview"}<ChannelOverview connect={()=>navigate("connections")} />
       {:else if tab === "stream"}<Overview session={sessions.find(s=>s.id===sessionFilter)}
           {summary}
@@ -281,7 +277,7 @@
         <YouTube />
       {:else if tab === "people"}<People
           {people}
-          {sessionFilter}
+          period={peoplePeriod}
           initialId={personId}
           onSelect={(id)=>{personId=id;saveRoute();}}
           onChange={()=>refresh(true)}
