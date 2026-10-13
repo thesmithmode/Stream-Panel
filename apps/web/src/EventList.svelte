@@ -28,7 +28,7 @@
       <div class="event-body">
         <div class="event-title">
           <button
-            class="text-button"
+            class="text-button" class:twitch={event.source==='twitch'} class:youtube={event.source==='youtube'}
             onclick={() => event.person_id && onPerson?.(event.person_id)}
             disabled={!event.person_id}
             >{event.payload.actorName ||
@@ -70,3 +70,5 @@
     </article>
   {/each}
 </div>
+
+<style>.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}</style>

@@ -18,8 +18,8 @@ test('stream scope never flashes channel totals, reload/back retain the route an
   await page.route('**/api/v1/summary?*',async route=>{await new Promise(r=>setTimeout(r,400));await route.continue();});
   await page.locator(`tr[data-session-id="${id}"]`).getByRole('button',{name:'Открыть',exact:true}).click();
   assert.ok(!(await page.locator('main').textContent()).includes('12 000'));
-  await page.locator('.stream-metrics .metric').filter({hasText:'Донаты'}).getByText('0',{exact:true}).waitFor();await page.locator('.stream-metrics').getByText('Зрители (все)',{exact:true}).waitFor();
-  assert.equal(await page.locator('.stream-metrics').getByText('Зрители (все)',{exact:true}).locator('..').locator('strong').textContent(),'10');
+  await page.locator('.stream-metrics .metric').filter({hasText:'Донаты'}).getByText('0',{exact:true}).waitFor();await page.locator('.stream-metrics').getByText('Средние зрители',{exact:true}).waitFor();
+  assert.equal(await page.locator('.stream-metrics').getByText('Средние зрители',{exact:true}).locator('..').locator('strong').textContent(),'10');
   assert.equal(await page.getByText('Полнота наблюдений',{exact:true}).count(),0);
   await reload(page);await page.locator('.stream-metrics .metric').filter({hasText:'Донаты'}).getByText('0',{exact:true}).waitFor();assert.ok(new URL(page.url()).searchParams.get('stream')===id);
   const ranking=page.getByRole('region',{name:'Рейтинг участников'});await ranking.getByRole('button',{name:'Viewer',exact:true}).click();await page.getByRole('heading',{name:'Viewer',exact:true}).waitFor();

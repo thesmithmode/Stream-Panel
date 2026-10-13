@@ -36,7 +36,8 @@
   let audienceData=$state<any>(null),audienceError=$state(''),audienceBusy=$state(false),barOpen=$state(false);
   let audienceMetric=$state<ChartMetric>('viewers');
   const viewers=$derived(audienceData?.streamComparison?.[0]?.viewers?.all);
-  const lastViewers=$derived(audienceData?.timeline?.findLast((p:any)=>p.viewers!=null)?.viewers);
+  const streamStats=$derived(audienceData?.streamComparison?.[0]);
+  let resolution=$state(1);
   const decimal=(n:number)=>n.toLocaleString('ru-RU',{maximumFractionDigits:1});
   let metadata=$state<Array<{at:number;title:string;categoryName:string}>>([]);
   let audienceRequest=0,lastAudienceSession='';
@@ -90,51 +91,14 @@
  </details>
 </section>{/if}
 <section class="metrics stream-metrics">
-  <div class="metric">
-    <Icon name="chat" size={27} />
-    <div>
-      <span>Сообщения</span><strong
-        >{summary.messages.toLocaleString("ru-RU")}</strong
-      >
-      {#if summary.messagesPerMinuteOfSession != null}<small
-          >{decimal(summary.messagesPerMinuteOfSession)} сообщ./мин
-          эфира</small
-        >{/if}
-    </div>
-  </div>
-  <div class="metric">
-    <span class="teal"><Icon name="people" size={27} /></span>
-    <div>
-      <span>Зрители (все)</span><strong>{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'Нет замеров'}</strong>
-      {#if viewers?.peak!=null}<small>Максимум: {viewers.peak}</small>{/if}
-      {#if lastViewers!=null}<small>Последний замер: {lastViewers}</small>{/if}
-    </div>
-  </div>
-  <div class="metric">
-    <Icon name="heart" size={27} />
-    <div>
-      <span>Донаты</span><strong
-        >{Object.keys(summary.totals).length
-          ? Object.entries(summary.totals)
-              .map(([c, a]) => money(a, c))
-              .join(" · ")
-          : "0"}</strong
-      >
-    </div>
-  </div>
+ <div class="metric"><div><span>Средние зрители</span><strong>{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'Нет замеров'}</strong></div></div>
+ <div class="metric"><div><span>Максимум зрителей</span><strong>{viewers?.peak??(audienceBusy?'…':'Нет замеров')}</strong></div></div>
+ <div class="metric"><div><span>Средние участники чата</span><strong>{streamStats?.meanParticipants!=null?decimal(streamStats.meanParticipants):audienceBusy?'…':'Нет наблюдений'}</strong></div></div>
+ <div class="metric"><div><span>Максимум участников чата</span><strong>{streamStats?.peakParticipants??(audienceBusy?'…':'Нет наблюдений')}</strong></div></div>
+ <div class="metric"><div><span>Сообщения</span><strong>{summary.messages.toLocaleString('ru-RU')}</strong></div></div>
+ <div class="metric"><div><span>Донаты</span><strong>{Object.keys(summary.totals).length?Object.entries(summary.totals).map(([c,a])=>money(a,c)).join(' · '):'0'}</strong></div></div>
 </section>
 {#if sessionFilter}<StreamDonations sessionId={sessionFilter} {onPerson} {changed} />{/if}
-<section class="metrics secondary-metrics">
-  <div class="metric">
-    <div>
-      <span>Участники чата</span><strong
-        >{(audienceData?.summary?.chatters ?? summary.participants?.length ?? 0).toLocaleString("ru-RU")}</strong
-      >
-
-    </div>
-  </div>
-  <div class="metric"><div><span>Замечены в чате</span><strong>{audienceData?.summary?.attendees??summary.uniquePersonsObserved??'Нет наблюдений'}</strong></div></div>
-</section>
 <section class="panel insights-section">
  <header><h2>Инсайты</h2><button class="outline small" aria-expanded={insightsOpen} onclick={loadInsights}>{insightsOpen?'Скрыть':'Показать паттерны'}</button></header>
  {#if insightsOpen}<div class="insight-grid">
@@ -142,9 +106,9 @@
  </div>{/if}
 </section>
 <section class="panel series-panel">
-  <header><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Поэтому 10 зрителей и 4 ника в чате возможны одновременно. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2><label>Показатель<select aria-label="Показатель графика стрима" bind:value={audienceMetric}><option value="viewers">Зрители (все)</option><option value="participants">Участники (все)</option><option value="twitchViewers">Зрители Twitch</option><option value="youtubeViewers">Зрители YouTube</option><option value="observed">Люди в чате Twitch</option><option value="estimated">Активность чата YouTube</option><option value="messages">Сообщения</option></select></label></header>
+  <header><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Поэтому 10 зрителей и 4 ника в чате возможны одновременно. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2><div class="chart-controls"><select aria-label="Показатель графика стрима" bind:value={audienceMetric}><option value="viewers">Зрители (все)</option><option value="participants">Участники (все)</option><option value="twitchViewers">Зрители Twitch</option><option value="youtubeViewers">Зрители YouTube</option><option value="observed">Люди в чате Twitch</option><option value="estimated">Активность чата YouTube</option><option value="messages">Сообщения</option></select><select aria-label="Детализация графика" bind:value={resolution}><option value={1}>1м</option><option value={5}>5м</option><option value={15}>15м</option></select></div></header>
   {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceData}
-    <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric={audienceMetric} resolution={1} showRegulars={true} {onPerson} onselection={(open)=>barOpen=open}/>
+    <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric={audienceMetric} {resolution} showResolution={false} showRegulars={true} {onPerson} onselection={(open)=>barOpen=open}/>
   {:else}<p class="empty-small" role="status">{audienceBusy?'Загружаем график…':'Выберите стрим'}</p>{/if}
 </section>
 <div class="stream-details-grid"><AudienceRanking people={audienceData?.audience??[]} {onPerson} showIntervals streamStart={session?.started_at_ms??0} streamEnd={session?.ended_at_ms??Date.now()}/>
@@ -176,4 +140,4 @@
 
 </div>
 
-<style>.overview-grid{display:block}.stream-details-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:20px;margin-bottom:20px;align-items:start}@media(max-width:900px){.stream-details-grid{grid-template-columns:1fr}}</style>
+<style>.series-panel header{flex-wrap:wrap;gap:12px}.chart-controls{display:flex;gap:8px;min-width:0}.chart-controls select{border-radius:999px;width:auto;max-width:100%;padding:8px 30px 8px 12px;font-size:13px}.chart-controls select:first-child{min-width:0;flex:1}.chart-controls select:last-child{flex-shrink:0}.stream-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}@media(max-width:600px){.chart-controls{width:100%;justify-content:space-between}}.overview-grid{display:block}.stream-details-grid{display:grid;grid-template-columns:1fr;gap:20px;margin-bottom:20px;align-items:start}@media(max-width:900px){.stream-details-grid{grid-template-columns:1fr}}</style>

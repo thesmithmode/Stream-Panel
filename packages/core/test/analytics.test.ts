@@ -375,6 +375,8 @@ test('single-stream analytics scopes overlapping recordings and ranks silent att
   assert.deepEqual(result.audience.map(p=>p.name).sort(),['Silent','Talker']);
   const silent=result.audience.find(p=>p.name==='Silent')!;
   assert.equal(silent.messages,0);assert.equal(silent.observedMinutes,5);
+  assert.equal(result.streamComparison[0]!.meanParticipants,.8);assert.equal(result.streamComparison[0]!.peakParticipants,2);
+  assert.deepEqual(silent.accounts,[{source:'twitch',name:'Silent'}]);
   assert.equal(result.audience.find(p=>p.name==='Talker')!.observedMinutes,3);
   assert.equal(result.timeline.find(p=>p.at===base+3*minute)!.presenceKnown,false);
   assert.deepEqual(result.audience.filter(p=>p.intervals.some(i=>i.from<base+minute&&i.to>base)).map(p=>p.name).sort(),['Silent','Talker']);

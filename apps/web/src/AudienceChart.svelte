@@ -4,7 +4,7 @@
  import Help from './Help.svelte';
  import {participantsAt,type SignalParticipant} from './chart-detail';
  import {chartSeries,type ChartMetric,type ChartPoint} from './chart-series';
- let {points,audience,metric='observed',resolution=$bindable(1),showRegulars=true,timezone='Europe/Moscow',onPerson,onselection}:{points:ChartPoint[];audience:SignalParticipant[];metric?:ChartMetric;resolution?:number;showRegulars?:boolean;timezone?:string;onPerson:(id:string)=>void;onselection?:(selected:boolean)=>void}=$props();
+ let {points,audience,metric='observed',resolution=$bindable(1),showRegulars=true,showResolution=true,timezone='Europe/Moscow',onPerson,onselection}:{points:ChartPoint[];audience:SignalParticipant[];metric?:ChartMetric;resolution?:number;showRegulars?:boolean;showResolution?:boolean;timezone?:string;onPerson:(id:string)=>void;onselection?:(selected:boolean)=>void}=$props();
  const id=$props.id();
  let bucket=$state<ReturnType<typeof chartSeries>[number]|null>(null),minute=$state<number|null>(null);
  const minutePoints=$derived(bucket?points.filter(p=>p.at>=bucket!.at&&p.at<bucket!.at+bucket!.width):[]);
@@ -15,7 +15,7 @@
  $effect(()=>onselection?.(bucket!==null));
  onDestroy(()=>onselection?.(false));
 </script>
-<label class="interval-control">Детализация графика<select bind:value={resolution}><option value={1}>1м</option><option value={5}>5м</option><option value={15}>15м</option></select></label>
+{#if showResolution}<label class="interval-control">Детализация графика<select bind:value={resolution}><option value={1}>1м</option><option value={5}>5м</option><option value={15}>15м</option></select></label>{/if}
 <TrendChart {points} {metric} {resolution} {showRegulars} {timezone} onselect={point=>{bucket=point;minute=null;}}/>
 {#if selected}
  <section class="bar-detail" aria-label="Детали выбранного столбца">

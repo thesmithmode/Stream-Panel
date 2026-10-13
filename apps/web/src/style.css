@@ -1217,7 +1217,7 @@ h1 { font-size:30px; letter-spacing:-.8px; }
 .following > details ul { font-size:12px; line-height:1.8; margin-bottom:0; }
 .following h2 { display:flex; gap:8px; align-items:center; }
 .stream-page .series-panel > header label { font-size:12px; }
-.stream-page .series-panel > header select { min-width:230px; }
+.stream-page .series-panel > header select { min-width:0; }
 .stream-page .feed { min-height:0; }
 .stream-page .event-list { max-height:560px; overflow-y:auto; }
 .event-row { padding:16px 20px; gap:12px; }
@@ -1253,7 +1253,7 @@ h1 { font-size:30px; letter-spacing:-.8px; }
   .panel > header > label { flex-basis:100%; width:100%; }
   .stream-facts > details,.stream-facts > p,.following > p,.following > details,.following > ul { padding:12px 16px; }
   .stream-page .series-panel > header label { width:100%; }
-  .stream-page .series-panel > header select { min-width:0; width:100%; }
+  .stream-page .series-panel > header select { min-width:0; width:auto; }
   .stream-page .trend-chart { padding:12px; }
   .event-row { padding:14px 16px; }
   .event-body p { font-size:13px; }

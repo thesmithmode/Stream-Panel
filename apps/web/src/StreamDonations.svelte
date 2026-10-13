@@ -9,8 +9,8 @@
  let editing=$state<Donation|null>(null),candidates=$state<Candidate[]>([]),people=$state<Person[]>([]),recipient=$state(''),search=$state(''),finding=$state(false);
  const value=(row:Donation)=>/^\d+$/.test(row.amountMinor)?money(row.amountMinor,row.currency):'Сумма неизвестна';
  let generation=0,editorGeneration=0;
- let all=$state(false),connection=$state('');
- const showAll=$derived(!sessionId||all);
+ let connection=$state('');
+ const showAll=$derived(!sessionId);
  async function refresh(){const ticket=++generation;loading=true;try{const [result,status]=await Promise.all([api(`donations?${showAll?'':`session=${encodeURIComponent(sessionId!)}&`}offset=${offset}&limit=10`),api('status')]);if(ticket===generation){rows=result.items;total=result.total;connection=status.donationalerts.state;error='';}}catch(e){if(ticket===generation)error=(e as Error).message;}finally{if(ticket===generation)loading=false;}}
  $effect(()=>{sessionId;offset;showAll;untrack(()=>void refresh());return()=>{generation++;};});
  onMount(()=>{const update=()=>void refresh();window.addEventListener('sp:data-refresh',update);return()=>{editorGeneration++;window.removeEventListener('sp:data-refresh',update);};});
@@ -22,7 +22,6 @@
 <section class="panel stream-donations" aria-label={sessionId?'Донаты стрима':'Все донаты'}>
  <header><h2>{sessionId?'Донаты стрима':'Все донаты'} <span class="small muted">{total}</span></h2><button class="outline small" disabled={busy||loading} onclick={rescan}>{busy?'Обновляем…':'Обновить донаты'}</button></header>
  <div class="donation-list">
- {#if sessionId}<div class="donation-scope"><button class="text-button" class:chosen={!all} onclick={()=>{all=false;offset=0;editing=null;}}>Этот стрим</button><button class="text-button" class:chosen={all} onclick={()=>{all=true;offset=0;editing=null;}}>Все донаты</button></div>{/if}
  {#if connection==='disconnected'||connection==='error'}<p class="small muted">DonationAlerts не подключён. Проверьте «Интеграции».</p>{/if}
  {#if error}<p class="notice error" role="alert">{error}</p>{/if}
  {#each rows as row (row.id)}<article data-donation-id={row.id}>
@@ -42,5 +41,5 @@
  </div>
 </section>
 <style>
-.donation-scope{display:flex;gap:18px;padding:12px 0;border-bottom:1px solid var(--border);}.donation-scope button{padding:6px 0;color:var(--muted);}.donation-scope button.chosen{color:var(--accent);border-bottom:2px solid var(--accent);}header{gap:12px;flex-wrap:wrap;}h2{display:flex;align-items:baseline;gap:10px;}.donation-list{padding:0 18px 12px;}article{padding:14px 0;border-bottom:1px solid var(--border);}article:last-child{border-bottom:0;}.donation-summary,.donation-owner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}.donation-summary{justify-content:space-between;margin-bottom:8px;}.donation-summary strong{color:#fff;font-size:20px;}.donation-owner>button:last-child{margin-left:auto;}.donation-message{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0;color:#fff;}.donation-editor{display:grid;gap:10px;padding:14px;border-radius:8px;background:var(--bg);margin-top:12px;}.donation-editor label{display:grid;gap:6px;color:var(--muted);font-size:12px;}.donation-editor input,.donation-editor select{min-width:0;width:100%;}.candidate-list{display:flex;gap:8px;flex-wrap:wrap;}.candidate-list button{display:flex;gap:8px;}.candidate-list button.active{border-color:var(--accent);}@media(max-width:600px){.donation-list{padding:0 12px 12px;}.donation-summary time{font-size:11px;}}
+header{gap:12px;flex-wrap:wrap;}h2{display:flex;align-items:baseline;gap:10px;}.donation-list{padding:0 18px 12px;}article{padding:14px 0;border-bottom:1px solid var(--border);}article:last-child{border-bottom:0;}.donation-summary,.donation-owner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}.donation-summary{justify-content:space-between;margin-bottom:8px;}.donation-summary strong{color:#fff;font-size:20px;}.donation-owner>button:last-child{margin-left:auto;}.donation-message{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0;color:#fff;}.donation-editor{display:grid;gap:10px;padding:14px;border-radius:8px;background:var(--bg);margin-top:12px;}.donation-editor label{display:grid;gap:6px;color:var(--muted);font-size:12px;}.donation-editor input,.donation-editor select{min-width:0;width:100%;}.candidate-list{display:flex;gap:8px;flex-wrap:wrap;}.candidate-list button{display:flex;gap:8px;}.candidate-list button.active{border-color:var(--accent);}@media(max-width:600px){.donation-list{padding:0 12px 12px;}.donation-summary time{font-size:11px;}}
 </style>

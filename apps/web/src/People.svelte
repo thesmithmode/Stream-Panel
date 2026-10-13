@@ -297,7 +297,7 @@
       <div class="settings-body person-scroll">
       {#if detailTab==='overview'}
         <h3>Связанные аккаунты</h3>
-        <div class="account-summary">{#each detail.identities as identity}<span><strong>{identity.display_name}</strong><small class="muted">{identity.source==='twitch'?'Twitch':identity.source==='youtube'?'YouTube':'DonationAlerts'}</small></span>{/each}</div>
+        <div class="account-summary">{#each detail.identities as identity}<span><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong></span>{/each}</div>
         <div class="actions"><button class="outline small" onclick={()=>{detailTab='donations';showDonorLinks=true;}}>Привязать донаты</button></div>
         <PersonActivity personId={detail.id} />
         <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} sessionId={sessionFilter} onPerson={(id)=>void select(id)} />{/if}</details>
@@ -323,7 +323,7 @@
               type="checkbox"
               bind:group={selectedIdentities}
               value={identity.id}
-            /><strong>{identity.display_name}</strong><span class="small muted"
+            /><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong><span class="small muted"
               >{identity.source === "donationalerts" ? "Донатер" : "Участник"} · {identity.source === "twitch" ? "Twitch" : identity.source === "youtube" ? "YouTube" : "DonationAlerts"}</span
             ></label
           >{/each}
@@ -402,6 +402,6 @@
 </div>
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 
-<style>
-.people-grid{height:calc(100dvh - 180px);min-height:360px;}.people-grid>section{min-height:0;display:flex;flex-direction:column;overflow:hidden;margin-bottom:0;}.people-list{min-height:0;flex:1;max-height:none;}.person-scroll{min-height:0;overflow-y:auto;flex:1;}.person-tabs{display:flex;gap:.4rem;padding:.6rem 1rem;border-bottom:1px solid var(--border);flex-wrap:wrap;}.person-tabs button{background:transparent;border:0;padding:.5rem .7rem;}.person-tabs button.active{background:#292438;color:var(--accent);}.person-detail .kpi-strip{padding:12px 16px;gap:12px;}.person-detail .kpi span{font-size:11px;}.person-detail .kpi strong{font-size:18px;color:#fff;}.account-summary{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;}.account-summary>span{display:grid;gap:4px;}.account-summary small{font-size:11px;}@media(max-width:760px){.people-grid{height:auto;min-height:0;}.people-grid>section{overflow:visible;}.people-list{max-height:260px;}.person-scroll{overflow:visible;}}
+<style>.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}
+.people-grid{height:calc(100dvh - 180px);min-height:360px;}.people-grid>section{min-height:0;display:flex;flex-direction:column;overflow:hidden;margin-bottom:0;}.people-list{min-height:0;flex:1;max-height:none;}.person-scroll{min-height:0;overflow-y:auto;flex:1;}.person-tabs{display:flex;gap:.4rem;padding:.6rem 1rem;border-bottom:1px solid var(--border);flex-wrap:wrap;}.person-tabs button{background:transparent;border:0;padding:.5rem .7rem;}.person-tabs button.active{background:#292438;color:var(--accent);}.person-detail .kpi-strip{padding:12px 16px;gap:12px;}.person-detail .kpi span{font-size:11px;}.person-detail .kpi strong{font-size:18px;color:#fff;}.account-summary{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;}.account-summary>span{display:grid;gap:4px;}@media(max-width:760px){.people-grid{height:auto;min-height:0;}.people-grid>section{overflow:visible;}.people-list{max-height:260px;}.person-scroll{overflow:visible;}}
 </style>
