@@ -60,12 +60,16 @@
   let insightsLoading = $state(false);
   let insightsError = $state("");
   let filteredEvents=$state<Event[]|null>(null);
+  const eventCache=new Map<string,Event[]>();
   $effect(()=>{const current=sessionFilter,type=eventType,source=sourceFilter,interval=eventInterval;void events;let cancelled=false;
     const q=new URLSearchParams({session:current,type:type==='all'?'':type,source});
     if(interval){q.set('from',String(interval.from));q.set('to',String(interval.to));}
-    filteredEvents=null;eventsBusy=true;eventsError='';
-    void api<Event[]>(`events?${q}`).then(rows=>{if(!cancelled)filteredEvents=rows;}).catch(e=>{if(!cancelled)eventsError=e.message;}).finally(()=>{if(!cancelled)eventsBusy=false;});
-    return()=>{cancelled=true;};
+    eventsError='';
+    if(!interval&&source==='all'&&type==='all'){filteredEvents=events;eventsBusy=false;return;}
+    const key=q.toString(),cached=eventCache.get(key),controller=new AbortController();
+    filteredEvents=cached??null;eventsBusy=!cached;
+    void api<Event[]>(`events?${key}`,undefined,controller.signal).then(rows=>{if(!cancelled){filteredEvents=rows;eventCache.delete(key);eventCache.set(key,rows);if(eventCache.size>12)eventCache.delete(eventCache.keys().next().value!);}}).catch(e=>{if(!cancelled&&!(cached&&e instanceof ConnectionError))eventsError=e.message;}).finally(()=>{if(!cancelled)eventsBusy=false;});
+    return()=>{cancelled=true;controller.abort();};
   });
   const visible = $derived(
     (filteredEvents??[]).filter((e) => !e.type.startsWith('channel_points') && (eventType === "all" || e.type === eventType) && (sourceFilter === "all" || e.source === sourceFilter)),
