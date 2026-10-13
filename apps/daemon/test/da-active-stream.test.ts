@@ -47,8 +47,8 @@ test('DA automatic collection retains older donations and keeps checking after t
   await connection.scanHistory();
   events=await db.call<any[]>('events');
   assert.equal(events.length,4);
-  assert.equal(events.find(event=>event.external_id==='3').occurred_at_ms,null);
-  assert.equal((await db.call<any>('summary',sessionId)).donations,2);
+  assert.equal(events.find(event=>event.external_id==='3').occurred_at_ms,Math.floor(now/1000)*1000);
+  assert.equal((await db.call<any>('summary',sessionId)).donations,3);
  } finally {await connection.stop();await db.stop();await rm(dir,{recursive:true,force:true});}
 });
 

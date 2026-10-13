@@ -1,4 +1,6 @@
-/** DA legacy wall-clock values require an explicit offset; ISO values carry their own. */
+/** DA API dates use UTC; the Moscow display zone must not shift the source clock. */
+export const DA_API_UTC_OFFSET_MINUTES=0;
+/** Parse an explicitly specified source clock or an ISO date carrying its own zone. */
 export function parseDonationTime(raw:string,offsetMinutes:number|null):number|null {
  if(offsetMinutes!==null&&(!Number.isInteger(offsetMinutes)||Math.abs(offsetMinutes)>840))throw new Error('INVALID_UTC_OFFSET');
  const iso=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(raw);

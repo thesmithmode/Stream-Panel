@@ -61,7 +61,7 @@
       clientSecret: daSecret,
       accessToken: daToken,
       refreshToken: daRefresh,
-      utcOffsetMinutes: 180,
+      utcOffsetMinutes: 0,
     });
     daSecret = daToken = daRefresh = "";
     if (result.url) window.open(result.url, "_blank", "noopener,noreferrer");

@@ -62,15 +62,15 @@ test("channel.subscription.message extracts text from message object", () => {
   assert.equal(event.payload.text, "Love the stream!");
 });
 
-test("lossless DA money and recipient are normalized; missing timezone stays unknown", () => {
+test("lossless DA money and recipient use the API UTC clock without a display timezone", () => {
   const raw = parse(
     '{"id":9007199254740993,"amount":0.29,"currency":"RUB","username":"Alice","message":"hello","created_at":"2026-10-06 20:00:00"}',
   );
   const event = normalizeDonation(raw, "recipient", "rest", null);
   assert.equal(event.externalId, "9007199254740993");
   assert.equal(event.payload.amountMinor, "29");
-  assert.equal(event.occurredAtMs, null);
-  assert.equal(event.timeQuality, "unknown");
+  assert.equal(event.occurredAtMs, Date.parse("2026-10-06T20:00:00Z"));
+  assert.equal(event.timeQuality, "provider");
   assert.equal(event.actor!.externalId, daDonorExternalId("Alice"));
   assert.notEqual(event.actor!.externalId, event.externalId);
   assert.equal(findDonation({ result: { data: raw } }), raw);

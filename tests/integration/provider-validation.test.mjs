@@ -22,7 +22,7 @@ test('Twitch notifications preserve anonymous and moderation provenance and reje
 
 test('DonationAlerts rejects invalid ids, money and dates; anonymous and unknown timestamps remain explicit',()=>{
  const row={id:'123',amount:'0.29',currency:'RUB',created_at:'2026-10-10 10:00:00',username:'',message:'anonymous'};
- const event=normalizeDonation(row,'owner','rest',180);assert.equal(event.actor,null);assert.equal(event.payload.amountMinor,'29');assert.equal(event.occurredAtMs,Date.parse('2026-10-10T07:00:00Z'));
+ const event=normalizeDonation(row,'owner','rest',180);assert.equal(event.actor,null);assert.equal(event.payload.amountMinor,'29');assert.equal(event.occurredAtMs,Date.parse('2026-10-10T10:00:00Z'));
  const unknown=normalizeDonation({...row,created_at:'not known'},'owner','centrifugo',null);assert.equal(unknown.occurredAtMs,null);assert.equal(unknown.timeQuality,'unknown');
  for(const id of [undefined,'abc','-1','1.5'])assert.throws(()=>normalizeDonation({...row,id},'owner','rest',180),/INVALID_DONATION_ID/);
  assert.throws(()=>normalizeDonation({...row,amount:undefined},'owner','rest',180));

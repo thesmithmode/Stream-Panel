@@ -185,7 +185,7 @@ test(
       );
       assert.equal(publicStatus.config.hasDaSecret, true);
       assert.equal(publicStatus.config.hasDaToken, true);
-      assert.equal(publicStatus.config.daUtcOffsetMinutes, 180);
+      assert.equal(publicStatus.config.daUtcOffsetMinutes, 0);
       assert.equal(
         JSON.stringify(publicStatus).includes("oauth-secret"),
         false,
@@ -221,7 +221,7 @@ test(
         await da.getByLabel("Refresh token", { exact: true }).inputValue(),
         "",
       );
-      assert.equal(a.configuration.value.daUtcOffsetMinutes, 180);
+      assert.equal(a.configuration.value.daUtcOffsetMinutes, 0);
       assert.equal(a.configuration.value.daAccessToken, "manual-access");
       await a.db.call("gap", "twitch", "fixture_gap", Date.now(), null);
       await reload(page);

@@ -13,7 +13,7 @@ test('saved DA timezone repairs imported donations through HTTP without reconnec
  const result=await app.app.inject({method:'POST',url:'/api/v1/donationalerts/timezone',headers:signed,payload:{utcOffsetMinutes:0}});
  assert.equal(result.statusCode,200,result.body);assert.equal(result.json().resolved,1);assert.equal((await app.db.call<any>('summary',sid)).donations,1);
  const status=await app.app.inject({url:'/api/v1/status',headers:signed});assert.equal(status.json().config.daUtcOffsetMinutes,0);
- for(const payload of [{utcOffsetMinutes:900},{utcOffsetMinutes:'0'},{utcOffsetMinutes:null}])assert.equal((await app.app.inject({method:'POST',url:'/api/v1/donationalerts/timezone',headers:signed,payload})).statusCode,400);
+ for(const payload of [{utcOffsetMinutes:900},{utcOffsetMinutes:180},{utcOffsetMinutes:'0'},{utcOffsetMinutes:null}])assert.equal((await app.app.inject({method:'POST',url:'/api/v1/donationalerts/timezone',headers:signed,payload})).statusCode,400);
  const rescan=await app.app.inject({method:'POST',url:'/api/v1/donationalerts/rescan',headers:signed,payload:{}});assert.notEqual(rescan.statusCode,200,'a disconnected import cannot report success');
  }finally{await app.app.close();await rm(dir,{recursive:true,force:true});}
 });

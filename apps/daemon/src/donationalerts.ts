@@ -15,13 +15,13 @@ import {
   type SocketFactory,
 } from "./twitch.js";
 
-import {parseDonationTime} from '../../../packages/core/src/donation-time.js';
+import {parseDonationTime,DA_API_UTC_OFFSET_MINUTES} from '../../../packages/core/src/donation-time.js';
 export {parseDonationTime} from '../../../packages/core/src/donation-time.js';
 export function normalizeDonation(
   raw: unknown,
   accountId: string,
   transport: "rest" | "centrifugo",
-  offsetMinutes: number | null,
+  _legacyOffsetMinutes?: number | null,
 ): EventInput {
   const data = object(raw),
     id = String(data.id ?? "");
@@ -29,7 +29,8 @@ export function normalizeDonation(
   const amount = moneyToMinor(String(data.amount ?? ""), string(data.currency));
   const name = string(data.username),
     sourceTime = string(data.created_at);
-  const occurredAtMs = parseDonationTime(sourceTime, offsetMinutes);
+  let occurredAtMs:number|null=null;
+  try{occurredAtMs=parseDonationTime(sourceTime,DA_API_UTC_OFFSET_MINUTES);}catch{/* Keep malformed provider dates as untimed facts instead of discarding money. */}
   return {
     source: "donationalerts",
     accountId,
@@ -41,7 +42,7 @@ export function normalizeDonation(
     occurredAtMs,
     receivedAtMs: Date.now(),
     sourceTime,
-    timeQuality: occurredAtMs === null ? "unknown" : "configured",
+    timeQuality: occurredAtMs === null ? "unknown" : "provider",
     transport,
     payload: {
       raw:data,
@@ -250,7 +251,7 @@ export class DonationAlertsConnection {
       this.status.account = string(profile.name);
       if(!/^\d+$/.test(this.recipient))throw new Error('DA_INVALID_RECIPIENT');
       this.connect(string(profile.socket_connection_token), generation);
-      if(this.config.value.daUtcOffsetMinutes!==null)await this.db.call('resolveDonationTimes',this.config.value.daUtcOffsetMinutes);
+      if(this.config.value.daUtcOffsetMinutes!==null)await this.db.call('resolveDonationTimes',DA_API_UTC_OFFSET_MINUTES);
       if(this.stopped||generation!==this.generation)return;
       // REST remains useful if realtime permission/protocol fails. State exposes each capability.
       void this.scanHistory(true).catch((error) => this.report(error));
@@ -349,7 +350,7 @@ export class DonationAlertsConnection {
           if (donation) {
             await this.db.call('providerSnapshot','donationalerts',this.recipient,'donation_notification',message,Date.now());
             if(this.stopped||generation!==this.generation)return;
-            const event=normalizeDonation(donation,this.recipient,'centrifugo',this.config.value.daUtcOffsetMinutes);
+            const event=normalizeDonation(donation,this.recipient,'centrifugo');
             const active = await this.db.call<{id:string;started_at_ms:number} | null>("activeLogicalStream");
             if (this.stopped || generation !== this.generation) return;
             const result = active&&event.occurredAtMs===null?await this.db.call<{inserted:boolean}|null>('ingestLiveDonation',event,active.id,true):await this.db.call<{inserted:boolean}>('ingest',event);
@@ -404,7 +405,7 @@ export class DonationAlertsConnection {
         let pageAllKnown = response.data.length > 0;
         for (const raw of response.data) {
           try {
-            const event = normalizeDonation(raw, this.recipient, "rest", this.config.value.daUtcOffsetMinutes);
+            const event = normalizeDonation(raw, this.recipient, "rest");
             const result=await this.db.call<{inserted:boolean}>('ingest',event);
             if (this.stopped || generation !== this.generation) return;
             if (result?.inserted) {pageAllKnown = false;this.status.lastEventAt=Date.now();}

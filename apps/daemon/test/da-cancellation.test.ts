@@ -47,7 +47,7 @@ test('DA realtime keeps untimed donations, archives malformed rows and stops at 
   connection=new DonationAlertsConnection(config,db,async()=>{assert.fail('no HTTP request for a donation publication');},()=>socket);
   const runtime=connection as any;runtime.stopped=false;runtime.recipient='owner';runtime.connect('transport-token',runtime.generation);
   try{
-   socket.emit('message',JSON.stringify({data:{id:1,amount:mode==='malformed'?'bad':'1',currency:'RUB',created_at:'2026-10-11 07:00:00',username:'Donor',future_field:'retained'}}));
+   socket.emit('message',JSON.stringify({data:{id:1,amount:mode==='malformed'?'bad':'1',currency:'RUB',created_at:'',username:'Donor',future_field:'retained'}}));
    for(let n=0;n<5;n++)await new Promise(r=>setImmediate(r));
    if(mode==='untimed-active')assert.deepEqual(writes,['providerSnapshot','activeLogicalStream','ingestLiveDonation']);
    if(mode==='untimed-offline')assert.deepEqual(writes,['providerSnapshot','activeLogicalStream','ingest']);

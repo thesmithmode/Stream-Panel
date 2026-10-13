@@ -15,7 +15,8 @@ export interface Config {
   version: 1;
   analyticsSettings?: AnalyticsSettings;
   coreAttendance80Applied?: boolean;
-  daMoscowTimeConfirmed?: boolean;
+  daMoscowTimeConfirmed?: boolean; // Legacy display confirmation; not an API clock.
+  daApiUtcClockApplied?: boolean;
   youtubeClientId?: string;
   youtubeAccountId?: string;
   youtubeClientSecret?: string;
@@ -39,7 +40,7 @@ const defaults: Config = {
   daClientSecret: "",
   daAccessToken: "",
   daRefreshToken: "",
-  daUtcOffsetMinutes: null,
+  daUtcOffsetMinutes: 0,
   chattersPollSeconds: 60,
   excludedBotLogins: ["jeetbot", "streemelements", "streamelements"],
 };

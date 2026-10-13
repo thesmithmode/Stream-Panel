@@ -1,3 +1,4 @@
+import {DA_API_UTC_OFFSET_MINUTES} from '../../../packages/core/src/donation-time.js';
 import {analyticsSettings} from "./analytics-settings.js";
 import Fastify, { type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
@@ -36,18 +37,15 @@ export async function createApplication(
 ) {
   const configuration = new Configuration(dir);
   await configuration.load();
-  // The owner confirmed DA wall-clock dates are Moscow time for both hosted profiles.
-  // Apply once; later edits in the profile's integration settings remain authoritative.
-  if((options.profile==='ruslan'||options.profile==='gulnaz')&&!configuration.value.daMoscowTimeConfirmed){
-    configuration.value.daUtcOffsetMinutes=180;
-    configuration.value.daMoscowTimeConfirmed=true;
+  // Source dates are UTC even when the DA cabinet and panel display Moscow time.
+  if(!configuration.value.daApiUtcClockApplied||configuration.value.daUtcOffsetMinutes!==DA_API_UTC_OFFSET_MINUTES){
+    configuration.value.daUtcOffsetMinutes=DA_API_UTC_OFFSET_MINUTES;
+    configuration.value.daApiUtcClockApplied=true;
     await configuration.save();
   }
   const db = new StoreClient(options.databasePath ?? join(dir, "data.sqlite"), options.profile);
   await db.ready;
-  if(configuration.value.daUtcOffsetMinutes!==null){
-    try{await db.call('resolveDonationTimes',configuration.value.daUtcOffsetMinutes);}catch(error){await db.stop();throw error;}
-  }
+  try{await db.call('resolveDonationTimes',DA_API_UTC_OFFSET_MINUTES);}catch(error){await db.stop();throw error;}
   const twitch = new TwitchConnection(
       configuration,
       db,
@@ -535,7 +533,7 @@ export async function createApplication(
         throw new Error("DA_CLIENT_SECRET_IS_URL");
     }
     await da.stop();
-    configuration.value.daUtcOffsetMinutes = offset;
+    configuration.value.daUtcOffsetMinutes = DA_API_UTC_OFFSET_MINUTES;
     if (clientId) configuration.value.daClientId = clientId;
     if (clientSecret) configuration.value.daClientSecret = clientSecret;
     if (accessToken) {
@@ -571,8 +569,8 @@ export async function createApplication(
   });
   app.post('/api/v1/donationalerts/timezone',async request=>{
     const offset=Number(object(request.body).utcOffsetMinutes),previous=configuration.value.daUtcOffsetMinutes;
-    if(!Number.isInteger(offset)||Math.abs(offset)>840)throw new Error('INVALID_UTC_OFFSET');
-    configuration.value.daUtcOffsetMinutes=offset;
+    if(offset!==DA_API_UTC_OFFSET_MINUTES)throw new Error('INVALID_API_TIMEZONE');
+    configuration.value.daUtcOffsetMinutes=DA_API_UTC_OFFSET_MINUTES;
     try{await configuration.save();}catch(error){configuration.value.daUtcOffsetMinutes=previous;throw error;}
     return db.call('resolveDonationTimes',offset);
   });

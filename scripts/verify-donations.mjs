@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {parseDonationTime} from '../dist/packages/core/src/donation-time.js';
+import {parseDonationTime,DA_API_UTC_OFFSET_MINUTES} from '../dist/packages/core/src/donation-time.js';
 const dir=process.env.STREAM_PANEL_DATA_DIR;
 if(!dir)throw new Error('DATA_DIRECTORY_REQUIRED');
 const db=new Database(join(dir,'data.sqlite'),{readonly:true});
@@ -9,12 +9,12 @@ db.pragma('busy_timeout=20000');
 try{
  for(const profile of ['ruslan','gulnaz']){
   const config=JSON.parse(await readFile(join(dir,'profiles',profile,'secrets.json'),'utf8'));
-  if(!config.daMoscowTimeConfirmed||!Number.isInteger(config.daUtcOffsetMinutes))throw new Error('DA_TIMEZONE_NOT_CONFIRMED');
+  if(!config.daApiUtcClockApplied||config.daUtcOffsetMinutes!==DA_API_UTC_OFFSET_MINUTES)throw new Error('DA_API_CLOCK_NOT_APPLIED');
   const rows=db.prepare(`SELECT source_time,occurred_at_ms FROM p_${profile}_events WHERE source='donationalerts' AND type='donation' AND account_id!='manual'`).all();
   let valid=0,invalid=0;
   for(const row of rows){
    if(row.source_time===null){invalid++;continue;}
-   let expected;try{expected=parseDonationTime(row.source_time,config.daUtcOffsetMinutes);}catch{invalid++;continue;}
+   let expected;try{expected=parseDonationTime(row.source_time,DA_API_UTC_OFFSET_MINUTES);}catch{invalid++;continue;}
    if(row.occurred_at_ms!==expected)throw new Error('DA_TIME_REPAIR_INCOMPLETE');
    valid++;
   }
