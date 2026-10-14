@@ -68,10 +68,17 @@ function fixture(t) {
     },
     save: async () => {},
   };
+  const failures=new Map();
   const db = {
     call: async (method, ...args) => {
       const call = { method, args };
       calls.push(call);
+      if(method==='pendingDonationImports')return [...failures.values()];
+      if(method==='donationImportStates')return [];
+      if(method==='pendingDonationImportCount')return failures.size;
+      if(method==='saveDonationImportFailure'){const serialized=args[1],id=String(JSON.parse(serialized)?.id??serialized);failures.set(id,{id,serialized});return;}
+      if(method==='removePendingDonation'){failures.delete(args[1]);return;}
+      if(method==='ingest')return {inserted:true};
       if (method === "sessions") return sessions;
       if (method === "observePlatformStream") {
         const [platform, account_id, external_id, started_at_ms, observed_at_ms] = args;
@@ -1118,23 +1125,23 @@ test('DA history continues past an invalid row, stops at its page budget and nev
  }finally{await c.stop();}
 });
 
-test('DA automatic scan stops after three known pages and duplicate automatic calls share in-flight work',async t=>{
+test('DA automatic scan checks the 48-hour window and duplicate automatic calls share in-flight work',async t=>{
  const f=fixture(t);await f.db.call('observePlatformStream','twitch','owner','live',Date.now()-60000,Date.now(),null,'Live');
  let pages=0,release;const pending=new Promise(resolve=>{release=resolve;});
  const row={id:1,amount:'1',currency:'RUB',created_at:'2026-10-10 07:00:00',username:'Known'};f.config.value.daUtcOffsetMinutes=0;
  f.setSessions([{id:'live',kind:'platform',started_at_ms:0,ended_at_ms:null}]);
- const db={call:async(method,...args)=>method==='activeLogicalStream'?{id:'live',started_at_ms:0}:method==='ingestLiveDonation'?{inserted:false}:f.db.call(method,...args)};
- const request=async()=>{pages++;t.mock.timers.tick(1100);if(pages===1)return pending;return response({data:[row],links:{next:'next'}});};
+ const db={call:async(method,...args)=>method==='activeLogicalStream'?{id:'live',started_at_ms:0}:method==='donationImportStates'?[{id:'1',needsImport:false,occurredAtMs:Date.parse('2026-10-10T07:00:00Z')}]:f.db.call(method,...args)};
+ const request=async()=>{pages++;t.mock.timers.tick(1100);if(pages===1)return pending;return response({data:[{...row,id:2,created_at:'2026-10-07 07:00:00'}],links:{next:'next'}});};
  const c=new DonationAlertsConnection(f.config,db,request,f.socket);c.stopped=false;c.recipient='7';
  try{
   const scan=c.scanHistory(true);await flush();await c.scanHistory(true);assert.equal(pages,1);
-  release(response({data:[row],links:{next:'next'}}));await scan;assert.equal(pages,3);assert.equal(c.status.capabilities.history,'Импорт доступных страниц завершён');
+  release(response({data:[row],links:{next:'next'}}));await scan;assert.equal(pages,2);assert.equal(c.status.capabilities.history,'Импорт доступных страниц завершён');
  }finally{release(response({data:[],links:{next:null}}));await c.stop();}
 });
 
 test('DA a finished page with a rejected row stays incomplete while its valid donation survives',async t=>{
  const f=fixture(t);let ingested=0;t.mock.method(console,'error',()=>{});
- const db={call:async(method)=>{if(method==='ingest'){ingested++;return {inserted:true};}return null;}};
+ const db={call:async(method,...args)=>{if(method==='ingest'){ingested++;return {inserted:true};}return f.db.call(method,...args);}};
  const request=async()=>response({data:[{id:'broken'},{id:2,amount:'2.90',currency:'RUB',created_at:'',username:'Valid'}],links:{next:null}});
  const c=new DonationAlertsConnection(f.config,db,request,f.socket);c.stopped=false;c.recipient='7';
  try{await c.scanHistory();assert.equal(ingested,1);assert.equal(c.status.capabilities.history,'Импорт неполный: пропущено записей 1');}finally{await c.stop();}
