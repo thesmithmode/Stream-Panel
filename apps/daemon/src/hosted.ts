@@ -1,3 +1,4 @@
+import {prepareChatStorage} from "./chat-cleanup.js";
 import Fastify, { type FastifyRequest, type FastifyReply } from "fastify";
 import cookie from "@fastify/cookie";
 import staticFiles from "@fastify/static";
@@ -8,7 +9,7 @@ import { BACKUP_STREAM_MAX_SIZE } from "./backup-stream.js";
 import { stageRestore, commitRestore, receiveRestore } from "./restore-service.js";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AccountStore, profiles, type Profile } from "./auth.js";
+import { AccountStore, profiles, canAccessProfile, publicUser, type Profile } from "./auth.js";
 import { BackupService } from "./backup.js";
 import { createApplication } from "./server.js";
 import {
@@ -33,6 +34,7 @@ export async function createHostedApplication(
   const backup = backupOptions ? new BackupService(dir, backupOptions) : undefined;
   let lastBackupRequest = 0;
   let restoreBusy = false;
+  await prepareChatStorage(join(dir,"data.sqlite"));
   const accounts = new AccountStore(join(dir, "data.sqlite"));
   const selectedProfile = (request: FastifyRequest, fallback: Profile): Profile =>
     request.headers["x-stream-panel-profile"] as Profile | undefined ?? fallback;
@@ -49,9 +51,10 @@ export async function createHostedApplication(
     for (const profile of profiles) {
       const runtime = await createApplication(join(dir, "profiles", profile), 47831, connect, {}, {
         databasePath: join(dir, "data.sqlite"), profile, origin: publicOrigin, staticFiles: false,
+        canViewCredentials: request => accounts.session(request.headers.cookie)?.profile === "ruslan",
         session: (request) => {
           const session = accounts.session(request.headers.cookie);
-          return session && selectedProfile(request, session.profile) === profile ? { csrf: session.csrf, expires: Number.MAX_SAFE_INTEGER } : null;
+          return session && canAccessProfile(session.profile, profile) && selectedProfile(request, session.profile) === profile ? { csrf: session.csrf, expires: Number.MAX_SAFE_INTEGER } : null;
         },
       });
       if(backup)runtime.db.setStorageCleanup(()=>backup.purgeLocal());
@@ -71,6 +74,9 @@ export async function createHostedApplication(
     const requestedProfile = request.headers["x-stream-panel-profile"];
     if (requestedProfile !== undefined && (typeof requestedProfile !== "string" || !profiles.includes(requestedProfile as Profile)))
       return reply.code(400).send({ error: "INVALID_PROFILE" });
+    const account = accounts.session(request.headers.cookie);
+    if (account && !request.url.split("?")[0]!.startsWith("/api/v1/auth/") && requestedProfile !== undefined && !canAccessProfile(account.profile, requestedProfile as Profile))
+      return reply.code(403).send({error:"PROFILE_FORBIDDEN"});
     if (request.url.startsWith("/api/") && ["deploying", "initializing", "restoring"].some(marker=>existsSync(join(dir,marker))))
       return reply.header("Retry-After", "10").code(503).send({ error: "SERVER_UPDATING" });
     if (!["GET", "HEAD"].includes(request.method) && request.headers.origin !== publicOrigin)
@@ -91,12 +97,12 @@ export async function createHostedApplication(
     const result = await accounts.login(body.username, body.password, request.ip);
     if (!result) return reply.code(401).send({ error: "INVALID_LOGIN" });
     reply.setCookie("sp_session", result.token, { httpOnly: true, secure: origin.protocol === "https:", sameSite: "lax", path: "/", maxAge: 86400 });
-    return { csrf: result.csrf, user: result.user };
+    return { csrf: result.csrf, user: publicUser(result.user) };
   });
   app.get("/api/v1/auth/me", async (request, reply) => {
     const user = accounts.session(request.headers.cookie);
     if (!user) return reply.code(401).send({ error: "LOGIN_REQUIRED" });
-    return { csrf: user.csrf, user: { profile: user.profile, username: user.username, displayName: user.displayName } };
+    return { csrf: user.csrf, user: publicUser(user) };
   });
   app.post("/api/v1/auth/logout", async (request, reply) => {
     const user = accounts.session(request.headers.cookie);
@@ -126,8 +132,10 @@ export async function createHostedApplication(
         return reply.code(400).send({ error: "INVALID_OAUTH_STATE" });
       if (binding.tokenHash !== user.tokenHash) return reply.code(403).send({ error: "INVALID_OAUTH_SESSION" });
       profile = binding.profile;
+      if (!canAccessProfile(user.profile, profile)) return reply.code(403).send({error:"PROFILE_FORBIDDEN"});
       oauthBindings.delete(state);
     }
+    if (!canAccessProfile(user.profile, profile)) return reply.code(403).send({error:"PROFILE_FORBIDDEN"});
     const runtime = runtimes.get(profile)!;
     let release = () => {};
     let queue: { tail: Promise<void>; waiting: number } | undefined;
@@ -142,7 +150,9 @@ export async function createHostedApplication(
     }
     try {
       // Recheck after waiting: logout can revoke a queued request's session.
-      if (!accounts.session(request.headers.cookie)) return reply.code(401).send({ error: "LOGIN_REQUIRED" });
+      const currentUser = accounts.session(request.headers.cookie);
+      if (!currentUser) return reply.code(401).send({ error: "LOGIN_REQUIRED" });
+      if (!canAccessProfile(currentUser.profile, profile)) return reply.code(403).send({error:"PROFILE_FORBIDDEN"});
       const headers = { ...request.headers };
       headers["x-stream-panel-profile"] = profile;
       delete headers["content-length"];
@@ -159,12 +169,14 @@ export async function createHostedApplication(
       const responseHeaders = { ...result.headers };
       delete responseHeaders["content-length"];
       const payload = request.url.split("?")[0] === "/api/v1/status" && result.statusCode === 200
-        ? JSON.stringify({ ...result.json(), backup: {...(backup?.status ?? {state:"disabled"}),restoreAvailable:!!backup&&!!onRestore}, user: { profile, username: user.username, displayName: user.displayName } }) : result.body;
+        ? JSON.stringify({ ...result.json(), ...(user.profile === "ruslan" ? {backup: {...(backup?.status ?? {state:"disabled"}),restoreAvailable:!!backup&&!!onRestore}} : {}), user: publicUser(user, profile) }) : result.body;
       reply.code(result.statusCode).headers(responseHeaders).send(payload);
     } finally { release(); if (queue) queue.waiting--; }
   };
   const canReadBackups=(request:FastifyRequest,reply:FastifyReply)=>{
-    if(!accounts.session(request.headers.cookie)){reply.code(401).send({error:"LOGIN_REQUIRED"});return false;}
+    const account=accounts.session(request.headers.cookie);
+    if(!account){reply.code(401).send({error:"LOGIN_REQUIRED"});return false;}
+    if(account.profile!=="ruslan"){reply.code(403).send({error:"BACKUP_FORBIDDEN"});return false;}
     if(request.headers["sec-fetch-site"]==="cross-site" || (request.headers.origin!==undefined&&request.headers.origin!==publicOrigin)){reply.code(403).send({error:"INVALID_ORIGIN"});return false;}
     if(!backup){reply.code(503).send({error:"BACKUP_NOT_CONFIGURED"});return false;}
     return true;
@@ -225,6 +237,7 @@ export async function createHostedApplication(
   app.post("/api/v1/backup", async (request, reply) => {
     const user = accounts.session(request.headers.cookie);
     if (!user) return reply.code(401).send({error:"LOGIN_REQUIRED"});
+    if (user.profile !== "ruslan") return reply.code(403).send({error:"BACKUP_FORBIDDEN"});
     if (!accounts.validCsrf(user,request.headers["x-csrf-token"])) return reply.code(403).send({error:"CSRF_REQUIRED"});
     if (!backup) return reply.code(503).send({error:"BACKUP_NOT_CONFIGURED"});
     if (Date.now() - lastBackupRequest < 600000) return reply.code(429).send({error:"BACKUP_RATE_LIMIT"});

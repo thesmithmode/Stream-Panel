@@ -1,3 +1,4 @@
+import {prepareChatStorage} from "./chat-cleanup.js";
 import {DA_API_UTC_OFFSET_MINUTES} from '../../../packages/core/src/donation-time.js';
 import {analyticsSettings} from "./analytics-settings.js";
 import Fastify, { type FastifyRequest } from "fastify";
@@ -32,6 +33,7 @@ export async function createApplication(
     profile?: string;
     origin?: string;
     session?: (request: FastifyRequest) => { csrf: string; expires: number } | null;
+    canViewCredentials?: (request: FastifyRequest) => boolean;
     staticFiles?: boolean;
   } = {},
 ) {
@@ -43,6 +45,7 @@ export async function createApplication(
     configuration.value.daApiUtcClockApplied=true;
     await configuration.save();
   }
+  if(!options.databasePath)await prepareChatStorage(join(dir,"data.sqlite"));
   const db = new StoreClient(options.databasePath ?? join(dir, "data.sqlite"), options.profile);
   await db.ready;
   try{await db.call('resolveDonationTimes',DA_API_UTC_OFFSET_MINUTES);}catch(error){await db.stop();throw error;}
@@ -284,7 +287,8 @@ export async function createApplication(
       excludedLogins:configuration.value.excludedBotLogins,ownerId:configuration.value.twitch?.userId??"",youtubeAccount:configuration.value.youtube?.userId??configuration.value.youtubeAccountId??"",
     });
   });
-  app.post('/api/v1/integrations/credentials',{schema:{body:{type:'object',additionalProperties:false,properties:{}}}},async()=>{
+  app.post('/api/v1/integrations/credentials',{schema:{body:{type:'object',additionalProperties:false,properties:{}}}},async(request,reply)=>{
+    if(options.canViewCredentials&&!options.canViewCredentials(request))return reply.code(403).send({error:'CREDENTIALS_FORBIDDEN'});
     const config=configuration.value;
     return {
       twitch:{clientId:config.twitchClientId,...config.twitch},

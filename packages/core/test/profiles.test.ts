@@ -18,8 +18,9 @@ test("profiles share one SQLite but isolate identical provider keys, mutations a
     assert.notEqual(first.personId, other.personId);
     assert.equal(a.summary().events, 1);
     assert.equal(b.summary().messages, 1);
-    assert.equal((a.events()[0]!.payload as any).text, "Руслан");
-    assert.equal((b.events()[0]!.payload as any).text, "Гульназ");
+    assert.equal(a.events()[0]!.person_id,first.personId);
+    assert.equal((a.events()[0]!.payload as any).text,undefined);
+    assert.equal(b.events()[0]!.person_id,other.personId);
     assert.throws(() => b.person(first.personId!), /NOT_FOUND/);
     assert.throws(() => b.renamePerson(first.personId!, "Hacked"), /NOT_FOUND/);
     a.renamePerson(first.personId!, "Only A");

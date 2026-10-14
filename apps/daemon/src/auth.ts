@@ -4,6 +4,13 @@ import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 export const profiles = ["ruslan", "gulnaz"] as const;
 export type Profile = typeof profiles[number];
 export type UserSession = { profile: Profile; username: string; displayName: string; csrf: string; tokenHash: string };
+/** Ruslan owns the installation; Gulnaz can use only her own profile. */
+export function allowedProfiles(profile: Profile): readonly Profile[] { return profile === "ruslan" ? profiles : [profile]; }
+export function canAccessProfile(account: Profile, selected: Profile): boolean { return allowedProfiles(account).includes(selected); }
+export function publicUser(user: Pick<UserSession, "profile" | "username" | "displayName">, selected=user.profile) {
+  return {profile:selected,accountProfile:user.profile,username:user.username,displayName:user.displayName,
+    allowedProfiles:allowedProfiles(user.profile),canManageBackups:user.profile === "ruslan",canViewCredentials:user.profile === "ruslan"};
+}
 type User = { profile: Profile; username: string; display_name: string; salt: string; password_hash: string };
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const hashPassword = (password: string, salt: string): Promise<Buffer> =>

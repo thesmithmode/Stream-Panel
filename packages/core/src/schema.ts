@@ -1,5 +1,5 @@
 // Migration 1. All times are UTC epoch milliseconds; names are never unique identifiers.
-export const CURRENT_SCHEMA_VERSION = 14;
+export const CURRENT_SCHEMA_VERSION = 15;
 
 export const schemaV1 = `
 CREATE TABLE persons (
@@ -266,4 +266,23 @@ CREATE INDEX events_type_time ON events(type,occurred_at_ms,id);
 CREATE INDEX events_type_received ON events(type,received_at_ms,id);
 CREATE INDEX youtube_messages_author_time ON youtube_messages(account_id,author_id,published_at_ms);
 PRAGMA user_version = 14;
+`;
+
+/** Chat content is not a product feature. Retain only counting/deduplication metadata. */
+export const schemaV15 = `
+UPDATE events SET payload_json=json_object('count',1,
+ 'originChannelId',json_extract(payload_json,'$.originChannelId'),
+ 'redacted',coalesce(json_extract(payload_json,'$.redacted'),0)) WHERE type='chat.message';
+UPDATE events SET payload_json=json_object(
+ 'targetMessageId',json_extract(payload_json,'$.targetMessageId'),
+ 'targetUserId',json_extract(payload_json,'$.targetUserId'))
+ WHERE type IN ('chat.message_delete','chat.clear','chat.clear_user_messages');
+UPDATE youtube_messages SET payload_json=json_object(
+ 'snippet',json_object('type',json_extract(payload_json,'$.snippet.type'),'publishedAt',json_extract(payload_json,'$.snippet.publishedAt')),
+ 'authorDetails',json_object('channelId',json_extract(payload_json,'$.authorDetails.channelId'),
+ 'displayName',json_extract(payload_json,'$.authorDetails.displayName'),
+ 'isChatOwner',coalesce(json_extract(payload_json,'$.authorDetails.isChatOwner'),0)));
+DELETE FROM provider_snapshots WHERE source='youtube' AND substr(key,1,5)='chat:';
+DELETE FROM youtube_snapshots WHERE substr(key,1,5)='chat:';
+PRAGMA user_version = 15;
 `;

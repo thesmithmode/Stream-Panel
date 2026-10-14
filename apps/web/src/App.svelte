@@ -56,13 +56,15 @@
     busy = $state(false);
   let username = $state(""), password = $state(""), user = $state<any>(null);
   let profile = $state<Profile>(getProfile());
+  const allowedProfiles = $derived<readonly Profile[]>(user?.allowedProfiles ?? ["ruslan", "gulnaz"]);
+  const accessibleProfile = (next: Profile): Profile => allowedProfiles.includes(next) ? next : allowedProfiles[0]!;
   let epoch = 0;
   let scopeReady=$state(false),connectionLost=$state(false);
   let outdated=$state(false);
   let refreshTask:{epoch:number;task:Promise<void>;controller:AbortController}|null=null;
   function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
   function clearScope(){refreshTask?.controller.abort();busy=false;scopeReady=false;events=[];summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
-  function restoreRoute(){const route=readRoute(location.search,getProfile());epoch++;tab=route.view;sessionFilter=route.session;personId=route.person;setProfile(route.profile);profile=route.profile;clearScope();}
+  function restoreRoute(){const route=readRoute(location.search,getProfile()),selected=accessibleProfile(route.profile),denied=selected!==route.profile;epoch++;tab=denied&&route.view==='stream'?'overview':route.view;sessionFilter=denied?'':route.session;personId=denied?'':route.person;setProfile(selected);profile=selected;clearScope();}
   function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}connectionLost=!navigator.onLine;if(document.hidden||!navigator.onLine)return;error=authMessage((e as Error).message);}
 
   const authMessage = (code: string) => ({ INVALID_LOGIN: "Неверный логин или пароль", LOGIN_RATE_LIMIT: "Слишком много попыток. Попробуйте позже.", LOGIN_REQUIRED: "Войдите в свой профиль", LOCAL_LOGIN_REQUIRED: "Войдите в свой профиль" }[code] ?? code);
@@ -142,7 +144,7 @@
   }
   function openPerson(id:string){navigate('people',id);}
   async function switchProfile(next: Profile) {
-    if (next === profile) return;
+    if (!allowedProfiles.includes(next) || next === profile) return;
     epoch++;if(tab==="stream")tab="overview"; setProfile(next); profile = next;
     status = null; sessions = []; people = []; events = []; personId = sessionFilter = ""; error = "";
     summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
@@ -165,8 +167,11 @@
           catch(bootstrapError){try{await api("status");}catch{throw bootstrapError;}}
           history.replaceState(null,"",location.pathname+location.search);
         }
+        // Establish account permissions before using a persisted or URL-selected profile.
+        // The standalone collector has no auth/me route; its existing status flow remains.
+        try {const identity=await api<any>("auth/me");user=identity.user;restoreRoute();} catch(e) {if((e as Error).message!=="NOT_FOUND"&&(e as Error).message!=="HTTP_404")throw e;}
         const auth=await api<any>("status");
-        setCsrf(auth.csrf);user=auth.user;restoreRoute();
+        setCsrf(auth.csrf);user=auth.user??user;restoreRoute();
         await refresh();
         if (!alive) return;
         authorized=true;saveRoute(true);
@@ -216,7 +221,7 @@
           <button class="text-button small manual-refresh" aria-label="Обновить данные" title="Обновить данные" disabled={busy} onclick={()=>void action(async()=>{})}><Icon name="refresh" size={18}/><span>{busy?'Обновляем…':'Обновить данные'}</span></button>
           {#if autoRefresh&&connectionLost}<span class="small muted" role="status">Не удалось обновить данные</span>{/if}
         </div>
-        <label class="profile-label"><span class="small muted">Профиль</span><select aria-label="Профиль" value={profile} disabled={busy} onchange={(event) => void switchProfile(event.currentTarget.value as Profile)}><option value="ruslan">Руслан</option><option value="gulnaz">Гульназ</option></select></label>
+        <label class="profile-label"><span class="small muted">Профиль</span><select aria-label="Профиль" value={profile} disabled={busy} onchange={(event) => void switchProfile(event.currentTarget.value as Profile)}>{#each allowedProfiles as allowed}<option value={allowed}>{allowed==='ruslan'?'Руслан':'Гульназ'}</option>{/each}</select></label>
       {/if}
     </div>
   </aside>

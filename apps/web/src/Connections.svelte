@@ -72,7 +72,7 @@
 </script>
 
 <div class="settings-grid">
-  <Credentials/>
+  {#if status.user?.canViewCredentials ?? !status.serverMode}<Credentials/>{/if}
   <section class="panel settings">
     <header>
       <h2>Twitch</h2>

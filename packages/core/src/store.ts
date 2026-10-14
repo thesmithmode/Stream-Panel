@@ -1,3 +1,4 @@
+import {chatMetadata,messageMetadata,moderationMetadata} from "./message-storage.js";
 import {registerDonationSum,donorRanking} from './donation-statistics.js';
 import {parseDonationTime} from './donation-time.js';
 import {streamMetrics} from "./stream-metrics.js";
@@ -16,7 +17,7 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11,schemaV12,schemaV13,schemaV14 } from "./schema.js";
+import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11,schemaV12,schemaV13,schemaV14,schemaV15 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
 import {personFollowing,followingAnalytics,type Follower} from './following.js';
 import { sessionWindows,sessionBreaks,windowsFromLinks } from './session-windows.js';
@@ -62,6 +63,7 @@ export class StreamStore {
         throw new Error("UNSUPPORTED_SCHEMA_VERSION");
       this.db.pragma("journal_mode = WAL");
       this.db.pragma("synchronous = FULL");
+      this.db.pragma("secure_delete = ON");
       this.db.pragma("wal_autocheckpoint = 1000");
       this.db.pragma("journal_size_limit = 67108864");
       if (version === 0) this.db.transaction(() => this.db.exec(schemaV1)).immediate();
@@ -104,6 +106,8 @@ export class StreamStore {
         this.db.transaction(() => this.db.exec(schemaV13)).immediate();
       if ((this.db.pragma("user_version", { simple: true }) as number) < 14)
         this.db.transaction(() => this.db.exec(schemaV14)).immediate();
+      if ((this.db.pragma("user_version", { simple: true }) as number) < 15)
+        this.db.transaction(() => this.db.exec(schemaV15)).immediate();
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
       this.db.transaction(() => {this.collapseDuplicateDaDonors();this.reconcileNicknameLinks();}).immediate();
     } catch (error) {
@@ -234,6 +238,7 @@ export class StreamStore {
   }
   youtubeSnapshot(account: string, key: string, payload: unknown, now = Date.now()): void {
     if (!account || !key) throw new Error("INVALID_YOUTUBE_KEY");
+    if(key.startsWith("chat:"))return;
     this.db.transaction(()=>{
       this.db.prepare("INSERT INTO youtube_snapshots VALUES (?,?,?,?) ON CONFLICT(account_id,key) DO UPDATE SET payload_json=excluded.payload_json,updated_at_ms=excluded.updated_at_ms").run(account, key, JSON.stringify(payload), now);
       if(!key.startsWith('cursor:'))this.providerSnapshot('youtube',account,key,payload,now);
@@ -242,6 +247,7 @@ export class StreamStore {
   providerSnapshot(source:string,account:string,key:string,payload:unknown,at:number,sessionId:string|null=null):void {
     assertTimestamp(at);
     if(!['twitch','youtube','donationalerts'].includes(source)||!account||!key)throw new Error('INVALID_PROVIDER_SNAPSHOT');
+    if(source==='youtube'&&key.startsWith('chat:'))return;
     const encoded=JSON.stringify(payload);
     // Normalized events/samples retain each observation. Compress only repeated diagnostic responses.
     if(key==='donation_history_page'||key.startsWith('api:')||['channel','broadcasts','liveVideoDetails','report','archivedVideoDetails','stream'].includes(key)){
@@ -267,7 +273,7 @@ export class StreamStore {
   youtubeMessages(account: string, chat: string, messages: any[]): void {
     if (!account || !chat || messages.length > 2000) throw new Error("INVALID_YOUTUBE_MESSAGES");
     this.db.transaction(() => {
-      if(messages.length)this.providerSnapshot('youtube',account,`chat:${chat}`,messages,Date.now());
+
       const insert = this.db.prepare("INSERT OR IGNORE INTO youtube_messages VALUES (?,?,?,?,?,?)");
       for (const m of messages) {
         const time = Date.parse(m.snippet?.publishedAt ?? "");
@@ -282,7 +288,7 @@ export class StreamStore {
           if (typeof bannedChannelId === "string" && bannedChannelId.trim())
             this.db.prepare("DELETE FROM youtube_messages WHERE account_id=? AND author_id=?").run(account, bannedChannelId);
         }
-        if (insert.run(m.id, account, chat, m.authorDetails?.channelId ?? "", time, JSON.stringify(m)).changes)
+        if (insert.run(m.id, account, chat, m.authorDetails?.channelId ?? "", time, JSON.stringify(messageMetadata(m))).changes)
           this.ensureYoutubeIdentity(account,m.authorDetails,time);
       }
     }).immediate();
@@ -306,8 +312,8 @@ export class StreamStore {
   }
   youtubeData(account: string) {
     const snapshots = this.db.prepare("SELECT key,payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=?").all(account) as {key:string;payload_json:string;updated_at_ms:number}[];
-    const messages = this.db.prepare("SELECT payload_json FROM youtube_messages WHERE account_id=? ORDER BY published_at_ms DESC,id DESC LIMIT 200").all(account) as {payload_json:string}[];
-    return { snapshots: Object.fromEntries(snapshots.map(r => [r.key, {data: JSON.parse(r.payload_json), updatedAt: r.updated_at_ms}])), messages: messages.map(r => JSON.parse(r.payload_json)) };
+    const messages = this.db.prepare("SELECT id,payload_json FROM youtube_messages WHERE account_id=? ORDER BY published_at_ms DESC,id DESC LIMIT 200").all(account) as {id:string;payload_json:string}[];
+    return { snapshots: Object.fromEntries(snapshots.map(r => [r.key, {data: JSON.parse(r.payload_json), updatedAt: r.updated_at_ms}])), messages: messages.map(r => ({...JSON.parse(r.payload_json),id:r.id})) };
   }
 
   ingest(event: EventInput): {
@@ -328,7 +334,9 @@ export class StreamStore {
     }
     if (event.actor && !event.actor.externalId)
       throw new Error("MISSING_ACTOR_KEY");
-    const payload = JSON.stringify(event.payload); // Fails before writing on BigInt/cycles.
+    JSON.stringify(event.payload); // Validate the transport payload before any writes; content is never retained.
+    const payload = JSON.stringify(event.type === "chat.message" ? chatMetadata(event.payload) :
+      ["chat.message_delete","chat.clear","chat.clear_user_messages"].includes(event.type) ? moderationMetadata(event.payload) : event.payload);
     return this.db.transaction(() => {
       const previous = this.db
         .prepare(`SELECT identity_id AS id FROM events WHERE id = ?`)

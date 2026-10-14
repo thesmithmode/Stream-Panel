@@ -18,7 +18,7 @@ test('YouTube reports, duplicate messages, moderation, account and profile isola
   a.youtubeMessages('channel','chat',[message,message,{id:'bad',snippet:{publishedAt:'invalid'}}]);
   b.youtubeMessages('channel','chat',[{...message,snippet:{...message.snippet,displayMessage:'B'}}]);
   assert.equal(a.youtubeData('channel').messages.length,1);assert.equal(a.youtubeData('channel').snapshots.report!.data.views,43);
-  assert.equal(b.youtubeData('channel').messages[0].snippet.displayMessage,'B');assert.equal(a.youtubeData('other').messages.length,0);
+  assert.equal(b.youtubeData('channel').messages[0].snippet.displayMessage,undefined);assert.equal(a.youtubeData('other').messages.length,0);
   a.youtubeMessages('channel','chat',[{id:'delete',snippet:{type:'messageDeletedEvent',publishedAt:message.snippet.publishedAt,messageDeletedDetails:{deletedMessageId:'same'}}}]);
   assert.equal(a.youtubeData('channel').messages.some(m=>m.id==='same'),false);
   a.youtubeMessages('channel','chat',[message,{id:'ban',snippet:{type:'userBannedEvent',publishedAt:message.snippet.publishedAt,userBannedDetails:{bannedUserDetails:{channelId:'viewer'}}}}]);
@@ -42,7 +42,7 @@ test('YouTube moderation with missing or malformed target IDs preserves messages
   ]);
   const messages=store.youtubeData('channel').messages;
   const kept=messages.find(row=>row.id==='kept')!;
-  assert.equal(kept.snippet.displayMessage,'Keep me');
+  assert.equal(kept.snippet.displayMessage,undefined);
   assert.equal(messages.some(row=>row.id==='anonymous'),true);
   for(const id of ['delete-no-target','delete-empty-target','delete-malformed-target'])
    assert.equal(messages.find(row=>row.id===id)?.snippet.type,'messageDeletedEvent');

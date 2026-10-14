@@ -19,12 +19,13 @@ test("authenticated clients select profiles per request without changing another
     };
     const [a, b] = await Promise.all([login(), login()]);
     const input = { source: "twitch", accountId: "channel", externalId: "same-event", type: "chat.message", actor: { externalId: "viewer", displayName: "Viewer" }, occurredAtMs: 100, receivedAtMs: 100, sourceTime: null, timeQuality: "provider", transport: "eventsub", payload: { text: "Руслан" } };
-    await h.runtimes.get("ruslan")!.db.call("ingest", input);
-    await h.runtimes.get("gulnaz")!.db.call("ingest", { ...input, payload: { text: "Гульназ" } });
+    const ea=await h.runtimes.get("ruslan")!.db.call<any>("ingest", input);
+    const eb=await h.runtimes.get("gulnaz")!.db.call<any>("ingest", { ...input, payload: { text: "Гульназ" } });
     const selected = { ...a, "x-stream-panel-profile": "gulnaz" };
     const responses = await Promise.all([h.app.inject({ url: "/api/v1/events", headers: selected }), h.app.inject({ url: "/api/v1/events", headers: b })]);
-    assert.equal(responses[0]!.json()[0].payload.text, "Гульназ");
-    assert.equal(responses[1]!.json()[0].payload.text, "Руслан");
+    assert.equal(responses[0]!.json()[0].person_id, eb.personId);
+    assert.equal(responses[0]!.json()[0].payload.text, undefined);
+    assert.equal(responses[1]!.json()[0].person_id, ea.personId);
     assert.equal((await h.app.inject({ url: "/api/v1/status", headers: selected })).json().user.profile, "gulnaz");
     assert.equal((await h.app.inject({ url: "/api/v1/events", headers: { ...base, "x-stream-panel-profile": "gulnaz" } })).statusCode, 401);
     assert.equal((await h.app.inject({ url: "/api/v1/events", headers: { ...a, "x-stream-panel-profile": "other" } })).statusCode, 400);
@@ -77,8 +78,8 @@ test("hosted logins isolate two profiles and simultaneous writes; login, CSRF, o
     const [ea, eb] = await Promise.all([h.runtimes.get("ruslan")!.db.call<any>("ingest", input), h.runtimes.get("gulnaz")!.db.call<any>("ingest", { ...input, payload: { text: "B" } })]);
     assert.notEqual(ea.personId, eb.personId);
     const list = (headers: any) => h.app.inject({ url: "/api/v1/events", headers });
-    assert.equal((await list(a)).json()[0].payload.text, "A");
-    assert.equal((await list(b)).json()[0].payload.text, "B");
+    assert.equal((await list(a)).json()[0].person_id, ea.personId);
+    assert.equal((await list(b)).json()[0].person_id, eb.personId);
     assert.equal((await h.app.inject({ url: `/api/v1/persons/${ea.personId}`, headers: b })).statusCode, 404);
     assert.equal((await h.app.inject({ method: "POST", url: `/api/v1/persons/${ea.personId}/rename`, headers: b, payload: { name: "Stolen" } })).statusCode, 404);
     assert.equal((await h.app.inject({ method: "POST", url: "/api/v1/twitch/disconnect", headers: { ...a, "x-csrf-token": "wrong" }, payload: {} })).statusCode, 403);

@@ -61,12 +61,12 @@ for (const kind of [
       db.ingest(message("old", 60000));
       const rows = db.events();
       const oldPayload = rows.find((x) => x.external_id === "old")!.payload as any;
-      assert.equal(oldPayload.text, "private text", "original text must be preserved");
+      assert.equal(oldPayload.text, undefined, "message text must never be persisted");
       assert.equal(oldPayload.redacted, 1);
       assert.equal(
         (rows.find((x) => x.external_id === "newer")!.payload as any).text,
-        "private text",
-        "later messages must not be removed by an older clear",
+        undefined,
+        "later messages contain only counting metadata",
       );
       assert.notEqual(
         (rows.find((x) => x.external_id === "newer")!.payload as any).redacted,
@@ -75,13 +75,13 @@ for (const kind of [
       assert.equal(
         (rows.find((x) => x.external_id === "other-account")!.payload as any)
           .text,
-        "private text",
+        undefined,
       );
       if (kind !== "chat.clear")
         assert.equal(
           (rows.find((x) => x.external_id === "other-user")!.payload as any)
             .text,
-          "private text",
+          undefined,
         );
       assert.equal(db.ingest(message("old", 60000)).inserted, false);
       assert.equal(db.eventCount(), 5);

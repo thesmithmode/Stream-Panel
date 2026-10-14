@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {application,seed} from '../helpers/application.mjs';import {launchBrowser} from '../helpers/browser.mjs';import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';
-test('phone stream reads stay bounded and manual/timed refresh update counters, chart and selected message history',{timeout:60000},async()=>{
+test('phone stream reads stay bounded and manual/timed refresh update counters, chart and selected minute detail',{timeout:60000},async()=>{
  const app=await application();let browser;
  try{
   const id=await seed(app),at=Math.floor((Date.now()-120000)/60000)*60000;
@@ -14,11 +14,11 @@ test('phone stream reads stay bounded and manual/timed refresh update counters, 
   await message(1);await app.db.call('streamSample',id,at,'g','Game','Live',20);
   await page.getByRole('button',{name:'Обновить данные',exact:true}).click();await metric('Сообщения').getByText('9',{exact:true}).waitFor();await metric('Максимум зрителей').getByText('20',{exact:true}).waitFor();assert.equal(analyticsReads,2);
   await page.getByLabel('Показатель графика стрима').selectOption('messages');await page.locator('.series-panel .chart-bar').filter({has:page.locator(`rect title`,{hasText:/всего: 2/})}).first().click();
-  await page.getByRole('region',{name:'Детали выбранного столбца'}).waitFor();await page.locator('.stream-feed').getByText('Fresh 1',{exact:true}).waitFor();
-  await message(2);await page.getByRole('button',{name:'Обновить данные',exact:true}).click();await metric('Сообщения').getByText('10',{exact:true}).waitFor();await page.locator('.stream-feed').getByText('Fresh 2',{exact:true}).waitFor();assert.equal(await page.getByRole('region',{name:'Детали выбранного столбца'}).count(),1,'refresh retains selected minute');
+  await page.getByRole('region',{name:'Детали выбранного столбца'}).waitFor();assert.equal(await page.locator('.stream-feed').getByText('Fresh 1',{exact:true}).count(),0);
+  await message(2);await page.getByRole('button',{name:'Обновить данные',exact:true}).click();await metric('Сообщения').getByText('10',{exact:true}).waitFor();assert.equal(await page.locator('.stream-feed').getByText('Fresh 2',{exact:true}).count(),0);assert.equal(await page.getByRole('region',{name:'Детали выбранного столбца'}).count(),1,'refresh retains selected minute');
   await page.getByRole('button',{name:/Автообновление/}).click();await page.waitForTimeout(200);await page.clock.install();await page.getByLabel('Интервал автообновления').selectOption('60');
   await message(3);await app.db.call('streamSample',id,at,'g','Game','Live',30);await page.clock.fastForward(61000);
-  await metric('Сообщения').getByText('11',{exact:true}).waitFor();await metric('Максимум зрителей').getByText('30',{exact:true}).waitFor();await page.locator('.stream-feed').getByText('Fresh 3',{exact:true}).waitFor();
+  await metric('Сообщения').getByText('11',{exact:true}).waitFor();await metric('Максимум зрителей').getByText('30',{exact:true}).waitFor();assert.equal(await page.locator('.stream-feed').getByText('Fresh 3',{exact:true}).count(),0);
   const before=analyticsReads;await page.clock.fastForward(5000);assert.equal(analyticsReads,before,'no refresh before interval');
   await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'));});await page.clock.fastForward(60000);assert.equal(analyticsReads,before,'hidden phone page stops requests');
   await page.evaluate(()=>Object.defineProperty(document,'hidden',{configurable:true,get:()=>false}));await page.getByRole('button',{name:'Обновить данные',exact:true}).click();await page.waitForTimeout(200);assert.ok(analyticsReads<=before+1,`unexpected request count ${analyticsReads}`);assert.deepEqual(errors,[]);

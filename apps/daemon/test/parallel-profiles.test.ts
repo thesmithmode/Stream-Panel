@@ -17,7 +17,7 @@ test('parallel profile workers retain separate live events, samples, donors and 
   for(const [index,c] of clients.entries()){
    const summary=await c.call<any>('summary',ids[index],[],false);assert.equal(summary.messages,150);assert.equal(summary.totals.RUB,String((index+1)*10000));
    const sessions=await c.call<any[]>('sessions',ids[index]);assert.equal(sessions.length,1);assert.equal(sessions[0].viewerPeak,index+1);assert.deepEqual(await c.call('sessions',ids[1-index]),[]);
-   const events=await c.call<any[]>('events',ids[index]);assert.ok(events.filter(e=>e.type==='chat.message').every(e=>e.payload.text===`Profile ${index}`));
+   const events=await c.call<any[]>('events',ids[index]);assert.ok(events.filter(e=>e.type==='chat.message').every(e=>e.payload.text===undefined&&e.payload.count===1));
   }
   const probe=new Database(path);try{assert.equal(probe.pragma('integrity_check',{simple:true}),'ok');assert.deepEqual(probe.pragma('foreign_key_check'),[]);}finally{probe.close();}
  }finally{await Promise.all(clients.map(c=>c.stop()));await rm(dir,{recursive:true,force:true});}

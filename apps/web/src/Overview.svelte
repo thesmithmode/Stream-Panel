@@ -5,7 +5,7 @@
   import Following from "./Following.svelte";
   import Help from "./Help.svelte";
   import EventList from "./EventList.svelte";
-  import {chartMetrics,metricSource,isMessageMetric,type ChartMetric} from './chart-series';
+  import {chartMetrics,metricSource,type ChartMetric} from './chart-series';
   import AudienceChart from "./AudienceChart.svelte";
   import AudienceRanking from "./AudienceRanking.svelte";
   import {streamRange,streamTime} from './stream-time';
@@ -55,7 +55,7 @@
   });
   let filter = $state("all");
   const sourceFilter=$derived(metricSource(audienceMetric));
-  const eventType=$derived(isMessageMetric(audienceMetric)?'chat.message':filter);
+  const eventType=$derived(filter);
   $effect(()=>{void audienceMetric;filter='all';});
   let eventInterval=$state<{from:number;to:number}|null>(null),eventsBusy=$state(false),eventsError=$state('');
   $effect(()=>{void sessionFilter;eventInterval=null;});
@@ -125,12 +125,12 @@
 {#if sessionFilter}<Following sessionId={sessionFilter} {onPerson} />{/if}</div>
 <section class="panel feed stream-feed">
     <header>
-      <h2>{isMessageMetric(audienceMetric)?'История сообщений':'Лента событий'}</h2>
+      <h2>Лента событий</h2>
       <div class="event-filters"><span class="small muted">{sourceFilter==='all'?'Все площадки':sourceFilter==='twitch'?'Twitch':'YouTube'}</span>
-      {#if !isMessageMetric(audienceMetric)}<select aria-label="Фильтр событий" bind:value={filter}><option value="all">Все события</option><option value="chat.message">Сообщения</option><option value="donation">Донаты</option></select>{/if}</div>
+      <select aria-label="Фильтр событий" bind:value={filter}><option value="all">Все события</option><option value="donation">Донаты</option></select></div>
     </header>
-    {#if eventsBusy}<p class="empty-small" role="status">Загружаем события…</p>{:else if eventsError}<p class="notice error" role="alert">{eventsError}</p>{:else if visible.length}<EventList
-        events={visible}
+    {#if eventsBusy}<p class="empty-small" role="status">Загружаем события…</p>{:else if eventsError}<p class="notice error" role="alert">{eventsError}</p>{:else if visible.some(event=>event.type!=='chat.message')}<EventList
+        events={visible.filter(event=>event.type!=='chat.message')}
         {onPerson}
         streamStart={session?.started_at_ms} streamEnd={session?.ended_at_ms??Date.now()}
       />{:else}<p class="empty-small">Событий этого типа нет</p>{/if}

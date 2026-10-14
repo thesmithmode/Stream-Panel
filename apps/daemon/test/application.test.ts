@@ -198,7 +198,7 @@ test("local API requires bootstrap; rejects cross-site reads, Host rebinding, CS
   }
 });
 
-test("chat moderation redacts persisted text rather than hiding it only in UI", async () => {
+test("chat moderation retains flags and counters without persisting message text", async () => {
   const directory = await mkdtemp(join(tmpdir(), "stream-panel-redaction-"));
   const app = await createApplication(directory, 47831, false);
   try {
@@ -217,7 +217,8 @@ test("chat moderation redacts persisted text rather than hiding it only in UI", 
     await app.db.call("ingest", normalizeTwitch(deletion, "channel"));
     const events = await app.db.call<any[]>("events");
     const chat = events.find((e) => e.type === "chat.message").payload;
-    assert.equal(chat.text, "hello", "moderation must not overwrite text");
+    assert.equal(chat.text, undefined, "message content is not persisted");
+    assert.equal(chat.count,1);
     assert.equal(chat.redacted, 1);
   } finally {
     await app.app.close();
