@@ -16,8 +16,8 @@ test('phone stream reads stay bounded and manual/timed refresh update counters, 
   await page.getByLabel('Показатель графика стрима').selectOption('messages');await page.locator('.series-panel .chart-bar').filter({has:page.locator(`rect title`,{hasText:/всего: 2/})}).first().click();
   await page.getByRole('region',{name:'Детали выбранного столбца'}).waitFor();await page.locator('.stream-feed').getByText('Fresh 1',{exact:true}).waitFor();
   await message(2);await page.getByRole('button',{name:'Обновить данные',exact:true}).click();await metric('Сообщения').getByText('10',{exact:true}).waitFor();await page.locator('.stream-feed').getByText('Fresh 2',{exact:true}).waitFor();assert.equal(await page.getByRole('region',{name:'Детали выбранного столбца'}).count(),1,'refresh retains selected minute');
-  await page.getByRole('button',{name:/Автообновление/}).click();await page.waitForTimeout(200);await page.clock.install();await page.getByLabel('Интервал автообновления').selectOption('15');
-  await message(3);await app.db.call('streamSample',id,at,'g','Game','Live',30);await page.clock.fastForward(16000);
+  await page.getByRole('button',{name:/Автообновление/}).click();await page.waitForTimeout(200);await page.clock.install();await page.getByLabel('Интервал автообновления').selectOption('60');
+  await message(3);await app.db.call('streamSample',id,at,'g','Game','Live',30);await page.clock.fastForward(61000);
   await metric('Сообщения').getByText('11',{exact:true}).waitFor();await metric('Максимум зрителей').getByText('30',{exact:true}).waitFor();await page.locator('.stream-feed').getByText('Fresh 3',{exact:true}).waitFor();
   const before=analyticsReads;await page.clock.fastForward(5000);assert.equal(analyticsReads,before,'no refresh before interval');
   await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'));});await page.clock.fastForward(60000);assert.equal(analyticsReads,before,'hidden phone page stops requests');
@@ -42,7 +42,7 @@ test('manual refresh arriving during an old automatic response waits for a new r
   delayed=false;const nextStarted=new Promise(resolve=>{release.start=resolve;});const nextHeld=new Promise(resolve=>{release.finish=resolve;});
   await page.unroute('**/api/v1/summary?*');
   await page.route('**/api/v1/summary?*',async route=>{reads++;if(delayed){await route.continue();return;}delayed=true;const old=await route.fetch();release.start();await nextHeld;await route.fulfill({response:old});});
-  await page.clock.install();await page.getByLabel('Интервал автообновления').selectOption('15');await page.clock.fastForward(16000);await nextStarted;
+  await page.clock.install();await page.getByLabel('Интервал автообновления').selectOption('60');await page.clock.fastForward(61000);await nextStarted;
   await app.db.call('ingest',{source:'twitch',accountId:'test-channel',externalId:'manual-after-read',type:'chat.message',actor:{externalId:'42',displayName:'Viewer'},occurredAtMs:Date.now()-1000,receivedAtMs:Date.now(),sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'After snapshot'}});
   await page.getByRole('button',{name:'Обновить данные',exact:true}).click();release.finish();await messages.getByText('10',{exact:true}).waitFor();assert.equal(reads,3);
   await saveCoverage(page,'refresh-race');
