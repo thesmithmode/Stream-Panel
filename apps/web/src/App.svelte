@@ -33,7 +33,7 @@
   import {sessionGroup} from "./session-group";
   import {formatDuration} from "./duration";
   let retryInitialization=()=>{};
-  let autoRefresh=$state(false),refreshSeconds=$state(30);
+  let autoRefresh=$state(false),refreshSeconds=$state(60);
   function toggleRefresh(){autoRefresh=!autoRefresh;if(autoRefresh)void action(async()=>{});}
   let tab = $state("overview"),
     authorized = $state(false),
@@ -212,7 +212,7 @@
       {#if authorized}
         <div class="refresh-controls">
           <button class="refresh-toggle" aria-label={`Автообновление ${autoRefresh?'Вкл':'Выкл'}`} aria-pressed={autoRefresh} onclick={toggleRefresh}><span class="dot" class:off={!autoRefresh}></span><span class="refresh-label">Автообновление</span> <strong>{autoRefresh?'Вкл':'Выкл'}</strong></button>
-          {#if autoRefresh}<label class="small muted">Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={15}>15 с</option><option value={30}>30 с</option><option value={60}>1 мин</option></select></label>{/if}
+          {#if autoRefresh}<label class="small muted">Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={60}>1 мин</option><option value={300}>5 мин</option><option value={900}>15 мин</option></select></label>{/if}
           <button class="text-button small manual-refresh" aria-label="Обновить данные" title="Обновить данные" disabled={busy} onclick={()=>void action(async()=>{})}><Icon name="refresh" size={18}/><span>{busy?'Обновляем…':'Обновить данные'}</span></button>
           {#if autoRefresh&&connectionLost}<span class="small muted" role="status">Не удалось обновить данные</span>{/if}
         </div>
