@@ -68,10 +68,7 @@ export class YouTubeConnection {
     if (!await this.db.call("youtubeQuota", day, this.profile, 1)) throw new Error("YOUTUBE_DAILY_BUDGET");
     const data=await this.json(`https://www.googleapis.com/youtube/v3/${resource}?${new URLSearchParams(params)}`, { headers: { Authorization: `Bearer ${tokens.access}` } });
     if(generation!==this.generation)return {};
-    if(tokens.userId){
-      await this.db.call('providerSnapshot','youtube',tokens.userId,`api:${resource}`,{request:{resource,params},response:data},this.now());
-      if(generation!==this.generation)return {};
-    }
+
     return data;
   }
   private async activeBroadcasts(tokens: Tokens, valid: () => boolean) {

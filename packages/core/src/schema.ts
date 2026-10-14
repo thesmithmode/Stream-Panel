@@ -1,5 +1,5 @@
 // Migration 1. All times are UTC epoch milliseconds; names are never unique identifiers.
-export const CURRENT_SCHEMA_VERSION = 15;
+export const CURRENT_SCHEMA_VERSION = 16;
 
 export const schemaV1 = `
 CREATE TABLE persons (
@@ -285,4 +285,15 @@ UPDATE youtube_messages SET payload_json=json_object(
 DELETE FROM provider_snapshots WHERE source='youtube' AND substr(key,1,5)='chat:';
 DELETE FROM youtube_snapshots WHERE substr(key,1,5)='chat:';
 PRAGMA user_version = 15;
+`;
+
+/** Diagnostic API copies are unused; follower history and unparsed money must survive. */
+export const schemaV16 = `
+UPDATE provider_snapshots SET payload_json=json_object(
+ 'followers',json((SELECT coalesce(json_group_array(json_object('id',json_extract(f.value,'$.id'),'name',json_extract(f.value,'$.name'),'followedAtMs',json_extract(f.value,'$.followedAtMs'))),'[]') FROM json_each(provider_snapshots.payload_json,'$.followers') f)),
+ 'complete',json(CASE WHEN json_extract(payload_json,'$.complete') THEN 'true' ELSE 'false' END),
+ 'total',json_extract(payload_json,'$.total')) WHERE key='followers';
+DELETE FROM provider_snapshots WHERE key NOT IN('followers','donation_unparsed');
+DELETE FROM youtube_snapshots WHERE substr(key,1,4)='api:';
+PRAGMA user_version = 16;
 `;

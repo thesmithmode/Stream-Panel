@@ -12,7 +12,7 @@ import {migrateLegacy,prepareLocal} from '../src/legacy-import.js';
 
 test('legacy import keeps every table, WAL events and credentials, leaves source intact, and refuses overwrite',async()=>{
  const root=await mkdtemp(join(tmpdir(),'sp-import-')),source=join(root,'old'),dest=join(root,'new');await mkdir(source);
- const store=new StreamStore(join(source,'data.sqlite'));store.startSession('channel','stream',1000,'platform',1000);store.providerSnapshot('twitch','channel','channel',{future:'retained'},1001);store.collectionLifecycle('start',1002);store.close();
+ const store=new StreamStore(join(source,'data.sqlite'));store.startSession('channel','stream',1000,'platform',1000);store.followingSnapshot('twitch','channel',[],true,1001);store.collectionLifecycle('start',1002);store.close();
  const old=new Database(join(source,'data.sqlite'));old.pragma('journal_mode=WAL');old.exec("INSERT INTO persons VALUES ('p','Viewer',0)");
  const session=(old.prepare('SELECT id FROM sessions').get() as any).id;
  old.prepare('INSERT INTO identities VALUES (?,?,?,?,?,?,?,?)').run('i','twitch','channel','external','Viewer','viewer','p','viewer');
@@ -33,7 +33,7 @@ test('legacy import keeps every table, WAL events and credentials, leaves source
  const result=await migrateLegacy(source,dest);assert.equal(result.tables.persons,1);assert.equal(result.tables.provider_snapshots,1);assert.equal(result.tables.collector_state,1);
  for(const [table,n] of Object.entries(result.tables))assert.equal(n,(old.prepare(`SELECT count(*) AS n FROM ${table}`).get() as {n:number}).n);
  const migrated=new Database(join(dest,'data.sqlite'));
- assert.deepEqual(migrated.prepare('SELECT payload_json FROM p_ruslan_provider_snapshots').all(),[{payload_json:'{"future":"retained"}'}]);assert.equal(migrated.prepare("SELECT name FROM sqlite_master WHERE name='provider_snapshots'").get(),undefined);
+ assert.deepEqual(migrated.prepare('SELECT payload_json FROM p_ruslan_provider_snapshots').all(),[{payload_json:'{"followers":[],"complete":true,"total":null}'}]);assert.equal(migrated.prepare("SELECT name FROM sqlite_master WHERE name='provider_snapshots'").get(),undefined);
  try{
  for(const table of Object.keys(result.tables))assert.deepEqual(migrated.prepare(`SELECT * FROM p_ruslan_${table}`).all(),old.prepare(`SELECT * FROM ${table}`).all());
  assert.equal((migrated.prepare('SELECT display_name FROM p_ruslan_persons').get() as any).display_name,'Viewer');assert.equal(migrated.prepare('SELECT * FROM p_ruslan_sessions').all().length,1);assert.equal(migrated.prepare("SELECT name FROM sqlite_master WHERE name='persons'").all().length,0);assert.equal(migrated.pragma('integrity_check',{simple:true}),'ok');assert.equal((migrated.pragma('foreign_key_check') as unknown[]).length,0);}finally{migrated.close();}

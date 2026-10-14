@@ -5,7 +5,7 @@ const allowed = new Set([
   "channelOverview", "analytics", "streamSample", "youtubeViewers",
   "followingSnapshot","personFollowing","followingAnalytics",
   "youtubeQuota", "youtubeSnapshot", "providerSnapshot", "collectionLifecycle", "streamMetadata", "youtubeMessages", "youtubeData",
-  "ingest",
+  "ingest", "donationImportStates", "pendingDonationImports", "pendingDonationImportCount", "saveDonationImportFailure", "removePendingDonation",
   "ingestLiveDonation",
   "sessions",
   "platformStreams",

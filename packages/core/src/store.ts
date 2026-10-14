@@ -1,3 +1,4 @@
+import {ProviderStorage} from "./provider-storage.js";
 import {chatMetadata,messageMetadata,moderationMetadata} from "./message-storage.js";
 import {registerDonationSum,donorRanking} from './donation-statistics.js';
 import {parseDonationTime} from './donation-time.js';
@@ -17,7 +18,7 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11,schemaV12,schemaV13,schemaV14,schemaV15 } from "./schema.js";
+import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16 } from "./schema.js";
 import { botExclusionSet } from "./bots.js";
 import {personFollowing,followingAnalytics,type Follower} from './following.js';
 import { sessionWindows,sessionBreaks,windowsFromLinks } from './session-windows.js';
@@ -108,6 +109,8 @@ export class StreamStore {
         this.db.transaction(() => this.db.exec(schemaV14)).immediate();
       if ((this.db.pragma("user_version", { simple: true }) as number) < 15)
         this.db.transaction(() => this.db.exec(schemaV15)).immediate();
+      if ((this.db.pragma("user_version", {simple:true}) as number)<16)
+        this.db.transaction(()=>{new ProviderStorage(this.db).migrate();this.db.exec(schemaV16);}).immediate();
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
       this.db.transaction(() => {this.collapseDuplicateDaDonors();this.reconcileNicknameLinks();}).immediate();
     } catch (error) {
@@ -238,26 +241,26 @@ export class StreamStore {
   }
   youtubeSnapshot(account: string, key: string, payload: unknown, now = Date.now()): void {
     if (!account || !key) throw new Error("INVALID_YOUTUBE_KEY");
-    if(key.startsWith("chat:"))return;
+    if(key.startsWith("chat:")||key.startsWith("api:"))return;
     this.db.transaction(()=>{
       this.db.prepare("INSERT INTO youtube_snapshots VALUES (?,?,?,?) ON CONFLICT(account_id,key) DO UPDATE SET payload_json=excluded.payload_json,updated_at_ms=excluded.updated_at_ms").run(account, key, JSON.stringify(payload), now);
-      if(!key.startsWith('cursor:'))this.providerSnapshot('youtube',account,key,payload,now);
+
     }).immediate();
   }
   providerSnapshot(source:string,account:string,key:string,payload:unknown,at:number,sessionId:string|null=null):void {
     assertTimestamp(at);
     if(!['twitch','youtube','donationalerts'].includes(source)||!account||!key)throw new Error('INVALID_PROVIDER_SNAPSHOT');
-    if(source==='youtube'&&key.startsWith('chat:'))return;
-    const encoded=JSON.stringify(payload);
-    // Normalized events/samples retain each observation. Compress only repeated diagnostic responses.
-    if(key==='donation_history_page'||key.startsWith('api:')||['channel','broadcasts','liveVideoDetails','report','archivedVideoDetails','stream'].includes(key)){
-      const page=key==='donation_history_page'?(payload as {page?:number})?.page??null:null;
-      const request=key.startsWith('api:')?JSON.stringify((payload as {request?:unknown})?.request??null):null;
-      const prior=this.db.prepare(`SELECT id,payload_json,observed_at_ms FROM provider_snapshots WHERE source=? AND account_id=? AND key=? AND session_id IS ? AND (? IS NULL OR json_extract(payload_json,'$.page')=?) AND (? IS NULL OR json_extract(payload_json,'$.request')=?) ORDER BY observed_at_ms DESC,id DESC LIMIT 2`).all(source,account,key,sessionId,page,page,request,request) as {id:string;payload_json:string;observed_at_ms:number}[];
-      if(prior.length===2&&prior.every(row=>row.payload_json===encoded)&&at>=prior[0]!.observed_at_ms){this.db.prepare('UPDATE provider_snapshots SET observed_at_ms=? WHERE id=?').run(at,prior[0]!.id);return;}
-    }
-    this.db.prepare('INSERT INTO provider_snapshots VALUES (?,?,?,?,?,?,?)').run(randomUUID(),source,account,key,at,sessionId,encoded);
+    if(key!=='followers')return;
+    const data=payload as {followers:Follower[];complete:boolean;total:number|null};
+    const clean={followers:data.followers.map(({id,name,followedAtMs})=>({id,name,followedAtMs})),complete:data.complete,total:data.total};
+    this.db.prepare('INSERT INTO provider_snapshots VALUES (?,?,?,?,?,?,?)').run(randomUUID(),source,account,key,at,sessionId,JSON.stringify(clean));
   }
+  donationImportStates(account:string,ids:string[]){return new ProviderStorage(this.db).donationStates(account,ids);}
+  pendingDonationImportCount(account:string){return new ProviderStorage(this.db).pendingCount(account);}
+  pendingDonationImports(account:string){return new ProviderStorage(this.db).pending(account);}
+  saveDonationImportFailure(account:string,serialized:string,error:string,at:number){new ProviderStorage(this.db).saveFailure(account,serialized,error,at);}
+  removePendingDonation(account:string,id:string){new ProviderStorage(this.db).removePending(account,id);}
+
   followingSnapshot(source:'twitch'|'youtube',account:string,followers:Follower[],complete:boolean,at:number,total:number|null=null):void {
     if(!['twitch','youtube'].includes(source)||!account||typeof complete!=='boolean'||followers.length>25000||total!==null&&(!Number.isSafeInteger(total)||total<0))throw new Error('INVALID_FOLLOWERS');
     for(const follower of followers){if(!follower.id||typeof follower.name!=='string')throw new Error('INVALID_FOLLOWERS');if(follower.followedAtMs!==null)assertTimestamp(follower.followedAtMs);}
@@ -342,13 +345,15 @@ export class StreamStore {
         .prepare(`SELECT identity_id AS id FROM events WHERE id = ?`)
         .get(eventKey(event)) as { id: string | null } | undefined;
       if (previous) {
+        if(event.source==='donationalerts'&&event.type==='donation')new ProviderStorage(this.db).clearImported(event.accountId,event.externalId);
         // A REST rescan can supply the configured time missing at first reception.
         // Preserve the original payload, donor and every explicit correction.
         if(event.source==='donationalerts' && event.type==='donation' && event.occurredAtMs!==null){
-          const repaired=this.db.prepare("UPDATE events SET occurred_at_ms=?,time_quality=? WHERE id=? AND occurred_at_ms IS NULL").run(event.occurredAtMs,event.timeQuality,eventKey(event));
+          const repaired=this.db.prepare("UPDATE events SET occurred_at_ms=?,time_quality=?,source_time=coalesce(?,source_time) WHERE id=? AND occurred_at_ms IS NULL").run(event.occurredAtMs,event.timeQuality,event.sourceTime,eventKey(event));
           if(repaired.changes){
             this.db.prepare("UPDATE donation_corrections SET occurred_at_ms=? WHERE event_id=? AND occurred_at_ms IS NULL AND coalesce(json_extract(payload_json,'$.corrected'),0)=0").run(event.occurredAtMs,eventKey(event));
             const effective=this.db.prepare('SELECT occurred_at_ms FROM effective_events WHERE id=?').get(eventKey(event)) as {occurred_at_ms:number|null}|undefined;
+            this.db.prepare('DELETE FROM event_sessions WHERE event_id=?').run(eventKey(event));
             if(effective?.occurred_at_ms!=null)this.assignEvent(eventKey(event),event.accountId,effective.occurred_at_ms);
           }
         }
@@ -573,6 +578,7 @@ export class StreamStore {
         this.db
           .prepare("UPDATE persons SET revision = revision + 1 WHERE id = ?")
           .run(identity.person_id);
+      if(event.source==='donationalerts'&&event.type==='donation')new ProviderStorage(this.db).clearImported(event.accountId,event.externalId);
       return {
         inserted: true,
         identityId: identity?.id ?? null,

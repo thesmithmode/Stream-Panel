@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {StreamStore} from '../src/store.js';
-test('provider history appends snapshots while the current YouTube view advances and profiles remain isolated',()=>{
+test('latest YouTube metadata advances without creating a duplicate provider archive',()=>{
  const s=new StreamStore(':memory:','ruslan');try{
   s.youtubeSnapshot('channel','channel',{title:'First'},1);s.youtubeSnapshot('channel','channel',{title:'Second'},2);
   assert.equal((s.youtubeData('channel').snapshots.channel!.data as any).title,'Second');
   const raw=(s as any).db;
-  assert.equal(raw.prepare('SELECT count(*) AS n FROM provider_snapshots').get().n,2);
-  s.youtubeSnapshot('channel','cursor:chat','next',3);assert.equal(raw.prepare('SELECT count(*) AS n FROM provider_snapshots').get().n,2);
+  assert.equal(raw.prepare('SELECT count(*) AS n FROM provider_snapshots').get().n,0);
+  s.youtubeSnapshot('channel','cursor:chat','next',3);assert.equal(raw.prepare('SELECT count(*) AS n FROM provider_snapshots').get().n,0);
   assert.throws(()=>s.providerSnapshot('unknown','channel','stream',{},1),/INVALID_PROVIDER_SNAPSHOT/);
   const id=s.observePlatformStream('twitch','owner','one',10,10,null,'First')!;
   s.providerSnapshot('twitch','owner','stream',{custom:'full'},10,id);

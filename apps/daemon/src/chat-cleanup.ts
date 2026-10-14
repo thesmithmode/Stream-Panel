@@ -14,14 +14,14 @@ export async function prepareChatStorage(path:string) {
   size=Number(db.pragma('page_size',{simple:true}))*Number(db.pragma('page_count',{simple:true}));
   if(db.prepare("SELECT 1 FROM sqlite_master WHERE name='sp_profile_schema' AND type='table'").get())
    versions=db.prepare('SELECT profile,version FROM sp_profile_schema').all() as typeof versions;
-  standalone=!!db.prepare("SELECT 1 FROM sqlite_master WHERE name='events' AND type='table'").get() && Number(db.pragma('user_version',{simple:true}))<15;
-  const oldProfiles=versions.filter(row=>row.version>0&&row.version<15);
+  standalone=!!db.prepare("SELECT 1 FROM sqlite_master WHERE name='events' AND type='table'").get() && Number(db.pragma('user_version',{simple:true}))<16;
+  const oldProfiles=versions.filter(row=>row.version>0&&row.version<16);
   if(db.prepare("SELECT 1 FROM sqlite_master WHERE name='sp_pending_maintenance' AND type='table'").get())
-   pending=!!db.prepare("SELECT 1 FROM sp_pending_maintenance WHERE name='chat-content-v15'").get();
+   pending=!!db.prepare("SELECT 1 FROM sp_pending_maintenance WHERE name IN ('chat-content-v15','raw-storage-v16')").get();
   if(!standalone&&!oldProfiles.length&&!pending)return;
   // Persist before migration: a crash between content removal and VACUUM must retry compaction.
   db.exec('CREATE TABLE IF NOT EXISTS sp_pending_maintenance(name TEXT PRIMARY KEY) STRICT');
-  db.prepare("INSERT OR IGNORE INTO sp_pending_maintenance VALUES ('chat-content-v15')").run();
+  db.prepare("INSERT OR IGNORE INTO sp_pending_maintenance VALUES ('raw-storage-v16')").run();
   if(standalone){const store=new StreamStore(path);store.close();}
   for(const row of oldProfiles){const store=new StreamStore(path,row.profile);store.close();}
   const disk=await statfs(path),free=disk.bavail*disk.bsize;
@@ -29,7 +29,7 @@ export async function prepareChatStorage(path:string) {
   db.pragma('wal_checkpoint(TRUNCATE)');
   db.exec('VACUUM');
   if(db.pragma('integrity_check',{simple:true})!=='ok'||(db.pragma('foreign_key_check') as unknown[]).length)throw new Error('CHAT_CLEANUP_INTEGRITY_FAILED');
-  db.prepare("DELETE FROM sp_pending_maintenance WHERE name='chat-content-v15'").run();
+  db.prepare("DELETE FROM sp_pending_maintenance WHERE name IN ('chat-content-v15','raw-storage-v16')").run();
   db.pragma('wal_checkpoint(TRUNCATE)');
   return {beforeBytes:size,afterBytes:(await stat(path)).size,compacted:true};
  }finally{db.close();}

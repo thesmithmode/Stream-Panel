@@ -51,7 +51,7 @@ test('DA OAuth state is single use and token exchange errors do not install cred
 test('DA history reports unknown pagination and marks pages incomplete when a row cannot be stored',async()=>{
  const config={value:{daAccessToken:'access',daUtcOffsetMinutes:0},save:async()=>{}} as unknown as Configuration;
  let failIngest=false;
- const db={call:async(method:string)=>{if(method==='ingest'&&failIngest)throw new Error('SQLITE_BUSY');return {inserted:true};}} as unknown as StoreClient;
+ const db={call:async(method:string)=>{if(method==='pendingDonationImportCount')return failIngest?1:0;if(method==='pendingDonationImports'||method==='donationImportStates')return [];if(method==='ingest'&&failIngest)throw new Error('SQLITE_BUSY');return {inserted:true};}} as unknown as StoreClient;
  let page:{data:unknown[];links?:{next:unknown}}={data:[]};
  const connection=new DonationAlertsConnection(config,db,async()=>Response.json(page));
  (connection as any).stopped=false;

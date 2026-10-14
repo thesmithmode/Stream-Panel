@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { parse } from "lossless-json";
+import { parse, stringify } from "lossless-json";
 import { randomBytes } from "node:crypto";
 import type { Configuration } from "./config.js";
 import type { StoreClient } from "./db.js";
@@ -15,6 +15,7 @@ import {
   type SocketFactory,
 } from "./twitch.js";
 
+import type {ImportState} from "../../../packages/core/src/provider-storage.js";
 import {parseDonationTime,DA_API_UTC_OFFSET_MINUTES} from '../../../packages/core/src/donation-time.js';
 export {parseDonationTime} from '../../../packages/core/src/donation-time.js';
 export function normalizeDonation(
@@ -54,6 +55,7 @@ export function normalizeDonation(
     },
   };
 }
+function donationId(raw:unknown):string {return raw&&typeof raw==='object'&&!Array.isArray(raw)?String((raw as Record<string,unknown>).id??''):'';}
 // Published legacy frames wrap the resource in result/data. Ignore unrelated push types.
 export function findDonation(value: unknown, depth = 0): unknown | null {
   if(depth>6)return null;
@@ -348,14 +350,7 @@ export class DonationAlertsConnection {
           }
           const donation = findDonation(message);
           if (donation) {
-            await this.db.call('providerSnapshot','donationalerts',this.recipient,'donation_notification',message,Date.now());
-            if(this.stopped||generation!==this.generation)return;
-            const event=normalizeDonation(donation,this.recipient,'centrifugo');
-            const active = await this.db.call<{id:string;started_at_ms:number} | null>("activeLogicalStream");
-            if (this.stopped || generation !== this.generation) return;
-            const result = active&&event.occurredAtMs===null?await this.db.call<{inserted:boolean}|null>('ingestLiveDonation',event,active.id,true):await this.db.call<{inserted:boolean}>('ingest',event);
-            if(this.stopped||generation!==this.generation)return;
-            if(result?.inserted)this.status.lastEventAt = Date.now();
+            await this.importDonation(donation,'centrifugo',generation);
           }
         }
       })().catch((error) => {if(!this.stopped&&generation===this.generation)this.report(error);});
@@ -373,6 +368,36 @@ export class DonationAlertsConnection {
       this.status.capabilities.realtime = "Ошибка WebSocket";
     });
   }
+  private async importDonation(raw:unknown,transport:"rest"|"centrifugo",generation:number,known?:ImportState|null):Promise<{inserted:boolean;known:boolean}|null> {
+    const valid=()=>!this.stopped&&generation===this.generation;
+    if(!valid())return null;
+    const id=donationId(raw);
+    if(known===undefined){
+      const states=await this.db.call<ImportState[]>('donationImportStates',this.recipient,/^\d+$/.test(id)?[id]:[]);
+      if(!valid())return null;
+      known=states.find(row=>row.id===id)??null;
+    }
+    if(known&&!known.needsImport)return {inserted:false,known:true};
+    try{
+      const event=normalizeDonation(raw,this.recipient,transport);
+      let result:{inserted:boolean}|null;
+      if(transport==='centrifugo'){
+        const active=await this.db.call<{id:string}|null>('activeLogicalStream');
+        if(!valid())return null;
+        result=active&&event.occurredAtMs===null?await this.db.call('ingestLiveDonation',event,active.id,true):await this.db.call('ingest',event);
+      }else result=await this.db.call('ingest',event);
+      if(!valid())return null;
+      if(result===null){result=await this.db.call('ingest',event);if(!valid())return null;}
+      if(result?.inserted)this.status.lastEventAt=Date.now();
+      return {inserted:result?.inserted??false,known:false};
+    }catch(error){
+      if(!valid())return null;
+      const serialized=stringify(raw);
+      if(serialized)await this.db.call('saveDonationImportFailure',this.recipient,serialized,(error as Error).message,Date.now());
+      if(!valid())return null;
+      throw error;
+    }
+  }
   async scanHistory(automatic = false): Promise<void> {
     while(this.scanTask){if(automatic)return;await this.scanTask;}
     if(this.stopped)return;
@@ -387,8 +412,17 @@ export class DonationAlertsConnection {
       if(this.stopped||generation!==this.generation)return;
       let complete = false;
       let skippedRows = 0;
-      let knownStreak = 0;
-      const stopAfterKnownPages = 3;
+      let cutoff:number|null=null,lastProviderTime=Infinity,ordered=true;
+      const pending=await this.db.call<{id:string;serialized:string}[]>('pendingDonationImports',this.recipient);
+      if(this.stopped||generation!==this.generation)return;
+      for(const row of pending){
+        try{
+          const result=await this.importDonation(parse(row.serialized),'rest',generation);
+          if(!result)return;
+          await this.db.call('removePendingDonation',this.recipient,row.id);
+          if(this.stopped||generation!==this.generation)return;
+        }catch{if(this.stopped||generation!==this.generation)return;skippedRows++;}
+      }
       for (
         let page = 1;
         page <= 1000 && !this.stopped && generation === this.generation;
@@ -398,39 +432,49 @@ export class DonationAlertsConnection {
           await this.api(`alerts/donations?page=${page}`),
         );
         if (this.stopped || generation !== this.generation) return;
-        await this.db.call('providerSnapshot','donationalerts',this.recipient,'donation_history_page',{page,response},Date.now());
-        if(this.stopped||generation!==this.generation)return;
         if (!Array.isArray(response.data))
           throw new Error("INVALID_DA_HISTORY");
-        let pageAllKnown = response.data.length > 0;
+        const ids=[...new Set(response.data.map(donationId).filter(id=>/^\d+$/.test(id)))];
+        const states=new Map<string,ImportState>();
+        for(let offset=0;offset<ids.length;offset+=2000){
+          for(const state of await this.db.call<ImportState[]>('donationImportStates',this.recipient,ids.slice(offset,offset+2000)))states.set(state.id,state);
+          if(this.stopped||generation!==this.generation)return;
+        }
+        // Early stopping is safe only while the observed provider dates descend.
+        for(const raw of response.data){
+          let at:number|null=null;
+          try{at=parseDonationTime(raw&&typeof raw==='object'?String((raw as Record<string,unknown>).created_at??''):'',DA_API_UTC_OFFSET_MINUTES);}catch{/* An unknown order requires a full scan. */}
+          if(at===null||at>lastProviderTime)ordered=false;
+          if(at!==null)lastProviderTime=at;
+          const known=states.get(donationId(raw));
+          if(automatic&&cutoff===null&&known&&!known.needsImport&&known.occurredAtMs!==null)
+            cutoff=Math.max(0,known.occurredAtMs-48*3600000);
+        }
         for (const raw of response.data) {
           try {
-            const event = normalizeDonation(raw, this.recipient, "rest");
-            const result=await this.db.call<{inserted:boolean}>('ingest',event);
-            if (this.stopped || generation !== this.generation) return;
-            if (result?.inserted) {pageAllKnown = false;this.status.lastEventAt=Date.now();}
+            const result=await this.importDonation(raw,"rest",generation,states.get(donationId(raw))??null);
+            if (!result || this.stopped || generation !== this.generation) return;
           } catch (error) {
             skippedRows++;
-            pageAllKnown = false;
             console.error(
               "DA history row skipped",
               error instanceof Error ? error.message : error,
             );
           }
         }
-        if (pageAllKnown) knownStreak++;
-        else knownStreak = 0;
         const links = response.links ? object(response.links) : {};
         if (links.next === null) {
           complete = true;
           break;
         }
         if (!string(links.next)) throw new Error("DA_PAGINATION_UNKNOWN");
-        if (automatic && knownStreak >= stopAfterKnownPages) {
+        if (automatic && ordered && cutoff!==null && lastProviderTime<cutoff) {
           complete = true;
           break;
         }
       }
+      skippedRows=await this.db.call<number>('pendingDonationImportCount',this.recipient);
+      if(this.stopped||generation!==this.generation)return;
       this.status.capabilities.history = complete
         ? skippedRows ? `Импорт неполный: пропущено записей ${skippedRows}` : "Импорт доступных страниц завершён"
         : "Импорт неполный (лимит/остановка)";

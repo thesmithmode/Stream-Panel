@@ -1,37 +1,11 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {TwitchConnection} from '../src/twitch.js';import {twitchCatalog} from '../src/twitch-catalog.js';import {YouTubeConnection} from '../src/youtube.js';
+import {TwitchConnection} from '../src/twitch.js';import {YouTubeConnection} from '../src/youtube.js';
 import type {Configuration} from '../src/config.js';import type {StoreClient} from '../src/db.js';
-test('Twitch catalog paginates, isolates unavailable resources, retains unanalysed fields and reports limits',async()=>{
- for(const mode of ['ok','scope','failure','malformed','loop','partial','cancel-request','cancel-store']){
-  let valid=true;const calls:string[]=[],writes:any[]=[];const at=Date.now();
-  const scopes=mode==='scope'?[]:twitchCatalog.map(x=>x.scope).filter(Boolean);
-  const config={value:{twitchClientId:'id',twitch:{access:'private-token',refresh:'r',expiresAt:at+3600000,userId:'owner',scopes}},save:async()=>{}} as unknown as Configuration;
-  const db={call:async(method:string,...args:any[])=>{writes.push([method,...args]);if(mode==='cancel-store')valid=false;}} as unknown as StoreClient;
-  const request:typeof fetch=async input=>{
-   const u=new URL(String(input)),resource=u.pathname.split('/helix/')[1]!;calls.push(resource);
-   if(mode==='cancel-request')valid=false;
-   if(resource==='channels'&&mode==='failure')throw new Error('offline');
-   if(resource==='videos'&&mode==='malformed')return Response.json({unexpected:'retained'});
-   if(resource==='users')assert.equal(u.searchParams.get('id'),'owner');
-   if(resource==='videos')assert.equal(u.searchParams.get('user_id'),'owner');
-   if(resource==='polls')assert.equal(u.searchParams.get('first'),'20');
-   const after=u.searchParams.get('after');
-   return Response.json({data:[{future_field:{retained:true}}],pagination:{cursor:resource!=='videos'?'':mode==='loop'?'same':mode==='partial'?String(calls.length):after?'':'next'},total:1});
-  };
-  const c=new TwitchConnection(config,db,request),runtime=c as unknown as {collectCatalog(account:string,current:()=>boolean,at:number):Promise<void>};
-  try{
-   await runtime.collectCatalog('owner',()=>valid,at);const before=calls.length;
-   await runtime.collectCatalog('owner',()=>valid,at+60000);assert.equal(calls.length,before);
-   assert.equal(c.status.state,'disconnected');
-   assert.ok(writes.every(x=>x[0]==='providerSnapshot'&&!JSON.stringify(x).includes('private-token')));
-   if(mode==='scope')assert.equal(c.status.capabilities['api:subscriptions'],'Нет разрешения');
-   if(['malformed','loop'].includes(mode))assert.equal(c.status.capabilities['api:videos'],'Не удалось получить снимок');
-   if(mode==='partial')assert.match(c.status.capabilities['api:videos']!,/частично/);
-   if(mode==='failure')assert.equal(c.status.capabilities['api:channels'],'Не удалось получить снимок');
-   if(mode==='ok'){assert.equal(calls.filter(x=>x==='videos').length,2);assert.deepEqual(writes[0][4].response.data[0],{future_field:{retained:true}});}
-   if(mode.startsWith('cancel-'))assert.equal(calls.length,1);
-  }finally{await c.stop();}
- }
+test('successful Twitch reads no longer archive diagnostic responses',async()=>{
+ const now=Date.now(),config={value:{twitchClientId:'id',twitch:{access:'secret',refresh:'r',expiresAt:now+3600000,userId:'owner',scopes:[]}},save:async()=>{}} as unknown as Configuration;
+ const db={call:async()=>{assert.fail('a successful API read must not write a raw snapshot');}} as unknown as StoreClient;
+ const c=new TwitchConnection(config,db,async()=>Response.json({data:[{future_field:'unused'}]}));
+ try{assert.deepEqual(await c.api('channels?broadcaster_id=owner'),{data:[{future_field:'unused'}]});}finally{await c.stop();}
 });
 test('late Twitch read and archived YouTube response cannot append data after disconnect',async()=>{
  const at=Date.now();let c:TwitchConnection,writes=0;
@@ -42,10 +16,10 @@ test('late Twitch read and archived YouTube response cannot append data after di
  let yt:YouTubeConnection;const ytWrites:any[]=[];
  const ytConfig={value:{youtube:{access:'secret',refresh:'r',expiresAt:at+3600000,userId:'channel',scopes:[]}},save:async()=>{}} as unknown as Configuration;
  const ytDb={call:async(method:string,...args:any[])=>{if(method==='youtubeQuota')return true;ytWrites.push([method,...args]);await yt.stop();}} as unknown as StoreClient;
- yt=new YouTubeConnection(ytConfig,ytDb,'https://panel.test/callback','ruslan',async()=>Response.json({items:[],future_field:'retained'}));
+ yt=new YouTubeConnection(ytConfig,ytDb,'https://panel.test/callback','ruslan',async()=>{await yt.stop();return Response.json({items:[],future_field:'retained'});});
  const api=yt as unknown as {api(resource:string,params:Record<string,string>,tokens:any):Promise<unknown>};
  assert.deepEqual(await api.api('subscriptions',{mySubscribers:'true'},ytConfig.value.youtube),{});
- assert.equal(ytWrites.length,1);assert.equal(ytWrites[0][4].response.future_field,'retained');assert.ok(!JSON.stringify(ytWrites).includes('secret'));
+ assert.equal(ytWrites.length,0);
 });
 test('YouTube archives final metadata in bounded batches and isolates failed or cancelled refreshes',async()=>{
  for(const mode of ['ok','malformed','network','cancel-request','cancel-store']){
@@ -93,13 +67,13 @@ test('retired Twitch and DA sockets cannot change status or recreate keepalive t
   }finally{socket.close();await c.stop();}
  }
 });
-test('Twitch does not return an obsolete API result when disconnected during raw archive persistence',async()=>{
- const at=Date.now();let c:TwitchConnection,writes=0;
- const config={value:{twitchClientId:'id',twitch:{access:'fixture',expiresAt:at+3600000,userId:'owner',scopes:[]}},save:async()=>{}} as unknown as Configuration;
- const db={call:async()=>{writes++;await c.stop();}} as unknown as StoreClient;
- c=new TwitchConnection(config,db,async()=>Response.json({data:[]}));
- try{await assert.rejects(c.api('channels'),/TWITCH_AUTH_CANCELLED/);assert.equal(writes,1);}finally{await c.stop();}
+test('Twitch successful API reads do not enter the obsolete archive-write boundary',async()=>{
+ const now=Date.now(),config={value:{twitchClientId:'id',twitch:{access:'fixture',refresh:'r',expiresAt:now+3600000,userId:'owner',scopes:[]}},save:async()=>{}} as unknown as Configuration;
+ const db={call:async()=>{assert.fail('diagnostic storage must not be called');}} as unknown as StoreClient;
+ const c=new TwitchConnection(config,db,async()=>Response.json({data:[]}));
+ try{assert.deepEqual(await c.api('streams?user_id=owner'),{data:[]});}finally{await c.stop();}
 });
+
 test('YouTube resumes final metadata collection from a durable cursor after cancellation or unavailable responses',async()=>{
  for(const mode of ['register-cancel','metadata-cancel','archive-cancel','network','malformed','old-array','old-string']){
   const at=Date.now(),snapshots:Record<string,any>={channel:{updatedAt:at},report:{updatedAt:at},'cursor:followers':{updatedAt:at},broadcasts:{data:[{id:'finished'}]},'cursor:archivedVideos':{data:mode==='old-array'?[]:mode==='old-string'?'legacy':{ids:[],checkedAt:0}}};
@@ -108,10 +82,10 @@ test('YouTube resumes final metadata collection from a durable cursor after canc
   const db={call:async(method:string,...args:any[])=>{
    if(method==='youtubeQuota')return true;if(method==='youtubeData')return {snapshots};writes.push(`${method}:${args[1]}`);
    if(method==='youtubeSnapshot')snapshots[args[1]]={data:args[2],updatedAt:at};
-   if(first&&((mode==='register-cancel'&&method==='youtubeSnapshot'&&args[1]==='cursor:archivedVideos')||(mode==='archive-cancel'&&method==='youtubeSnapshot'&&args[1]==='archivedVideoDetails')||(mode==='metadata-cancel'&&method==='providerSnapshot'&&args[2]==='api:videos')))await yt.stop();
+   if(first&&((mode==='register-cancel'&&method==='youtubeSnapshot'&&args[1]==='cursor:archivedVideos')||(mode==='archive-cancel'&&method==='youtubeSnapshot'&&args[1]==='archivedVideoDetails')))await yt.stop();
   }} as unknown as StoreClient;
   const request:typeof fetch=async input=>{
-   if(String(input).includes('/liveBroadcasts'))return Response.json({items:[]});calls++;
+   if(String(input).includes('/liveBroadcasts'))return Response.json({items:[]});calls++;if(first&&mode==='metadata-cancel')await yt.stop();
    if(first&&mode==='network')throw new Error('unavailable');return Response.json(first&&mode==='malformed'?{}:{items:[{id:'finished',statistics:{viewCount:'500'},future_field:'retained'}]});
   };
   yt=new YouTubeConnection(config,db,'https://panel.test/callback','ruslan',request,()=>at);
