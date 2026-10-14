@@ -1,47 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads";
+import {isStoreMethod} from "./store-contract.js";
 import { StreamStore } from "../../../packages/core/src/store.js";
 const store = new StreamStore(String(workerData.path), workerData.profile);
-const allowed = new Set([
-  "channelOverview", "analytics", "streamSample", "youtubeViewers",
-  "followingSnapshot","personFollowing","followingAnalytics",
-  "youtubeQuota", "youtubeSnapshot", "providerSnapshot", "collectionLifecycle", "streamMetadata", "youtubeMessages", "youtubeData",
-  "ingest", "donationImportStates", "pendingDonationImports", "pendingDonationImportCount", "saveDonationImportFailure", "removePendingDonation",
-  "ingestLiveDonation",
-  "sessions",
-  "platformStreams",
-  "platformMissing",
-  "attachPlatformStream",
-  "observePlatformStream",
-  "activeLogicalStream",
-  "startSession",
-  "endSession",
-  "deleteManualSession",
-  "recordPoll",
-  "updateChatterNames",
-  "persons", "createPerson",
-  "donorNicknames", "donorBindings", "bindDonorNickname",
-  "person",
-  "personNotes", "createPersonNote", "updatePersonNote", "deletePersonNote",
-  "personMetadata", "setPersonMetadata",
-  "resolveDonationTimes", "reassignDonation", "donation", "donations", "createDonation", "restoreDonation", "donationAudit", "donationCandidates",
-  "events",
-  "summary",
-  "grid",
-  "renamePerson",
-  "splitIdentities", "splits", "undoSplit",
-  "merges",
-  "merge",
-  "undoMerge",
-  "gap",
-  "gaps",
-  "backup",
-  "close",
-  "candidatePersons",
-  "insights",
-  "personsTop",
-  "personStats", "personActivity",
-  "ensureOwnerIdentity",
-]);
 parentPort!.on(
   "message",
   async ({
@@ -54,7 +14,7 @@ parentPort!.on(
     args: unknown[];
   }) => {
     try {
-      if (!allowed.has(method)) throw new Error("UNKNOWN_OPERATION");
+      if (!isStoreMethod(method)) throw new Error("UNKNOWN_OPERATION");
       const fn = (
         store as unknown as Record<string, (...args: unknown[]) => unknown>
       )[method]!;

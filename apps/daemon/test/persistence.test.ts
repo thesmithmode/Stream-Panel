@@ -1,3 +1,5 @@
+import {Worker} from "node:worker_threads";
+import {once} from "node:events";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, mkdir, writeFile, readFile, stat } from "node:fs/promises";
@@ -84,6 +86,7 @@ test("worker RPC rejects unsupported operations and oversubscription but remains
   const db = new StoreClient(join(dir, "db.sqlite"));
   try {
     await db.ready;
+    // @ts-expect-error Exercise rejection of an untrusted runtime operation.
     await assert.rejects(db.call("not-an-operation"), /UNKNOWN_OPERATION/);
     const results = await Promise.allSettled(
       Array.from({ length: 10002 }, (_,index) => db.call("persons",String(index))),
@@ -119,6 +122,7 @@ test("uncloneable worker arguments never consume queue capacity", async () => {
     await db.ready;
     for (let i = 0; i < 10000; i++)
       await assert.rejects(
+        // @ts-expect-error Exercise a runtime payload that cannot cross the worker boundary.
         db.call("persons", () => {}),
         /could not be cloned/,
       );
@@ -141,4 +145,17 @@ test('legacy configuration preserves saved YouTube history and restores required
   await writeFile(path,JSON.stringify({version:1,youtube:{userId:'connected-owner'}}));await config.load();
   assert.equal(config.value.youtubeAccountId,'connected-owner');
  } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+test('worker rejects untrusted commands even when a caller bypasses the typed client',{timeout:10000},async()=>{
+ const worker=new Worker(new URL('../src/db-worker.js',import.meta.url),{workerData:{path:':memory:'}});
+ try{
+  const [ready]=await once(worker,'message');assert.equal(ready.ready,true);
+  for(const method of ['not-an-operation','constructor','__proto__']){
+   const reply=once(worker,'message');worker.postMessage({id:1,method,args:[]});
+   assert.deepEqual((await reply)[0],{id:1,error:'UNKNOWN_OPERATION'});
+  }
+  const reply=once(worker,'message');worker.postMessage({id:2,method:'summary',args:[]});
+  const result=(await reply)[0];assert.equal(result.error,undefined);assert.equal(result.result.messages,0);
+ }finally{await worker.terminate();}
 });

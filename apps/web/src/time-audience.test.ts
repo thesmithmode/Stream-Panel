@@ -18,3 +18,34 @@ test('periods and platform labels are reused consistently and do not guess a pla
  assert.deepEqual(periodRange(7,20*86400000),{from:13*86400000,to:20*86400000});assert.equal(periodRange('all',100).from,0);assert.equal(periodRange('custom',100).from,0);
  assert.equal(platformClass('twitch,donationalerts'),'twitch');assert.equal(platformClass(['youtube']),'youtube');assert.equal(platformClass('twitch,youtube'),'');assert.equal(platformClass('donationalerts'),'');assert.equal(platformClass(null),'');assert.equal(platformClass(undefined),'');
 });
+test('hour means stay equal when one hour has many more broadcasts and rotating people',()=>{
+ const windows: {session:string;from:number;to:number}[]=[],people:any[]=[];
+ for(let i=0;i<11;i++){
+  const from=base+i*86400000+(i?8*hour:0),window={session:String(i),from,to:from+hour};windows.push(window);
+  for(let j=0;j<2;j++)people.push({id:`person-${i}-${j}`,name:'Viewer',intervals:[window]});
+ }
+ const result=timeAudience(windows,people,'UTC');
+ const morning=result.find(b=>b.minute===10*60)!,evening=result.find(b=>b.minute===18*60)!;
+ assert.equal(morning.averageAudience,2);assert.equal(evening.averageAudience,2);
+ assert.equal(morning.streams.size,1);assert.equal(evening.streams.size,10);assert.equal(evening.people.size,20);
+ assert.equal(result.find(b=>b.minute===0)!.averageAudience,null,'no airtime is not a zero audience');
+});
+test('means weight partial broadcasts by exact duration and union overlapping platform/message signals',()=>{
+ const window={session:'full',from:base+15*1000,to:base+30*m+15*1000};
+ const short={session:'short',from:base+86400000,to:base+86400000+10*m};
+ const people=[{id:'a',name:'A',intervals:[window,{...window}],messageMinutes:[{session:'full',at:base+m},{session:'full',at:base+m}]},...Array.from({length:4},(_,i)=>({id:`short-${i}`,name:'S',intervals:[short]}))];
+ const windows=[window,{...window,from:base+m,to:base+2*m},short];
+ const before=structuredClone({windows,people}),bucket=timeAudience(windows,people,'UTC').find(b=>b.minute===10*60)!;
+ assert.equal(bucket.airtimeMs,40*m);assert.equal(bucket.personTimeMs,70*m);assert.equal(bucket.averageAudience,1.75);
+ assert.equal(bucket.people.get('a')!.size,1);assert.deepEqual({windows,people},before,'calculations never mutate API data');
+ const fractional=timeAudience([{session:'x',from:base,to:base+m}],[{id:'x',name:'X',intervals:[{session:'x',from:base+15*1000,to:base+30*1000}]}],'UTC',1,'all',10)[0]!;
+ assert.equal(fractional.averageAudience,.25);
+});
+test('weekday/weekend groups follow the configured local date, including Friday midnight',()=>{
+ const from=Date.UTC(2026,9,9,20,30),window={session:'friday-saturday',from,to:from+hour};
+ const weekday=timeAudience([window],[{id:'p',name:'P',intervals:[window]}],'Europe/Moscow',60,'weekdays');
+ const weekend=timeAudience([window],[{id:'p',name:'P',intervals:[window]}],'Europe/Moscow',60,'weekends');
+ assert.equal(weekday.find(b=>b.minute===23*60)!.airtimeMs,30*m);assert.equal(weekday[0]!.averageAudience,null);
+ assert.equal(weekend[0]!.airtimeMs,30*m);assert.equal(weekend[0]!.averageAudience,1);assert.equal(weekend.find(b=>b.minute===23*60)!.averageAudience,null);
+ const utcWeekend=timeAudience([window],[],'UTC',60,'weekends');assert.ok(utcWeekend.every(b=>b.averageAudience===null));
+});

@@ -1,3 +1,4 @@
+import type {StoreRequest} from "../src/store-contract.js";
 import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {StreamStore} from '../../../packages/core/src/store.js';
@@ -20,7 +21,7 @@ test('reimports skip known IDs, preserve manual edits, repair only missing times
   const original=(await f.db.call<any[]>('events')).find(e=>e.external_id==='1');
   const editor=new StreamStore(join(f.dir,'data.sqlite'),'ruslan');editor.updateDonation(original.id,{personId:original.person_id,amount:'9',currency:'USD',occurredAtMs:base-hour,message:'Manual edit',sourceName:'Manual'},0,base+hour);editor.close();
   const edited=await f.db.call('donation',original.id),audit=await f.db.call('donationAudit',original.id);
-  let ingestions=0;const call=f.db.call.bind(f.db);f.db.call=async<T>(method:string,...args:unknown[]):Promise<T>=>{if(method==='ingest')ingestions++;return call<T>(method,...args);};
+  let ingestions=0;const call=f.db.call.bind(f.db);f.db.call=async<T>(...request:StoreRequest):Promise<T>=>{const [method]=request;if(method==='ingest')ingestions++;return call<T>(...request);};
   rows=[{...row(1),amount:'not-money',username:'Changed'}, {...row(2,base+1000),amount:'999',username:'Changed'},{...row(3),amount:'bad'}];
   await f.c.scanHistory();assert.equal(ingestions,1,'known complete donation never reaches normalizer/ingest');
   assert.deepEqual(await f.db.call('donation',original.id),edited);assert.deepEqual(await f.db.call('donationAudit',original.id),audit);

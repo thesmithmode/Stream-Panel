@@ -1,3 +1,4 @@
+import type {EventInput} from "../../../packages/core/src/domain.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
@@ -14,7 +15,7 @@ test('donor nickname HTTP flow crosses the worker boundary and preserves past, f
   assert.equal(auth.statusCode,200,auth.body);
   const signed={...headers,cookie:String(auth.headers['set-cookie']).split(';')[0]!, 'x-csrf-token':auth.json().csrf};
   const person=await app.db.call<{id:string;revision:number}>('createPerson','Target');
-  const at=Date.now(),tip=(externalId:string)=>({source:'donationalerts',accountId:'da',externalId,type:'donation',actor:{externalId:'name:donor',displayName:'Donor'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'rest',payload:{amountMinor:'100',currency:'RUB'}});
+  const at=Date.now(),tip=(externalId:string):EventInput=>({source:'donationalerts',accountId:'da',externalId,type:'donation',actor:{externalId:'name:donor',displayName:'Donor'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'rest',payload:{amountMinor:'100',currency:'RUB'}});
   await app.db.call('ingest',tip('old'));
   const names=await app.app.inject({url:'/api/v1/donor-nicknames',headers:signed});
   assert.equal(names.statusCode,200,names.body);assert.equal(names.json()[0].name,'Donor');

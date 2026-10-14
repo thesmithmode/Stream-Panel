@@ -1,3 +1,4 @@
+import type {EventInput} from "../../../packages/core/src/domain.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -18,7 +19,7 @@ test("authenticated clients select profiles per request without changing another
       return { ...base, cookie: String(response.headers["set-cookie"]).split(";")[0]!, "x-csrf-token": response.json().csrf };
     };
     const [a, b] = await Promise.all([login(), login()]);
-    const input = { source: "twitch", accountId: "channel", externalId: "same-event", type: "chat.message", actor: { externalId: "viewer", displayName: "Viewer" }, occurredAtMs: 100, receivedAtMs: 100, sourceTime: null, timeQuality: "provider", transport: "eventsub", payload: { text: "Руслан" } };
+    const input:EventInput = { source: "twitch", accountId: "channel", externalId: "same-event", type: "chat.message", actor: { externalId: "viewer", displayName: "Viewer" }, occurredAtMs: 100, receivedAtMs: 100, sourceTime: null, timeQuality: "provider", transport: "eventsub", payload: { text: "Руслан" } };
     const ea=await h.runtimes.get("ruslan")!.db.call<any>("ingest", input);
     const eb=await h.runtimes.get("gulnaz")!.db.call<any>("ingest", { ...input, payload: { text: "Гульназ" } });
     const selected = { ...a, "x-stream-panel-profile": "gulnaz" };
@@ -74,7 +75,7 @@ test("hosted logins isolate two profiles and simultaneous writes; login, CSRF, o
       assert.equal(response.statusCode,400,response.body);
       assert.match(response.json().error,/^INVALID_/);
     }
-    const input = { source: "twitch", accountId: "channel", externalId: "same-event", type: "chat.message", actor: { externalId: "viewer", displayName: "Viewer" }, occurredAtMs: 100, receivedAtMs: 100, sourceTime: null, timeQuality: "provider", transport: "eventsub", payload: { text: "A" } };
+    const input:EventInput = { source: "twitch", accountId: "channel", externalId: "same-event", type: "chat.message", actor: { externalId: "viewer", displayName: "Viewer" }, occurredAtMs: 100, receivedAtMs: 100, sourceTime: null, timeQuality: "provider", transport: "eventsub", payload: { text: "A" } };
     const [ea, eb] = await Promise.all([h.runtimes.get("ruslan")!.db.call<any>("ingest", input), h.runtimes.get("gulnaz")!.db.call<any>("ingest", { ...input, payload: { text: "B" } })]);
     assert.notEqual(ea.personId, eb.personId);
     const list = (headers: any) => h.app.inject({ url: "/api/v1/events", headers });

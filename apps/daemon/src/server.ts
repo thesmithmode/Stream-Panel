@@ -283,10 +283,13 @@ export async function createApplication(
   app.get("/api/v1/analytics", async request => {
     const q=object(request.query);
     const sessionId=string(q.session),defaults=analyticsSettings(configuration.value.analyticsSettings);
+    const source=string(q.source)||'all',coreRule=string(q.coreRule)||defaults.coreRule;
+    if(source!=='all'&&source!=='twitch'&&source!=='youtube')throw new Error('INVALID_ANALYTICS_FILTER');
+    if(coreRule!=='either'&&coreRule!=='both'&&coreRule!=='frequency')throw new Error('INVALID_ANALYTICS_FILTER');
     return db.call("analytics", {
-      sessionId:sessionId||undefined,fromMs:sessionId?0:Number(q.from),toMs:sessionId?Date.now():Math.min(Number(q.to),Date.now()),source:string(q.source)||"all",category:string(q.category),
+      ...(sessionId?{sessionId}:{}),fromMs:sessionId?0:Number(q.from),toMs:sessionId?Date.now():Math.min(Number(q.to),Date.now()),source,category:string(q.category),
       regularThresholdPercent:q.regularThresholdPercent===undefined?defaults.regularThresholdPercent:Number(q.regularThresholdPercent),minSessions:q.minSessions===undefined?defaults.minSessions:Number(q.minSessions),minMinutes:q.minMinutes===undefined?defaults.minMinutes:Number(q.minMinutes),minMessages:q.minMessages===undefined?defaults.minMessages:Number(q.minMessages),
-      chatWindowMinutes:q.chatWindowMinutes===undefined?defaults.chatWindowMinutes:Number(q.chatWindowMinutes),coreRule:string(q.coreRule)||defaults.coreRule,timezone:string(q.timezone)||defaults.timezone,
+      chatWindowMinutes:q.chatWindowMinutes===undefined?defaults.chatWindowMinutes:Number(q.chatWindowMinutes),coreRule,timezone:string(q.timezone)||defaults.timezone,
       excludedLogins:configuration.value.excludedBotLogins,ownerId:configuration.value.twitch?.userId??"",youtubeAccount:configuration.value.youtube?.userId??configuration.value.youtubeAccountId??"",
     });
   });
@@ -414,6 +417,8 @@ export async function createApplication(
   app.get("/api/v1/persons/:id/metadata", async request => db.call("personMetadata",string(object(request.params).id)));
   app.post("/api/v1/persons/:id/metadata", async request => {
     const b=object(request.body);
+    if(!Array.isArray(b.tags)||!b.tags.every((tag):tag is string=>typeof tag==='string'))throw new Error('INVALID_PERSON_TAGS');
+    if(b.manualCore!==null&&typeof b.manualCore!=='boolean')throw new Error('INVALID_MANUAL_CORE');
     return db.call("setPersonMetadata",string(object(request.params).id),b.tags,b.manualCore,Number(b.revision));
   });
   app.get("/api/v1/persons/:id/notes", async request => db.call("personNotes",string(object(request.params).id)));

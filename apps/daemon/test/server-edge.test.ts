@@ -188,7 +188,7 @@ test('single-stream analytics derives its bounds server-side and never includes 
   const base=Math.floor((Date.now()-3600000)/60000)*60000;
   const first=await f.a.db.call<string>('startSession','a','scoped-a',base,'platform',base);
   const other=await f.a.db.call<string>('startSession','b','scoped-b',base,'platform',base);
-  for(const [id,account,user] of [[first,'a','silent'],[other,'b','other']]){
+  for(const [id,account,user] of [[first,'a','silent'],[other,'b','other']] as const){
    await f.a.db.call('recordPoll',id,account,{startedAtMs:base,completedAtMs:base+120000,status:'complete',userIds:[user]});
    await f.a.db.call('endSession',id,base+600000,'observed');
   }

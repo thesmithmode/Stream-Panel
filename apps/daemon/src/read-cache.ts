@@ -1,3 +1,4 @@
+import {operationsWithPolicy} from "./store-contract.js";
 import {serialize} from "node:v8";
 import {createHash,randomUUID} from 'node:crypto';
 import {createClient} from 'redis';
@@ -48,7 +49,6 @@ export class ReadCache {
  }
  close(){this.invalidate();if(this.redis?.isOpen)this.redis.destroy();}
 }
-export const cachedReads=new Set(['donorNicknames','donorBindings','channelOverview','persons','person','personStats','personActivity','personMetadata','personNotes','donation','donations','donationAudit','donationCandidates','sessions','analytics','summary','personFollowing','followingAnalytics','streamMetadata','personsTop','events','merges','splits','candidatePersons']);
-
+export const cachedReads=operationsWithPolicy('cached');
 /** Uncached reads must not invalidate unrelated derived data. */
-export const uncachedReads=new Set(['donationImportStates','pendingDonationImports','pendingDonationImportCount','gaps','grid','youtubeData','activeLogicalStream','platformStreams','personRevision','eventCount','insights']);
+export const uncachedReads=operationsWithPolicy('read');

@@ -1,3 +1,4 @@
+import type {StoreRequest} from "../src/store-contract.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -77,7 +78,7 @@ test('unknown provider start times retain viewer/chat collection without inventi
     return Response.json({});
   };
   const originalCall = db.call.bind(db);
-  const trackedDb = { call: async (method: string, ...args: unknown[]) => { writes.push([method, ...args]); return originalCall(method, ...args); } } as unknown as StoreClient;
+  const trackedDb = { call: async (...request:StoreRequest) => { writes.push(request); return originalCall(...request); } } as unknown as StoreClient;
   const yt = new YouTubeConnection(config, trackedDb, 'https://panel.test/oauth/youtube/callback', 'ruslan', request, () => now);
   try {
     await db.ready;

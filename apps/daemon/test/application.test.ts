@@ -205,7 +205,8 @@ test("chat moderation retains flags and counters without persisting message text
   const directory = await mkdtemp(join(tmpdir(), "stream-panel-redaction-"));
   const app = await createApplication(directory, 47831, false);
   try {
-    await app.db.call("ingest", normalizeTwitch(chatEnvelope, "channel"));
+    const chatEvent=normalizeTwitch(chatEnvelope,"channel");assert.ok(chatEvent);
+    await app.db.call("ingest",chatEvent);
     const deletion = {
       metadata: {
         message_type: "notification",
@@ -217,7 +218,8 @@ test("chat moderation retains flags and counters without persisting message text
         event: { message_id: "original-id" },
       },
     };
-    await app.db.call("ingest", normalizeTwitch(deletion, "channel"));
+    const deleteEvent=normalizeTwitch(deletion,"channel");assert.ok(deleteEvent);
+    await app.db.call("ingest",deleteEvent);
     const events = await app.db.call<any[]>("events");
     const chat = events.find((e) => e.type === "chat.message").payload;
     assert.equal(chat.text, undefined, "message content is not persisted");

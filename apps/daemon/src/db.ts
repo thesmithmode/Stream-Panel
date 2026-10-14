@@ -1,3 +1,4 @@
+import {type StoreRequest,isStoreMethod} from "./store-contract.js";
 import {StorageGuard} from "./storage-guard.js";
 import {ReadCache,cachedReads,uncachedReads} from "./read-cache.js";
 import { Worker } from "node:worker_threads";
@@ -46,7 +47,9 @@ export class StoreClient {
       });
     });
   }
-  async call<T = unknown>(method: string, ...args: unknown[]): Promise<T> {
+  async call<T = unknown>(...request:StoreRequest): Promise<T> {
+    const [method,...args]=request;
+    if(!isStoreMethod(method))throw new Error("UNKNOWN_OPERATION");
     await this.ready;
     if(this.dead)throw new Error("DB_WORKER_STOPPED");
     if(cachedReads.has(method))return this.cache.read(JSON.stringify([method,args]),()=>this.execute<T>(method,...args));
