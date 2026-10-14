@@ -1,5 +1,4 @@
 // Migration 1. All times are UTC epoch milliseconds; names are never unique identifiers.
-export const CURRENT_SCHEMA_VERSION = 16;
 
 export const schemaV1 = `
 CREATE TABLE persons (
@@ -297,3 +296,7 @@ DELETE FROM provider_snapshots WHERE key NOT IN('followers','donation_unparsed')
 DELETE FROM youtube_snapshots WHERE substr(key,1,4)='api:';
 PRAGMA user_version = 16;
 `;
+
+/** One ordered registry drives upgrades and profile SQL identifiers. Append new versions here. */
+export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16] as const;
+export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;

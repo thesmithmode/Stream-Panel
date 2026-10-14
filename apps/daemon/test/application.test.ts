@@ -122,6 +122,7 @@ test("local API requires bootstrap; rejects cross-site reads, Host rebinding, CS
       headers,
     });
     assert.equal(unauthorized.statusCode, 401);
+    assert.equal((await application.app.inject({method:'GET',url:'/api/v1/auth/me',headers})).statusCode,401);
     const key = new URLSearchParams(application.bootstrap().split("#")[1]).get(
       "key",
     )!;
@@ -134,6 +135,8 @@ test("local API requires bootstrap; rejects cross-site reads, Host rebinding, CS
     assert.equal(login.statusCode, 200);
     const cookie = String(login.headers["set-cookie"]).split(";")[0]!;
     const csrf = login.json().csrf;
+    const identity=await application.app.inject({method:'GET',url:'/api/v1/auth/me',headers:{...headers,cookie}});
+    assert.equal(identity.statusCode,200);assert.deepEqual(identity.json(),{user:null});
     const reused = await application.app.inject({
       method: "POST",
       url: "/api/v1/bootstrap",

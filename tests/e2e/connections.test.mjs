@@ -281,10 +281,10 @@ test(
       await page.getByLabel("Фильтр событий").selectOption("donation");
       await page.getByText("Событий этого типа нет", { exact: true }).waitFor();
       assert.equal(await page.locator(".event-row").count(), 0);
-      await page.getByLabel("Фильтр событий").selectOption("chat.message");
-      await page.locator(".event-row").nth(7).waitFor();
-      assert.equal(await page.locator(".event-row").count(), 8);
-      await page.locator(".event-title button").first().click();
+      await page.getByLabel("Фильтр событий").selectOption("all");
+      await page.getByText("Событий этого типа нет", { exact: true }).waitFor();
+      assert.equal(await page.locator(".event-row").count(), 0,'chat content stays outside the event feed');
+      await page.getByRole('region',{name:'Рейтинг участников'}).getByRole('button',{name:'Тестовый зритель',exact:true}).click();
       await page.getByRole("tab", {name:"Редактировать аккаунты",exact:true}).click();await page.getByLabel("Имя группы").waitFor();
       await page.getByRole("button", { name: "Стримы", exact: true }).click();
       await page.getByRole("button", { name: "Открыть", exact: true }).click();

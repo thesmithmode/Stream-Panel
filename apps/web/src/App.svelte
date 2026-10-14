@@ -168,7 +168,7 @@
           history.replaceState(null,"",location.pathname+location.search);
         }
         // Establish account permissions before using a persisted or URL-selected profile.
-        // The standalone collector has no auth/me route; its existing status flow remains.
+        // Older standalone collectors may lack this route; retain their status flow.
         try {const identity=await api<any>("auth/me");user=identity.user;restoreRoute();} catch(e) {if((e as Error).message!=="NOT_FOUND"&&(e as Error).message!=="HTTP_404")throw e;}
         const auth=await api<any>("status");
         setCsrf(auth.csrf);user=auth.user??user;restoreRoute();

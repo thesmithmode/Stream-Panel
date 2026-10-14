@@ -269,6 +269,9 @@ export async function createApplication(
       return { csrf };
     },
   );
+  // Local bootstrap sessions have no hosted account; the common onRequest hook
+  // still requires a valid session before this capability response is returned.
+  app.get('/api/v1/auth/me',()=>({user:null}));
   app.get('/api/v1/settings',()=>analyticsSettings(configuration.value.analyticsSettings));
   app.post('/api/v1/settings',async request=>{
     const next=analyticsSettings(request.body);const previous=analyticsSettings(configuration.value.analyticsSettings);

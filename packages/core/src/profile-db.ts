@@ -1,11 +1,11 @@
 import Database from "better-sqlite3";
-import { schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16 } from "./schema.js";
+import {schemaMigrations} from "./schema.js";
 
 // Only trusted schema identifiers are rewritten. Bound data and SQL string
 // literals are never rewritten. Each profile has its own tables, indexes,
 // foreign keys and migration version inside the same physical SQLite file.
 const identifiers = new Set(
-  [...`${schemaV1}\n${schemaV2}\n${schemaV3}\n${schemaV4}\n${schemaV5}\n${schemaV6}\n${schemaV7}\n${schemaV8}\n${schemaV9}\n${schemaV10}\n${schemaV11}\n${schemaV12}\n${schemaV13}\n${schemaV14}\n${schemaV15}\n${schemaV16}`.matchAll(/CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|VIEW)\s+(?:IF NOT EXISTS\s+)?(\w+)/gi)].map((m) => m[1]!),
+  [...schemaMigrations.join('\n').matchAll(/CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|VIEW)\s+(?:IF NOT EXISTS\s+)?(\w+)/gi)].map((m) => m[1]!),
 );
 export function openProfileDatabase(path: string, profile?: string): Database.Database {
   if (profile !== undefined && !/^[a-z][a-z0-9_]{0,31}$/.test(profile))

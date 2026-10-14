@@ -18,6 +18,7 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   await app.db.call('recordPoll',first,'a',{startedAtMs:base+5*minute,completedAtMs:base+6*minute,status:'complete',userIds:['silent']});
   await app.db.call('recordPoll',other,'b',{startedAtMs:base,completedAtMs:base+9*minute,status:'complete',userIds:['other'],userNames:{other:'Other Stream Viewer'}});
   for(let i=0;i<4;i++)await app.db.call('ingest',{source:'twitch',accountId:'a',externalId:`rank-message-${i}`,type:'chat.message',actor:{externalId:'talker',displayName:'Talkative Viewer'},occurredAtMs:base+minute,receivedAtMs:base+minute,timeQuality:'provider',sourceTime:null,transport:'eventsub',payload:{text:'hello'}});
+  await app.db.call('ingest',{source:'twitch',accountId:'a',externalId:'audience-raid',type:'channel.raid',actor:null,occurredAtMs:base+minute,receivedAtMs:base+minute,timeQuality:'provider',sourceTime:null,transport:'eventsub',payload:{viewers:1}});
   await app.db.call('endSession',first,base+10*minute,'observed');await app.db.call('endSession',other,base+10*minute,'observed');
   browser=await launchBrowser();
   const page=await browser.newPage({viewport:{width:1280,height:800}});page.setDefaultTimeout(10000);

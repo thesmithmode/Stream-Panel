@@ -18,7 +18,9 @@ import {
   type EventInput,
   type Source,
 } from "./domain.js";
-import { CURRENT_SCHEMA_VERSION, schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, schemaV6, schemaV7, schemaV8, schemaV9, schemaV10, schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16 } from "./schema.js";
+import {migrateDatabase} from "./database-migrations.js";
+import {CURRENT_SCHEMA_VERSION} from "./schema.js";
+import {PersonAnnotations} from "./person-annotations.js";
 import { botExclusionSet } from "./bots.js";
 import {personFollowing,followingAnalytics,type Follower} from './following.js';
 import { sessionWindows,sessionBreaks,windowsFromLinks } from './session-windows.js';
@@ -27,10 +29,6 @@ import { presenceMinutes, pollCoveredMinutes, type PresencePoll } from "./presen
 interface IdentityRow {
   id: string;
   person_id: string;
-}
-interface PersonRow {
-  id: string;
-  revision: number;
 }
 interface Membership {
   id: string;
@@ -52,65 +50,14 @@ export const priorModerationQuery = `SELECT 1 FROM events WHERE source='twitch' 
 
 export class StreamStore {
   private readonly db: Database.Database;
+  private readonly annotations:PersonAnnotations;
 
   constructor(path: string, private readonly profile?: string) {
     this.db = openProfileDatabase(path, profile);
+    this.annotations = new PersonAnnotations(this.db);
     registerDonationSum(this.db);
     try {
-      this.db.pragma("foreign_keys = ON");
-      this.db.pragma("busy_timeout = 5000");
-      const version = this.db.pragma("user_version", { simple: true });
-      if (typeof version !== "number" || !Number.isInteger(version) || version < 0 || version > CURRENT_SCHEMA_VERSION)
-        throw new Error("UNSUPPORTED_SCHEMA_VERSION");
-      this.db.pragma("journal_mode = WAL");
-      this.db.pragma("synchronous = FULL");
-      this.db.pragma("secure_delete = ON");
-      this.db.pragma("wal_autocheckpoint = 1000");
-      this.db.pragma("journal_size_limit = 67108864");
-      if (version === 0) this.db.transaction(() => this.db.exec(schemaV1)).immediate();
-      if ((this.db.pragma("user_version", { simple: true }) as number) < 2)
-        this.db.transaction(() => this.db.exec(schemaV2)).immediate();
-      if ((this.db.pragma("user_version", { simple: true }) as number) < 3) {
-        this.db.transaction(() => {
-          this.db.exec(schemaV3);
-          const rows = this.db
-            .prepare("SELECT id, display_name FROM identities")
-            .all() as { id: string; display_name: string }[];
-          const update = this.db.prepare(
-            "UPDATE identities SET match_key = ? WHERE id = ?",
-          );
-          for (const row of rows)
-            update.run(matchKey(row.display_name), row.id);
-        }).immediate();
-      }
-      if ((this.db.pragma("user_version", { simple: true }) as number) < 4)
-        this.db.transaction(() => this.db.exec(schemaV4)).immediate();
-      if ((this.db.pragma("user_version", { simple: true }) as number) < 5)
-        this.db.transaction(() => this.db.exec(schemaV5)).immediate();
-      if ((this.db.pragma("user_version", { simple: true }) as number) < 6)
-        this.db.transaction(() => this.db.exec(schemaV6)).immediate();
-      if ((this.db.pragma("user_version", { simple: true }) as number) < 7)
-        this.db.transaction(() => this.db.exec(schemaV7)).immediate();
-      if ((this.db.pragma("user_version", { simple: true }) as number) < 8)
-        this.db.transaction(() => this.db.exec(schemaV8)).immediate();
-      if ((this.db.pragma("user_version", { simple: true }) as number) < 9)
-        this.db.transaction(() => this.db.exec(schemaV9)).immediate();
-      if ((this.db.pragma("user_version", { simple: true }) as number) < 10)
-        this.db.transaction(() => this.db.exec(schemaV10)).immediate();
-      if ((this.db.pragma("user_version", { simple: true }) as number) < 11)
-        this.db.transaction(() => this.db.exec(schemaV11)).immediate();
-      if ((this.db.pragma("user_version", { simple: true }) as number) < 12)
-        this.db.transaction(() => this.db.exec(schemaV12)).immediate();
-      this.db.exec("CREATE TABLE IF NOT EXISTS sp_youtube_quota (day TEXT NOT NULL, profile TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(day,profile)) WITHOUT ROWID");
-      // Viewer = Twitch identity (stable user id). Donor = DA identity (account+name).
-      if ((this.db.pragma("user_version", { simple: true }) as number) < 13)
-        this.db.transaction(() => this.db.exec(schemaV13)).immediate();
-      if ((this.db.pragma("user_version", { simple: true }) as number) < 14)
-        this.db.transaction(() => this.db.exec(schemaV14)).immediate();
-      if ((this.db.pragma("user_version", { simple: true }) as number) < 15)
-        this.db.transaction(() => this.db.exec(schemaV15)).immediate();
-      if ((this.db.pragma("user_version", {simple:true}) as number)<16)
-        this.db.transaction(()=>{new ProviderStorage(this.db).migrate();this.db.exec(schemaV16);}).immediate();
+      migrateDatabase(this.db);
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
       this.db.transaction(() => {this.collapseDuplicateDaDonors();this.reconcileNicknameLinks();}).immediate();
     } catch (error) {
@@ -598,85 +545,13 @@ export class StreamStore {
     }).immediate();
   }
 
-  personMetadata(personId: string): {revision:number;tags:string[];manualCore:boolean|null} {
-    const revision = this.personRevision(personId);
-    const tags = this.db.prepare(`WITH RECURSIVE owners(id) AS (SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT t.label FROM person_tags t JOIN owners o ON t.person_id=o.id ORDER BY t.label`).all(personId) as {label:string}[];
-    const preference = this.db.prepare("SELECT manual_core FROM person_preferences WHERE person_id=?").get(personId) as {manual_core:number|null} | undefined;
-    return {revision,tags:tags.map(row=>row.label),manualCore:preference?.manual_core==null?null:preference.manual_core===1};
-  }
-
-  setPersonMetadata(personId: string, tags: string[], manualCore: boolean|null, revision: number): ReturnType<StreamStore['personMetadata']> {
-    if (!Array.isArray(tags) || tags.length>50 || tags.some(tag=>typeof tag!=="string" || !tag.trim() || tag.trim().length>64)) throw new Error("INVALID_PERSON_TAGS");
-    if (manualCore!==null && typeof manualCore!=="boolean") throw new Error("INVALID_MANUAL_CORE");
-    if (!Number.isSafeInteger(revision) || revision<0) throw new Error("INVALID_PERSON_REVISION");
-    const wanted=[...new Set(tags.map(tag=>tag.trim()))];
-    return this.db.transaction(() => {
-      const current=this.personMetadata(personId);
-      if (current.revision!==revision) throw new Error("REVISION_CONFLICT");
-      // Retain provenance of inherited tags; only explicit removals delete them.
-      this.db.prepare(`WITH RECURSIVE owners(id) AS (SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) DELETE FROM person_tags WHERE person_id IN(SELECT id FROM owners) AND label NOT IN(SELECT value FROM json_each(?))`).run(personId,JSON.stringify(wanted));
-      const insert=this.db.prepare("INSERT OR IGNORE INTO person_tags VALUES (?,?)");
-      for(const tag of wanted)if(!current.tags.includes(tag))insert.run(personId,tag);
-      this.db.prepare("INSERT INTO person_preferences VALUES (?,?) ON CONFLICT(person_id) DO UPDATE SET manual_core=excluded.manual_core").run(personId,manualCore===null?null:Number(manualCore));
-      this.db.prepare("UPDATE persons SET revision=revision+1 WHERE id=?").run(personId);
-      return this.personMetadata(personId);
-    }).immediate();
-  }
-
-  personNotes(personId: string): unknown[] {
-    this.personRevision(personId);
-    return this.db.prepare(`WITH RECURSIVE owners(id) AS (SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT n.* FROM person_notes n JOIN owners o ON n.person_id=o.id ORDER BY n.created_at_ms DESC,n.id`).all(personId);
-  }
-
-  createPersonNote(personId: string, body: string, nowMs = Date.now()): unknown {
-    assertTimestamp(nowMs);
-    const text = this.noteText(body);
-    return this.db.transaction(() => {
-      this.personRevision(personId);
-      const id = randomUUID();
-      this.db.prepare("INSERT INTO person_notes VALUES (?,?,?,?,?,0)").run(id,personId,text,nowMs,nowMs);
-      return this.db.prepare("SELECT * FROM person_notes WHERE id=?").get(id);
-    }).immediate();
-  }
-
-  updatePersonNote(personId: string, id: string, body: string, revision: number, nowMs = Date.now()): unknown {
-    assertTimestamp(nowMs);
-    const text = this.noteText(body);
-    return this.db.transaction(() => {
-      const note = this.requirePersonNote(personId,id,revision);
-      this.db.prepare("UPDATE person_notes SET body=?,updated_at_ms=?,revision=revision+1 WHERE id=?").run(text,Math.max(nowMs,note.updated_at_ms),id);
-      return this.db.prepare("SELECT * FROM person_notes WHERE id=?").get(id);
-    }).immediate();
-  }
-
-  deletePersonNote(personId: string, id: string, revision: number): void {
-    this.db.transaction(() => {
-      this.requirePersonNote(personId,id,revision);
-      this.db.prepare("DELETE FROM person_notes WHERE id=?").run(id);
-    }).immediate();
-  }
-
-  private noteText(body: string): string {
-    if (typeof body !== "string" || !body.trim() || body.length > 10000) throw new Error("INVALID_NOTE_BODY");
-    return body.trim();
-  }
-
-  private requirePersonNote(personId: string, id: string, revision: number): {updated_at_ms:number} {
-    this.personRevision(personId);
-    if (!Number.isSafeInteger(revision) || revision < 0) throw new Error("INVALID_NOTE_REVISION");
-    const note = this.db.prepare(`WITH RECURSIVE owners(id) AS (SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT n.revision,n.updated_at_ms FROM person_notes n JOIN owners o ON n.person_id=o.id WHERE n.id=?`).get(personId,id) as {revision:number;updated_at_ms:number} | undefined;
-    if (!note) throw new Error("NOTE_NOT_FOUND");
-    if (note.revision !== revision) throw new Error("NOTE_CONFLICT");
-    return note;
-  }
-
-  personRevision(id: string): number {
-    const person = this.db
-      .prepare("SELECT id, revision FROM persons WHERE id = ?")
-      .get(id) as PersonRow | undefined;
-    if (!person) throw new Error("PERSON_NOT_FOUND");
-    return person.revision;
-  }
+  personMetadata(personId:string) {return this.annotations.personMetadata(personId);}
+  setPersonMetadata(personId:string,tags:string[],manualCore:boolean|null,revision:number) {return this.annotations.setPersonMetadata(personId,tags,manualCore,revision);}
+  personNotes(personId:string) {return this.annotations.personNotes(personId);}
+  createPersonNote(personId:string,body:string,nowMs=Date.now()) {return this.annotations.createPersonNote(personId,body,nowMs);}
+  updatePersonNote(personId:string,id:string,body:string,revision:number,nowMs=Date.now()) {return this.annotations.updatePersonNote(personId,id,body,revision,nowMs);}
+  deletePersonNote(personId:string,id:string,revision:number):void {this.annotations.deletePersonNote(personId,id,revision);}
+  personRevision(id:string):number {return this.annotations.personRevision(id);}
 
   private memberships(personIds: string[]): Membership[] {
     return this.db
