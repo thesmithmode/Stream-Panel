@@ -164,7 +164,7 @@ test("stream backup validates keys and preserves underlying filesystem errors", 
   const dir = await mkdtemp(join(tmpdir(), "sp-backup-stream-errors-"));
   const key = randomBytes(32), input = join(dir, "missing.spbk");
   try {
-    assert.equal(BACKUP_STREAM_MAX_SIZE, 2 * 1024 * 1024 * 1024);
+    assert.equal(BACKUP_STREAM_MAX_SIZE, 64 * 1024 * 1024 * 1024);
     await assert.rejects(sealBackupFile(chunks(Buffer.from("x")), join(dir, "bad-key.spbk"), Buffer.alloc(31)), /BACKUP_INVALID/);
     await assert.rejects(openBackupFile(input, join(dir, "bad-read.out"), Buffer.alloc(31)), /BACKUP_INVALID/);
     await assert.rejects(openBackupFile(input, join(dir, "bad-read.out"), key), /ENOENT/);
@@ -172,4 +172,12 @@ test("stream backup validates keys and preserves underlying filesystem errors", 
     await assert.rejects(sealBackupFile(chunks(Buffer.from("x")), join(dir, "bad-write.spbk"), Buffer.alloc(33)), /BACKUP_INVALID/);
     assert.deepEqual((await readdir(dir)).filter(name => /bad-key|bad-read|bad-write/.test(name)), []);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('streaming backups restore more than two GiB without buffering the database',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-backup-over-2g-')),key=randomBytes(32),block=Buffer.alloc(1024*1024),size=2*1024*1024*1024+1;
+ const sealed=join(dir,'large.spbk'),restored=join(dir,'restored.sqlite'),digest=createHash('sha256');
+ async function* source(){for(let n=0;n<2048;n++){digest.update(block);yield block;}digest.update(Buffer.from([1]));yield Buffer.from([1]);}
+ try{const written=await sealBackupFile(source(),sealed,key);assert.equal(written,digest.digest('hex'));assert.equal(await openBackupFile(sealed,restored,key),written);assert.equal((await stat(restored)).size,size);}
+ finally{await rm(dir,{recursive:true,force:true});}
 });

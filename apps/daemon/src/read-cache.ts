@@ -30,6 +30,7 @@ export class ReadCache {
     }catch{/* Read from SQLite. */}finally{clearTimeout(timer);}
    }
    value??=await load();
+   if(value&&typeof value==='object'&&'preparing' in value&&value.preparing===true)return value;
    if(version===this.version){
     const bytes=serialize(value).byteLength;
     if(bytes<=2_000_000){

@@ -58,12 +58,13 @@
   let profile = $state<Profile>(getProfile());
   const allowedProfiles = $derived<readonly Profile[]>(user?.allowedProfiles ?? ["ruslan", "gulnaz"]);
   const accessibleProfile = (next: Profile): Profile => allowedProfiles.includes(next) ? next : allowedProfiles[0]!;
+  let sessionPage=$state(0);
   let epoch = 0;
   let scopeReady=$state(false),connectionLost=$state(false);
   let outdated=$state(false);
   let refreshTask:{epoch:number;task:Promise<void>;controller:AbortController}|null=null;
   function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
-  function clearScope(){refreshTask?.controller.abort();busy=false;scopeReady=false;events=[];summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
+  function clearScope(){sessionPage=0;refreshTask?.controller.abort();busy=false;scopeReady=false;events=[];summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
   function restoreRoute(){const route=readRoute(location.search,getProfile()),selected=accessibleProfile(route.profile),denied=selected!==route.profile;epoch++;tab=denied&&route.view==='stream'?'overview':route.view;sessionFilter=denied?'':route.session;personId=denied?'':route.person;setProfile(selected);profile=selected;clearScope();}
   function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}connectionLost=!navigator.onLine;if(document.hidden||!navigator.onLine)return;error=authMessage((e as Error).message);}
 
@@ -118,7 +119,7 @@
     const controller=new AbortController();
     const deadline=setTimeout(()=>controller.abort(new ConnectionError()),12000);
     const task=(async()=>{
-      const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter,peoplePeriod).map(async([key,path])=>[key,await api(path,undefined,controller.signal)])));
+      const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter,peoplePeriod).map(async([key,path])=>[key,await api(key==='sessions'&&tab==='sessions'?`sessions?offset=${sessionPage*100}`:path,undefined,controller.signal)])));
       if(current!==epoch)return;
       status=values.status;{setCsrf(status.csrf);user=status.user??user;outdated=isOutdatedRelease(status.release);}
       sessions=values.sessions??sessions;people=values.persons??people;events=values.events??events;summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';window.dispatchEvent(new Event('sp:data-refresh'));
@@ -283,7 +284,7 @@
       {:else if tab === "sessions"}<section class="panel">
           <header>
             <h2>История стримов</h2>
-            <span class="small muted">Последние 100</span>
+            <span class="small muted">Сначала новые</span>
           </header>
           {#if !sessions.length}<div class="empty">
               <Icon name="sessions" size={48} />
@@ -326,6 +327,7 @@
                 >
               </table>
             </div>{/if}
+      <div class="history-pages analytics-controls"><button class="outline" disabled={busy||sessionPage===0} onclick={()=>{sessionPage--;void action(async()=>{});}}>Назад</button><span>Страница {sessionPage+1}</span><button class="outline" disabled={busy||sessions.length<100} onclick={()=>{sessionPage++;void action(async()=>{});}}>Далее</button></div>
         </section>{/if}
       {/if}
       {/key}

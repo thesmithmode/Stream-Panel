@@ -3,9 +3,12 @@ import {mkdir,readFile,writeFile,copyFile,rename,rm,access,chmod} from 'node:fs/
 import {join,dirname,resolve} from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {StreamStore} from '../../../packages/core/src/store.js';
-import {schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12} from '../../../packages/core/src/schema.js';
+import {schemaMigrations} from '../../../packages/core/src/schema.js';
 import {AccountStore} from './auth.js';
-const tables=[...`${schemaV1}\n${schemaV2}\n${schemaV3}\n${schemaV4}\n${schemaV5}\n${schemaV6}\n${schemaV7}\n${schemaV8}\n${schemaV9}\n${schemaV10}\n${schemaV11}\n${schemaV12}`.matchAll(/CREATE TABLE (\w+)/g)].map(m=>m[1]!);
+const schema=schemaMigrations.join('\n');
+const allTables=[...new Set([...schema.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?(\w+)/g)].map(m=>m[1]!))].filter(name=>!name.startsWith('sp_'));
+const tables=allTables.filter(name=>!name.startsWith('analytics_'));
+const auxiliary=[...new Set([...schema.matchAll(/CREATE (VIEW|TRIGGER) (?:IF NOT EXISTS )?(\w+)/g)].map(m=>({type:m[1]!,name:m[2]!})))];
 async function exists(path:string){try{await access(path);return true;}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return false;throw e;}}
 export async function migrateLegacy(source:string,destination:string) {
  if(await exists(destination))throw new Error('DESTINATION_EXISTS');
@@ -31,13 +34,14 @@ export async function migrateLegacy(source:string,destination:string) {
   try{
    db.pragma('foreign_keys=OFF');
    db.transaction(()=>{
+    for(const object of auxiliary)db.exec(`DROP ${object.type} IF EXISTS "${object.name}"`);
     for(const table of tables){
      counts[table]=(db.prepare(`SELECT count(*) AS n FROM "${table}"`).get() as {n:number}).n;
      db.exec(`INSERT INTO "p_ruslan_${table}" SELECT * FROM "${table}"`);
      const actual=(db.prepare(`SELECT count(*) AS n FROM "p_ruslan_${table}"`).get() as {n:number}).n;
      if(actual!==counts[table])throw new Error('IMPORT_COUNT_MISMATCH');
     }
-    for(const table of [...tables].reverse())db.exec(`DROP TABLE "${table}"`);
+    for(const table of [...allTables].reverse())db.exec(`DROP TABLE "${table}"`);
     if(db.pragma('integrity_check',{simple:true})!=='ok'||(db.pragma('foreign_key_check') as unknown[]).length)throw new Error('IMPORT_INTEGRITY_FAILED');
    }).immediate();
    db.pragma('wal_checkpoint(TRUNCATE)');

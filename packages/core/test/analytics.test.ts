@@ -96,7 +96,7 @@ test('empty/default analytics is safe; too many sessions or expanded minutes req
             const id = recordedStream(s,'channel', `bounded-${n}`, base, 'platform', base);
             s.endSession(id, base + minute, 'observed');
         }
-        assert.throws(() => s.analytics(opts), /ANALYTICS_RANGE_TOO_LARGE/);
+        assert.equal((s.analytics(opts) as any).preparing,true);
     }
     finally {
         s.close();

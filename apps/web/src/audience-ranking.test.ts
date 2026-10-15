@@ -14,6 +14,8 @@ import {presenceMinutes,rankTable,intervalRows,durationLabel} from './audience-r
 test('table combines overlapping platforms, retains zero rows, sorts exact currency amounts, and measures gaps',()=>{
  const intervals=[{from:0,to:120000,kind:'observed'},{from:60000,to:180000,kind:'chat_proxy'},{from:300000,to:360000,kind:'observed'}];
  assert.equal(presenceMinutes({id:'a',name:'A',intervals}),4);
+ assert.equal(presenceMinutes({id:'a',name:'A',intervals,activityMinutes:500}),500);
+ assert.equal(presenceMinutes({id:'a',name:'A',intervals,activityMinutes:NaN}),4);
  assert.equal(presenceMinutes({id:'a',name:'A',observedMinutes:2,estimatedChatMinutes:3}),5);
  const people=[{id:'a',name:'A',intervals,messages:0,donations:{RUB:'9007199254740992'}},{id:'b',name:'B',messages:2,donations:{RUB:'9007199254740993'}},{id:'c',name:'C'}];
  assert.deepEqual(rankTable(people,'presence').map(p=>p.id),['a','b','c']);

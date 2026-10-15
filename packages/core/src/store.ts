@@ -1,3 +1,4 @@
+import {AnalyticsHistory} from "./analytics-history.js";
 import {EventIngestion} from "./event-ingestion.js";
 export {priorModerationQuery} from "./event-ingestion.js";
 import {StreamSessions} from "./stream-sessions.js";
@@ -29,6 +30,7 @@ import { type PresencePoll } from "./presence.js";
 
 
 export class StreamStore {
+  private history:AnalyticsHistory;
   private readonly db: Database.Database;
   private readonly annotations:PersonAnnotations;
   private readonly eventIngestion:EventIngestion;
@@ -46,6 +48,7 @@ export class StreamStore {
     registerDonationSum(this.db);
     try {
       migrateDatabase(this.db);
+    this.history=new AnalyticsHistory(this.db);
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
       this.db.transaction(() => {this.collapseDuplicateDaDonors();this.reconcileNicknameLinks();}).immediate();
     } catch (error) {
@@ -64,7 +67,7 @@ export class StreamStore {
   ) {return this.streams.startSession(accountId,streamId,startedAtMs,kind,nowMs);}
   endSession(id: string, atMs: number, quality = "observed") {return this.streams.endSession(id,atMs,quality);}
   deleteManualSession(id: string, atMs: number) {return this.streams.deleteManualSession(id,atMs);}
-  sessions(sessionId?: string) {return this.streams.sessions(sessionId);}
+  sessions(sessionId?: string,offset=0,limit=100) {return this.streams.sessions(sessionId,offset,limit);}
   platformStreams(sessionId: string) {return this.streams.platformStreams(sessionId);}
   platformMissing(platform: "twitch" | "youtube", accountId: string, presentIds: string[], observedAtMs: number) {return this.streams.platformMissing(platform,accountId,presentIds,observedAtMs);}
   attachPlatformStream(
@@ -277,7 +280,14 @@ export class StreamStore {
     const windowsBySession=new Map<string,typeof links>();for(const link of links){const list=windowsBySession.get(link.session_id)??[];list.push(link);windowsBySession.set(link.session_id,list);}
     return {streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+windowsFromLinks(windowsBySession.get(s.id)??[],s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees,messages:summary.messages,totals:summary.totals,donations:summary.donations};
   }
-  analytics(options: AnalyticsOptions) { return audienceAnalytics(this.db,options); }
+  analytics(options: AnalyticsOptions):ReturnType<typeof audienceAnalytics> {
+    if(!options.sessionId){const count=(this.db.prepare("SELECT count(*) AS n FROM sessions WHERE started_at_ms<? AND coalesce(ended_at_ms,?)>? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id)").get(options.toMs,options.toMs,options.fromMs) as {n:number}).n;if(count>200)return this.history.report(options);}
+    try{return audienceAnalytics(this.db,options);}catch(error){
+      if(!options.sessionId&&error instanceof Error&&error.message==='ANALYTICS_RANGE_TOO_LARGE')return this.history.report(options);
+      throw error;
+    }
+  }
+  warmAnalytics(options:AnalyticsOptions){return this.history.prepare(options);}
 
   youtubeQuota(day: string, profile: string, cost = 1): boolean {
     if (!/^\d{2}\/\d{2}\/\d{4}$/.test(day) || !profile || !Number.isInteger(cost) || cost < 1 || cost > 4000) throw new Error("INVALID_QUOTA");
@@ -302,8 +312,7 @@ export class StreamStore {
     if(!['twitch','youtube','donationalerts'].includes(source)||!account||!key)throw new Error('INVALID_PROVIDER_SNAPSHOT');
     if(key!=='followers')return;
     const data=payload as {followers:Follower[];complete:boolean;total:number|null};
-    const clean={followers:data.followers.map(({id,name,followedAtMs})=>({id,name,followedAtMs})),complete:data.complete,total:data.total};
-    this.db.prepare('INSERT INTO provider_snapshots VALUES (?,?,?,?,?,?,?)').run(randomUUID(),source,account,key,at,sessionId,JSON.stringify(clean));
+    new ProviderStorage(this.db).saveFollowers(source,account,data,at,sessionId);
   }
   donationImportStates(account:string,ids:string[]){return new ProviderStorage(this.db).donationStates(account,ids);}
   pendingDonationImportCount(account:string){return new ProviderStorage(this.db).pendingCount(account);}

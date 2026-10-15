@@ -27,7 +27,7 @@ test('credential reads require authentication and CSRF; full import preserves bo
   const saved=await h.backup!.run(),blob=await h.backup!.file(saved.filename);const file=join(dir,'input.spbk');await writeFile(file,blob);
   h.runtimes.get('ruslan')!.configuration.value.daAccessToken='new-token';await h.runtimes.get('ruslan')!.configuration.save();
   const upload=(bytes:Buffer,extra:Record<string,string>={})=>post('/api/v1/backups/restore',bytes,{...auth,'content-type':'application/octet-stream',...extra});
-  assert.equal((await upload(Buffer.from('x'),{'content-length':String(2*1024*1024*1024+1)})).statusCode,413);
+  assert.equal((await upload(Buffer.from('x'),{'content-length':String(64*1024*1024*1024+1)})).statusCode,413);
   assert.equal((await upload(blob,{'x-backup-key':'bad'})).json().error,'INVALID_BACKUP_KEY');assert.equal((await upload(blob,{'x-backup-key':'a'.repeat(64)})).json().error,'BACKUP_INVALID');assert.equal((await upload(Buffer.from('bad'))).statusCode,400);assert.equal((await post('/api/v1/backups/restore')).json().error,'BACKUP_INVALID');
   await mkdir(join(dir,'restore-pending'));assert.equal((await upload(blob)).statusCode,409);await rm(join(dir,'restore-pending'),{recursive:true});
   assert.equal(h.runtimes.get('ruslan')!.configuration.value.daAccessToken,'new-token');assert.equal(restarted,0);

@@ -12,7 +12,8 @@ type Manifest={format:'stream-panel-chunks-v1';filename:string;size:number;sha25
 /** Immutable encrypted objects; publish the manifest only after every part verifies. */
 export class CloudBackup {
  private base:string;private bucket:string;private prefix:string;private secret='';
- constructor(private options:{url:string;serviceKeyFile?:string|undefined;bucket?:string|undefined;prefix?:string|undefined},private request:typeof fetch=fetch){
+ constructor(private options:{url:string;serviceKeyFile?:string|undefined;bucket?:string|undefined;prefix?:string|undefined;budgetBytes?:number|undefined},private request:typeof fetch=fetch){
+  if(options.budgetBytes!==undefined&&(!Number.isSafeInteger(options.budgetBytes)||options.budgetBytes<1))throw new Error('INVALID_BACKUP_BUDGET');
   const url=new URL(options.url);this.base=url.origin;this.bucket=options.bucket??'stream-panel-backups';this.prefix=options.prefix??'stream-panel';
   if(!/^stream-panel(?:\/[a-f0-9]{32})?$/.test(this.prefix))throw new Error('INVALID_BACKUP_PREFIX');
   if(url.protocol!=='https:'||!url.hostname.endsWith('.supabase.co')||url.origin!==options.url||!options.serviceKeyFile)throw new Error('INVALID_BACKUP_REMOTE');
@@ -48,6 +49,7 @@ export class CloudBackup {
   const file=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK),stored:string[]=[];
   try{
    const size=(await file.stat()).size;if(size>BACKUP_STREAM_MAX_SIZE)throw new Error('BACKUP_SIZE_LIMIT');
+   await this.checkBudget(filename,size);
    if(size<=singleLimit)await this.put(filename,blob??await file.readFile(),stored);
    else{
     const manifest:Manifest={format:'stream-panel-chunks-v1',filename,size,sha256:'',parts:[]},digest=createHash('sha256');
@@ -67,13 +69,28 @@ export class CloudBackup {
   await this.rotate(filename);
  }
  private async list(prefix:string){
-  const all: {name:string}[]=[];
+  const all: {name:string;metadata?:{size?:number|string}|null}[]=[];
   for(let offset=0;offset<100000;offset+=1000){
    const rows=JSON.parse((await this.bytes((await this.call(`object/list/${this.bucket}`,'POST',JSON.stringify({prefix,limit:1000,offset,sortBy:{column:'name',order:'desc'}})))!,4*1024*1024)).toString());
    if(!Array.isArray(rows))throw new Error('BACKUP_INVALID_LIST');all.push(...rows);
    if(rows.length<1000)return all;
   }
   throw new Error('BACKUP_LIST_LIMIT');
+ }
+ /** The installation allocation is separate from the organization/project quota. */
+ private async checkBudget(filename:string,size:number){
+  const budget=this.options.budgetBytes;if(budget===undefined)return;
+  const listed=await this.list(this.prefix);let used=0,alreadyPublished=false;
+  const bytes=(row:{metadata?:{size?:number|string}|null})=>{
+   const n=Number(row.metadata?.size);if(row.metadata?.size===undefined||!Number.isSafeInteger(n)||n<0)throw new Error('BACKUP_STORAGE_USAGE_UNAVAILABLE');return n;
+  };
+  for(const row of listed){
+   if(typeof row.name!=='string')continue;
+   if(validName.test(row.name)||row.name.endsWith('.manifest.json')&&validName.test(row.name.slice(0,-14))){used+=bytes(row);if(row.name===filename||row.name===filename+'.manifest.json')alreadyPublished=true;}
+   else if(row.name.endsWith('.parts')&&validName.test(row.name.slice(0,-6)))for(const part of await this.list(this.prefix+'/'+row.name))if(/^\d{4}\.part$/.test(part.name))used+=bytes(part);
+  }
+  // Reserve the new immutable archive and manifest before the first POST.
+  if(used+(alreadyPublished?0:size+(size>singleLimit?1024*1024:0))>budget)throw new Error('BACKUP_CLOUD_BUDGET_EXCEEDED');
  }
  private async rotate(filename:string){
   const listed=await this.list(this.prefix);

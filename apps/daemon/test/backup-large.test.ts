@@ -83,10 +83,10 @@ test('backup low disk space preserves database and existing copies; oversized da
  try {
   await writeFile(join(sparse,'key'),key.toString('hex'));
   const handle=await open(join(sparse,'data.sqlite'),'wx');
-  try{await handle.truncate(2*1024*1024*1024+1);}finally{await handle.close();}
+  try{await handle.truncate(64*1024*1024*1024+1);}finally{await handle.close();}
   const backup=new BackupService(sparse,{keyFile:join(sparse,'key')});
   await assert.rejects(backup.run(),/BACKUP_SIZE_LIMIT/);
-  assert.equal((await stat(join(sparse,'data.sqlite'))).size,2*1024*1024*1024+1);
+  assert.equal((await stat(join(sparse,'data.sqlite'))).size,64*1024*1024*1024+1);
  } finally {await rm(sparse,{recursive:true,force:true});}
 });
 

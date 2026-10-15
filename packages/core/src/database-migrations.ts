@@ -24,6 +24,7 @@ export function migrateDatabase(db:Database.Database):void {
     db.transaction(()=>{
       if(target===16)new ProviderStorage(db).migrate();
       db.exec(sql);
+      if(target===17)new ProviderStorage(db).migrateFollowers();
       if(target===3) {
         const rows=db.prepare('SELECT id, display_name FROM identities').all() as {id:string;display_name:string}[];
         const update=db.prepare('UPDATE identities SET match_key = ? WHERE id = ?');

@@ -1,0 +1,14 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {application} from '../helpers/application.mjs';import {launchBrowser} from '../helpers/browser.mjs';import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';import {assertUiLayout} from '../helpers/ui-layout.mjs';
+test('long history prepares, paginates, averages clock activity and drills into original minute data',{timeout:120000},async()=>{
+ const a=await application();let browser;
+ try{const day=86400000,base=Math.floor((Date.now()-202*day)/day)*day+12*3600000;
+ for(let n=0;n<201;n++){const at=base+n*day,id=await a.db.call('observePlatformStream','twitch','owner',String(n),at,at,null,'History '+n);
+ await a.db.call('ingest',{source:'twitch',accountId:'owner',externalId:String(n),type:'chat.message',actor:{externalId:'viewer',displayName:'History viewer'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{count:1}});await a.db.call('endSession',id,at+60000);}
+ browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(30000);const errors=[];page.on('pageerror',e=>errors.push(e.message));await goto(page,a.bootstrap());
+ await page.getByRole('button',{name:'Стримы',exact:true}).click();const history=page.locator('.history-pages');await history.getByText('Страница 1',{exact:true}).waitFor();await history.getByRole('button',{name:'Далее',exact:true}).click();await history.getByText('Страница 2',{exact:true}).waitFor();await history.getByRole('button',{name:'Назад',exact:true}).click();await history.getByText('Страница 1',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByLabel('Период аналитики').selectOption('all');await page.locator('.aggregate-hint').waitFor();
+ const chart=page.locator('.time-audience');await chart.getByRole('button',{name:/15:00 · в среднем 1 · 201 стримов/}).click();await chart.getByRole('cell',{name:'201 / 201',exact:true}).waitFor();await chart.getByLabel('День активности').selectOption('weekends');await chart.locator('.slots button:not(:disabled)').first().click();await chart.getByLabel('День активности').selectOption('weekdays');await chart.locator('.slots button:not(:disabled)').first().click();await chart.getByRole('button',{name:'Подробно по минутам',exact:true}).click();await chart.getByLabel('Шаг активности').selectOption('1');await chart.locator('.slots button:not(:disabled)').first().click();
+ await assertUiLayout(page);await page.locator('.analytics-chart svg [role="button"]').first().click();await page.locator('.aggregate-hint').waitFor({state:'detached'});assert.deepEqual(errors,[]);await saveCoverage(page);
+ }finally{await browser?.close();await a.close();}
+});

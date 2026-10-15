@@ -3,12 +3,16 @@
  interface ComparisonStream {startedAt:number;title?:string;audience:number;returning:number;viewers?:{all?:{mean?:number|null;peak?:number|null}}}
  interface ComparisonCategory {name:string;minutes:number;sessions:number;messagesPerHour:number}
  let {streams,categories}:{streams:ComparisonStream[];categories:ComparisonCategory[]}=$props();
+ let page=$state(0);
+ $effect(()=>{void streams;page=0;});
+ const displayed=$derived(streams.slice(page*100,(page+1)*100));
  const comparisons=$derived([
-  {title:'Возвращаемость по эфирам',unit:'%',rows:streams.map(s=>({label:date(s.startedAt).split(',')[0]!,value:s.audience?s.returning*100/s.audience:null,detail:`${s.returning} из ${s.audience} участников`}))},
+  {title:'Возвращаемость по эфирам',unit:'%',rows:displayed.map(s=>({label:date(s.startedAt).split(',')[0]!,value:s.audience?s.returning*100/s.audience:null,detail:`${s.returning} из ${s.audience} участников`}))},
   {title:'Активность чата по категориям',unit:'сообщ./ч',rows:categories.map(c=>({label:c.name,value:c.minutes?c.messagesPerHour:null,detail:`${c.sessions} эфиров · ${Math.round(c.minutes)} мин`}))},
-  {title:'Зрители по эфирам',unit:'в среднем',rows:streams.map(s=>({label:s.title||date(s.startedAt).split(',')[0]!,value:s.viewers?.all?.mean??null,detail:`Пик ${s.viewers?.all?.peak??'—'}`}))}
+  {title:'Зрители по эфирам',unit:'в среднем',rows:displayed.map(s=>({label:s.title||date(s.startedAt).split(',')[0]!,value:s.viewers?.all?.mean??null,detail:`Пик ${s.viewers?.all?.peak??'—'}`}))}
  ]);
 </script>
+{#if streams.length>100}<div class="analytics-controls"><button class="outline" disabled={page===0} onclick={()=>page--}>Назад</button><span>Сравнение: страница {page+1}</span><button class="outline" disabled={(page+1)*100>=streams.length} onclick={()=>page++}>Далее</button></div>{/if}
 <div class="comparison-charts">
  {#each comparisons as chart}<section class="panel"><header><h2>{chart.title}</h2></header><div class="comparison-bars">
   {#each chart.rows as row}<div class="comparison-row"><div><span>{row.label}</span><strong>{row.value===null?'Нет данных':`${row.value.toLocaleString('ru-RU',{maximumFractionDigits:1})} ${chart.unit}`}</strong></div><div class="track"><i style:width={`${row.value===null?0:Math.max(0,row.value)/Math.max(1,...chart.rows.map(r=>r.value??0))*100}%`}></i></div><small class="muted">{row.detail}</small></div>{:else}<p class="muted">Нужны собранные эфиры.</p>{/each}

@@ -1,0 +1,78 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {StreamStore} from '../src/store.js';
+import {AnalyticsHistory} from '../src/analytics-history.js';
+import {audienceAnalytics} from '../src/analytics.js';
+const base=Date.UTC(2026,9,1),minute=60000;
+function fixture(s:StreamStore,n=4,youtube=false){for(let i=0;i<n;i++){
+ const at=base+i*86400000,sid=s.startSession('owner',String(i),at,'platform',at);
+ s.streamSample(sid,at,'game','Game','',10);
+ s.recordPoll(sid,'owner',{startedAtMs:at,completedAtMs:at+minute,status:'complete',userIds:['viewer'],userNames:{viewer:'Viewer'}});
+ s.ingest({source:'twitch',accountId:'owner',externalId:String(i),type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:at+minute,receivedAtMs:at+minute,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{count:1}});
+ if(youtube&&i===0)s.attachPlatformStream(sid,'youtube','yt-owner','video',at,at,null,'Video');
+ s.endSession(sid,at+3*minute);
+}}
+const options={fromMs:base,toMs:base+10*86400000,timezone:'Europe/Moscow',ownerId:'owner',minSessions:2,minMessages:2,minMinutes:1};
+function ready(h:AnalyticsHistory,opts:Parameters<AnalyticsHistory['report']>[0]=options){let r:any;for(let i=0;i<100;i++){r=h.report(opts);if(!r.preparing)return r;}throw Error('preparation did not finish');}
+test('incremental reports agree with raw facts, clocks and cohorts; late data and renamed identities invalidate cached streams',()=>{
+ const s=new StreamStore(':memory:');try{
+ fixture(s);s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:base}],true,options.toMs);
+ const db=(s as any).db,h=new AnalyticsHistory(db),raw=audienceAnalytics(db,options),r=ready(h);
+ assert.deepEqual(r.summary,raw.summary);assert.deepEqual(r.composition,raw.composition);assert.deepEqual(r.streamComparison,raw.streamComparison);assert.deepEqual(r.hours,raw.hours);
+ for(const field of ['messages','observedMinutes','estimatedChatMinutes','visits','core','follower','attendanceRatio','donations'])assert.deepEqual(r.audience[0][field],(raw.audience[0] as any)[field]);
+ assert.equal(r.timeline.reduce((n:number,p:any)=>n+p.messages,0),raw.summary.messages);assert.ok(r.clockBuckets.some((p:any)=>p.day==='weekends'));assert.ok(r.clockBuckets.some((p:any)=>p.day==='weekdays'));
+ const person=r.audience[0].id;s.setPersonMetadata(person,[],false,s.personRevision(person));assert.equal(ready(h).summary.core,0);
+ s.ingest({source:'twitch',accountId:'owner',externalId:'late',type:'chat.message',actor:{externalId:'viewer',displayName:'Renamed'},occurredAtMs:base+minute,receivedAtMs:options.toMs,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{count:1}});
+ const late=ready(h);assert.equal(late.summary.messages,5);assert.equal(late.audience[0].name,audienceAnalytics(db,options).audience[0]!.name);
+ db.prepare('UPDATE analytics_stream_cache SET payload=?').run(Buffer.from('invalid gzip'));assert.equal(ready(h).summary.messages,5);
+ assert.throws(()=>h.report({...options,fromMs:-1}),/INVALID_ANALYTICS_FILTER/);assert.throws(()=>h.report({...options,timezone:'no/timezone'}),/INVALID_TIMEZONE/);
+ assert.equal(new AnalyticsHistory(db).report({...options,fromMs:base-86400000,toMs:base-1}).summary.streams,0);
+ }finally{s.close();}
+});
+test('more than 200 streams prepare in bounded batches and remain browsable without a range error',()=>{
+ const s=new StreamStore(':memory:');try{fixture(s,201);const opts={...options,toMs:base+202*86400000},h=new AnalyticsHistory((s as any).db);assert.equal((s.analytics(opts) as any).preparing,true);
+ let status;do{status=s.warmAnalytics(opts);}while(status.preparing);
+ let result:any;do{result=s.analytics(opts);}while(result.preparing);assert.equal(result.summary.streams,201);assert.equal(result.summary.messages,201);assert.equal(s.sessions(undefined,100).length,100);assert.equal(s.sessions(undefined,200).length,1);assert.throws(()=>s.sessions(undefined,-1),/INVALID/);assert.equal(ready(h,opts).aggregate,true);
+ }finally{s.close();}
+});
+
+test('cached money, platform inference and core rules match raw analytics after corrections and identity merges',()=>{
+ const s=new StreamStore(':memory:');try{
+ fixture(s,2,true);const db=(s as any).db,h=new AnalyticsHistory(db),person=s.analytics(options).audience[0]!.id;
+ s.youtubeMessages('yt-owner','chat',[{id:'yt',snippet:{type:'textMessageEvent',publishedAt:new Date(base).toISOString()},authorDetails:{channelId:'yt-viewer',displayName:'YouTube Viewer'}}]);
+ const tip=s.createDonation({personId:person,amount:'10',currency:'RUB',occurredAtMs:base+minute,message:'Preserved',sourceName:'Cash'},base+minute);
+ s.followingSnapshot('twitch','owner',[],true,base);s.followingSnapshot('youtube','yt-owner',[{id:'yt-viewer',name:'YouTube Viewer',followedAtMs:null}],false,base);
+ s.setPersonMetadata(person,['Friend'],null,s.personRevision(person));
+ const opts={...options,youtubeAccount:'yt-owner'};
+ for(const source of ['all','twitch','youtube'] as const)for(const coreRule of ['either','both','frequency'] as const){const query={...opts,source,coreRule};const raw=audienceAnalytics(db,query),r=ready(h,query);assert.deepEqual(r.summary,raw.summary);assert.deepEqual(r.composition,raw.composition);for(const p of raw.audience){const cached=r.audience.find((q:any)=>q.id===p.id);assert.equal(cached.messages,p.messages);assert.deepEqual(cached.donations,p.donations);assert.deepEqual(cached.tags,p.tags);}}
+ s.updateDonation(String(tip.id),{personId:person,amount:'0.50',currency:'USD',occurredAtMs:base+86400000+minute,message:'Corrected',sourceName:'Cash'},0,base+86400000+2*minute);
+ assert.deepEqual(ready(h,opts).audience.find((p:any)=>p.id===person).donations,{USD:'50'});
+ s.deleteDonation(String(tip.id),1,base+86400000+3*minute);assert.deepEqual(ready(h,opts).audience.find((p:any)=>p.id===person).donations,{});
+ const yt=s.persons().find(p=>String(p.sources).includes('youtube'))!.id as string;s.merge(yt,person,s.personRevision(yt),s.personRevision(person),options.toMs);
+ assert.equal(ready(h,opts).summary.entities,1);
+ assert.deepEqual(ready(h,{...opts,category:'game'}).summary,audienceAnalytics(db,{...opts,category:'game'}).summary);
+ // A live stream is evaluated freshly and never persisted as a closed-stream cache.
+ const live=s.startSession('owner','live',base+9*86400000,'platform',base+9*86400000);assert.equal(ready(h,opts).summary.streams,3);assert.equal(db.prepare('SELECT count(*) n FROM analytics_stream_cache WHERE session_id=?').get(live).n,0);
+ }finally{s.close();}
+});
+
+test('derived analytics stop at storage/size bounds and recover from failed composition without changing facts',()=>{
+ const s=new StreamStore(':memory:');try{fixture(s);const db=(s as any).db;
+ assert.throws(()=>new AnalyticsHistory(db,{availableBytes:()=>0}).prepare(options),/ANALYTICS_STORAGE_LOW/);
+ assert.throws(()=>new AnalyticsHistory(db,{maxBytes:1}).prepare(options),/ANALYTICS_STREAM_TOO_LARGE/);
+ const h=new AnalyticsHistory(db);assert.equal(ready(h).summary.messages,4);
+ const prepare=db.prepare.bind(db);let once=true;db.prepare=(sql:string)=>{if(once&&sql.startsWith('SELECT person_id,manual_core')){once=false;throw Error('TRANSIENT_TEST_FAILURE');}return prepare(sql);};
+ assert.throws(()=>h.report(options),/TRANSIENT_TEST_FAILURE/);assert.equal(ready(h).summary.messages,4);db.prepare=prepare;
+ assert.equal(s.summary().messages,4);
+ }finally{s.close();}
+});
+
+test('cached clock/day statistics split midnight and preserve known zero viewers and silent presence',()=>{
+ const s=new StreamStore(':memory:');try{
+ const at=base+3*86400000+23*3600000+59*minute,id=s.startSession('owner','midnight',at,'platform',at);s.streamSample(id,at,'game','Game','',0);
+ s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+minute-1,status:'complete',userIds:['silent']});s.recordPoll(id,'owner',{startedAtMs:at+minute,completedAtMs:at+2*minute,status:'complete',userIds:[]});s.endSession(id,at+2*minute);
+ const db=(s as any).db,h=new AnalyticsHistory(db),query={...options,timezone:'UTC',minSessions:1,minMinutes:0,minMessages:0},r=ready(h,query);
+ assert.equal(r.timeline.length,2);assert.equal(r.timeline[0].viewers,0);assert.equal(r.timeline[1].observed,0);assert.equal(r.timeline[1].presenceKnown,true);
+ assert.ok(r.clockBuckets.some((b:any)=>b.day==='weekends'&&b.minute===23*60+59));assert.ok(r.clockBuckets.some((b:any)=>b.day==='weekdays'&&b.minute===0));assert.equal(r.summary.messages,0);assert.equal(r.summary.attendees,1);
+ }finally{s.close();}
+});

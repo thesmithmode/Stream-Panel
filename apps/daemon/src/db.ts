@@ -10,6 +10,10 @@ export class StoreClient {
   storageStatus(){return this.storage.status();}
   private sequence = 0;
   private dead = false;
+  private stopping=false;
+  private onFatal:((error:Error)=>void)|undefined;
+  setFatalHandler(handler:(error:Error)=>void){this.onFatal=handler;if(this.dead&&!this.stopping)handler(new Error("DB_WORKER_STOPPED"));}
+  private fatal(error:Error){const first=!this.dead;this.dead=true;this.cache.invalidate();if(first&&!this.stopping)this.onFatal?.(error);}
   private pending = new Map<
     number,
     { resolve: (value: unknown) => void; reject: (error: Error) => void }
@@ -19,6 +23,7 @@ export class StoreClient {
     this.storage=new StorageGuard(path);
     this.worker = new Worker(new URL("./db-worker.js", import.meta.url), {
       workerData: { path, profile },
+      resourceLimits:{maxOldGenerationSizeMb:128},
     });
     this.ready = new Promise((resolve, reject) => {
       this.worker.on("message", (message) => {
@@ -33,13 +38,13 @@ export class StoreClient {
         else request.resolve(message.result);
       });
       this.worker.on("error", (error) => {
-        this.dead = true;
+        this.fatal(error);
         reject(error);
         for (const p of this.pending.values()) p.reject(error);
         this.pending.clear();
       });
       this.worker.on("exit", () => {
-        this.dead = true;
+        this.fatal(new Error("DB_WORKER_STOPPED"));
         reject(new Error("DB_WORKER_STOPPED"));
         for (const p of this.pending.values())
           p.reject(new Error("DB_WORKER_STOPPED"));
@@ -74,6 +79,7 @@ export class StoreClient {
     });
   }
   async stop(): Promise<void> {
+    this.stopping=true;
     this.cache.close();
     if (this.dead) return;
     try { await this.call("close"); }

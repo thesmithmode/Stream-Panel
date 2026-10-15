@@ -315,7 +315,7 @@ export async function createApplication(
     profile: options.profile ?? null,
     gaps: await db.call("gaps"),
   }));
-  app.get("/api/v1/sessions", async request => db.call("sessions",string(object(request.query).session)||undefined));
+  app.get("/api/v1/sessions", async request => db.call("sessions",string(object(request.query).session)||undefined,Number(object(request.query).offset??0),Number(object(request.query).limit??100)));
   app.get("/api/v1/sessions/:id/followers",async(request)=>db.call("followingAnalytics",string(object(request.params).id)));
   app.get("/api/v1/persons/:id/following",async(request)=>db.call("personFollowing",string(object(request.params).id),string(object(request.query).session)));
   app.get("/api/v1/sessions/:id/metadata",async(request)=>db.call('streamMetadata',string(object(request.params).id)));

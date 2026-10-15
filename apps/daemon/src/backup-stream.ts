@@ -6,7 +6,7 @@ import { Readable, Transform, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
 
-export const BACKUP_STREAM_MAX_SIZE = 2 * 1024 * 1024 * 1024;
+export const BACKUP_STREAM_MAX_SIZE = 64 * 1024 * 1024 * 1024;
 const magic = Buffer.from("SPBK2");
 const headerSize = 17;
 const tagSize = 16;

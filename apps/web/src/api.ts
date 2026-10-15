@@ -8,8 +8,8 @@ export const getProfile = selection.get;
 export const setProfile = selection.set;
 export const setCsrf = (value: string) => (csrf = value);
 export async function importBackup(file:File,key:string){
-  if(file.size>2*1024*1024*1024)throw new Error('BACKUP_SIZE_LIMIT');
-  return requestJson('/api/v1/backups/restore',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-CSRF-Token':csrf,'X-Stream-Panel-Profile':getProfile(),...(key?{'X-Backup-Key':key}:{})},body:file,signal:new AbortController().signal});
+  if(file.size>64*1024*1024*1024)throw new Error('BACKUP_SIZE_LIMIT');
+  return requestJson('/api/v1/backups/restore',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-CSRF-Token':csrf,'X-Stream-Panel-Profile':getProfile(),...(key?{'X-Backup-Key':key}:{})},body:file,signal:new AbortController().signal,timeoutMs:30*60*1000});
 }
 export async function api<T = any>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   return requestJson<T>(`/api/v1/${path}`, {

@@ -125,7 +125,8 @@ export class StreamSessions {
     }).immediate();
   }
 
-  sessions(sessionId?: string): Record<string, unknown>[] {
+  sessions(sessionId?: string,offset=0,limit=100): Record<string, unknown>[] {
+    if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>100)throw new Error("INVALID_PAGINATION");
     const rows = this.db
       .prepare(
         `SELECT s.*,
@@ -133,12 +134,12 @@ export class StreamSessions {
           (SELECT title FROM platform_streams p WHERE p.session_id=s.id AND trim(title)<>'' ORDER BY CASE platform WHEN 'twitch' THEN 0 ELSE 1 END,last_observed_at_ms DESC,account_id,external_id LIMIT 1) AS primaryTitle,
           (SELECT json_group_array(platform) FROM (SELECT DISTINCT platform FROM platform_streams p WHERE p.session_id=s.id ORDER BY platform)) AS platforms_json,
           (SELECT json_group_array(json_object('platform',platform,'url',url)) FROM (SELECT DISTINCT platform,url FROM platform_streams p WHERE p.session_id=s.id AND url IS NOT NULL ORDER BY platform,url)) AS urls_json
-        FROM sessions s WHERE (? IS NULL OR s.id=?) AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) ORDER BY started_at_ms DESC,s.id DESC LIMIT 100`,
+        FROM sessions s WHERE (? IS NULL OR s.id=?) AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) ORDER BY started_at_ms DESC,s.id DESC LIMIT ? OFFSET ?`,
       )
-      .all(sessionId??null,sessionId??null) as Record<string, unknown>[];
+      .all(sessionId??null,sessionId??null,limit,sessionId?0:offset) as Record<string, unknown>[];
     const ids=JSON.stringify(rows.map(row=>row.id));
     const counts=this.db.prepare(`SELECT session_id,sum(n) AS n FROM (
-      SELECT es.session_id,count(*) AS n FROM effective_events e JOIN event_sessions es ON es.event_id=e.id WHERE e.type='chat.message' AND es.session_id IN(SELECT value FROM json_each(?)) AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id) GROUP BY es.session_id
+      SELECT es.session_id,count(*) AS n FROM event_sessions es INDEXED BY event_sessions_session CROSS JOIN events e ON e.id=es.event_id WHERE e.type='chat.message' AND es.session_id IN(SELECT value FROM json_each(?)) AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id) GROUP BY es.session_id
       UNION ALL SELECT ps.session_id,count(DISTINCT m.account_id||':'||m.id) AS n FROM youtube_messages m JOIN platform_streams ps ON ps.platform='youtube' AND ps.account_id=m.account_id AND ps.started_at_ms<=m.published_at_ms AND (ps.ended_at_ms IS NULL OR ps.ended_at_ms>m.published_at_ms) WHERE ps.session_id IN(SELECT value FROM json_each(?)) AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent') GROUP BY ps.session_id
     ) GROUP BY session_id`).all(ids,ids) as {session_id:string;n:number}[];
     const messagesBySession=new Map(counts.map(row=>[row.session_id,row.n]));

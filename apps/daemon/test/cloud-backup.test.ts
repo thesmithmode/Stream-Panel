@@ -38,7 +38,7 @@ test('cloud backup bounds remote bodies, validates immutable object names and ro
    if(['valid','rotate'].includes(mode)){await cloud.uploadFile(filename,source);assert.ok(uploaded);const target=join(dir,mode);await cloud.downloadFile(filename,target);assert.equal(await readFile(target,'utf8'),'encrypted fixture');if(mode==='rotate')assert.deepEqual(deletes,[`stream-panel/${old}.parts/0000.part`,`stream-panel/${old}.manifest.json`]);}
    else await assert.rejects(cloud.uploadFile(filename,source));
   }
-  const sparse=await open(source,'w');await sparse.truncate(2*1024*1024*1024+1);await sparse.close();
+  const sparse=await open(source,'w');await sparse.truncate(64*1024*1024*1024+1);await sparse.close();
   await assert.rejects(new CloudBackup(options,async()=>Response.json({public:false})).uploadFile(filename,source),/BACKUP_SIZE_LIMIT/);
  }finally{await rm(dir,{recursive:true,force:true});}
 });
@@ -81,4 +81,14 @@ test('cloud rotation paginates within its installation and rejects an unbounded 
    else {await cloud.uploadFile(filename,source);assert.deepEqual(offsets,[0,1000]);assert.deepEqual(deletes,[prefix+'/'+old]);}
   }
  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('an explicit cloud allocation counts owned parts and reserves new upload space without deleting recovery points',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-cloud-budget-')),service=join(dir,'key'),source=join(dir,'source');await writeFile(service,'fixture');await writeFile(source,'small backup');
+ try{for(const mode of ['over','missing','allowed','invalid']){
+ let writes=0;const request:typeof fetch=async(input,init)=>{const p=new URL(String(input)).pathname;if(p.includes('/bucket/'))return Response.json({public:false});if(p.includes('/object/list/')){const prefix=JSON.parse(String(init?.body)).prefix;return Response.json(prefix.endsWith('.parts')?[{name:'0000.part',metadata:{size:90}}]:[{name:'stream-panel-2099-01-01T00-00-00-000Z-12345678.spbk.parts'},{name:'stream-panel-2099-01-01T00-00-00-000Z-12345678.spbk.manifest.json',metadata:mode==='missing'?{}:{size:10}},...(writes?[{name:filename,metadata:{size:12}}]:[])]);}if(init?.method==='POST')writes++;if(p.includes('/object/authenticated/'))return new Response('small backup');return Response.json({});};
+ if(mode==='invalid'){assert.throws(()=>new CloudBackup({url:'https://fixture.supabase.co',serviceKeyFile:service,budgetBytes:0},request),/INVALID_BACKUP_BUDGET/);continue;}
+ const c=new CloudBackup({url:'https://fixture.supabase.co',serviceKeyFile:service,budgetBytes:mode==='allowed'?1000:105},request);
+ if(mode==='allowed'){await c.uploadFile(filename,source);assert.equal(writes,1);}else{await assert.rejects(c.uploadFile(filename,source),mode==='missing'?/BACKUP_STORAGE_USAGE_UNAVAILABLE/:/BACKUP_CLOUD_BUDGET_EXCEEDED/);assert.equal(writes,0);}
+ }}finally{await rm(dir,{recursive:true,force:true});}
 });

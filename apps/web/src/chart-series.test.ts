@@ -69,3 +69,8 @@ test('platform message charts sum counts and disjoint groups at all supported re
   for(let i=0;i<all.length;i++)for(const key of ['value','regularValue','followerValue','unknownValue'] as const)assert.equal(all[i]![key],tw[i]![key]!+yt[i]![key]!);
  }
 });
+
+test('daily means retain local midnight instead of shifting the selected calendar day to UTC',()=>{
+ const at=Date.UTC(2026,9,1,21),points=[{at,messages:5,viewers:2,presenceKnown:true},{at:at+86400000,messages:7,viewers:4,presenceKnown:true}];
+ assert.equal(chartSeries(points,'messages',1440)[0]?.at,at);assert.equal(chartSeries(points,'messages',1440)[0]?.value,5);assert.equal(chartSeries(points,'viewers',1440)[1]?.value,4);
+});

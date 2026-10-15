@@ -297,6 +297,145 @@ DELETE FROM youtube_snapshots WHERE substr(key,1,4)='api:';
 PRAGMA user_version = 16;
 `;
 
+/** Compact access indexes and share unchanged follower payloads without dropping poll times. */
+export const schemaV17=`
+CREATE INDEX IF NOT EXISTS sessions_start ON sessions(started_at_ms DESC,id DESC);
+DROP INDEX events_time;
+CREATE INDEX events_time ON events(occurred_at_ms);
+DROP INDEX events_type_time;
+CREATE INDEX events_type_time ON events(type,occurred_at_ms);
+DROP INDEX events_type_received;
+CREATE INDEX events_type_received ON events(type,received_at_ms);
+DROP INDEX event_sessions_session;
+CREATE INDEX event_sessions_session ON event_sessions(session_id);
+CREATE INDEX IF NOT EXISTS events_identity_activity ON events(identity_id,coalesce(occurred_at_ms,received_at_ms)) WHERE type!='donation';
+CREATE TABLE IF NOT EXISTS follower_checks (
+ id TEXT PRIMARY KEY,snapshot_id TEXT NOT NULL REFERENCES provider_snapshots(id),observed_at_ms INTEGER NOT NULL,session_id TEXT REFERENCES sessions(id)
+) STRICT;
+CREATE INDEX IF NOT EXISTS follower_checks_snapshot_time ON follower_checks(snapshot_id,observed_at_ms);
+CREATE INDEX IF NOT EXISTS follower_checks_time ON follower_checks(observed_at_ms);
+INSERT OR IGNORE INTO follower_checks SELECT id,id,observed_at_ms,session_id FROM provider_snapshots p WHERE key='followers' AND NOT EXISTS(SELECT 1 FROM follower_checks c WHERE c.snapshot_id=p.id);
+CREATE VIEW IF NOT EXISTS follower_observations AS SELECT c.id,p.source,p.account_id,p.key,c.observed_at_ms,c.session_id,p.payload_json
+ FROM follower_checks c JOIN provider_snapshots p ON p.id=c.snapshot_id;
+PRAGMA user_version=17;
+`;
+
+/** Closed-stream reports are derived and invalidated by factual mutations. */
+export const schemaV18=`
+CREATE TABLE IF NOT EXISTS analytics_stream_revisions(session_id TEXT PRIMARY KEY,revision INTEGER NOT NULL) STRICT;
+INSERT OR IGNORE INTO analytics_stream_revisions SELECT id,0 FROM sessions;
+CREATE TABLE IF NOT EXISTS analytics_global_revision(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL) STRICT;
+INSERT OR IGNORE INTO analytics_global_revision VALUES(1,0);
+CREATE TABLE IF NOT EXISTS analytics_stream_cache(session_id TEXT NOT NULL,cache_key TEXT NOT NULL,revision INTEGER NOT NULL,global_revision INTEGER NOT NULL,payload BLOB NOT NULL,updated_at_ms INTEGER NOT NULL,PRIMARY KEY(session_id,cache_key)) STRICT;
+CREATE TRIGGER IF NOT EXISTS analytics_sessions_insert AFTER INSERT ON sessions BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(NEW.id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_sessions_update AFTER UPDATE ON sessions BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(NEW.id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_sessions_delete AFTER DELETE ON sessions BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(OLD.id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_stream_samples_insert AFTER INSERT ON stream_samples BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(NEW.session_id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_stream_samples_update AFTER UPDATE ON stream_samples BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(NEW.session_id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_stream_samples_delete AFTER DELETE ON stream_samples BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(OLD.session_id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_platform_streams_insert AFTER INSERT ON platform_streams BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(NEW.session_id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_platform_streams_update AFTER UPDATE ON platform_streams BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(NEW.session_id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_platform_streams_delete AFTER DELETE ON platform_streams BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(OLD.session_id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_presence_polls_insert AFTER INSERT ON presence_polls BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(NEW.session_id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_presence_polls_update AFTER UPDATE ON presence_polls BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(NEW.session_id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_presence_polls_delete AFTER DELETE ON presence_polls BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(OLD.session_id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_event_sessions_replace BEFORE INSERT ON event_sessions BEGIN
+ UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT session_id FROM event_sessions WHERE event_id=NEW.event_id);
+END;
+CREATE TRIGGER IF NOT EXISTS analytics_event_sessions_insert AFTER INSERT ON event_sessions BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(NEW.session_id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_event_sessions_update AFTER UPDATE ON event_sessions BEGIN
+ UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id=OLD.session_id;
+   INSERT INTO analytics_stream_revisions VALUES(NEW.session_id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_event_sessions_delete AFTER DELETE ON event_sessions BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(OLD.session_id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_session_tombstones_insert AFTER INSERT ON session_tombstones BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(NEW.session_id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_session_tombstones_update AFTER UPDATE ON session_tombstones BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(NEW.session_id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_session_tombstones_delete AFTER DELETE ON session_tombstones BEGIN
+   INSERT INTO analytics_stream_revisions VALUES(OLD.session_id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_events_insert AFTER INSERT ON events BEGIN
+   UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT session_id FROM event_sessions WHERE event_id=NEW.id);
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_events_update AFTER UPDATE ON events BEGIN
+   UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT session_id FROM event_sessions WHERE event_id=NEW.id);
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_events_delete AFTER DELETE ON events BEGIN
+   UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT session_id FROM event_sessions WHERE event_id=OLD.id);
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_presence_members_insert AFTER INSERT ON presence_members BEGIN
+   UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT session_id FROM presence_polls WHERE id=NEW.poll_id);
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_presence_members_update AFTER UPDATE ON presence_members BEGIN
+   UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT session_id FROM presence_polls WHERE id=NEW.poll_id);
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_presence_members_delete AFTER DELETE ON presence_members BEGIN
+   UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT session_id FROM presence_polls WHERE id=OLD.poll_id);
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_donation_corrections_insert AFTER INSERT ON donation_corrections BEGIN
+   UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT session_id FROM event_sessions WHERE event_id=NEW.event_id);
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_donation_corrections_update AFTER UPDATE ON donation_corrections BEGIN
+   UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT session_id FROM event_sessions WHERE event_id=NEW.event_id);
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_donation_corrections_delete AFTER DELETE ON donation_corrections BEGIN
+   UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT session_id FROM event_sessions WHERE event_id=OLD.event_id);
+  END;
+CREATE TRIGGER IF NOT EXISTS analytics_identities_rename AFTER UPDATE ON identities WHEN OLD.person_id IS NOT NEW.person_id OR OLD.display_name IS NOT NEW.display_name OR OLD.match_key IS NOT NEW.match_key BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS analytics_youtube_identities_rename AFTER UPDATE ON youtube_identities WHEN OLD.is_owner IS NOT NEW.is_owner OR OLD.person_id IS NOT NEW.person_id OR OLD.display_name IS NOT NEW.display_name OR OLD.match_key IS NOT NEW.match_key BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS analytics_identity_aliases_insert AFTER INSERT ON identity_aliases WHEN EXISTS(SELECT 1 FROM events WHERE identity_id=NEW.identity_id) BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS analytics_identity_aliases_update AFTER UPDATE ON identity_aliases WHEN OLD.candidate_key IS NOT NEW.candidate_key BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS analytics_identity_aliases_delete AFTER DELETE ON identity_aliases BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS analytics_youtube_identity_aliases_insert AFTER INSERT ON youtube_identity_aliases WHEN EXISTS(SELECT 1 FROM youtube_messages m JOIN youtube_identities i ON i.account_id=m.account_id AND i.external_id=m.author_id WHERE i.id=NEW.identity_id) BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS analytics_youtube_identity_aliases_update AFTER UPDATE ON youtube_identity_aliases WHEN OLD.match_key IS NOT NEW.match_key BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS analytics_youtube_identity_aliases_delete AFTER DELETE ON youtube_identity_aliases BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS analytics_anonymous_donors_insert AFTER INSERT ON anonymous_donors BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS analytics_anonymous_donors_update AFTER UPDATE ON anonymous_donors BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS analytics_anonymous_donors_delete AFTER DELETE ON anonymous_donors BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS analytics_persons_rename AFTER UPDATE ON persons WHEN OLD.display_name IS NOT NEW.display_name BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS analytics_youtube_messages_insert AFTER INSERT ON youtube_messages BEGIN
+  UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT session_id FROM platform_streams WHERE platform='youtube' AND account_id=NEW.account_id AND started_at_ms<=NEW.published_at_ms AND (ended_at_ms IS NULL OR ended_at_ms>NEW.published_at_ms));
+ END;
+CREATE TRIGGER IF NOT EXISTS analytics_youtube_messages_update AFTER UPDATE ON youtube_messages BEGIN
+  UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT session_id FROM platform_streams WHERE platform='youtube' AND account_id=NEW.account_id AND started_at_ms<=NEW.published_at_ms AND (ended_at_ms IS NULL OR ended_at_ms>NEW.published_at_ms));
+ END;
+CREATE TRIGGER IF NOT EXISTS analytics_youtube_messages_delete AFTER DELETE ON youtube_messages BEGIN
+  UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT session_id FROM platform_streams WHERE platform='youtube' AND account_id=OLD.account_id AND started_at_ms<=OLD.published_at_ms AND (ended_at_ms IS NULL OR ended_at_ms>OLD.published_at_ms));
+ END;
+PRAGMA user_version=18;
+`;
+
 /** One ordered registry drives upgrades and profile SQL identifiers. Append new versions here. */
-export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16] as const;
+export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18] as const;
 export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;

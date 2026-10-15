@@ -18,11 +18,11 @@ export interface ChartPoint {
 }
 export function chartSeries(points: ChartPoint[], metric: ChartMetric, resolutionMinutes = 1) {
   if (!points.length) return [];
-  const width = ([1,5,15].includes(resolutionMinutes)?resolutionMinutes:1)*60000;
+  const width = ([1,5,15,1440].includes(resolutionMinutes)?resolutionMinutes:1)*60000;
   const regularKey = {participants:'regularParticipants',observed: 'regularObserved', estimated: 'regularEstimated', messages: 'regularMessages',twitchMessages:'regularTwitchMessages',youtubeMessages:'regularYoutubeMessages', viewers:null,twitchViewers:null,youtubeViewers:null}[metric] as keyof ChartPoint | null;
   const map = new Map<number, {at: number; total: number; regular: number; follower:number; unknown:number; n: number;breakMinutes:number;points:number;partial:boolean;twitch:number;twitchN:number;youtube:number;youtubeN:number}>();
   for (const point of points) {
-    const at = Math.floor(point.at / width) * width;
+    const at = resolutionMinutes===1440?point.at:Math.floor(point.at / width) * width;
     let bucket = map.get(at);
     if (!bucket) { bucket = {at, total: 0, regular: 0, follower:0, unknown:0, n: 0,breakMinutes:0,points:0,partial:false,twitch:0,twitchN:0,youtube:0,youtubeN:0}; map.set(at, bucket); }
     if(!point.isBreak&&metric==='viewers'&&point.viewers!=null){

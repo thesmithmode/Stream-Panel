@@ -7,6 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {FrontendProcess} from './frontend-process.js';
 import {existsSync} from 'node:fs';
 import {createServer} from 'node:net';
+import {analyticsSettings} from './analytics-settings.js';
 import {activatePendingRestore} from './restore-service.js';
 
 const dir = process.env.STREAM_PANEL_DATA_DIR;
@@ -28,7 +29,7 @@ process.env.STREAM_PANEL_RELEASE ??= /^[a-f0-9]{40}$/.test(releaseName) ? releas
 await mkdir(dir, { recursive: true, mode: 0o700 });
 const backupOptions = process.env.STREAM_PANEL_BACKUP_KEY_FILE ? {
   keyFile: process.env.STREAM_PANEL_BACKUP_KEY_FILE,
-  ...(process.env.STREAM_PANEL_SUPABASE_URL ? {url: process.env.STREAM_PANEL_SUPABASE_URL} : {}),
+  ...(process.env.STREAM_PANEL_SUPABASE_URL ? {url: process.env.STREAM_PANEL_SUPABASE_URL,cloudBudgetBytes:Number(process.env.STREAM_PANEL_CLOUD_BACKUP_BUDGET_BYTES??1000000000)} : {}),
   ...(process.env.STREAM_PANEL_SUPABASE_KEY_FILE ? {serviceKeyFile: process.env.STREAM_PANEL_SUPABASE_KEY_FILE} : {}),
 } : undefined;
 if(existsSync(join(dir,'restore-pending'))||existsSync(join(dir,'restoring'))){
@@ -74,14 +75,23 @@ void runBackup();
 const backupTimer = setInterval(() => { if(!closing)void runBackup(); }, 60000);
 const retentionTimer=setInterval(()=>{void hosted.backup?.purgeLocal().catch(()=>console.error('Local backup cleanup failed'));},60*60*1000);
 const heartbeatTimer=setInterval(()=>{if(collectorsStarted&&!closing)for(const runtime of hosted.runtimes.values())void runtime.db.call("collectionLifecycle","heartbeat",Date.now()).catch(()=>console.error("Collector heartbeat failed"));},30000);
+const analyticsTimer=setInterval(()=>{
+ if(closing||!collectorsStarted)return;
+ for(const runtime of hosted.runtimes.values()){
+  const cfg=runtime.configuration.value;
+  void runtime.db.call('warmAnalytics',{...analyticsSettings(cfg.analyticsSettings),fromMs:0,toMs:Date.now(),excludedLogins:cfg.excludedBotLogins,ownerId:cfg.twitch?.userId??'',youtubeAccount:cfg.youtube?.userId??cfg.youtubeAccountId??''}).catch(()=>console.error('Historical analytics preparation failed'));
+ }
+},60000);
 const timer = setInterval(() => void startCollectors(), 2000);
 const shutdown = async (code=0) => {
   if (closing) return;
-  closing = true; clearInterval(timer); clearInterval(backupTimer);clearInterval(retentionTimer);clearInterval(heartbeatTimer);
+  closing = true; clearInterval(timer); clearInterval(backupTimer);clearInterval(retentionTimer);clearInterval(heartbeatTimer);clearInterval(analyticsTimer);
   const timeout = setTimeout(() => process.exit(1), 10000); timeout.unref();
-  try { if(collectorsStarted)await Promise.all([...hosted.runtimes.values()].map(runtime=>runtime.db.call("collectionLifecycle","stop",Date.now())));await frontend?.stop();await hosted.app.close(); clearTimeout(timeout); process.exit(code); }
+  try { if(collectorsStarted)await Promise.allSettled([...hosted.runtimes.values()].map(runtime=>runtime.db.call("collectionLifecycle","stop",Date.now())));await frontend?.stop();await hosted.app.close(); clearTimeout(timeout); process.exit(code); }
   catch { process.exit(1); }
 };
+for(const runtime of hosted.runtimes.values())runtime.db.setFatalHandler(()=>{console.error('Database worker stopped; restarting service');void shutdown(1);});
+
 for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => void shutdown());
 
 // Readiness includes installed signal handlers, so immediate shutdown closes SQLite.

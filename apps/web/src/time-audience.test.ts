@@ -49,3 +49,11 @@ test('weekday/weekend groups follow the configured local date, including Friday 
  assert.equal(weekend[0]!.airtimeMs,30*m);assert.equal(weekend[0]!.averageAudience,1);assert.equal(weekend.find(b=>b.minute===23*60)!.averageAudience,null);
  const utcWeekend=timeAudience([window],[],'UTC',60,'weekends');assert.ok(utcWeekend.every(b=>b.averageAudience===null));
 });
+
+import {localDateWindow} from './time-audience.ts';
+test('calendar-day drill-down respects timezone and daylight saving boundaries',()=>{
+ assert.equal(localDateWindow('2026-03-29','Europe/Berlin').to-localDateWindow('2026-03-29','Europe/Berlin').from,23*hour);
+ assert.equal(localDateWindow('2026-10-25','Europe/Berlin').to-localDateWindow('2026-10-25','Europe/Berlin').from,25*hour);
+ assert.equal(localDateWindow('2026-10-01','Europe/Moscow').from,Date.UTC(2026,8,30,21));
+ assert.throws(()=>localDateWindow('2026-02-30','UTC'),/INVALID_DATE/);assert.throws(()=>localDateWindow('invalid','UTC'),/INVALID_DATE/);
+});

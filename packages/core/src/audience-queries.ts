@@ -32,10 +32,10 @@ export class AudienceQueries {
           ) OR EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?)))) THEN 1 ELSE 0 END AS is_bot
         FROM persons p
         LEFT JOIN (
-          SELECT i.person_id, count(e.id) AS event_count
-          FROM identities i
-          LEFT JOIN effective_events e ON e.identity_id = i.id AND coalesce(e.occurred_at_ms,e.received_at_ms)>=${fromMs}
-          GROUP BY i.person_id
+          SELECT i.person_id,sum(counts.n) AS event_count FROM identities i JOIN (
+           SELECT identity_id,count(*) AS n FROM events INDEXED BY events_identity_activity WHERE type!='donation' AND coalesce(occurred_at_ms,received_at_ms)>=${fromMs} GROUP BY identity_id
+           UNION ALL SELECT identity_id,count(*) AS n FROM effective_events WHERE type='donation' AND coalesce(occurred_at_ms,received_at_ms)>=${fromMs} GROUP BY identity_id
+          ) counts ON counts.identity_id=i.id GROUP BY i.person_id
         ) ec ON ec.person_id = p.id
         WHERE (EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id) OR EXISTS(SELECT 1 FROM youtube_identities y WHERE y.person_id=p.id) OR (NOT EXISTS(SELECT 1 FROM person_merges m WHERE m.source_person_id=p.id AND m.undone_at_ms IS NULL) AND (EXISTS(SELECT 1 FROM person_notes n WHERE n.person_id=p.id) OR EXISTS(SELECT 1 FROM person_tags t WHERE t.person_id=p.id) OR EXISTS(SELECT 1 FROM person_preferences pref WHERE pref.person_id=p.id))))
           AND (

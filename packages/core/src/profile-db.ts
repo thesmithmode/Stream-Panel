@@ -5,7 +5,7 @@ import {schemaMigrations} from "./schema.js";
 // literals are never rewritten. Each profile has its own tables, indexes,
 // foreign keys and migration version inside the same physical SQLite file.
 const identifiers = new Set(
-  [...schemaMigrations.join('\n').matchAll(/CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|VIEW)\s+(?:IF NOT EXISTS\s+)?(\w+)/gi)].map((m) => m[1]!),
+  [...schemaMigrations.join('\n').matchAll(/CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|VIEW|TRIGGER)\s+(?:IF NOT EXISTS\s+)?(\w+)/gi)].map((m) => m[1]!),
 );
 export function openProfileDatabase(path: string, profile?: string): Database.Database {
   if (profile !== undefined && !/^[a-z][a-z0-9_]{0,31}$/.test(profile))

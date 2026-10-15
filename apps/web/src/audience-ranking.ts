@@ -1,5 +1,5 @@
 export type RankMetric = 'observedMinutes' | 'messages' | 'estimatedChatMinutes';
-export interface RankPerson {id:string;name:string;observedMinutes?:number;messages?:number;estimatedChatMinutes?:number;accounts?:Array<{source:string;name:string}>;donations?:Record<string,string>;core?:boolean;intervals?:Array<{from:number;to:number;kind:string}>;}
+export interface RankPerson {id:string;name:string;observedMinutes?:number;messages?:number;estimatedChatMinutes?:number;activityMinutes?:number;accounts?:Array<{source:string;name:string}>;donations?:Record<string,string>;core?:boolean;intervals?:Array<{from:number;to:number;kind:string}>;}
 export function audienceRanking(people:RankPerson[],metric:RankMetric) {
  return people.filter(person=>Number.isFinite(person[metric])&&(person[metric]??0)>0)
   .slice().sort((a,b)=>(b[metric]??0)-(a[metric]??0)||a.name.localeCompare(b.name,'ru')||a.id.localeCompare(b.id));
@@ -7,6 +7,7 @@ export function audienceRanking(people:RankPerson[],metric:RankMetric) {
 
 /** Unified presence is a signal, not confirmed video watch time. */
 export function presenceMinutes(person:RankPerson):number {
+ if(person.activityMinutes!==undefined&&Number.isFinite(person.activityMinutes))return person.activityMinutes;
  if(!person.intervals?.length)return (person.observedMinutes??0)+(person.estimatedChatMinutes??0);
  const spans=person.intervals.filter(s=>s.to>s.from).slice().sort((a,b)=>a.from-b.from);
  let end=-Infinity,total=0;

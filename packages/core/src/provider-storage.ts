@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID as cryptoId} from 'node:crypto';
 import {parse,stringify} from 'lossless-json';
 import {assertTimestamp} from './domain.js';
 
@@ -8,6 +8,33 @@ export type PendingDonation={id:string;serialized:string};
 /** Only domain history and unresolved money records belong in the provider archive. */
 export class ProviderStorage {
  constructor(private db:Database.Database){}
+
+ saveFollowers(source:string,account:string,data:{followers:{id:string;name:string;followedAtMs:number|null}[];complete:boolean;total:number|null},at:number,session:string|null):void {
+  const clean={followers:data.followers.map(({id,name,followedAtMs})=>({id,name,followedAtMs})).sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0),complete:data.complete,total:data.total};
+  const payload=JSON.stringify(clean),id=createHash('sha256').update(JSON.stringify([source,account,payload])).digest('hex');
+  this.db.transaction(()=>{
+   this.db.prepare("INSERT OR IGNORE INTO provider_snapshots VALUES (?,?,?,'followers',?,?,?)").run(id,source,account,at,session,payload);
+   this.db.prepare('INSERT INTO follower_checks VALUES (?,?,?,?)').run(cryptoId(),id,at,session);
+  }).immediate();
+ }
+ migrateFollowers():void {
+  let last='';
+  for(;;){
+   const rows=this.db.prepare("SELECT p.* FROM provider_snapshots p JOIN follower_checks c ON c.id=p.id AND c.snapshot_id=p.id WHERE p.key='followers' AND p.id>? ORDER BY p.id LIMIT 100").all(last) as {id:string;source:string;account_id:string;observed_at_ms:number;session_id:string|null;payload_json:string}[];
+   if(!rows.length)break;
+   for(const row of rows){
+    const data=JSON.parse(row.payload_json),clean={followers:data.followers.map(({id,name,followedAtMs}:{id:string;name:string;followedAtMs:number|null})=>({id,name,followedAtMs})).sort((a:{id:string},b:{id:string})=>a.id<b.id?-1:a.id>b.id?1:0),complete:data.complete,total:data.total};
+    const payload=JSON.stringify(clean),id=createHash('sha256').update(JSON.stringify([row.source,row.account_id,payload])).digest('hex');
+    if(id!==row.id){
+     this.db.prepare("INSERT OR IGNORE INTO provider_snapshots VALUES (?,?,?,'followers',?,?,?)").run(id,row.source,row.account_id,row.observed_at_ms,row.session_id,payload);
+     this.db.prepare('UPDATE follower_checks SET snapshot_id=? WHERE snapshot_id=?').run(id,row.id);
+     this.db.prepare('DELETE FROM provider_snapshots WHERE id=?').run(row.id);
+    }
+    last=row.id;
+   }
+  }
+ }
+
  donationStates(account:string,ids:readonly string[]):ImportState[]{
   if(!account||ids.length>2000||ids.some(id=>!/^\d+$/.test(id)))throw new Error('INVALID_DONATION_IDS');
   return (this.db.prepare("SELECT external_id AS id,occurred_at_ms AS occurredAtMs,CASE WHEN occurred_at_ms IS NULL THEN 1 ELSE 0 END AS missing FROM events WHERE source='donationalerts' AND account_id=? AND type='donation' AND external_id IN(SELECT value FROM json_each(?))").all(account,JSON.stringify([...new Set(ids)])) as {id:string;missing:number;occurredAtMs:number|null}[]).map(row=>({id:row.id,needsImport:row.missing===1,occurredAtMs:row.occurredAtMs}));

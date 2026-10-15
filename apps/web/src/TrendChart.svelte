@@ -6,7 +6,7 @@
   import {timelineTicks} from './chart-detail';
   let {points,metric,resolution=1,showRegulars=true,timezone='Europe/Moscow',onselect}:{points:ChartPoint[];metric:ChartMetric;resolution?:number;showRegulars?:boolean;timezone?:string;onselect?:(point:ReturnType<typeof chartSeries>[number])=>void}=$props();
   let availableWidth=$state(800),pageOffset=$state(0);
-  const pages=$derived(chartPages(points));
+  const pages=$derived(chartPages(points,resolution));
   const visiblePoints=$derived(pages[pageOffset]??[]);
   $effect(()=>{if(pageOffset>=pages.length)pageOffset=0;});
   const layout=$derived(chartLayout(visiblePoints[0]?.at??0,(visiblePoints.at(-1)?.at??0)+60000,availableWidth,resolution));

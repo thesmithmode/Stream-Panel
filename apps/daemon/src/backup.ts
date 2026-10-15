@@ -116,7 +116,7 @@ export class BackupService {
     if(this.uploadTask)return this.uploadTask;
     const task=(async()=>{
       try{
-        const cloud=new CloudBackup({url:this.options.url!,serviceKeyFile:this.options.serviceKeyFile,bucket:this.options.bucket,prefix:'stream-panel/'+this.ledger!.installationId},this.request);
+        const cloud=new CloudBackup({url:this.options.url!,serviceKeyFile:this.options.serviceKeyFile,bucket:this.options.bucket,prefix:'stream-panel/'+this.ledger!.installationId,budgetBytes:this.options.cloudBudgetBytes},this.request);
         for(const filename of [...this.ledger!.pending].sort().slice(0,4)){
           this.uploading=filename;try{await cloud.uploadFile(filename,join(this.dir,'backups',filename));}finally{this.uploading=undefined;}
           this.ledger!.pending=this.ledger!.pending.filter(n=>n!==filename);
@@ -135,7 +135,7 @@ export class BackupService {
     })();this.uploadTask=task;
     try{await task;}finally{if(this.uploadTask===task)this.uploadTask=undefined;}
   }
-  constructor(private dir: string, private options: { keyFile: string; url?: string; serviceKeyFile?: string; bucket?: string }, private request: typeof fetch = fetch, private readPersistedBackup: (path:string)=>Promise<Buffer> = readFile, private freeSpace:()=>Promise<number> = async()=>{const info=await statfs(this.dir);return info.bavail*info.bsize;}) {
+  constructor(private dir: string, private options: { keyFile: string; url?: string; serviceKeyFile?: string; bucket?: string;cloudBudgetBytes?:number }, private request: typeof fetch = fetch, private readPersistedBackup: (path:string)=>Promise<Buffer> = readFile, private freeSpace:()=>Promise<number> = async()=>{const info=await statfs(this.dir);return info.bavail*info.bsize;}) {
     this.status.state = options.url ? "pending" : "local";
     this.status.local.state = "pending";
     this.status.cloud.state = options.url ? "pending" : "disabled";
