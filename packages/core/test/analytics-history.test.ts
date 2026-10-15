@@ -155,3 +155,22 @@ test('independent filters finish when browsers interleave incremental historical
   assert.equal(ready(h,queries[0]!).summary.messages,202);
  }finally{s.close();}
 });
+
+test('expired or displaced report preparation can restart without losing historical facts',t=>{
+ const s=new StreamStore(':memory:');let now=options.toMs;
+ t.mock.method(Date,'now',()=>now);
+ try{
+  fixture(s,60);const h=new AnalyticsHistory((s as any).db),query={...options,toMs:base+62*86400000};
+  while(h.prepare(query).preparing){/* warm bounded batches */}
+  assert.equal(h.report(query).ready,25);assert.equal(h.report(query).ready,50);
+  now+=6*60000;
+  h.prepare(query); // Scheduled maintenance releases abandoned browser work.
+  assert.equal(h.report(query).ready,25);
+  assert.equal(ready(h,query).summary.messages,60);
+  const first={...query,minMessages:100};
+  assert.equal(h.report(first).ready,25);assert.equal(h.report(first).ready,50);
+  for(let filter=101;filter<106;filter++)assert.equal(h.report({...query,minMessages:filter}).preparing,true);
+  assert.equal(h.report(first).ready,25,'displaced work restarts safely instead of retaining unlimited jobs');
+  assert.equal(ready(h,first).summary.messages,60);assert.equal(s.eventCount(),60);
+ }finally{s.close();}
+});

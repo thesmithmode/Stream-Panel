@@ -21,13 +21,11 @@
   import Following from "./Following.svelte";
   import PersonMetadata from "./PersonMetadata.svelte";
   let {
-    people,
     period = "",
     initialId = "",
     onChange,
     onSelect,
   }: {
-    people: Person[];
     period?: string;
     initialId?: string;
     onSelect:(id:string)=>void;
@@ -54,7 +52,14 @@
   const donorCurrencies=$derived([...new Set(tops.flatMap(p=>Object.keys(p.donationTotals)))].sort());
   const rankLabels=$derived(new Map(tops.map(t=>[t.id,sortBy==='donations'?Object.entries(t.donationTotals).map(([currency,amount])=>money(amount,currency)).join(' · ')||`${t.donationCount} донатов`:sortBy==='observed_minutes'?formatDuration(t.observedMinutes):`${t.messageCount} сообщ.`])));
   let pageRows = $state<Person[]>([]), peopleOffset = $state(0), peopleTotal = $state(0), peopleLoading = $state(false);
-  const directory = latestRequest();
+  const directory = latestRequest(), recipients = latestRequest();
+  let people = $state<Person[]>([]);
+  $effect(()=>{
+    const editing=detailTab==='accounts'||detailTab==='donations';void rankRefresh;
+    if(!editing)return;
+    void recipients.run(signal=>api<Person[]>('persons',undefined,signal),rows=>{people=rows;},failure=>{error=failure.message;});
+    return ()=>recipients.cancel();
+  });
   const availablePeople = $derived([...new Map([...people,...pageRows].map(person=>[person.id,person])).values()]);
   let selectedSession = '';
   const visible = $derived(
