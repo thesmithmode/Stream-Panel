@@ -119,7 +119,7 @@
     const controller=new AbortController();
     const deadline=setTimeout(()=>controller.abort(new ConnectionError()),12000);
     const task=(async()=>{
-      const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter,peoplePeriod).map(async([key,path])=>[key,await api(key==='sessions'&&tab==='sessions'?`sessions?offset=${sessionPage*100}`:path,undefined,controller.signal)])));
+      const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter,peoplePeriod).map(async([key,path])=>[key,await api(key==='sessions'&&tab==='sessions'&&sessionPage>0?`sessions?offset=${sessionPage*100}`:path,undefined,controller.signal)])));
       if(current!==epoch)return;
       status=values.status;{setCsrf(status.csrf);user=status.user??user;outdated=isOutdatedRelease(status.release);}
       sessions=values.sessions??sessions;people=values.persons??people;events=values.events??events;summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';window.dispatchEvent(new Event('sp:data-refresh'));
@@ -209,6 +209,7 @@
     <a class="brand" href="/">Stream <span>Panel</span></a>
     <nav aria-label="Разделы">
       {#each nav as [key, label]}<button
+          disabled={loading||!authorized}
           class:active={tab === key}
           aria-current={tab===key?'page':undefined}
           onclick={() => navigate(key)}><Icon name={key} />{label}</button
