@@ -1,10 +1,15 @@
+import {registerRouteSchemas} from './route-schemas.js';
+import {registerPeopleRoutes} from './people-routes.js';
+import {registerDonationsRoutes} from './donations-routes.js';
+import {registerStreamsRoutes} from './streams-routes.js';
+import {object, string} from './provider-values.js';
 import {prepareChatStorage} from "./chat-cleanup.js";
 import {DA_API_UTC_OFFSET_MINUTES} from '../../../packages/core/src/donation-time.js';
 import {analyticsSettings} from "./analytics-settings.js";
 import Fastify, { type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
 import staticFiles from "@fastify/static";
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdir, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,8 +17,6 @@ import { StoreClient } from "./db.js";
 import { Configuration } from "./config.js";
 import {
   TwitchConnection,
-  object,
-  string,
   type SocketFactory,
 } from "./twitch.js";
 import { YouTubeConnection } from "./youtube.js";
@@ -101,91 +104,7 @@ export async function createApplication(
       )
       .send({ error: safe });
   });
-  const text = { type: "string", maxLength: 256, minLength: 1 };
-  const revision = { type: "integer", minimum: 0 };
-  const body = (
-    properties: Record<string, unknown> = {},
-    required: string[] = [],
-  ): Record<string, unknown> => ({
-    type: "object",
-    additionalProperties: false,
-    properties,
-    required,
-  });
-  const donationFields={personId:{type:"string",minLength:1,maxLength:512},amount:{type:"string",minLength:1,maxLength:50,pattern:"^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$"},currency:{type:"string",enum:["RUB","USD","EUR","BYN","KZT","UAH","BRL","TRY"]},occurredAtMs:{type:["integer","null"],minimum:0},message:{type:"string",maxLength:10000},sourceName:{type:"string",minLength:1,maxLength:200}};
-  const donationRequired=["personId","amount","currency","occurredAtMs","message","sourceName"];
-  const schemaBodies: Record<string, Record<string, unknown>> = {
-    "/api/v1/persons/:id/donor-bindings":body({name:{type:"string",minLength:1,maxLength:200},revision},["name","revision"]),
-    "/api/v1/donations":body({...donationFields,occurredAtMs:{type:"integer",minimum:0}},donationRequired),
-    "/api/v1/donations/:id/assign":body({personId:{anyOf:[{type:"string",minLength:1,maxLength:256},{type:"null"}]},revision},["personId","revision"]),
-    "/api/v1/donations/:id/restore":body({revision},["revision"]),
-    "/api/v1/persons/:id/metadata": body({tags:{type:"array",maxItems:50,items:{type:"string",minLength:1,maxLength:64}},manualCore:{type:["boolean","null"]},revision},["tags","manualCore","revision"]),
-    "/api/v1/persons/:id/notes": body({body:{type:"string",minLength:1,maxLength:10000}},["body"]),
-    "/api/v1/persons/:id/notes/:noteId/update": body({body:{type:"string",minLength:1,maxLength:10000},revision},["body","revision"]),
-    "/api/v1/persons/:id/notes/:noteId/delete": body({revision},["revision"]),
-    "/api/v1/sessions/start": body(),
-    "/api/v1/sessions/:id/stop": body(),
-    "/api/v1/sessions/:id/delete": body(),
-    "/api/v1/persons/:id/rename": body(
-      { name: { type: "string", minLength: 1, maxLength: 200 } },
-      ["name"],
-    ),
-    "/api/v1/persons/merge": body(
-      {
-        sourceId: text,
-        targetId: text,
-        sourceRevision: revision,
-        targetRevision: revision,
-      },
-      ["sourceId", "targetId", "sourceRevision", "targetRevision"],
-    ),
-    "/api/v1/persons/split": body(
-      {
-        identityIds: {
-          type: "array",
-          items: text,
-          minItems: 1,
-          maxItems: 1000,
-          uniqueItems: true,
-        },
-        name: { type: "string", minLength: 1, maxLength: 200 },
-        revision,
-      },
-      ["identityIds", "name", "revision"],
-    ),
-    "/api/v1/merges/:id/undo": body(),
-    "/api/v1/splits/:id/undo": body(),
-    "/api/v1/youtube/connect": body({clientId:text,clientSecret:{type:"string",maxLength:256}},["clientId"]),
-    "/api/v1/youtube/disconnect": body(),
-    "/api/v1/twitch/connect": body(
-      { clientId: text, extended: { type: "boolean" } },
-      ["clientId"],
-    ),
-    "/api/v1/twitch/disconnect": body(),
-    "/api/v1/donationalerts/connect": body(
-      {
-        clientId: { type: "string", maxLength: 256 },
-        clientSecret: { type: "string", maxLength: 4096 },
-        accessToken: { type: "string", maxLength: 4096 },
-        refreshToken: { type: "string", maxLength: 4096 },
-        utcOffsetMinutes: {
-          anyOf: [
-            { type: "integer", minimum: -840, maximum: 840 },
-            { type: "null" },
-          ],
-        },
-      },
-      ["utcOffsetMinutes"],
-    ),
-    "/api/v1/donationalerts/disconnect": body(),
-    "/api/v1/donationalerts/rescan": body(),
-    "/api/v1/donationalerts/timezone": body({utcOffsetMinutes:{type:"integer",minimum:-840,maximum:840}},["utcOffsetMinutes"]),
-    "/api/v1/backup": body(),
-  };
-  app.addHook("onRoute", (route) => {
-    if (route.method === "POST" && schemaBodies[route.url])
-      route.schema = { ...route.schema, body: schemaBodies[route.url] };
-  });
+  registerRouteSchemas(app);
   let nonce = randomBytes(32).toString("hex");
   let nonceExpiry = Date.now() + 600000;
   const sessions = new Map<string, { csrf: string; expires: number }>();
@@ -272,6 +191,10 @@ export async function createApplication(
   // Local bootstrap sessions have no hosted account; the common onRequest hook
   // still requires a valid session before this capability response is returned.
   app.get('/api/v1/auth/me',()=>({user:null}));
+  registerPeopleRoutes(app, db, configuration);
+  registerDonationsRoutes(app, db, configuration);
+  registerStreamsRoutes(app, db, configuration);
+
   app.get('/api/v1/settings',()=>analyticsSettings(configuration.value.analyticsSettings));
   app.post('/api/v1/settings',async request=>{
     const next=analyticsSettings(request.body);const previous=analyticsSettings(configuration.value.analyticsSettings);
@@ -279,20 +202,8 @@ export async function createApplication(
     try{await configuration.save();}catch(error){configuration.value.analyticsSettings=previous;throw error;}
     return next;
   });
-  app.get("/api/v1/overview",()=>db.call("channelOverview",configuration.value.excludedBotLogins));
-  app.get("/api/v1/analytics", async request => {
-    const q=object(request.query);
-    const sessionId=string(q.session),defaults=analyticsSettings(configuration.value.analyticsSettings);
-    const source=string(q.source)||'all',coreRule=string(q.coreRule)||defaults.coreRule;
-    if(source!=='all'&&source!=='twitch'&&source!=='youtube')throw new Error('INVALID_ANALYTICS_FILTER');
-    if(coreRule!=='either'&&coreRule!=='both'&&coreRule!=='frequency')throw new Error('INVALID_ANALYTICS_FILTER');
-    return db.call("analytics", {
-      ...(sessionId?{sessionId}:{}),fromMs:sessionId?0:Number(q.from),toMs:sessionId?Date.now():Math.min(Number(q.to),Date.now()),source,category:string(q.category),
-      regularThresholdPercent:q.regularThresholdPercent===undefined?defaults.regularThresholdPercent:Number(q.regularThresholdPercent),minSessions:q.minSessions===undefined?defaults.minSessions:Number(q.minSessions),minMinutes:q.minMinutes===undefined?defaults.minMinutes:Number(q.minMinutes),minMessages:q.minMessages===undefined?defaults.minMessages:Number(q.minMessages),
-      chatWindowMinutes:q.chatWindowMinutes===undefined?defaults.chatWindowMinutes:Number(q.chatWindowMinutes),coreRule,timezone:string(q.timezone)||defaults.timezone,
-      excludedLogins:configuration.value.excludedBotLogins,ownerId:configuration.value.twitch?.userId??"",youtubeAccount:configuration.value.youtube?.userId??configuration.value.youtubeAccountId??"",
-    });
-  });
+
+
   app.post('/api/v1/integrations/credentials',{schema:{body:{type:'object',additionalProperties:false,properties:{}}}},async(request,reply)=>{
     if(options.canViewCredentials&&!options.canViewCredentials(request))return reply.code(403).send({error:'CREDENTIALS_FORBIDDEN'});
     const config=configuration.value;
@@ -304,6 +215,7 @@ export async function createApplication(
   });
   app.get("/api/v1/status", async (request) => ({
     storage:db.storageStatus(),
+    database:db.queueStatus(),
     release:process.env.STREAM_PANEL_RELEASE??'development',
     youtube: youtube.status,
     twitch: twitch.status,
@@ -315,206 +227,7 @@ export async function createApplication(
     profile: options.profile ?? null,
     gaps: await db.call("gaps"),
   }));
-  app.get("/api/v1/sessions", async request => db.call("sessions",string(object(request.query).session)||undefined,Number(object(request.query).offset??0),Number(object(request.query).limit??100)));
-  app.get("/api/v1/sessions/:id/followers",async(request)=>db.call("followingAnalytics",string(object(request.params).id)));
-  app.get("/api/v1/persons/:id/following",async(request)=>db.call("personFollowing",string(object(request.params).id),string(object(request.query).session)));
-  app.get("/api/v1/sessions/:id/metadata",async(request)=>db.call('streamMetadata',string(object(request.params).id)));
-  app.post("/api/v1/sessions/start", async () => {
-    const existing = await db.call<Record<string, unknown>[]>("sessions");
-    if (existing.some((s) => s.ended_at_ms === null))
-      throw new Error("SESSION_ALREADY_OPEN");
-    return {
-      id: await db.call(
-        "startSession",
-        configuration.value.twitch?.userId || "local",
-        `manual-${randomUUID()}`,
-        Date.now(),
-        "manual",
-        Date.now(),
-      ),
-    };
-  });
-  app.post("/api/v1/sessions/:id/stop", async (request) => {
-    const id = string(object(request.params).id),
-      session = (await db.call<Record<string, unknown>[]>("sessions")).find(
-        (s) => s.id === id,
-      );
-    if (!session) throw new Error("SESSION_NOT_FOUND");
-    if (session.kind !== "manual")
-      throw new Error("PLATFORM_SESSION_MANAGED_AUTOMATICALLY");
-    await db.call("endSession", id, Date.now(), "manual");
-    return { ok: true };
-  });
-  app.post("/api/v1/sessions/:id/delete",async request=>{
-    await db.call("deleteManualSession",string(object(request.params).id),Date.now());
-    return {ok:true};
-  });
-  app.get("/api/v1/summary", async (request) =>
-    db.call(
-      "summary",
-      string(object(request.query).session) || undefined,
-      configuration.value.excludedBotLogins,
-      string(object(request.query).compact)!=="1",
-    ),
-  );
-  app.get("/api/v1/events", async (request) => {
-    const q = object(request.query);
-    return db.call(
-      "events",
-      string(q.session) || undefined,
-      string(q.person) || undefined,
-      q.from === undefined ? undefined : Number(q.from),
-      q.to === undefined ? undefined : Number(q.to),
-      string(q.type)||undefined,
-      string(q.source)||undefined,
-    );
-  });
-  app.get('/api/v1/donor-nicknames',()=>db.call('donorNicknames'));
-  app.get('/api/v1/persons/:id/donor-bindings',request=>db.call('donorBindings',string(object(request.params).id)));
-  app.post('/api/v1/persons/:id/donor-bindings',request=>{const b=object(request.body);return db.call('bindDonorNickname',string(object(request.params).id),string(b.name),Number(b.revision),Date.now());});
-  function peopleFrom(query: unknown): number {
-    const period=string(object(query).period);
-    if (!period) return 0;
-    if (period!=="7" && period!=="30") throw new Error("INVALID_PERIOD");
-    return Date.now()-Number(period)*86400000;
-  }
-  app.get("/api/v1/persons", async (request) =>
-    db.call(
-      "persons",
-      string(object(request.query).search),
-      configuration.value.excludedBotLogins,
-      peopleFrom(request.query),
-    ),
-  );
-  app.get("/api/v1/persons/tops", async (request) => {
-    const q = object(request.query);
-    const sortRaw = string(q.by) || "messages";
-    const sortBy =
-      sortRaw === "donations" || sortRaw === "observed_minutes"
-        ? sortRaw
-        : "messages";
-    return db.call(
-      "personsTop",
-      sortBy,
-      string(q.session) || undefined,
-      configuration.value.excludedBotLogins,
-      q.limit === undefined ? 50 : Number(q.limit),
-      q.from===undefined?peopleFrom(request.query):Number(q.from),q.to===undefined?undefined:Number(q.to),string(q.currency)||'RUB',
-    );
-  });
-  app.get("/api/v1/insights", async (request) =>
-    db.call(
-      "insights",
-      string(object(request.query).session) || undefined,
-      configuration.value.excludedBotLogins,
-    ),
-  );
 
-  app.get("/api/v1/persons/:id", async (request) =>
-    db.call("person", string(object(request.params).id),string(object(request.query).events)!=="false"),
-  );
-  app.get("/api/v1/persons/:id/activity",async request=>db.call("personActivity",string(object(request.params).id),analyticsSettings(configuration.value.analyticsSettings).chatWindowMinutes,analyticsSettings(configuration.value.analyticsSettings).timezone));
-  app.get("/api/v1/persons/:id/metadata", async request => db.call("personMetadata",string(object(request.params).id)));
-  app.post("/api/v1/persons/:id/metadata", async request => {
-    const b=object(request.body);
-    if(!Array.isArray(b.tags)||!b.tags.every((tag):tag is string=>typeof tag==='string'))throw new Error('INVALID_PERSON_TAGS');
-    if(b.manualCore!==null&&typeof b.manualCore!=='boolean')throw new Error('INVALID_MANUAL_CORE');
-    return db.call("setPersonMetadata",string(object(request.params).id),b.tags,b.manualCore,Number(b.revision));
-  });
-  app.get("/api/v1/persons/:id/notes", async request => db.call("personNotes",string(object(request.params).id)));
-  app.post("/api/v1/persons/:id/notes", async request => db.call("createPersonNote",string(object(request.params).id),string(object(request.body).body)));
-  app.post("/api/v1/persons/:id/notes/:noteId/update", async request => {
-    const p=object(request.params), b=object(request.body);
-    return db.call("updatePersonNote",string(p.id),string(p.noteId),string(b.body),Number(b.revision));
-  });
-  app.post("/api/v1/persons/:id/notes/:noteId/delete", async request => {
-    const p=object(request.params);
-    await db.call("deletePersonNote",string(p.id),string(p.noteId),Number(object(request.body).revision));
-    return {ok:true};
-  });
-  app.get("/api/v1/persons/:id/stats", async (request) => {
-    const id = string(object(request.params).id);
-    const session = string(object(request.query).session) || undefined;
-    return db.call(
-      "personStats",
-      id,
-      session,
-      configuration.value.excludedBotLogins,
-      analyticsSettings(configuration.value.analyticsSettings).chatWindowMinutes,
-      peopleFrom(request.query),
-    );
-  });
-  app.get("/api/v1/persons/:id/candidates", async (request) => {
-    const person = await db.call<Record<string, unknown>>(
-      "person",
-      string(object(request.params).id),
-    );
-    return db.call("candidatePersons", String(person.display_name));
-  });
-  app.post("/api/v1/persons/:id/rename", async (request) => {
-    await db.call(
-      "renamePerson",
-      string(object(request.params).id),
-      string(object(request.body).name),
-    );
-    return { ok: true };
-  });
-  app.post("/api/v1/persons/merge", async (request) => {
-    const b = object(request.body);
-    return {
-      id: await db.call(
-        "merge",
-        string(b.sourceId),
-        string(b.targetId),
-        Number(b.sourceRevision),
-        Number(b.targetRevision),
-        Date.now(),
-      ),
-    };
-  });
-  app.post("/api/v1/persons/split", async (request) => {
-    const b = object(request.body);
-    if (!Array.isArray(b.identityIds) || b.identityIds.length > 1000)
-      throw new Error("INVALID_SPLIT");
-    return {
-      id: await db.call(
-        "splitIdentities",
-        b.identityIds.map(string),
-        string(b.name),
-        Number(b.revision),
-        Date.now(),
-      ),
-    };
-  });
-  app.get("/api/v1/splits",async()=>db.call("splits"));
-  app.post("/api/v1/splits/:id/undo",async request=>{await db.call("undoSplit",string(object(request.params).id),Date.now());return {ok:true};});
-  const donationInput=(b:Record<string,unknown>)=>({personId:string(b.personId),amount:string(b.amount),currency:string(b.currency),occurredAtMs:b.occurredAtMs===null?null:Number(b.occurredAtMs),message:string(b.message),sourceName:string(b.sourceName)});
-  app.get("/api/v1/donations",async request=>{
-    const q=object(request.query);
-    if(q.includeDeleted!==undefined && !["true","false"].includes(string(q.includeDeleted)))throw new Error("INVALID_DONATION_PAGE");
-    return db.call("donations",q.person===undefined?undefined:string(q.person),q.offset===undefined?0:Number(q.offset),q.limit===undefined?50:Number(q.limit),q.includeDeleted==="true",q.session===undefined?undefined:string(q.session));
-  });
-  app.get("/api/v1/donations/:id",async request=>db.call("donation",string(object(request.params).id)));
-  app.get("/api/v1/donations/:id/candidates",async request=>db.call("donationCandidates",string(object(request.params).id),configuration.value.excludedBotLogins));
-  app.get("/api/v1/donations/:id/audit",async request=>db.call("donationAudit",string(object(request.params).id)));
-  app.post("/api/v1/donations",async request=>db.call("createDonation",donationInput(object(request.body)),Date.now()));
-  app.post("/api/v1/donations/:id/assign",async request=>{const b=object(request.body);return db.call("reassignDonation",string(object(request.params).id),b.personId===null?null:string(b.personId),Number(b.revision),Date.now());});
-  app.post("/api/v1/donations/:id/restore",async request=>db.call("restoreDonation",string(object(request.params).id),Number(object(request.body).revision),Date.now()));
-  app.get("/api/v1/merges", async () => db.call("merges"));
-  app.post("/api/v1/merges/:id/undo", async (request) => {
-    await db.call("undoMerge", string(object(request.params).id), Date.now());
-    return { ok: true };
-  });
-  app.get("/api/v1/presence", async (request) => {
-    const q = object(request.query);
-    return db.call(
-      "grid",
-      string(q.session),
-      string(q.person),
-      Number(q.from),
-      Number(q.to),
-    );
-  });
   app.post("/api/v1/youtube/connect", async request => {
     const b = object(request.body);
     return youtube.beginAuth(string(b.clientId), string(b.clientSecret));

@@ -1,4 +1,5 @@
 <script lang="ts">
+ import {latestRequest} from './latest-request';
  import {api,date} from './api';
  import {ConnectionError} from './request';
  import Help from './Help.svelte';
@@ -8,11 +9,11 @@
  const status=(value:boolean|null)=>value===true?'Подписан':value===false?'Не подписан':'Неизвестно';
  const changes=$derived.by(()=>{const prior=new Map<string,string>();return (data?.polls??[]).filter((p:any)=>{const key=p.source,value=JSON.stringify([p.source==='youtube'?null:p.total,p.visibleCount]);if(prior.get(key)===value)return false;prior.set(key,value);return true;});});
  $effect(()=>{
-  const person=personId,session=sessionId;let cancelled=false,pending=false;data=null;error='';
+  const person=personId,session=sessionId,request=latestRequest();data=null;error='';
   const path=person?`persons/${person}/following?${new URLSearchParams({session})}`:`sessions/${session}/followers`;
-  const load=()=>{if(pending)return;pending=true;void api(path).then(result=>{if(!cancelled){data=result;error='';}}).catch(e=>{if(!cancelled&&!(e instanceof ConnectionError))error=e.message;}).finally(()=>pending=false);};
+  const load=()=>void request.run(signal=>api(path,undefined,signal),result=>{data=result;error='';},failure=>{if(!(failure instanceof ConnectionError))error=failure.message;});
   load();window.addEventListener('sp:data-refresh',load);
-  return()=>{cancelled=true;window.removeEventListener('sp:data-refresh',load);};
+  return()=>{request.cancel();window.removeEventListener('sp:data-refresh',load);};
  });
 </script>
 <section class="panel following" aria-label="Подписки на канал">

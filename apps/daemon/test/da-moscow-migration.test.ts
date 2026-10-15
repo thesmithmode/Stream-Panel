@@ -13,7 +13,7 @@ test('DA API clock is UTC: previously Moscow-shifted donations rejoin their stre
   const a=await createApplication(join(dir,profile),47831,false,{}, {databasePath:path,profile});try{
    assert.equal(a.configuration.value.daUtcOffsetMinutes,0);
    const saved=JSON.parse(await readFile(join(dir,profile,'secrets.json'),'utf8'));assert.equal(saved.daAccessToken,'saved-access');assert.equal(saved.daRefreshToken,'saved-refresh');
-   const sessions=await a.db.call<any[]>('sessions');assert.equal(sessions[0].donationCount,1);assert.equal(sessions[0].donationTotals.RUB,'22800');assert.equal((await a.db.call<any>('summary',sessions[0].id)).totals.RUB,'22800');assert.equal((await a.db.call<any>('donations')).items[0].occurredAtMs,payment);
+   const sessions=await (a.db.call('sessions') as Promise<any[]>);assert.equal(sessions[0].donationCount,1);assert.equal(sessions[0].donationTotals.RUB,'22800');assert.equal((await (a.db.call('summary',sessions[0].id) as Promise<any>)).totals.RUB,'22800');assert.equal((await (a.db.call('donations') as Promise<any>)).items[0].occurredAtMs,payment);
    if(profile==='ruslan'){a.configuration.value.daUtcOffsetMinutes=180;await a.configuration.save();}
   }finally{await a.app.close();}
  }

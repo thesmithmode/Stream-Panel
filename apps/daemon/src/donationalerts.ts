@@ -1,8 +1,9 @@
 import WebSocket from "ws";
 import { parse, stringify } from "lossless-json";
 import { randomBytes } from "node:crypto";
-import type { Configuration } from "./config.js";
-import type { StoreClient } from "./db.js";
+import type { ConfigurationPort } from "./config.js";
+import type {StorePort} from './store-contract.js';
+type DonationalertsStore = StorePort<'activeLogicalStream' | 'donationImportStates' | 'ingest' | 'ingestLiveDonation' | 'pendingDonationImportCount' | 'pendingDonationImports' | 'removePendingDonation' | 'resolveDonationTimes' | 'saveDonationImportFailure'>;
 import {
   moneyToMinor,
   daDonorExternalId,
@@ -13,7 +14,7 @@ import {
   string,
   type ConnectionStatus,
   type SocketFactory,
-} from "./twitch.js";
+} from "./provider-values.js";
 
 import type {ImportState} from "../../../packages/core/src/provider-storage.js";
 import {parseDonationTime,DA_API_UTC_OFFSET_MINUTES} from '../../../packages/core/src/donation-time.js';
@@ -95,8 +96,8 @@ export class DonationAlertsConnection {
   private refreshPromise: Promise<void> | null = null;
   private oauthState: { value: string; expiresAt: number } | null = null;
   constructor(
-    private config: Configuration,
-    private db: StoreClient,
+    private config: ConfigurationPort,
+    private db: DonationalertsStore,
     private request: typeof fetch = fetch,
     private socketFactory: SocketFactory = (url, options) =>
       new WebSocket(url, options),
@@ -373,7 +374,7 @@ export class DonationAlertsConnection {
     if(!valid())return null;
     const id=donationId(raw);
     if(known===undefined){
-      const states=await this.db.call<ImportState[]>('donationImportStates',this.recipient,/^\d+$/.test(id)?[id]:[]);
+      const states=await this.db.call('donationImportStates',this.recipient,/^\d+$/.test(id)?[id]:[]);
       if(!valid())return null;
       known=states.find(row=>row.id===id)??null;
     }
@@ -382,9 +383,9 @@ export class DonationAlertsConnection {
       const event=normalizeDonation(raw,this.recipient,transport);
       let result:{inserted:boolean}|null;
       if(transport==='centrifugo'){
-        const active=await this.db.call<{id:string}|null>('activeLogicalStream');
+        const active=await this.db.call('activeLogicalStream');
         if(!valid())return null;
-        result=active&&event.occurredAtMs===null?await this.db.call('ingestLiveDonation',event,active.id,true):await this.db.call('ingest',event);
+        result=active&&event.occurredAtMs===null?await this.db.call('ingestLiveDonation',event,string(active.id),true):await this.db.call('ingest',event);
       }else result=await this.db.call('ingest',event);
       if(!valid())return null;
       if(result===null){result=await this.db.call('ingest',event);if(!valid())return null;}
@@ -413,7 +414,7 @@ export class DonationAlertsConnection {
       let complete = false;
       let skippedRows = 0;
       let cutoff:number|null=null,lastProviderTime=Infinity,ordered=true;
-      const pending=await this.db.call<{id:string;serialized:string}[]>('pendingDonationImports',this.recipient);
+      const pending=await this.db.call('pendingDonationImports',this.recipient);
       if(this.stopped||generation!==this.generation)return;
       for(const row of pending){
         try{
@@ -437,7 +438,7 @@ export class DonationAlertsConnection {
         const ids=[...new Set(response.data.map(donationId).filter(id=>/^\d+$/.test(id)))];
         const states=new Map<string,ImportState>();
         for(let offset=0;offset<ids.length;offset+=2000){
-          for(const state of await this.db.call<ImportState[]>('donationImportStates',this.recipient,ids.slice(offset,offset+2000)))states.set(state.id,state);
+          for(const state of await this.db.call('donationImportStates',this.recipient,ids.slice(offset,offset+2000)))states.set(state.id,state);
           if(this.stopped||generation!==this.generation)return;
         }
         // Early stopping is safe only while the observed provider dates descend.
@@ -473,7 +474,7 @@ export class DonationAlertsConnection {
           break;
         }
       }
-      skippedRows=await this.db.call<number>('pendingDonationImportCount',this.recipient);
+      skippedRows=await this.db.call('pendingDonationImportCount',this.recipient);
       if(this.stopped||generation!==this.generation)return;
       this.status.capabilities.history = complete
         ? skippedRows ? `Импорт неполный: пропущено записей ${skippedRows}` : "Импорт доступных страниц завершён"

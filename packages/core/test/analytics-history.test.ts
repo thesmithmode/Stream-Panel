@@ -133,3 +133,44 @@ test('a global cache budget evicts deterministically and reports larger than the
  assert.equal(s.summary().messages,12);
  }finally{s.close();}
 });
+
+test('independent filters finish when browsers interleave incremental historical report requests',()=>{
+ const s=new StreamStore(':memory:');
+ try{
+  fixture(s,201);
+  const h=new AnalyticsHistory((s as any).db),range={...options,toMs:base+202*86400000};
+  const queries=[{...range,source:'all' as const},{...range,source:'twitch' as const}];
+  const completed=new Map<string,any>();
+  for(let attempt=0;attempt<100&&completed.size<queries.length;attempt++){
+   for(const query of queries){
+    if(completed.has(query.source))continue;
+    const result=h.report(query);
+    if(!result.preparing)completed.set(query.source,result);
+   }
+  }
+  assert.equal(completed.size,2,'neither browser may reset the other browser progress');
+  for(const result of completed.values()){assert.equal(result.summary.streams,201);assert.equal(result.summary.messages,201);}
+  // Completed results and a late correction remain independent of other filters.
+  s.ingest({source:'twitch',accountId:'owner',externalId:'late-interleaved',type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:base+minute,receivedAtMs:range.toMs,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{count:1}});
+  assert.equal(ready(h,queries[0]!).summary.messages,202);
+ }finally{s.close();}
+});
+
+test('expired or displaced report preparation can restart without losing historical facts',t=>{
+ const s=new StreamStore(':memory:');let now=options.toMs;
+ t.mock.method(Date,'now',()=>now);
+ try{
+  fixture(s,60);const h=new AnalyticsHistory((s as any).db),query={...options,toMs:base+62*86400000};
+  while(h.prepare(query).preparing){/* warm bounded batches */}
+  assert.equal(h.report(query).ready,25);assert.equal(h.report(query).ready,50);
+  now+=6*60000;
+  h.prepare(query); // Scheduled maintenance releases abandoned browser work.
+  assert.equal(h.report(query).ready,25);
+  assert.equal(ready(h,query).summary.messages,60);
+  const first={...query,minMessages:100};
+  assert.equal(h.report(first).ready,25);assert.equal(h.report(first).ready,50);
+  for(let filter=101;filter<106;filter++)assert.equal(h.report({...query,minMessages:filter}).preparing,true);
+  assert.equal(h.report(first).ready,25,'displaced work restarts safely instead of retaining unlimited jobs');
+  assert.equal(ready(h,first).summary.messages,60);assert.equal(s.eventCount(),60);
+ }finally{s.close();}
+});

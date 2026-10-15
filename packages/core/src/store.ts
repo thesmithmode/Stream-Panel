@@ -130,6 +130,9 @@ export class StreamStore {
     excludedBotLogins: readonly string[] = [],
     fromMs=0,
   ) {return this.queries.persons(search,excludedBotLogins,fromMs);}
+  personsPage(search = "", excludedBotLogins: readonly string[] = [], fromMs=0, offset=0, limit=50) {
+    return this.queries.personsPage(search,excludedBotLogins,fromMs,offset,limit);
+  }
   person(id: string,includeEvents=true) {return this.queries.person(id,includeEvents);}
   events(
     sessionId?: string,
@@ -325,7 +328,7 @@ export class StreamStore {
     for(const follower of followers){if(!follower.id||typeof follower.name!=='string')throw new Error('INVALID_FOLLOWERS');if(follower.followedAtMs!==null)assertTimestamp(follower.followedAtMs);}
     this.providerSnapshot(source,account,'followers',{followers:[...new Map(followers.map(f=>[f.id,f])).values()],complete,total},at);
   }
-  personFollowing(personId:string,sessionId=''){this.person(personId);if(sessionId)this.sessionRow(sessionId);return personFollowing(this.db,personId,sessionId);}
+  personFollowing(personId:string,sessionId=''){if(!this.db.prepare('SELECT 1 FROM persons WHERE id=?').get(personId))throw new Error('PERSON_NOT_FOUND');if(sessionId)this.sessionRow(sessionId);return personFollowing(this.db,personId,sessionId);}
   followingAnalytics(sessionId:string){this.sessionRow(sessionId);return followingAnalytics(this.db,sessionId);}
   streamMetadata(sessionId:string){
     this.sessionRow(sessionId);

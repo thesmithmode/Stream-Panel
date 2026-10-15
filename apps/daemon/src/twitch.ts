@@ -1,32 +1,16 @@
 import WebSocket from "ws";
 import {extraTwitchEvents,extraTwitchScopes} from './twitch-events.js';
-import type { Configuration, Tokens } from "./config.js";
-import type { StoreClient } from "./db.js";
+import type { ConfigurationPort, Tokens } from "./config.js";
+import type {StorePort} from './store-contract.js';
+type TwitchStore = StorePort<'activeLogicalStream' | 'ensureOwnerIdentity' | 'followingSnapshot' | 'gap' | 'ingest' | 'observePlatformStream' | 'platformMissing' | 'platformStreams' | 'recordPoll' | 'streamSample' | 'updateChatterNames'>;
 import {
   collectChatters,
   type ChattersPage,
 } from "../../../packages/core/src/chatters.js";
 import type { EventInput } from "../../../packages/core/src/domain.js";
 
-export type SocketFactory = (
-  url: string,
-  options: WebSocket.ClientOptions,
-) => WebSocket;
-
-export interface ConnectionStatus {
-  state: string;
-  detail: string;
-  account?: string;
-  lastEventAt?: number;
-  capabilities: Record<string, string>;
-}
-export const object = (value: unknown): Record<string, unknown> => {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new Error("INVALID_PROVIDER_OBJECT");
-  return value as Record<string, unknown>;
-};
-export const string = (value: unknown): string =>
-  typeof value === "string" ? value : "";
+import {object, string, type ConnectionStatus, type SocketFactory} from './provider-values.js';
+export {object, string, type ConnectionStatus, type SocketFactory} from './provider-values.js';
 
 export function messageText(value: unknown): string {
   if (typeof value === "string") return value;
@@ -169,8 +153,8 @@ export class TwitchConnection {
   private rateLimitedUntil = 0;
   private sockets = new Set<WebSocket>();
   constructor(
-    private config: Configuration,
-    private db: StoreClient,
+    private config: ConfigurationPort,
+    private db: TwitchStore,
     private request: typeof fetch = fetch,
     private socketFactory: SocketFactory = (url, options) =>
       new WebSocket(url, options),
@@ -672,7 +656,7 @@ export class TwitchConnection {
         const login = string(stream.user_login);
         const url = /^[a-zA-Z0-9_]{1,25}$/.test(login)
           ? `https://www.twitch.tv/${login}` : null;
-        const sessionId = await this.db.call<string | null>(
+        const sessionId = await this.db.call(
           "observePlatformStream", "twitch", accountId, externalId,
           startedAtMs, observedAtMs, url, string(stream.title), [externalId],
         );
@@ -686,10 +670,10 @@ export class TwitchConnection {
       } else {
         await this.db.call("platformMissing", "twitch", accountId, [], observedAtMs);
         if (!current()) return;
-        const active = await this.db.call<Record<string, unknown> | null>("activeLogicalStream");
+        const active = await this.db.call("activeLogicalStream");
         if (!current()) return;
         const links = active
-          ? await this.db.call<Record<string, unknown>[]>("platformStreams", String(active.id))
+          ? await this.db.call("platformStreams", String(active.id))
           : [];
         if (!current()) return;
         this.platformLive = links.some(link => link.platform === "twitch" && link.account_id === accountId && link.ended_at_ms === null);

@@ -25,7 +25,6 @@
     setProfile,
     type Profile,
     type Session,
-    type Person,
     money,
     type Summary,
     type Event,
@@ -41,7 +40,6 @@
     error = $state(""),
     status = $state<any>(null),
     sessions = $state<Session[]>([]),
-    people = $state<Person[]>([]),
     events = $state<Event[]>([]),
     summary = $state<Summary>({
       messages: 0,
@@ -119,10 +117,10 @@
     const controller=new AbortController();
     const deadline=setTimeout(()=>controller.abort(new ConnectionError()),12000);
     const task=(async()=>{
-      const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter,peoplePeriod).map(async([key,path])=>[key,await api(key==='sessions'&&tab==='sessions'&&sessionPage>0?`sessions?offset=${sessionPage*100}`:path,undefined,controller.signal)])));
+      const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter).map(async([key,path])=>[key,await api(key==='sessions'&&tab==='sessions'&&sessionPage>0?`sessions?offset=${sessionPage*100}`:path,undefined,controller.signal)])));
       if(current!==epoch)return;
       status=values.status;{setCsrf(status.csrf);user=status.user??user;outdated=isOutdatedRelease(status.release);}
-      sessions=values.sessions??sessions;people=values.persons??people;events=values.events??events;summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';window.dispatchEvent(new Event('sp:data-refresh'));
+      sessions=values.sessions??sessions;events=values.events??events;summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';window.dispatchEvent(new Event('sp:data-refresh'));
     })();refreshTask={epoch:current,task,controller};
     try{await task;}finally{clearTimeout(deadline);if(refreshTask?.task===task)refreshTask=null;}
   }
@@ -147,14 +145,14 @@
   async function switchProfile(next: Profile) {
     if (!allowedProfiles.includes(next) || next === profile) return;
     epoch++;if(tab==="stream")tab="overview"; setProfile(next); profile = next;
-    status = null; sessions = []; people = []; events = []; personId = sessionFilter = ""; error = "";
+    status = null; sessions = []; events = []; personId = sessionFilter = ""; error = "";
     summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
     clearScope();saveRoute();await action(async () => {});
     if(outdated)location.reload();
   }
   onMount(() => {
     let alive=true,initializing=false,pendingInitialization=false,lastRefresh=0;
-    const update=()=>{if(!alive||!autoRefresh||busy||initializing||document.hidden||!navigator.onLine)return;if(!authorized){if(connectionLost&&!username&&!password)void initialize();return;}const current=epoch;void refresh().catch(e=>{if(current!==epoch||!alive)return;if(['LOGIN_REQUIRED','LOCAL_LOGIN_REQUIRED'].includes(e.message)){epoch++;authorized=false;people=[];events=[];sessions=[];clearScope();}reportFailure(e);});};
+    const update=()=>{if(!alive||!autoRefresh||busy||initializing||document.hidden||!navigator.onLine)return;if(!authorized){if(connectionLost&&!username&&!password)void initialize();return;}const current=epoch;void refresh().catch(e=>{if(current!==epoch||!alive)return;if(['LOGIN_REQUIRED','LOCAL_LOGIN_REQUIRED'].includes(e.message)){epoch++;authorized=false;events=[];sessions=[];clearScope();}reportFailure(e);});};
     const timer=setInterval(()=>{if(Date.now()-lastRefresh>=refreshSeconds*1000){lastRefresh=Date.now();update();}},1000);
     async function initialize() {
       if(initializing||busy){pendingInitialization=true;return;}pendingInitialization=false;initializing=true;
@@ -276,7 +274,6 @@
         />
         <YouTube />
       {:else if tab === "people"}<People
-          {people}
           period={peoplePeriod}
           initialId={personId}
           onSelect={(id)=>{personId=id;saveRoute();}}

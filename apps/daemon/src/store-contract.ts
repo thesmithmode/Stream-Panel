@@ -36,6 +36,7 @@ export const storeOperations={
   recordPoll:"write",
   updateChatterNames:"write",
   persons:"cached",
+  personsPage:"cached",
   createPerson:"write",
   donorNicknames:"cached",
   donorBindings:"cached",
@@ -80,6 +81,11 @@ export type StoreMethod=keyof typeof storeOperations;
 export type StoreRequest={
   [Method in StoreMethod]:[method:Method,...args:Parameters<StreamStore[Method]>]
 }[StoreMethod];
+export type StoreResult<Method extends StoreMethod> = Awaited<ReturnType<StreamStore[Method]>>;
+/** Consumers depend on their required operations, not the worker implementation. */
+export type StorePort<Method extends StoreMethod> = {
+  call<Request extends Extract<StoreRequest, [Method, ...unknown[]]>>(...request: Request): Promise<StoreResult<Request[0]>>;
+};
 export function isStoreMethod(value:string):value is StoreMethod {
   return Object.hasOwn(storeOperations,value);
 }

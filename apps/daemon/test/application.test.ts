@@ -220,7 +220,7 @@ test("chat moderation retains flags and counters without persisting message text
     };
     const deleteEvent=normalizeTwitch(deletion,"channel");assert.ok(deleteEvent);
     await app.db.call("ingest",deleteEvent);
-    const events = await app.db.call<any[]>("events");
+    const events = await (app.db.call("events") as Promise<any[]>);
     const chat = events.find((e) => e.type === "chat.message").payload;
     assert.equal(chat.text, undefined, "message content is not persisted");
     assert.equal(chat.count,1);

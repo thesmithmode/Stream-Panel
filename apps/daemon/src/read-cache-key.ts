@@ -16,7 +16,7 @@ export function readCacheKey(method:string,args:unknown[],now=Date.now()):string
   const options=args[0] as Record<string,unknown>;
   key[0]={...options,toMs:moving(options.toMs)};
  }
- if(method==='persons')key[2]=rolling(args[2]);
+ if(method==='persons'||method==='personsPage')key[2]=rolling(args[2]);
  if(method==='personsTop')key[4]=rolling(args[4]);
  return JSON.stringify([method,key]);
 }

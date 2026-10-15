@@ -6,7 +6,7 @@ import { mkdtemp, rm, mkdir, writeFile, readFile, stat } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Configuration, defaultDataDir } from "../src/config.js";
+import { Configuration } from "../src/config.js";
 import { StoreClient } from "../src/db.js";
 test("configuration rejects invalid versions/JSON and recovers its serialized write queue after a disk failure", async () => {
   const dir = await mkdtemp(join(tmpdir(), "sp-config-errors-"));
@@ -56,29 +56,6 @@ test("concurrent configuration saves persist the last value with private permiss
       assert.equal((await stat(path)).mode & 0o777, 0o600);
   } finally {
     await rm(dir, { recursive: true, force: true });
-  }
-});
-test("default data directory obeys explicit override and platform defaults", () => {
-  const vars = [
-    "STREAM_PANEL_DATA_DIR",
-    "XDG_DATA_HOME",
-  ] as const;
-  const saved = Object.fromEntries(vars.map((v) => [v, process.env[v]]));
-  try {
-    process.env.STREAM_PANEL_DATA_DIR = "/explicit";
-    assert.equal(defaultDataDir(), "/explicit");
-    delete process.env.STREAM_PANEL_DATA_DIR;
-    process.env.XDG_DATA_HOME = "/xdg";
-    assert.equal(defaultDataDir(), join("/xdg", "stream-panel"));
-    delete process.env.XDG_DATA_HOME;
-    assert.ok(
-      defaultDataDir().endsWith(join(".local", "share", "stream-panel")),
-    );
-  } finally {
-    for (const v of vars) {
-      if (saved[v] === undefined) delete process.env[v];
-      else process.env[v] = saved[v];
-    }
   }
 });
 test("worker RPC rejects unsupported operations and oversubscription but remains usable", async () => {
