@@ -47,6 +47,13 @@ const sumMoney = (target: Record<string, string>, input: Record<string, string>)
     target[currency] = (BigInt(target[currency] ?? '0') + BigInt(amount)).toString(); };
 /** Incremental, derived closed-stream reports. Facts and public event IDs are untouched. */
 export class AnalyticsHistory {
+    private statements = new Map<string, Database.Statement>();
+    private statement(sql: string) {
+        let statement = this.statements.get(sql);
+        if (!statement) { statement = this.db.prepare(sql); this.statements.set(sql, statement); }
+        return statement;
+    }
+    private completed: { key: string; value: Report } | undefined;
     private job: {
         key: string;
         iterator: Generator<Progress, Report, void>;
@@ -56,14 +63,14 @@ export class AnalyticsHistory {
         maxBytes?: number;
     } = {}) { }
     private sessions(options: AnalyticsOptions): Session[] {
-        return this.db.prepare(`SELECT s.id,s.started_at_ms,s.ended_at_ms,coalesce(r.revision,0) AS revision FROM sessions s LEFT JOIN analytics_stream_revisions r ON r.session_id=s.id
+        return this.statement(`SELECT s.id,s.started_at_ms,s.ended_at_ms,coalesce(r.revision,0) AS revision FROM sessions s LEFT JOIN analytics_stream_revisions r ON r.session_id=s.id
    WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND s.started_at_ms<? AND coalesce(s.ended_at_ms,?)>? ORDER BY s.started_at_ms,s.id`).all(options.toMs, options.toMs, options.fromMs) as Session[];
     }
     private key(options: AnalyticsOptions, session: Session): string {
         const fields = { format: 1, from: Math.max(options.fromMs, session.started_at_ms), to: Math.min(options.toMs, session.ended_at_ms ?? options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: [...(options.excludedLogins ?? [])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
         return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
     }
-    private globalRevision() { return (this.db.prepare('SELECT revision FROM analytics_global_revision WHERE id=1').get() as {
+    private globalRevision() { return (this.statement('SELECT revision FROM analytics_global_revision WHERE id=1').get() as {
         revision: number;
     }).revision; }
     private build(options: AnalyticsOptions, session: Session): Report {
@@ -91,7 +98,7 @@ export class AnalyticsHistory {
     private cached(options: AnalyticsOptions, session: Session, global: number): Report | undefined {
         if (session.ended_at_ms === null)
             return undefined;
-        const row = this.db.prepare('SELECT payload FROM analytics_stream_cache WHERE session_id=? AND cache_key=? AND revision=? AND global_revision=?').get(session.id, this.key(options, session), session.revision, global) as {
+        const row = this.statement('SELECT payload FROM analytics_stream_cache WHERE session_id=? AND cache_key=? AND revision=? AND global_revision=?').get(session.id, this.key(options, session), session.revision, global) as {
             payload: Buffer;
         } | undefined;
         if (!row)
@@ -100,7 +107,7 @@ export class AnalyticsHistory {
             return JSON.parse(gunzipSync(row.payload, { maxOutputLength: this.cachePolicy.maxBytes ?? 16 * 1024 * 1024 }).toString()) as Report;
         }
         catch {
-            this.db.prepare('DELETE FROM analytics_stream_cache WHERE session_id=? AND cache_key=?').run(session.id, this.key(options, session));
+            this.statement('DELETE FROM analytics_stream_cache WHERE session_id=? AND cache_key=?').run(session.id, this.key(options, session));
             return undefined;
         }
     }
@@ -117,10 +124,11 @@ export class AnalyticsHistory {
         }
         if (available < 1024 * 1024 * 1024)
             throw new Error('ANALYTICS_STORAGE_LOW');
+        const payload = gzipSync(serialized);
         this.db.transaction(() => {
-            this.db.prepare('DELETE FROM analytics_stream_cache WHERE session_id=? AND (revision<>? OR global_revision<>?)').run(session.id, session.revision, global);
-            this.db.prepare('INSERT INTO analytics_stream_cache VALUES (?,?,?,?,?,?) ON CONFLICT(session_id,cache_key) DO UPDATE SET revision=excluded.revision,global_revision=excluded.global_revision,payload=excluded.payload,updated_at_ms=excluded.updated_at_ms').run(session.id, this.key(options, session), session.revision, global, gzipSync(serialized), Date.now());
-            this.db.prepare('DELETE FROM analytics_stream_cache WHERE session_id=? AND cache_key NOT IN(SELECT cache_key FROM analytics_stream_cache WHERE session_id=? ORDER BY updated_at_ms DESC LIMIT 16)').run(session.id, session.id);
+            this.statement('DELETE FROM analytics_stream_cache WHERE session_id=? AND (revision<>? OR global_revision<>?)').run(session.id, session.revision, global);
+            this.statement('INSERT INTO analytics_stream_cache VALUES (?,?,?,?,?,?) ON CONFLICT(session_id,cache_key) DO UPDATE SET revision=excluded.revision,global_revision=excluded.global_revision,payload=excluded.payload,updated_at_ms=excluded.updated_at_ms').run(session.id, this.key(options, session), session.revision, global, payload, Date.now());
+            this.statement('DELETE FROM analytics_stream_cache WHERE session_id=? AND cache_key NOT IN(SELECT cache_key FROM analytics_stream_cache WHERE session_id=? ORDER BY updated_at_ms DESC LIMIT 16)').run(session.id, session.id);
         }).immediate();
     }
     prepare(options: AnalyticsOptions, sessions = this.sessions(options)) {
@@ -131,7 +139,7 @@ export class AnalyticsHistory {
                 ready++;
                 continue;
             }
-            if (this.db.prepare('SELECT 1 FROM analytics_stream_cache WHERE session_id=? AND cache_key=? AND revision=? AND global_revision=?').get(session.id, this.key(options, session), session.revision, global)) {
+            if (this.statement('SELECT 1 FROM analytics_stream_cache WHERE session_id=? AND cache_key=? AND revision=? AND global_revision=?').get(session.id, this.key(options, session), session.revision, global)) {
                 ready++;
                 continue;
             }
@@ -149,12 +157,21 @@ export class AnalyticsHistory {
         if (!Number.isSafeInteger(options.fromMs) || options.fromMs < 0 || !Number.isSafeInteger(options.toMs) || options.toMs <= options.fromMs)
             throw new Error('INVALID_ANALYTICS_FILTER');
         const validation = audienceAnalytics(this.db, { ...options, fromMs: options.toMs - 1, toMs: options.toMs });
-        const sessions = this.sessions(options), progress = this.prepare(options, sessions);
-        if (progress.preparing)
-            return { ...validation, ...progress };
-        const fingerprint = createHash('sha256').update(JSON.stringify([options, this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.db.prepare('SELECT * FROM person_preferences ORDER BY person_id').all(), this.db.prepare('SELECT source,account_id,max(observed_at_ms) AS at FROM follower_observations GROUP BY source,account_id').all()])).digest('hex');
-        if (this.job?.key !== fingerprint)
+        const sessions = this.sessions(options);
+        const live = sessions.some(session => session.ended_at_ms === null);
+        const lastEnd = sessions.reduce((end, session) => Math.max(end, session.ended_at_ms ?? options.toMs), options.fromMs);
+        const canonical = { ...options, fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
+        const fingerprint = createHash('sha256').update(JSON.stringify([canonical, this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.statement('SELECT * FROM person_preferences ORDER BY person_id').all(), this.statement('SELECT * FROM person_tags ORDER BY person_id,label').all(), this.statement('SELECT source,account_id,max(observed_at_ms) AS at FROM follower_observations GROUP BY source,account_id').all()])).digest('hex');
+        if (!live && this.completed?.key === fingerprint) {
+            const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as { payload_json: string; updated_at_ms: number } | undefined : undefined;
+            return { ...this.completed.value, filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs }, youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, donationTiming: donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow') };
+        }
+        if (this.job?.key !== fingerprint) {
+            this.completed = undefined;
+            const progress = this.prepare(options, sessions);
+            if (progress.preparing) return { ...validation, ...progress };
             this.job = { key: fingerprint, iterator: this.aggregate(options, sessions, validation) };
+        }
         let next: IteratorResult<Progress, Report>;
         try {
             next = this.job.iterator.next();
@@ -166,6 +183,7 @@ export class AnalyticsHistory {
         if (!next.done)
             return { ...validation, ...next.value, stage: 'aggregate' };
         this.job = undefined;
+        if (!live) this.completed = { key: fingerprint, value: next.value };
         return next.value;
     }
     private *aggregate(options: AnalyticsOptions, sessions: Session[], validation: ReturnType<typeof audienceAnalytics>): Generator<Progress, Report, void> {
@@ -287,7 +305,7 @@ export class AnalyticsHistory {
         }
         if (!sample)
             return audienceAnalytics(this.db, options);
-        const preferences = new Map((this.db.prepare('SELECT person_id,manual_core FROM person_preferences').all() as {
+        const preferences = new Map((this.statement('SELECT person_id,manual_core FROM person_preferences').all() as {
             person_id: string;
             manual_core: number | null;
         }[]).map(p => [p.person_id, p.manual_core]));
@@ -304,7 +322,7 @@ export class AnalyticsHistory {
             person.observedMinutesPerSession = attendance ? person.observedMinutes / attendance : 0;
             person.detailAvailable = true;
         }
-        const current = this.db.prepare("SELECT p.source,p.account_id,p.payload_json FROM follower_observations p WHERE p.id=(SELECT q.id FROM follower_observations q WHERE q.source=p.source AND q.account_id=p.account_id ORDER BY q.observed_at_ms DESC,q.id DESC LIMIT 1)").all() as {
+        const current = this.statement("SELECT p.source,p.account_id,p.payload_json FROM follower_observations p WHERE p.id=(SELECT q.id FROM follower_observations q WHERE q.source=p.source AND q.account_id=p.account_id ORDER BY q.observed_at_ms DESC,q.id DESC LIMIT 1)").all() as {
             source: string;
             account_id: string;
             payload_json: string;
@@ -314,20 +332,20 @@ export class AnalyticsHistory {
             const info = JSON.parse(snapshot.payload_json), ids = JSON.stringify(info.followers.map((f: {
                 id: string;
             }) => f.id));
-            const members = snapshot.source === 'youtube' ? this.db.prepare('SELECT person_id FROM youtube_identities WHERE account_id=? AND external_id IN(SELECT value FROM json_each(?))').all(snapshot.account_id, ids) : this.db.prepare("SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id IN(SELECT value FROM json_each(?))").all(snapshot.account_id, ids);
+            const members = snapshot.source === 'youtube' ? this.statement('SELECT person_id FROM youtube_identities WHERE account_id=? AND external_id IN(SELECT value FROM json_each(?))').all(snapshot.account_id, ids) : this.statement("SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id IN(SELECT value FROM json_each(?))").all(snapshot.account_id, ids);
             for (const row of members as {
                 person_id: string;
             }[])
                 followers.add(row.person_id);
             if (snapshot.source === 'twitch' && info.complete)
-                for (const row of this.db.prepare("SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id NOT IN(SELECT value FROM json_each(?))").all(snapshot.account_id, ids) as {
+                for (const row of this.statement("SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id NOT IN(SELECT value FROM json_each(?))").all(snapshot.account_id, ids) as {
                     person_id: string;
                 }[])
                     negative.add(row.person_id);
         }
         for (const person of people.values()) {
             person.follower = followers.has(person.id) ? true : negative.has(person.id) && !person.sources.includes('youtube') ? false : null;
-            person.tags = (this.db.prepare(`WITH RECURSIVE owners(id) AS(SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT t.label FROM person_tags t JOIN owners o ON o.id=t.person_id ORDER BY t.label`).all(person.id) as {
+            person.tags = (this.statement(`WITH RECURSIVE owners(id) AS(SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT t.label FROM person_tags t JOIN owners o ON o.id=t.person_id ORDER BY t.label`).all(person.id) as {
                 label: string;
             }[]).map(t => t.label);
         }
@@ -353,7 +371,7 @@ export class AnalyticsHistory {
             row.averageAudience = row.airtimeMs ? row.personTimeMs / row.airtimeMs : null;
         }
         const attendees = audience.filter(p => p.attendanceSessionIds.length), core = audience.filter(p => p.core).length;
-        const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.db.prepare("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {
+        const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {
             payload_json: string;
             updated_at_ms: number;
         } | undefined : undefined;

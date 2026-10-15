@@ -75,13 +75,15 @@ void runBackup();
 const backupTimer = setInterval(() => { if(!closing)void runBackup(); }, 60000);
 const retentionTimer=setInterval(()=>{void hosted.backup?.purgeLocal().catch(()=>console.error('Local backup cleanup failed'));},60*60*1000);
 const heartbeatTimer=setInterval(()=>{if(collectorsStarted&&!closing)for(const runtime of hosted.runtimes.values())void runtime.db.call("collectionLifecycle","heartbeat",Date.now()).catch(()=>console.error("Collector heartbeat failed"));},30000);
-const analyticsTimer=setInterval(()=>{
+const warmAnalytics=()=>{
  if(closing||!collectorsStarted)return;
- for(const runtime of hosted.runtimes.values()){
+ for(const runtime of hosted.runtimes.values())void(async()=>{
   const cfg=runtime.configuration.value;
-  void runtime.db.call('warmAnalytics',{...analyticsSettings(cfg.analyticsSettings),fromMs:0,toMs:Date.now(),excludedLogins:cfg.excludedBotLogins,ownerId:cfg.twitch?.userId??'',youtubeAccount:cfg.youtube?.userId??cfg.youtubeAccountId??''}).catch(()=>console.error('Historical analytics preparation failed'));
- }
-},60000);
+  await runtime.db.call('warmAnalytics',{...analyticsSettings(cfg.analyticsSettings),fromMs:0,toMs:Date.now(),excludedLogins:cfg.excludedBotLogins,ownerId:cfg.twitch?.userId??'',youtubeAccount:cfg.youtube?.userId??cfg.youtubeAccountId??''});
+ })().catch(()=>console.error('Historical analytics preparation failed'));
+};
+const analyticsTimer=setInterval(warmAnalytics,60000);
+warmAnalytics();
 const timer = setInterval(() => void startCollectors(), 2000);
 const shutdown = async (code=0) => {
   if (closing) return;

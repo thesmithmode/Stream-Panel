@@ -24,7 +24,7 @@ test('incremental reports agree with raw facts, clocks and cohorts; late data an
  const person=r.audience[0].id;s.setPersonMetadata(person,[],false,s.personRevision(person));assert.equal(ready(h).summary.core,0);
  s.ingest({source:'twitch',accountId:'owner',externalId:'late',type:'chat.message',actor:{externalId:'viewer',displayName:'Renamed'},occurredAtMs:base+minute,receivedAtMs:options.toMs,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{count:1}});
  const late=ready(h);assert.equal(late.summary.messages,5);assert.equal(late.audience[0].name,audienceAnalytics(db,options).audience[0]!.name);
- db.prepare('UPDATE analytics_stream_cache SET payload=?').run(Buffer.from('invalid gzip'));assert.equal(ready(h).summary.messages,5);
+ db.prepare('UPDATE analytics_stream_cache SET payload=?').run(Buffer.from('invalid gzip'));assert.equal(ready(new AnalyticsHistory(db)).summary.messages,5);
  assert.throws(()=>h.report({...options,fromMs:-1}),/INVALID_ANALYTICS_FILTER/);assert.throws(()=>h.report({...options,timezone:'no/timezone'}),/INVALID_TIMEZONE/);
  assert.equal(new AnalyticsHistory(db).report({...options,fromMs:base-86400000,toMs:base-1}).summary.streams,0);
  }finally{s.close();}
@@ -62,7 +62,7 @@ test('derived analytics stop at storage/size bounds and recover from failed comp
  assert.throws(()=>new AnalyticsHistory(db,{maxBytes:1}).prepare(options),/ANALYTICS_STREAM_TOO_LARGE/);
  const h=new AnalyticsHistory(db);assert.equal(ready(h).summary.messages,4);
  const prepare=db.prepare.bind(db);let once=true;db.prepare=(sql:string)=>{if(once&&sql.startsWith('SELECT person_id,manual_core')){once=false;throw Error('TRANSIENT_TEST_FAILURE');}return prepare(sql);};
- assert.throws(()=>h.report(options),/TRANSIENT_TEST_FAILURE/);assert.equal(ready(h).summary.messages,4);db.prepare=prepare;
+ const failing=new AnalyticsHistory(db);assert.throws(()=>failing.report(options),/TRANSIENT_TEST_FAILURE/);assert.equal(ready(failing).summary.messages,4);db.prepare=prepare;
  assert.equal(s.summary().messages,4);
  }finally{s.close();}
 });
@@ -74,5 +74,21 @@ test('cached clock/day statistics split midnight and preserve known zero viewers
  const db=(s as any).db,h=new AnalyticsHistory(db),query={...options,timezone:'UTC',minSessions:1,minMinutes:0,minMessages:0},r=ready(h,query);
  assert.equal(r.timeline.length,2);assert.equal(r.timeline[0].viewers,0);assert.equal(r.timeline[1].observed,0);assert.equal(r.timeline[1].presenceKnown,true);
  assert.ok(r.clockBuckets.some((b:any)=>b.day==='weekends'&&b.minute===23*60+59));assert.ok(r.clockBuckets.some((b:any)=>b.day==='weekdays'&&b.minute===0));assert.equal(r.summary.messages,0);assert.equal(r.summary.attendees,1);
+ }finally{s.close();}
+});
+
+test('unchanged closed history reuses its report across empty date extensions while offline donations and tags stay current',()=>{
+ const s=new StreamStore(':memory:');try{fixture(s,7);const db=(s as any).db,h=new AnalyticsHistory(db),r=ready(h),id=r.audience[0].id;
+ db.prepare('DELETE FROM analytics_stream_cache').run();
+ const later={...options,toMs:options.toMs+1000};assert.equal(h.report(later).preparing,undefined);assert.equal(h.report(later).summary.messages,7);assert.equal(h.report(later).filters.toMs,later.toMs);
+ s.createDonation({personId:id,amount:'1',currency:'RUB',occurredAtMs:options.toMs-1000,message:'Offline',sourceName:'Cash'},options.toMs-1000);assert.deepEqual(h.report(later).donationTiming.totals,{RUB:'100'});
+ s.setPersonMetadata(id,['Changed'],true,s.personRevision(id));const changed=ready(h,later);assert.deepEqual(changed.audience[0].tags,['Changed']);assert.equal(changed.summary.core,1);
+ }finally{s.close();}
+});
+
+test('a completed report refreshes channel reports and excludes them from Twitch-only responses',()=>{
+ const s=new StreamStore(':memory:');try{fixture(s);const h=new AnalyticsHistory((s as any).db),query={...options,youtubeAccount:'yt-owner'};
+ ready(h,query);s.youtubeSnapshot('yt-owner','report',{start:'2026-10-01',end:'2026-10-02',columnHeaders:[],rows:[[1]]},base);assert.deepEqual(h.report(query).youtubeReport?.data.rows,[[1]]);
+ const twitch={...query,source:'twitch' as const};ready(h,twitch);assert.equal(h.report(twitch).youtubeReport,null);
  }finally{s.close();}
 });

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import net from "node:net";
 const freePort = () => new Promise((resolve) => { const s = net.createServer(); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 test('production serves UI through a separate process and closes both processes cleanly',{timeout:20000},async()=>{
- const dir=await mkdtemp(join(tmpdir(),'sp-split-cli-')),port=await freePort(),collectorPort=await freePort();let c;
+ const dir=await mkdtemp(join(tmpdir(),'sp-split-cli-')),port=await freePort();let collectorPort=await freePort();while(collectorPort===port)collectorPort=await freePort();let c;
  try{
   c=start(dir,port,{NODE_ENV:'production',STREAM_PANEL_COLLECTOR_PORT:String(collectorPort)});await c.ready();
   assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status,200);
@@ -149,4 +149,27 @@ test('full restore streams through production frontend, restarts safely and acti
   const restoredHeaders=await login();for(const profile of ['ruslan','gulnaz']){const r=await fetch(origin+'/api/v1/integrations/credentials',{method:'POST',headers:{...restoredHeaders,'Content-Type':'application/json','X-Stream-Panel-Profile':profile},body:'{}'});assert.equal((await r.json()).donationalerts.clientId,profile+'-saved-id');}
   next.child.kill('SIGTERM');assert.equal((await next.exit).code,0);
  }finally{for(const child of children)child.child.kill();await Promise.all(children.map(child=>child.exit));await rm(dir,{recursive:true,force:true});}
+});
+
+test('startup prepares closed-stream analytics independently for both profiles without changing recorded facts',{timeout:15000},async()=>{
+ const {StreamStore}=await import('../../dist/packages/core/src/store.js'),{AccountStore}=await import('../../dist/apps/daemon/src/auth.js'),{default:Database}=await import('better-sqlite3');
+ const dir=await mkdtemp(join(tmpdir(),'sp-analytics-startup-')),path=join(dir,'data.sqlite'),port=await freePort(),at=Date.now()-3600000;let c;
+ try{
+ const accounts=new AccountStore(path);try{for(const profile of ['ruslan','gulnaz'])await accounts.createUser(profile,profile,profile,'fixture-startup-password');}finally{accounts.close();}
+ for(const profile of ['ruslan','gulnaz']){const s=new StreamStore(path,profile),id=s.startSession('owner','closed',at,'platform',at);s.endSession(id,at+60000);s.close();}
+ c=start(dir,port);await c.ready();const db=new Database(path,{readonly:true});
+ try{const deadline=Date.now()+7000;for(;;){const counts=['ruslan','gulnaz'].map(p=>db.prepare(`SELECT count(*) n FROM p_${p}_analytics_stream_cache`).get().n);if(counts.every(n=>n===1))break;assert.ok(Date.now()<deadline,'both profile caches must warm at startup');await new Promise(r=>setTimeout(r,20));}
+ for(const p of ['ruslan','gulnaz'])assert.equal(db.prepare(`SELECT count(*) n FROM p_${p}_sessions`).get().n,1);
+ }finally{db.close();}
+ assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status,200);c.child.kill('SIGTERM');assert.equal((await c.exit).code,0);
+ }finally{if(c){c.child.kill();await c.exit;}await rm(dir,{recursive:true,force:true});}
+});
+
+test('a derived analytics failure in one profile does not stop collection or server readiness',{timeout:15000},async()=>{
+ const {StreamStore}=await import('../../dist/packages/core/src/store.js'),{default:Database}=await import('better-sqlite3');
+ const dir=await mkdtemp(join(tmpdir(),'sp-warm-isolation-')),path=join(dir,'data.sqlite'),port=await freePort();let c;
+ try{const at=Date.now()-3600000,s=new StreamStore(path,'gulnaz'),id=s.startSession('owner','closed',at,'platform',at);s.endSession(id,at+60000);s.close();
+ const damaged=new Database(path);damaged.exec('DROP TABLE p_gulnaz_analytics_stream_cache');damaged.close();
+ c=start(dir,port);await c.ready();assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status,200);await new Promise(r=>setTimeout(r,100));c.child.kill('SIGTERM');const result=await c.exit;assert.equal(result.code,0);assert.match(result.stderr,/Historical analytics preparation failed/);
+ }finally{if(c){c.child.kill();await c.exit;}await rm(dir,{recursive:true,force:true});}
 });

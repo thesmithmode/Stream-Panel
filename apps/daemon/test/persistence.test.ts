@@ -153,7 +153,7 @@ test('worker rejects untrusted commands even when a caller bypasses the typed cl
   const [ready]=await once(worker,'message');assert.equal(ready.ready,true);
   for(const method of ['not-an-operation','constructor','__proto__']){
    const reply=once(worker,'message');worker.postMessage({id:1,method,args:[]});
-   assert.deepEqual((await reply)[0],{id:1,error:'UNKNOWN_OPERATION'});
+   assert.deepEqual((await reply)[0],{clientId:'legacy',id:1,error:'UNKNOWN_OPERATION'});
   }
   const reply=once(worker,'message');worker.postMessage({id:2,method:'summary',args:[]});
   const result=(await reply)[0];assert.equal(result.error,undefined);assert.equal(result.result.messages,0);

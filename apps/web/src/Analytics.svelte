@@ -78,7 +78,7 @@
       try {localStorage.setItem(`sp-analytics-${profile}`,JSON.stringify({timezone}));}catch{/* optional local preferences */}
       const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,timezone});
       let result=await api(`analytics?${q}`);
-      while(result.preparing&&id===requestId){buildProgress=`${result.stage==='aggregate'?'Собираем отчёт':'Готовим историю'}: ${Math.round(result.ready/Math.max(1,result.total)*100)}%`;await new Promise(resolve=>setTimeout(resolve,500));if(id!==requestId)return;result=await api(`analytics?${q}`);}
+      while(result.preparing&&id===requestId){buildProgress=`${result.stage==='aggregate'?'Собираем отчёт':'Готовим историю'}: ${Math.round(result.ready/Math.max(1,result.total)*100)}%`;await new Promise(resolve=>setTimeout(resolve,result.stage==='aggregate'?100:250));if(id!==requestId)return;result=await api(`analytics?${q}`);}
       buildProgress='';
       if(id===requestId){data=result;selected=null;streamPage=0;}
     }catch(e){if(id===requestId&&!(e instanceof ConnectionError)){error=(e as Error).message;data=null;selected=null;}}
