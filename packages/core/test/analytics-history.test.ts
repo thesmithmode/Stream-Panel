@@ -133,3 +133,25 @@ test('a global cache budget evicts deterministically and reports larger than the
  assert.equal(s.summary().messages,12);
  }finally{s.close();}
 });
+
+test('independent filters finish when browsers interleave incremental historical report requests',()=>{
+ const s=new StreamStore(':memory:');
+ try{
+  fixture(s,201);
+  const h=new AnalyticsHistory((s as any).db),range={...options,toMs:base+202*86400000};
+  const queries=[{...range,source:'all' as const},{...range,source:'twitch' as const}];
+  const completed=new Map<string,any>();
+  for(let attempt=0;attempt<100&&completed.size<queries.length;attempt++){
+   for(const query of queries){
+    if(completed.has(query.source))continue;
+    const result=h.report(query);
+    if(!result.preparing)completed.set(query.source,result);
+   }
+  }
+  assert.equal(completed.size,2,'neither browser may reset the other browser progress');
+  for(const result of completed.values()){assert.equal(result.summary.streams,201);assert.equal(result.summary.messages,201);}
+  // Completed results and a late correction remain independent of other filters.
+  s.ingest({source:'twitch',accountId:'owner',externalId:'late-interleaved',type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:base+minute,receivedAtMs:range.toMs,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{count:1}});
+  assert.equal(ready(h,queries[0]!).summary.messages,202);
+ }finally{s.close();}
+});

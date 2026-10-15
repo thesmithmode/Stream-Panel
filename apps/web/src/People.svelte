@@ -1,4 +1,5 @@
 <script lang="ts">
+  import {latestRequest} from './latest-request';
   import {platformClass} from './period';
   import DonorLinks from "./DonorLinks.svelte";
   import {
@@ -52,13 +53,13 @@
   let donorCurrency=$state('RUB'),rankRefresh=$state(0);
   const donorCurrencies=$derived([...new Set(tops.flatMap(p=>Object.keys(p.donationTotals)))].sort());
   const rankLabels=$derived(new Map(tops.map(t=>[t.id,sortBy==='donations'?Object.entries(t.donationTotals).map(([currency,amount])=>money(amount,currency)).join(' · ')||`${t.donationCount} донатов`:sortBy==='observed_minutes'?formatDuration(t.observedMinutes):`${t.messageCount} сообщ.`])));
-  let searchResults = $state<Person[]>([]);
+  let pageRows = $state<Person[]>([]), peopleOffset = $state(0), peopleTotal = $state(0), peopleLoading = $state(false);
+  const directory = latestRequest();
+  const availablePeople = $derived([...new Map([...people,...pageRows].map(person=>[person.id,person])).values()]);
   let selectedSession = '';
   const visible = $derived(
     sortBy === "default"
-      ? search.trim()
-        ? searchResults.filter(p=>!p.is_bot)
-        : people.filter(p=>!p.is_bot)
+      ? pageRows
       : tops.map(
           (t) =>
             ({
@@ -75,26 +76,19 @@
             }) as Person,
         ),
   );
+  $effect(()=>{search;period;sortBy;peopleOffset=0;});
   $effect(() => {
-    const term = search.trim();
-    let cancelled = false;
-    if (!term || sortBy !== "default") {
-      searchResults = [];
-      return;
-    }
-    const timer = setTimeout(() => {
-      void api<Person[]>(`persons?search=${encodeURIComponent(term)}&period=${period}`)
-        .then((rows) => {
-          if (!cancelled) searchResults = rows;
-        })
-        .catch((e) => {
-          if (!cancelled) error = e.message;
-        });
-    }, 200);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
+    const term=search.trim(), offset=peopleOffset, currentPeriod=period;void rankRefresh;
+    if(sortBy!=='default'){peopleLoading=false;return;}
+    peopleLoading=true;
+    const timer=setTimeout(()=>{
+      const query=new URLSearchParams({search:term,period:currentPeriod,offset:String(offset),limit:'50'});
+      void directory.run(signal=>api<{items:Person[];total:number}>(`persons/page?${query}`,undefined,signal),result=>{
+        pageRows=result.items;peopleTotal=result.total;peopleLoading=false;
+        if(offset>=result.total&&offset>0)peopleOffset=Math.max(0,Math.floor(Math.max(0,result.total-1)/50)*50);
+      },failure=>{error=failure.message;peopleLoading=false;});
+    },term?200:0);
+    return ()=>{clearTimeout(timer);directory.cancel();};
   });
   $effect(() => {
     const by = sortBy,currency=donorCurrency;void rankRefresh;
@@ -172,7 +166,7 @@
     }
   }
   async function merge() {
-    const other = people.find((p) => p.id === target);
+    const other = availablePeople.find((p) => p.id === target);
     if (!other || !detail) return;
     await api("persons/merge", {
       sourceId: detail.id,
@@ -233,7 +227,8 @@
       />
     </div>
     <div class="people-list">
-    {#if !visible.length}<div class="empty-small">
+    {#if peopleLoading&&sortBy==='default'}<p class="small muted" role="status">Загружаем людей…</p>{/if}
+    {#if !visible.length&&!peopleLoading}<div class="empty-small">
         <Icon name="people" size={36} />
         <p>{search.trim()?'Никого не найдено':'Пока никого нет'}</p>
         <span class="small muted"
@@ -252,6 +247,11 @@
         >{#if sortBy!=='default'}<span class="count">{rankLabels.get(person.id)}</span>{/if}</button
       >{/each}
     </div>
+    {#if sortBy==='default'&&peopleTotal>50}<div class="actions" aria-label="Страницы людей">
+      <button class="outline small" disabled={peopleLoading||peopleOffset===0} onclick={()=>peopleOffset=Math.max(0,peopleOffset-50)}>Предыдущие люди</button>
+      <span class="small muted">{peopleOffset+1}–{Math.min(peopleOffset+50,peopleTotal)} из {peopleTotal}</span>
+      <button class="outline small" disabled={peopleLoading||peopleOffset+50>=peopleTotal} onclick={()=>peopleOffset+=50}>Следующие люди</button>
+    </div>{/if}
   </section>
   <section class="panel person-detail">
     {#if detailLoading}<div class="empty" role="status">Загружаем карточку…</div>{:else if !detail}<div class="empty">
@@ -356,7 +356,7 @@
         <div class="inline">
           <select aria-label="Целевой человек" bind:value={target}
             ><option value="">Выберите группу…</option
-            >{#each people.filter((p) => p.id !== selectedId) as person}<option
+            >{#each availablePeople.filter((p) => p.id !== selectedId) as person}<option
                 value={person.id}
                 >{person.display_name}{candidates.includes(person.id)
                   ? " · совпадает имя"
@@ -394,7 +394,7 @@
       {:else if detailTab==='donations'}
        <button class="outline small" aria-expanded={showDonorLinks} onclick={()=>showDonorLinks=!showDonorLinks}>{showDonorLinks?'Скрыть привязку':'Привязать донаты по нику'}</button>
        {#if showDonorLinks}<DonorLinks personId={detail.id} onChange={()=>refreshPerson(detail.id)} />{/if}
-       <PersonDonations personId={detail.id} revision={detail.revision} {people} onChange={()=>refreshPerson(detail.id)} />
+       <PersonDonations personId={detail.id} revision={detail.revision} people={availablePeople} onChange={()=>refreshPerson(detail.id)} />
       {:else if detailTab==='notes'}
        <PersonMetadata personId={detail.id} onChange={()=>refreshPerson(detail.id)} />
        <PersonNotes personId={detail.id} />

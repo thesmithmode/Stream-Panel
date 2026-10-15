@@ -12,10 +12,6 @@ import {
   isExcludedBot,
   normalizeBotLogin,
 } from "../src/bots.js";
-import {
-  StreamerBotStubAdapter,
-  mapStreamerBotTwitchChatMessage,
-} from "../src/streamerbot.js";
 import { presenceMinutes, pollCoveredMinutes } from "../src/presence.js";
 import { collectChatters } from "../src/chatters.js";
 import { StreamStore } from "../src/store.js";
@@ -868,84 +864,6 @@ test("summary uses SQL aggregates and excludes well-known bots from message coun
   }
 });
 
-test("Streamer.bot stub maps Twitch.ChatMessage and dedupes against direct ingest", async () => {
-  const store = new StreamStore(":memory:");
-  try {
-    const adapter = new StreamerBotStubAdapter("channel-1");
-    const events: import("../src/domain.js").EventInput[] = [];
-    adapter.subscribe((event) => {
-      events.push(event);
-      store.ingest(event);
-    });
-    await adapter.start();
-    await adapter.inject({
-      messageId: "message-1",
-      message: "from sb",
-      user: { id: "user-1", displayName: "Vasya" },
-      timeStamp: "1970-01-01T00:01:00.000Z",
-    });
-    assert.equal(events.length, 1);
-    assert.equal(events[0]!.transport, "streamerbot");
-    assert.equal(store.ingest(base).inserted, false);
-    assert.equal(
-      mapStreamerBotTwitchChatMessage({}, "channel-1", 1),
-      null,
-    );
-    await adapter.stop();
-  } finally {
-    store.close();
-  }
-});
-
-
-test("Streamer.bot stub with client wires Twitch.ChatMessage and ignores bad payloads", async () => {
-  const seen: import("../src/domain.js").EventInput[] = [];
-  let connected = false;
-  let disconnected = false;
-  const client = {
-    on(
-      _event: "Twitch.ChatMessage",
-      handler: (data: import("../src/streamerbot.js").StreamerBotTwitchChatMessage) => void,
-    ) {
-      Promise.resolve().then(() => {
-        handler({});
-        handler({
-          messageId: "live-1",
-          message: { text: "hi" },
-          user: { id: "9", displayName: "X" },
-          timeStamp: Date.now(),
-        });
-      });
-    },
-    async connect() {
-      connected = true;
-    },
-    async disconnect() {
-      disconnected = true;
-    },
-  };
-  const adapter = new StreamerBotStubAdapter("channel-1", client);
-  adapter.subscribe((event) => {
-    seen.push(event);
-  });
-  await adapter.start();
-  await adapter.start(); // idempotent
-  await new Promise((r) => setTimeout(r, 10));
-  assert.equal(connected, true);
-  assert.equal(seen.length, 1);
-  assert.equal(seen[0]!.payload.text, "hi");
-  await adapter.stop();
-  assert.equal(disconnected, true);
-  assert.equal(
-    mapStreamerBotTwitchChatMessage(
-      { messageId: "t", userId: "1", message: "plain", timeStamp: "not-a-date" },
-      "channel-1",
-      1,
-    )?.timeQuality,
-    "unknown",
-  );
-});
-
 test("personStats aggregates donations, messages, observed minutes and cross-session averages", () => {
   const store = new StreamStore(":memory:");
   try {
@@ -1318,4 +1236,8 @@ test("insights empty without sessions; sessionCoverage ratio null on zero window
   } finally {
     store.close();
   }
+});
+
+ test('historical Streamer.bot observations still deduplicate against direct Twitch events',()=>{
+ const store=new StreamStore(':memory:');try{assert.equal(store.ingest({...base,transport:'streamerbot'}).inserted,true);assert.equal(store.ingest(base).inserted,false);assert.equal(store.eventCount(),1);}finally{store.close();}
 });

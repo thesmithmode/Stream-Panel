@@ -14,7 +14,7 @@ test('donor nickname HTTP flow crosses the worker boundary and preserves past, f
   const auth=await app.app.inject({method:'POST',url:'/api/v1/bootstrap',headers,payload:{key:app.bootstrap().split('key=')[1]}});
   assert.equal(auth.statusCode,200,auth.body);
   const signed={...headers,cookie:String(auth.headers['set-cookie']).split(';')[0]!, 'x-csrf-token':auth.json().csrf};
-  const person=await app.db.call<{id:string;revision:number}>('createPerson','Target');
+  const person=await (app.db.call('createPerson','Target') as Promise<{id:string;revision:number}>);
   const at=Date.now(),tip=(externalId:string):EventInput=>({source:'donationalerts',accountId:'da',externalId,type:'donation',actor:{externalId:'name:donor',displayName:'Donor'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'rest',payload:{amountMinor:'100',currency:'RUB'}});
   await app.db.call('ingest',tip('old'));
   const names=await app.app.inject({url:'/api/v1/donor-nicknames',headers:signed});

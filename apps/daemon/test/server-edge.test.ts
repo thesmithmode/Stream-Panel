@@ -51,7 +51,7 @@ test("person notes and donation reassignment preserve revisions and expose no im
   try {
     const now = Date.now();
     await f.a.db.call("youtubeMessages", "channel", "chat", [{ id: "author-event", snippet: { type: "textMessageEvent", publishedAt: new Date(now).toISOString() }, authorDetails: { channelId: "author", displayName: "Author" } }]);
-    const person = await f.a.db.call<any>("person", "youtube:author");
+    const person = await (f.a.db.call("person", "youtube:author") as Promise<any>);
     const post = (url: string, payload: Record<string, unknown>) => f.a.app.inject({ method: "POST", url, headers: f.headers, payload });
     const note = await post(`/api/v1/persons/${person.id}/notes`, { body: "Initial context" });
     assert.equal(note.statusCode, 200, note.body);
@@ -62,7 +62,7 @@ test("person notes and donation reassignment preserve revisions and expose no im
     assert.equal((await post(`/api/v1/persons/${person.id}/notes/${noteId}/delete`, { revision: 1 })).statusCode, 200);
     assert.deepEqual((await f.a.app.inject({ url: `/api/v1/persons/${person.id}/notes`, headers: f.headers })).json(), []);
 
-    const second = await f.a.db.call<any>("createPerson", "Separate payee");
+    const second = await (f.a.db.call("createPerson", "Separate payee") as Promise<any>);
     const donation = { personId: person.id, amount: "4.25", currency: "RUB", occurredAtMs: now, message: "manual", sourceName: "cash" };
     const made = await post("/api/v1/donations", donation);
     assert.equal(made.statusCode, 200, made.body);
@@ -186,13 +186,13 @@ test('single-stream analytics derives its bounds server-side and never includes 
  const f=await fixture();
  try{
   const base=Math.floor((Date.now()-3600000)/60000)*60000;
-  const first=await f.a.db.call<string>('startSession','a','scoped-a',base,'platform',base);
-  const other=await f.a.db.call<string>('startSession','b','scoped-b',base,'platform',base);
+  const first=await (f.a.db.call('startSession','a','scoped-a',base,'platform',base) as Promise<string>);
+  const other=await (f.a.db.call('startSession','b','scoped-b',base,'platform',base) as Promise<string>);
   for(const [id,account,user] of [[first,'a','silent'],[other,'b','other']] as const){
    await f.a.db.call('recordPoll',id,account,{startedAtMs:base,completedAtMs:base+120000,status:'complete',userIds:[user]});
    await f.a.db.call('endSession',id,base+600000,'observed');
   }
-  for(let i=0;i<101;i++){const id=await f.a.db.call<string>('startSession',`later-${i}`,`later-${i}`,base+1200000+i,'platform',base+1200000+i);await f.a.db.call('endSession',id,base+1201000+i,'observed');}
+  for(let i=0;i<101;i++){const id=await (f.a.db.call('startSession',`later-${i}`,`later-${i}`,base+1200000+i,'platform',base+1200000+i) as Promise<string>);await f.a.db.call('endSession',id,base+1201000+i,'observed');}
   const r=await f.a.app.inject({url:`/api/v1/analytics?session=${first}&from=0&to=1`,headers:f.headers});
   assert.equal(r.statusCode,200,r.body);
   assert.equal(r.json().summary.streams,1);

@@ -1,4 +1,4 @@
-import {type StoreRequest,isStoreMethod,storeOperations} from "./store-contract.js";
+import {type StoreRequest,type StoreResult,isStoreMethod,storeOperations} from "./store-contract.js";
 import {readCacheKey} from "./read-cache-key.js";
 import {StorageGuard} from "./storage-guard.js";
 import {ReadCache,cachedReads,uncachedReads} from "./read-cache.js";
@@ -13,6 +13,8 @@ export class StoreClient {
   private storage:StorageGuard;
   setStorageCleanup(cleanup:()=>Promise<void>){this.storage.setCleanup(cleanup);}
   storageStatus(){return this.storage.status();}
+  private readonly timings = new Map<string, {calls:number;maxQueueMs:number;maxExecutionMs:number}>();
+  queueStatus(){return {pending:this.pending.size,operations:Object.fromEntries(this.timings)};}
   private sequence = 0;
   private dead = false;
   private stopping=false;
@@ -21,14 +23,14 @@ export class StoreClient {
   private fatal(error:Error){const first=!this.dead;this.dead=true;this.cache.invalidate();if(first&&!this.stopping)this.onFatal?.(error);}
   private pending = new Map<
     number,
-    { resolve: (value: unknown) => void; reject: (error: Error) => void }
+    { resolve: (value: unknown, executionMs?:number) => void; reject: (error: Error) => void }
   >();
   readonly ready: Promise<void>;
-  constructor(path: string, profile?: string) {
+  constructor(path: string, profile?: string, private readonly requestTimeoutMs=60000) {
     this.storage=new StorageGuard(path);
     this.lease=acquireStoreWorker(path,profile);this.worker=this.lease.worker;
     this.ready = new Promise((resolve, reject) => {
-      const onMessage=(message:{clientId?:string;ready?:boolean;error?:string;id:number;result?:unknown}) => {
+      const onMessage=(message:{clientId?:string;ready?:boolean;error?:string;id:number;result?:unknown;executionMs?:number}) => {
         if(message.clientId!==this.lease.clientId)return;
         if (message.ready) {
           if(message.error)reject(new Error(message.error));else resolve();
@@ -38,7 +40,7 @@ export class StoreClient {
         if (!request) return;
         this.pending.delete(message.id);
         if (message.error) request.reject(new Error(message.error));
-        else request.resolve(message.result);
+        else request.resolve(message.result,message.executionMs);
       };
       const onError=(error:Error) => {
         this.fatal(error);
@@ -58,7 +60,8 @@ export class StoreClient {
       if(!this.lease.first)this.worker.postMessage({clientId:this.lease.clientId,open:true,profile});
     });
   }
-  async call<T = unknown>(...request:StoreRequest): Promise<T> {
+  async call<Request extends StoreRequest>(...request:Request): Promise<StoreResult<Request[0]>> {
+    type T = StoreResult<Request[0]>;
     const [method,...args]=request;
     if(!isStoreMethod(method))throw new Error("UNKNOWN_OPERATION");
     await this.ready;
@@ -77,12 +80,31 @@ export class StoreClient {
     if (this.pending.size >= 10_000) throw new Error("QUEUE_OVERFLOW");
     return new Promise((resolve, reject) => {
       const id = ++this.sequence;
-      this.pending.set(id, { resolve: (value) => resolve(value as T), reject });
+      const started=performance.now();
+      // A stuck synchronous SQLite operation cannot be cancelled individually.
+      // Fail the shared worker and use the existing service restart/recovery path.
+      const timer=setTimeout(()=>{
+        const error=new Error('DB_WORKER_TIMEOUT');
+        this.fatal(error);
+        void this.worker.terminate();
+      }, method==='backup'?Math.max(this.requestTimeoutMs,600000):this.requestTimeoutMs);
+      this.pending.set(id, {
+        resolve:(value,executionMs=0)=>{
+          clearTimeout(timer);
+          const stats=this.timings.get(method)??{calls:0,maxQueueMs:0,maxExecutionMs:0};
+          stats.calls++;
+          stats.maxQueueMs=Math.max(stats.maxQueueMs,Math.max(0,performance.now()-started-executionMs));
+          stats.maxExecutionMs=Math.max(stats.maxExecutionMs,executionMs);
+          this.timings.set(method,stats);
+          resolve(value as T);
+        },
+        reject:error=>{clearTimeout(timer);reject(error);},
+      });
       try {
         this.worker.postMessage({clientId:this.lease.clientId,id,method,args});
       } catch (error) {
+        this.pending.get(id)!.reject(error instanceof Error?error:new Error(String(error)));
         this.pending.delete(id);
-        reject(error);
       }
     });
   }

@@ -1,7 +1,8 @@
 import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
-import type { Configuration, Tokens } from "./config.js";
-import type { StoreClient } from "./db.js";
-import { object, string } from "./twitch.js";
+import type { ConfigurationPort, Tokens } from "./config.js";
+import type {StorePort} from './store-contract.js';
+type YoutubeStore = StorePort<'followingSnapshot' | 'gap' | 'observePlatformStream' | 'platformMissing' | 'youtubeData' | 'youtubeMessages' | 'youtubeQuota' | 'youtubeSnapshot' | 'youtubeViewers'>;
+import { object, string } from "./provider-values.js";
 const scopes = ["https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/yt-analytics.readonly"];
 const videoParts='snippet,statistics,contentDetails,liveStreamingDetails,status,recordingDetails,topicDetails,localizations,paidProductPlacementDetails';
 export class YouTubeConnection {
@@ -11,7 +12,7 @@ export class YouTubeConnection {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running: Promise<void> | undefined;
   private requests = new Set<AbortController>();
-  constructor(private config: Configuration, private db: StoreClient, private redirect: string,
+  constructor(private config: ConfigurationPort, private db: YoutubeStore, private redirect: string,
     private profile: string, private request: typeof fetch = fetch, private now = Date.now) {}
   private async json(url: string, init: RequestInit = {}) {
     const controller = new AbortController(); this.requests.add(controller);
@@ -110,7 +111,7 @@ export class YouTubeConnection {
       tokens.access = string(data.access_token); tokens.refresh = string(data.refresh_token) || tokens.refresh; tokens.expiresAt = this.now() + Number(data.expires_in) * 1000;
       await this.config.save();
     }
-    const previous = await this.db.call<any>("youtubeData", tokens.userId);
+    const previous = await this.db.call("youtubeData", tokens.userId);
     if (!valid()) return 300000;
     let channelSnapshot: Record<string, unknown> | undefined;
     if (this.now() - (previous.snapshots.channel?.updatedAt ?? 0) >= 21600000) {
@@ -162,7 +163,7 @@ export class YouTubeConnection {
       const startedAt = Date.parse(actualStartTime);
       if (!Number.isSafeInteger(startedAt) || startedAt < 0 || startedAt > observedAt) continue;
       const url = `https://www.youtube.com/watch?v=${encodeURIComponent(broadcast.id)}`;
-      const sessionId = await this.db.call<string | null>("observePlatformStream", "youtube", tokens.userId, broadcast.id, startedAt, observedAt, url, string(broadcast.snippet?.title), videoIds);
+      const sessionId = await this.db.call("observePlatformStream", "youtube", tokens.userId, broadcast.id, startedAt, observedAt, url, string(broadcast.snippet?.title), videoIds);
       if (sessionId) logicalViewers.set(sessionId, [...(logicalViewers.get(sessionId) ?? []), broadcast.id]);
       if (!valid()) return 300000;
     }
@@ -219,7 +220,7 @@ export class YouTubeConnection {
     }catch{if(valid())await this.db.call('gap','youtube','archived_video_metadata_unavailable',at,at);}
   }
   private async collectSubscribers(tokens:Tokens,valid:()=>boolean,at:number){
-    const previous=await this.db.call<any>('youtubeData',tokens.userId);if(!valid()||at-(previous.snapshots["cursor:followers"]?.updatedAt??-Infinity)<15*60000)return;
+    const previous=await this.db.call('youtubeData',tokens.userId);if(!valid()||at-(previous.snapshots["cursor:followers"]?.updatedAt??-Infinity)<15*60000)return;
     try{
       const channelStats=object(object(previous.snapshots.channel?.data??{}).statistics??{}),count=Number(channelStats.subscriberCount);
       const subscriberTotal=channelStats.hiddenSubscriberCount===true||!Number.isSafeInteger(count)||count<0?null:count;

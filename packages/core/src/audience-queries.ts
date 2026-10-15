@@ -10,11 +10,19 @@ import {presenceMinutes,pollCoveredMinutes,type PresencePoll} from "./presence.j
 export class AudienceQueries {
   constructor(private readonly db:Database.Database) {}
 
-  persons(
-    search = "",
-    excludedBotLogins: readonly string[] = [],
-    fromMs=0,
-  ): Record<string, unknown>[] {
+  persons(search = "", excludedBotLogins: readonly string[] = [], fromMs=0): Record<string, unknown>[] {
+    return this.personRows(search, excludedBotLogins, fromMs, 0, 500, false).map(({_total, ...person}) => person);
+  }
+
+  personsPage(search = "", excludedBotLogins: readonly string[] = [], fromMs=0, offset=0, limit=50) {
+    if (!Number.isSafeInteger(offset) || offset<0 || !Number.isSafeInteger(limit) || limit<1 || limit>100)
+      throw new Error('INVALID_PERSON_PAGE');
+    const rows = this.personRows(search, excludedBotLogins, fromMs, offset, limit, true);
+    const total = Number(rows[0]?._total ?? (offset ? this.personRows(search, excludedBotLogins, fromMs, 0, 1, true)[0]?._total : 0) ?? 0);
+    return {items: rows.map(({_total, ...person}) => person), total, offset, limit};
+  }
+
+  private personRows(search: string, excludedBotLogins: readonly string[], fromMs: number, offset: number, limit: number, hideBots: boolean): Record<string, unknown>[] {
     if(!Number.isSafeInteger(fromMs)||fromMs<0)throw new Error("INVALID_PERIOD");
     const excluded = this.analyticsExclusions(excludedBotLogins);
     const botJson = JSON.stringify([...excluded]);
@@ -23,7 +31,7 @@ export class AudienceQueries {
     // Aggregate counts via JOIN instead of correlated per-row event scans.
     return this.db
       .prepare(
-        `SELECT p.id, p.display_name, p.revision,
+        `WITH people AS (SELECT p.id, p.display_name, p.revision,
           coalesce(ec.event_count, 0) + (SELECT count(*) FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE y.person_id=p.id AND m.published_at_ms>=${fromMs}) AS event_count,
           (SELECT group_concat(DISTINCT source) FROM (SELECT source FROM identities WHERE person_id=p.id UNION ALL SELECT 'youtube' AS source FROM youtube_identities WHERE person_id=p.id)) AS sources,
           CASE WHEN EXISTS(
@@ -47,10 +55,10 @@ export class AudienceQueries {
             ) OR EXISTS(SELECT 1 FROM youtube_identities y JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND instr(a.match_key,?)>0)
           )
           AND (${fromMs}=0 OR coalesce(ec.event_count,0)>0 OR EXISTS(SELECT 1 FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE y.person_id=p.id AND m.published_at_ms>=${fromMs}) OR EXISTS(SELECT 1 FROM presence_members m JOIN presence_polls poll ON poll.id=m.poll_id JOIN identities i ON i.id=m.identity_id WHERE i.person_id=p.id AND poll.status='complete' AND poll.completed_at_ms>=${fromMs}))
-        ORDER BY event_count DESC, p.display_name
-        LIMIT 500`,
+        ) SELECT *, count(*) OVER() AS _total FROM people WHERE (?=0 OR is_bot=0)
+        ORDER BY event_count DESC, display_name, id LIMIT ? OFFSET ?`,
       )
-      .all(botJson, botJson, botJson, term, term, key, key) as Record<string, unknown>[];
+      .all(botJson, botJson, botJson, term, term, key, key, Number(hideBots), limit, offset) as Record<string, unknown>[];
   }
 
   person(id: string,includeEvents=true): Record<string, unknown> {

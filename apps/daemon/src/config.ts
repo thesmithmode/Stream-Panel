@@ -3,7 +3,6 @@ import { clampChattersPollSeconds } from "../../../packages/core/src/presence.js
 import { normalizeBotLogin } from "../../../packages/core/src/bots.js";
 import { mkdir, readFile, rename, open, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
 export interface Tokens {
   access: string;
   refresh: string;
@@ -44,12 +43,7 @@ const defaults: Config = {
   chattersPollSeconds: 60,
   excludedBotLogins: ["jeetbot", "streemelements", "streamelements"],
 };
-export function defaultDataDir(): string {
-  return (
-    process.env.STREAM_PANEL_DATA_DIR ??
-    join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "stream-panel")
-  );
-}
+export type ConfigurationPort = Pick<Configuration, 'value' | 'save'>;
 export class Configuration {
   value: Config = { ...defaults, excludedBotLogins: [...defaults.excludedBotLogins] };
   private saving: Promise<void> = Promise.resolve();

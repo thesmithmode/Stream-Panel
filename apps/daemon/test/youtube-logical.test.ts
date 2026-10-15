@@ -32,10 +32,10 @@ test('YouTube discovery coalesces concurrent streams and closes only the absent 
     await db.call('youtubeSnapshot', 'channel', 'channel', { id: 'channel' }, now);
     await db.call('youtubeSnapshot', 'channel', 'report', {}, now);
     await yt.collectOnce();
-    const initial = await db.call<any[]>('sessions');
+    const initial = await (db.call('sessions') as Promise<any[]>);
     assert.equal(initial.length, 1);
     const sessionId = initial[0]!.id;
-    let links = await db.call<any[]>('platformStreams', sessionId);
+    let links = await (db.call('platformStreams', sessionId) as Promise<any[]>);
     assert.deepEqual(links.map(link => link.external_id), [startA, startB]);
     assert.ok(links.every(link => link.url === `https://www.youtube.com/watch?v=${link.external_id}`));
     assert.ok(links.every(link => link.started_at_ms === base));
@@ -51,12 +51,12 @@ test('YouTube discovery coalesces concurrent streams and closes only the absent 
     now += 60000;
     await yt.collectOnce();
 
-    links = await db.call<any[]>('platformStreams', sessionId);
+    links = await (db.call('platformStreams', sessionId) as Promise<any[]>);
     const absent = links.find(link => link.external_id === startA)!;
     const present = links.find(link => link.external_id === startB)!;
     assert.equal(absent.ended_at_ms, base + 120000);
     assert.equal(present.ended_at_ms, null);
-    assert.equal((await db.call<any[]>('sessions')).find(session => session.id === sessionId)?.ended_at_ms, null);
+    assert.equal((await (db.call('sessions') as Promise<any[]>)).find(session => session.id === sessionId)?.ended_at_ms, null);
   } finally {
     await yt.stop();
     await db.stop();
@@ -85,7 +85,7 @@ test('unknown provider start times retain viewer/chat collection without inventi
     await db.call('youtubeSnapshot', 'channel', 'channel', { id: 'channel' }, now);
     await db.call('youtubeSnapshot', 'channel', 'report', {}, now);
     await yt.collectOnce();
-    assert.equal((await db.call<any[]>('sessions')).length, 0);
+    assert.equal((await (db.call('sessions') as Promise<any[]>)).length, 0);
     assert.ok(writes.some(([method, at, viewers]) => method === 'youtubeViewers' && at === now && viewers === 9));
     assert.ok(writes.some(([method, , chat]) => method === 'youtubeMessages' && chat === 'chat'));
     assert.ok(writes.some(([method, platform, account, ids]) => method === 'platformMissing' && platform === 'youtube' && account === 'channel' && Array.isArray(ids) && ids.includes(startA)));
@@ -120,9 +120,9 @@ test('malformed or capped broadcast discovery fails before snapshots or missing 
     await db.call('youtubeSnapshot', 'channel', 'channel', { id: 'channel' }, now);
     await db.call('youtubeSnapshot', 'channel', 'report', {}, now);
     await yt.collectOnce();
-    const sessionId = (await db.call<any[]>('sessions'))[0]!.id;
-    const snapshotBefore = await db.call<any>('youtubeData', 'channel');
-    const linkBefore = (await db.call<any[]>('platformStreams', sessionId))[0]!;
+    const sessionId = (await (db.call('sessions') as Promise<any[]>))[0]!.id;
+    const snapshotBefore = await (db.call('youtubeData', 'channel') as Promise<any>);
+    const linkBefore = (await (db.call('platformStreams', sessionId) as Promise<any[]>))[0]!;
 
     mode = 'missing';
     await assert.rejects(yt.collectOnce(), /YOUTUBE_INVALID_BROADCASTS/);
@@ -130,8 +130,8 @@ test('malformed or capped broadcast discovery fails before snapshots or missing 
     await assert.rejects(yt.collectOnce(), /YOUTUBE_INVALID_BROADCASTS/);
     mode = 'pagination-cap'; page = 0;
     await assert.rejects(yt.collectOnce(), /YOUTUBE_BROADCAST_PAGINATION_LIMIT/);
-    const snapshotAfter = await db.call<any>('youtubeData', 'channel');
-    const linkAfter = (await db.call<any[]>('platformStreams', sessionId))[0]!;
+    const snapshotAfter = await (db.call('youtubeData', 'channel') as Promise<any>);
+    const linkAfter = (await (db.call('platformStreams', sessionId) as Promise<any[]>))[0]!;
     assert.deepEqual(snapshotAfter.snapshots.broadcasts, snapshotBefore.snapshots.broadcasts);
     assert.equal(linkAfter.offline_checks, linkBefore.offline_checks);
     assert.equal(linkAfter.ended_at_ms, null);
@@ -162,9 +162,9 @@ test('every confirmed concurrent YouTube broadcast collects its chat and durable
  try{
   await db.ready;await db.call('youtubeSnapshot','channel','channel',{id:'channel'},now);await db.call('youtubeSnapshot','channel','report',{},now);
   assert.equal(await yt.collectOnce(),60000);assert.deepEqual(requested,ids.map(id=>`chat-${id}`));
-  const data=await db.call<any>('youtubeData','channel');assert.equal(data.messages.length,4);
+  const data=await (db.call('youtubeData','channel') as Promise<any>);assert.equal(data.messages.length,4);
   for(const id of ids)assert.equal(data.snapshots[`cursor:chat-${id}`].data,`cursor-chat-${id}`);
-  assert.equal((await db.call<any[]>('persons')).length,4);
-  assert.equal((await db.call<any[]>('sessions')).length,1);
+  assert.equal((await (db.call('persons') as Promise<any[]>)).length,4);
+  assert.equal((await (db.call('sessions') as Promise<any[]>)).length,1);
  }finally{await yt.stop();await db.stop();await rm(dir,{recursive:true,force:true});}
 });

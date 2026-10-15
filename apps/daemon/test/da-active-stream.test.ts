@@ -31,24 +31,24 @@ test('DA automatic collection retains older donations and keeps checking after t
   await connection.start(); await setImmediate();
 
   await connection.scanHistory();
-  const sessionId=await db.call<string>('observePlatformStream','youtube','channel','video',now-60000,now,null,'Live');
+  const sessionId=await (db.call('observePlatformStream','youtube','channel','video',now-60000,now,null,'Live') as Promise<string>);
   await connection.scanHistory(true);
-  let events=await db.call<any[]>('events');
+  let events=await (db.call('events') as Promise<any[]>);
   assert.deepEqual(events.map(event=>event.external_id).sort(),['1','2']);
   await connection.scanHistory(true);
-  assert.equal((await db.call<any>('summary')).donations,2);
+  assert.equal((await (db.call('summary') as Promise<any>)).donations,2);
   await db.call('platformMissing','youtube','channel',[],now+60000);
   await db.call('platformMissing','youtube','channel',[],now+120000);
   assert.equal(await db.call('activeLogicalStream'),null);
   rows.push(donation(4,stamp(now-30000)));
   const before=requests; await connection.scanHistory(true); assert.equal(requests,before+1);
-  assert.equal((await db.call<any>('summary',sessionId)).donations,2);
+  assert.equal((await (db.call('summary',sessionId) as Promise<any>)).donations,2);
   config.value.daUtcOffsetMinutes=null;
   await connection.scanHistory();
-  events=await db.call<any[]>('events');
+  events=await (db.call('events') as Promise<any[]>);
   assert.equal(events.length,4);
   assert.equal(events.find(event=>event.external_id==='3').occurred_at_ms,Math.floor(now/1000)*1000);
-  assert.equal((await db.call<any>('summary',sessionId)).donations,3);
+  assert.equal((await (db.call('summary',sessionId) as Promise<any>)).donations,3);
  } finally {await connection.stop();await db.stop();await rm(dir,{recursive:true,force:true});}
 });
 
@@ -65,12 +65,12 @@ test('DA realtime retains older and offline donations without assigning them to 
   socket.emit('message',JSON.stringify(donation(10,now-120000)));
   socket.emit('message',JSON.stringify(donation(11,now)));
   socket.emit('message',JSON.stringify(donation(11,now)));
-  for(let n=0;n<100 && !(await db.call<any[]>('events')).some(e=>e.external_id==='11');n++)await delay(10);
-  assert.deepEqual((await db.call<any[]>('events')).map(e=>e.external_id).sort(),['10','11']);
-  const current=(await db.call<any>('activeLogicalStream')).id;assert.equal((await db.call<any>('summary',current)).donations,1);
+  for(let n=0;n<100 && !(await (db.call('events') as Promise<any[]>)).some(e=>e.external_id==='11');n++)await delay(10);
+  assert.deepEqual((await (db.call('events') as Promise<any[]>)).map(e=>e.external_id).sort(),['10','11']);
+  const current=(await (db.call('activeLogicalStream') as Promise<any>)).id;assert.equal((await (db.call('summary',current) as Promise<any>)).donations,1);
   await db.call('endSession',current,now+60000);socket.emit('message',JSON.stringify(donation(12,now+120000)));
-  for(let n=0;n<100&&!(await db.call<any[]>('events')).some(e=>e.external_id==='12');n++)await delay(10);
-  assert.equal((await db.call<any[]>('events')).some(e=>e.external_id==='12'),true);assert.equal((await db.call<any>('summary',current)).donations,1);
+  for(let n=0;n<100&&!(await (db.call('events') as Promise<any[]>)).some(e=>e.external_id==='12');n++)await delay(10);
+  assert.equal((await (db.call('events') as Promise<any[]>)).some(e=>e.external_id==='12'),true);assert.equal((await (db.call('summary',current) as Promise<any>)).donations,1);
  }finally{await connection.stop();await db.stop();await rm(dir,{recursive:true,force:true});}
 });
 
@@ -87,8 +87,8 @@ test('explicit DA history import continues past three known pages and discovers 
  };
  const connection=new DonationAlertsConnection(config,db,request,(()=>socket) as SocketFactory);
  try{
-  await connection.start();await connection.scanHistory();pages.length=0;await connection.scanHistory();assert.deepEqual(pages,[1,2,3,4]);assert.equal((await db.call<any>('summary')).donations,3);
-  late=true;pages.length=0;await connection.scanHistory();assert.deepEqual(pages,[1,2,3,4]);assert.equal((await db.call<any>('summary')).donations,4);
-  await connection.scanHistory();assert.equal((await db.call<any>('summary')).donations,4);
+  await connection.start();await connection.scanHistory();pages.length=0;await connection.scanHistory();assert.deepEqual(pages,[1,2,3,4]);assert.equal((await (db.call('summary') as Promise<any>)).donations,3);
+  late=true;pages.length=0;await connection.scanHistory();assert.deepEqual(pages,[1,2,3,4]);assert.equal((await (db.call('summary') as Promise<any>)).donations,4);
+  await connection.scanHistory();assert.equal((await (db.call('summary') as Promise<any>)).donations,4);
  }finally{await connection.stop();await db.stop();await rm(dir,{recursive:true,force:true});}
 });

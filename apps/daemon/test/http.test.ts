@@ -61,7 +61,7 @@ test("mutation API rejects extra properties and number/boolean coercion before s
       });
       assert.equal(r.statusCode, 400, `${url}: ${r.body}`);
     }
-    assert.equal((await f.a.db.call<any[]>("sessions")).length, 0);
+    assert.equal((await (f.a.db.call("sessions") as Promise<any[]>)).length, 0);
     assert.equal(f.a.configuration.value.daAccessToken, "");
   } finally {
     await f.close();
@@ -104,14 +104,14 @@ test("HTTP contracts: missing entities, conflicts, bounded grids, callback rejec
       (await post(`/api/v1/sessions/${session}/stop`)).statusCode,
       200,
     );
-    const id = await f.a.db.call<string>(
+    const id = await (f.a.db.call(
       "startSession",
       "owner",
       "stream",
       Date.now(),
       "platform",
       Date.now(),
-    );
+    ) as Promise<string>);
     assert.equal(
       (await post(`/api/v1/sessions/${id}/stop`)).json().error,
       "PLATFORM_SESSION_MANAGED_AUTOMATICALLY",
@@ -234,21 +234,21 @@ test("person stats, tops and insights endpoints return shaped aggregates", async
   const f = await fixture();
   try {
     const get = (url: string) => f.a.app.inject({ url, headers: f.headers });
-    const personId = await f.a.db.call<string>(
+    const personId = await (f.a.db.call(
       "ensureOwnerIdentity",
       "owner",
       "owner",
       "Owner",
       Date.now(),
-    );
-    const session = await f.a.db.call<string>(
+    ) as Promise<string>);
+    const session = await (f.a.db.call(
       "startSession",
       "owner",
       "http-analytics",
       Date.now() - 120_000,
       "platform",
       Date.now() - 120_000,
-    );
+    ) as Promise<string>);
     await f.a.db.call("ingest", {
       source: "twitch",
       accountId: "owner",
@@ -315,20 +315,20 @@ test("person stats, tops and insights endpoints return shaped aggregates", async
 test("manual stream deletion requires authentication, CSRF and strict payload, and preserves automatic streams",async()=>{
  const f=await fixture();
  try{
-  const now=Date.now(),manual=await f.a.db.call<string>('startSession','local','mistake',now,'manual',now);
+  const now=Date.now(),manual=await (f.a.db.call('startSession','local','mistake',now,'manual',now) as Promise<string>);
   const url=`/api/v1/sessions/${manual}/delete`;
   const inject=(headers:Record<string,string>,payload:Record<string,unknown>={})=>f.a.app.inject({method:'POST',url,headers,payload});
   assert.equal((await inject({host:f.headers.host})).statusCode,401);
   assert.equal((await inject({...f.headers,'x-csrf-token':'wrong'})).statusCode,403);
   assert.equal((await inject(f.headers,{unexpected:true})).statusCode,400);
-  assert.equal((await f.a.db.call<any[]>('sessions')).length,1);
+  assert.equal((await (f.a.db.call('sessions') as Promise<any[]>)).length,1);
   assert.equal((await inject(f.headers)).statusCode,200);
   assert.equal((await inject(f.headers)).statusCode,200);
-  assert.equal((await f.a.db.call<any[]>('sessions')).length,0);
-  const real=await f.a.db.call<string>('observePlatformStream','twitch','channel','real',now,now,null,'Actual stream');
+  assert.equal((await (f.a.db.call('sessions') as Promise<any[]>)).length,0);
+  const real=await (f.a.db.call('observePlatformStream','twitch','channel','real',now,now,null,'Actual stream') as Promise<string>);
   const denied=await f.a.app.inject({method:'POST',url:`/api/v1/sessions/${real}/delete`,headers:f.headers,payload:{}});
   assert.equal(denied.statusCode,400);assert.equal(denied.json().error,'PLATFORM_SESSION_MANAGED_AUTOMATICALLY');
-  assert.equal((await f.a.db.call<any[]>('sessions')).length,1);
+  assert.equal((await (f.a.db.call('sessions') as Promise<any[]>)).length,1);
  }finally{await f.close();}
 });
 
@@ -336,7 +336,7 @@ test('split history and guarded undo are available only through protected API',a
  const f=await fixture();
  try{
   const now=Date.now();await f.a.db.call('youtubeMessages','channel','chat',[{id:'message',snippet:{type:'textMessageEvent',publishedAt:new Date(now).toISOString()},authorDetails:{channelId:'author',displayName:'Author'}}]);
-  const person=await f.a.db.call<any>('person','youtube:author'),identity=person.identities[0];
+  const person=await (f.a.db.call('person','youtube:author') as Promise<any>),identity=person.identities[0];
   const split=await f.a.app.inject({method:'POST',url:'/api/v1/persons/split',headers:f.headers,payload:{identityIds:[identity.id],name:'Separate',revision:person.revision}});assert.equal(split.statusCode,200);
   const audit=await f.a.app.inject({url:'/api/v1/splits',headers:f.headers});assert.equal(audit.statusCode,200);const id=audit.json()[0].id;
   const url=`/api/v1/splits/${id}/undo`;
@@ -344,7 +344,7 @@ test('split history and guarded undo are available only through protected API',a
   assert.equal((await f.a.app.inject({method:'POST',url,headers:{...f.headers,'x-csrf-token':'wrong'},payload:{}})).statusCode,403);
   assert.equal((await f.a.app.inject({method:'POST',url,headers:f.headers,payload:{unexpected:true}})).statusCode,400);
   assert.equal((await f.a.app.inject({method:'POST',url,headers:f.headers,payload:{}})).statusCode,200);
-  assert.equal((await f.a.db.call<any>('person','youtube:author')).identities.length,1);
+  assert.equal((await (f.a.db.call('person','youtube:author') as Promise<any>)).identities.length,1);
   assert.equal((await f.a.app.inject({method:'POST',url,headers:f.headers,payload:{}})).statusCode,400);
  }finally{await f.close();}
 });

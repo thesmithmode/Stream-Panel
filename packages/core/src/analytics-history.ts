@@ -54,10 +54,14 @@ export class AnalyticsHistory {
         return statement;
     }
     private completed: { key: string; value: Report } | undefined;
-    private job: {
-        key: string;
+    private readonly jobs = new Map<string, {
         iterator: Generator<Progress, Report, void>;
-    } | undefined;
+        touchedAt: number;
+    }>();
+    private pruneJobs(now=Date.now()) {
+        for (const [key, job] of this.jobs)
+            if (now-job.touchedAt>300000) this.jobs.delete(key);
+    }
     constructor(private readonly db: Database.Database, private readonly cachePolicy: {
         availableBytes?: () => number;
         maxBytes?: number;
@@ -164,6 +168,7 @@ export class AnalyticsHistory {
         }).immediate();
     }
     prepare(options: AnalyticsOptions, sessions = this.sessions(options)) {
+        this.pruneJobs();
         this.checkCacheBudget();
         const global = this.globalRevision(), start = performance.now();
         let ready = 0, built = 0;
@@ -202,21 +207,28 @@ export class AnalyticsHistory {
             const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as { payload_json: string; updated_at_ms: number } | undefined : undefined;
             return { ...this.completed.value, filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs }, youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, donationTiming: donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow') };
         }
-        if (this.job?.key !== fingerprint) {
-            this.completed = undefined;
-            this.job = { key: fingerprint, iterator: this.aggregate(options, sessions, validation) };
+        const now = Date.now();
+        this.pruneJobs(now);
+        let job = this.jobs.get(fingerprint);
+        if (!job) {
+            // Each browser/filter keeps its own progress, with a bounded LRU budget.
+            while (this.jobs.size >= 4) this.jobs.delete(this.jobs.keys().next().value!);
+            job = { iterator: this.aggregate(options, sessions, validation), touchedAt: now };
         }
+        this.jobs.delete(fingerprint);
+        this.jobs.set(fingerprint, job);
+        job.touchedAt = now;
         let next: IteratorResult<Progress, Report>;
         try {
-            next = this.job.iterator.next();
+            next = job.iterator.next();
         }
         catch (error) {
-            this.job = undefined;
+            this.jobs.delete(fingerprint);
             throw error;
         }
         if (!next.done)
             return { ...validation, ...next.value, stage: 'aggregate' };
-        this.job = undefined;
+        this.jobs.delete(fingerprint);
         if (!live) this.completed = { key: fingerprint, value: next.value };
         return next.value;
     }

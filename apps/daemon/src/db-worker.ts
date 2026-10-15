@@ -12,9 +12,11 @@ parentPort!.on('message',async({id,method,args,clientId=workerData.clientId?'':i
   if(!isStoreMethod(method))throw new Error('UNKNOWN_OPERATION');
   const store=stores.get(clientId);if(!store)throw new Error('DB_WORKER_STOPPED');
   const fn=(store as unknown as Record<string,(...args:unknown[])=>unknown>)[method]!;
+  const started=performance.now();
   const result=await fn.apply(store,args);
+  const executionMs=performance.now()-started;
   if(method==='close')stores.delete(clientId);
-  parentPort!.postMessage({clientId,id,result});
+  parentPort!.postMessage({clientId,id,result,executionMs});
  }catch(error){parentPort!.postMessage({clientId,id,error:error instanceof Error?error.message:'DB_ERROR'});}
 });
 parentPort!.postMessage({clientId:initial,ready:true});
