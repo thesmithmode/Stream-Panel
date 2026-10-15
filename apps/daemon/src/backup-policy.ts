@@ -1,5 +1,10 @@
 const filename=/^stream-panel-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z-[a-f0-9]{8}\.spbk$/;
 export const BACKUP_INTERVAL_MS=24*3600000;
+// One scheduled interval plus room for the bounded hourly cloud retry and upload.
+export const BACKUP_MAX_AGE_MS=BACKUP_INTERVAL_MS+2*3600000;
+export function backupFresh(at:number,now=Date.now()):boolean{
+ return Number.isFinite(at)&&at>0&&at<=now&&now-at<=BACKUP_MAX_AGE_MS;
+}
 export function backupTimestamp(name:string):number|null{
  const match=filename.exec(name);if(!match)return null;
  const at=Date.parse(`${match[1]}T${match[2]}:${match[3]}:${match[4]}.${match[5]}Z`);

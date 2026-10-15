@@ -85,14 +85,26 @@ export class AudienceQueries {
     if (toMs !== undefined) assertTimestamp(toMs);
     if (fromMs !== undefined && toMs !== undefined && toMs <= fromMs)
       throw new Error("INVALID_EVENT_WINDOW");
+    // The effective identity can differ from the provider identity after a
+    // donation correction. Narrow raw events by their indexed identity first,
+    // then add corrections and legacy anonymous donations before checking the
+    // effective person below. This preserves reassignment/merge semantics
+    // without expanding the effective_events view for every historical event.
+    const personScope = personId === undefined ? "" : `e.id IN (
+      SELECT id FROM events WHERE identity_id IN (SELECT id FROM identities WHERE person_id=?)
+      UNION SELECT c.event_id FROM donation_corrections c JOIN identities i ON i.id=c.identity_id WHERE i.person_id=?
+      UNION SELECT e.id FROM events e WHERE e.identity_id IS NULL AND e.source='donationalerts' AND e.type='donation'
+        AND e.account_id IN (SELECT a.account_id FROM anonymous_donors a JOIN identities i ON i.id=a.identity_id WHERE i.person_id=?)
+    ) AND `;
     const events: Record<string,unknown>[] = source==='youtube'?[]:this.db
       .prepare(
         `SELECT e.*, i.display_name, i.person_id FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id
-      WHERE (? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?)) AND (? IS NULL OR i.person_id=?)
+      WHERE ${personScope}(? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?)) AND (? IS NULL OR i.person_id=?)
       AND (? IS NULL OR e.occurred_at_ms>=?) AND (? IS NULL OR e.occurred_at_ms<?) AND (? IS NULL OR e.type=?) AND (? IS NULL OR e.source=?)
       ORDER BY coalesce(e.occurred_at_ms,e.received_at_ms) DESC, e.id DESC LIMIT 200`,
       )
       .all(
+        ...(personId === undefined ? [] : [personId, personId, personId]),
         sessionId ?? null,
         sessionId ?? null,
         personId ?? null,

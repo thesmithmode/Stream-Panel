@@ -80,6 +80,9 @@ export class CloudBackup {
  /** The installation allocation is separate from the organization/project quota. */
  private async checkBudget(filename:string,size:number){
   const budget=this.options.budgetBytes;if(budget===undefined)return;
+  // Reclaim only points already superseded by existing archives. The proposed
+  // upload must never cause a recovery point to disappear before it verifies.
+  await this.rotate(filename,true);
   const listed=await this.list(this.prefix);let used=0,alreadyPublished=false;
   const bytes=(row:{metadata?:{size?:number|string}|null})=>{
    const n=Number(row.metadata?.size);if(row.metadata?.size===undefined||!Number.isSafeInteger(n)||n<0)throw new Error('BACKUP_STORAGE_USAGE_UNAVAILABLE');return n;
@@ -92,12 +95,17 @@ export class CloudBackup {
   // Reserve the new immutable archive and manifest before the first POST.
   if(used+(alreadyPublished?0:size+(size>singleLimit?1024*1024:0))>budget)throw new Error('BACKUP_CLOUD_BUDGET_EXCEEDED');
  }
- private async rotate(filename:string){
+ private async rotate(filename:string,beforeUpload=false){
   const listed=await this.list(this.prefix);
   const owned=[...new Set(listed.map((x:{name:string})=>typeof x.name==='string'?x.name.replace(/\.manifest\.json$/,''):'').filter((n:string)=>validName.test(n)))].sort().reverse() as string[];
-  if(!owned.includes(filename))throw new Error('BACKUP_UPLOAD_NOT_VERIFIED');
+  if(!beforeUpload&&!owned.includes(filename))throw new Error('BACKUP_UPLOAD_NOT_VERIFIED');
   const remove:string[]=[];
   const keep=retainedBackups(owned,Date.now(),filename);
+  if(beforeUpload){
+   // Sparse/offline installations can have no point within the calendar window.
+   if(owned[0])keep.add(owned[0]);
+   if(owned.includes(filename))keep.add(filename);
+  }
   for(const name of owned.filter(n=>!keep.has(n))){
    if(listed.some((x:{name:string})=>x.name===`${name}.manifest.json`)){
     const parts=await this.list(`${this.prefix}/${name}.parts`);

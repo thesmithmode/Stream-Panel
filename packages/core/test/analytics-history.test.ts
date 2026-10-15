@@ -56,10 +56,12 @@ test('cached money, platform inference and core rules match raw analytics after 
  }finally{s.close();}
 });
 
-test('derived analytics stop at storage/size bounds and recover from failed composition without changing facts',()=>{
+test('derived analytics skip persistence at storage/size bounds and recover without changing facts',()=>{
  const s=new StreamStore(':memory:');try{fixture(s);const db=(s as any).db;
- assert.throws(()=>new AnalyticsHistory(db,{availableBytes:()=>0}).prepare(options),/ANALYTICS_STORAGE_LOW/);
- assert.throws(()=>new AnalyticsHistory(db,{maxBytes:1}).prepare(options),/ANALYTICS_STREAM_TOO_LARGE/);
+ for(const policy of [{availableBytes:()=>0},{maxBytes:1},{maxTotalBytes:0}]){
+  const bounded=new AnalyticsHistory(db,policy);assert.equal(bounded.prepare(options).preparing,false);
+  assert.equal(ready(bounded).summary.messages,4);assert.equal(db.prepare('SELECT count(*) n FROM analytics_stream_cache').get().n,0);
+ }
  const h=new AnalyticsHistory(db);assert.equal(ready(h).summary.messages,4);
  const prepare=db.prepare.bind(db);let once=true;db.prepare=(sql:string)=>{if(once&&sql.startsWith('SELECT person_id,manual_core')){once=false;throw Error('TRANSIENT_TEST_FAILURE');}return prepare(sql);};
  const failing=new AnalyticsHistory(db);assert.throws(()=>failing.report(options),/TRANSIENT_TEST_FAILURE/);assert.equal(ready(failing).summary.messages,4);db.prepare=prepare;
@@ -104,5 +106,30 @@ test('half-hour timezone midnight divides weekday and weekend clock buckets',()=
  assert.ok(minuteBuckets.some((b:any)=>b.day==='weekends'&&b.minute===0));
  assert.ok(!minuteBuckets.some((b:any)=>b.day==='weekdays'&&b.minute===0));
  assert.ok(!minuteBuckets.some((b:any)=>b.day==='weekends'&&b.minute===1439));
+ }finally{s.close();}
+});
+
+test('a global cache budget evicts deterministically and reports larger than the budget still finish',()=>{
+ const s=new StreamStore(':memory:');try{
+ fixture(s,12);const db=(s as any).db,seed=new AnalyticsHistory(db),opts={...options,toMs:base+14*86400000};ready(seed,opts);
+ const rows=db.prepare('SELECT session_id,cache_key,length(payload) bytes FROM analytics_stream_cache ORDER BY session_id,cache_key').all();
+ assert.equal(rows.length,12);const limit=Math.max(...rows.map((r:any)=>r.bytes));
+ db.prepare('UPDATE analytics_stream_cache SET updated_at_ms=0').run();
+ const bounded=new AnalyticsHistory(db,{maxTotalBytes:limit});
+ bounded.prepare(opts);
+ assert.ok(db.prepare('SELECT coalesce(sum(length(payload)),0) n FROM analytics_stream_cache').get().n<=limit);
+ assert.equal(db.prepare('SELECT session_id FROM analytics_stream_cache').get().session_id,rows.at(-1).session_id);
+ const report=ready(bounded,opts);assert.equal(report.summary.messages,12);assert.equal(report.summary.streams,12);
+ assert.ok(db.prepare('SELECT coalesce(sum(length(payload)),0) n FROM analytics_stream_cache').get().n<=limit);
+ const retained=db.prepare('SELECT session_id,cache_key,updated_at_ms FROM analytics_stream_cache ORDER BY session_id,cache_key').all();
+ for(let n=0;n<3;n++)assert.equal(bounded.prepare(opts).preparing,false);
+ assert.deepEqual(db.prepare('SELECT session_id,cache_key,updated_at_ms FROM analytics_stream_cache ORDER BY session_id,cache_key').all(),retained,'background warming must not churn a full cache');
+ assert.equal(ready(new AnalyticsHistory(db,{maxTotalBytes:limit}),opts).summary.messages,12);
+ const person=report.audience[0].id;
+ const tip=s.createDonation({personId:person,amount:'2',currency:'RUB',occurredAtMs:base+minute,message:'Late',sourceName:'Cash'},options.toMs);
+ const changed=ready(bounded,opts);assert.deepEqual(changed.audience.find((p:any)=>p.id===person).donations,{RUB:'200'});
+ s.updateDonation(String(tip.id),{personId:person,amount:'3',currency:'RUB',occurredAtMs:base+minute,message:'Corrected',sourceName:'Cash'},0,options.toMs+minute);
+ assert.deepEqual(ready(bounded,opts).audience.find((p:any)=>p.id===person).donations,{RUB:'300'});
+ assert.equal(s.summary().messages,12);
  }finally{s.close();}
 });

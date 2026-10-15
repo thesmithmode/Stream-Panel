@@ -11,6 +11,23 @@ import {BackupService,restoreBackupFile} from '../src/backup.js';
 import {CloudBackup} from '../src/cloud-backup.js';
 import {sealBackupFile} from '../src/backup-stream.js';
 
+test('ordinary multi-megabyte snapshots stream and restore without the buffered legacy path',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-medium-backup-')),key=randomBytes(32),path=join(dir,'data.sqlite');
+ const auth=new AccountStore(path);
+ try{
+  await writeFile(join(dir,'key'),key.toString('hex'));
+  const db=new Database(path);
+  try{db.exec('CREATE TABLE retained_medium_data(payload BLOB); INSERT INTO retained_medium_data VALUES(randomblob(2*1024*1024))');}finally{db.close();}
+  const service=new BackupService(dir,{keyFile:join(dir,'key')},fetch,async()=>{throw Error('BUFFERED_READER_MUST_NOT_RUN');});
+  const {filename}=await service.run();await service.stop();
+  const archive=join(dir,'backups',filename);
+  assert.equal((await readFile(archive)).subarray(0,5).toString(),'SPBK2');
+  await restoreBackupFile(archive,key,join(dir,'restored'));
+  const restored=new Database(join(dir,'restored','data.sqlite'),{readonly:true});
+  try{assert.equal((restored.prepare('SELECT length(payload) AS n FROM retained_medium_data').get() as {n:number}).n,2*1024*1024);assert.equal(restored.pragma('integrity_check',{simple:true}),'ok');}finally{restored.close();}
+ }finally{auth.close();await rm(dir,{recursive:true,force:true});}
+});
+
 test('large SQLite uses streaming encrypted backup and restores data, credentials and revoked sessions',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-large-backup-')),key=randomBytes(32),path=join(dir,'data.sqlite');
  const auth=new AccountStore(path),store=new StreamStore(path,'ruslan');

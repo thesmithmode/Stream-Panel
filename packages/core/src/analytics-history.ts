@@ -61,7 +61,14 @@ export class AnalyticsHistory {
     constructor(private readonly db: Database.Database, private readonly cachePolicy: {
         availableBytes?: () => number;
         maxBytes?: number;
+        maxTotalBytes?: number;
     } = {}) { }
+    private budgetChecked = false;
+    private checkCacheBudget() {
+        if (this.budgetChecked) return;
+        this.db.transaction(() => this.trimCache('', '')).immediate();
+        this.budgetChecked = true;
+    }
     private sessions(options: AnalyticsOptions): Session[] {
         return this.statement(`SELECT s.id,s.started_at_ms,s.ended_at_ms,coalesce(r.revision,0) AS revision FROM sessions s LEFT JOIN analytics_stream_revisions r ON r.session_id=s.id
    WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND s.started_at_ms<? AND coalesce(s.ended_at_ms,?)>? ORDER BY s.started_at_ms,s.id`).all(options.toMs, options.toMs, options.fromMs) as Session[];
@@ -113,30 +120,54 @@ export class AnalyticsHistory {
             return undefined;
         }
     }
-    private save(options: AnalyticsOptions, session: Session, global: number, report: Report) {
+    /** Derived reports may be evicted; facts and late corrections remain authoritative. */
+    private trimCache(protectedSession: string, protectedKey: string): boolean {
+        const limit = this.cachePolicy.maxTotalBytes ?? 128 * 1024 * 1024;
+        let total = (this.statement('SELECT coalesce(sum(length(payload)),0) AS bytes FROM analytics_stream_cache').get() as {bytes:number}).bytes, evicted = false;
+        while (total > limit) {
+            // Bound JS allocations even when years of reports are present.
+            const rows = this.statement('SELECT session_id,cache_key,length(payload) AS bytes FROM analytics_stream_cache WHERE session_id<>? OR cache_key<>? ORDER BY updated_at_ms,session_id,cache_key LIMIT 64').all(protectedSession, protectedKey) as {session_id:string;cache_key:string;bytes:number}[];
+            if (!rows.length) break;
+            for (const row of rows) {
+                if (total <= limit) break;
+                this.statement('DELETE FROM analytics_stream_cache WHERE session_id=? AND cache_key=?').run(row.session_id, row.cache_key);
+                total -= row.bytes;
+                evicted = true;
+            }
+        }
+        return evicted;
+    }
+    private save(options: AnalyticsOptions, session: Session, global: number, report: Report, allowEviction = true) {
         if (session.ended_at_ms === null)
             return;
         const serialized = JSON.stringify(report);
         if (Buffer.byteLength(serialized) > (this.cachePolicy.maxBytes ?? 16 * 1024 * 1024))
-            throw new Error('ANALYTICS_STREAM_TOO_LARGE');
+            return false;
         let available = this.cachePolicy.availableBytes?.() ?? Infinity;
         if (!this.cachePolicy.availableBytes && this.db.name !== ':memory:') {
             const disk = statfsSync(dirname(this.db.name));
             available = disk.bavail * disk.bsize;
         }
         if (available < 1024 * 1024 * 1024)
-            throw new Error('ANALYTICS_STORAGE_LOW');
+            return false;
         const payload = gzipSync(serialized);
-        this.db.transaction(() => {
+        if (payload.byteLength > (this.cachePolicy.maxTotalBytes ?? 128 * 1024 * 1024)) return false;
+        if (!allowEviction) {
+            const retained = (this.statement('SELECT coalesce(sum(length(payload)),0) AS bytes FROM analytics_stream_cache WHERE NOT(session_id=? AND (cache_key=? OR revision<>? OR global_revision<>?))').get(session.id, this.key(options, session), session.revision, global) as {bytes:number}).bytes;
+            if (retained + payload.byteLength > (this.cachePolicy.maxTotalBytes ?? 128 * 1024 * 1024)) return false;
+        }
+        return this.db.transaction(() => {
             this.statement('DELETE FROM analytics_stream_cache WHERE session_id=? AND (revision<>? OR global_revision<>?)').run(session.id, session.revision, global);
             this.statement('INSERT INTO analytics_stream_cache VALUES (?,?,?,?,?,?) ON CONFLICT(session_id,cache_key) DO UPDATE SET revision=excluded.revision,global_revision=excluded.global_revision,payload=excluded.payload,updated_at_ms=excluded.updated_at_ms').run(session.id, this.key(options, session), session.revision, global, payload, Date.now());
-            this.statement('DELETE FROM analytics_stream_cache WHERE session_id=? AND cache_key NOT IN(SELECT cache_key FROM analytics_stream_cache WHERE session_id=? ORDER BY updated_at_ms DESC LIMIT 16)').run(session.id, session.id);
+            this.statement('DELETE FROM analytics_stream_cache WHERE session_id=? AND cache_key<>? AND cache_key NOT IN(SELECT cache_key FROM analytics_stream_cache WHERE session_id=? AND cache_key<>? ORDER BY updated_at_ms DESC,cache_key DESC LIMIT 15)').run(session.id, this.key(options, session), session.id, this.key(options, session));
+            return !this.trimCache(session.id, this.key(options, session));
         }).immediate();
     }
     prepare(options: AnalyticsOptions, sessions = this.sessions(options)) {
+        this.checkCacheBudget();
         const global = this.globalRevision(), start = performance.now();
         let ready = 0, built = 0;
-        for (const session of sessions) {
+        for (const session of [...sessions].reverse()) {
             if (session.ended_at_ms === null) {
                 ready++;
                 continue;
@@ -147,13 +178,16 @@ export class AnalyticsHistory {
             }
             if (built >= 5 || performance.now() - start > 250)
                 continue;
-            this.save(options, session, global, this.build(options, session));
+            // Warming is optional: a budget smaller than history must not loop forever.
+            if (!this.save(options, session, global, this.build(options, session), false))
+                return { preparing: false, ready, total: sessions.length };
             ready++;
             built++;
         }
         return { preparing: ready < sessions.length, ready, total: sessions.length };
     }
     report(options: AnalyticsOptions): Report {
+        this.checkCacheBudget();
         // Reuse the established validation, including timezone/core/source checks,
         // without expanding the historical period before it is known to be valid.
         if (!Number.isSafeInteger(options.fromMs) || options.fromMs < 0 || !Number.isSafeInteger(options.toMs) || options.toMs <= options.fromMs)
@@ -170,8 +204,6 @@ export class AnalyticsHistory {
         }
         if (this.job?.key !== fingerprint) {
             this.completed = undefined;
-            const progress = this.prepare(options, sessions);
-            if (progress.preparing) return { ...validation, ...progress };
             this.job = { key: fingerprint, iterator: this.aggregate(options, sessions, validation) };
         }
         let next: IteratorResult<Progress, Report>;
@@ -189,11 +221,13 @@ export class AnalyticsHistory {
         return next.value;
     }
     private *aggregate(options: AnalyticsOptions, sessions: Session[], validation: ReturnType<typeof audienceAnalytics>): Generator<Progress, Report, void> {
+        let built = 0, sliceStart = performance.now();
         const active = new Map<string, Report>(), read = (session: Session) => {
             if (session.ended_at_ms === null) {
                 let report = active.get(session.id);
                 if (!report) {
                     report = this.build(options, session);
+                    built++;
                     active.set(session.id, report);
                 }
                 return report;
@@ -201,6 +235,7 @@ export class AnalyticsHistory {
             let report = this.cached(options, session, this.globalRevision());
             if (!report) {
                 report = this.build(options, session);
+                built++;
                 this.save(options, session, this.globalRevision(), report);
             }
             return report;
@@ -302,8 +337,11 @@ export class AnalyticsHistory {
                         visits.set(person.id, { ...person });
                 }
             }
-            if (++processed % 25 === 0)
+            if (++processed % 25 === 0 || built >= 5 || performance.now() - sliceStart > 250) {
                 yield { preparing: true, ready: processed, total: sessions.length * 2 };
+                built = 0;
+                sliceStart = performance.now();
+            }
         }
         if (!sample)
             return audienceAnalytics(this.db, options);
@@ -363,8 +401,11 @@ export class AnalyticsHistory {
                 stream.returning = visitors.length - stream.newInPeriod;
                 for (const id of visitors) seen.add(id);
             }
-            if (++processed % 25 === 0)
+            if (++processed % 25 === 0 || built >= 5 || performance.now() - sliceStart > 250) {
                 yield { preparing: true, ready: processed, total: sessions.length * 2 };
+                built = 0;
+                sliceStart = performance.now();
+            }
         }
         const audience = [...people.values()].sort((a, b) => Number(b.core) - Number(a.core) || b.observedMinutes - a.observedMinutes || b.messages - a.messages);
         const outputCategories = [...categoryRows.values()].map(row => { const { people: ids, ...category } = row; return { ...category, audience: ids.size, core: [...ids].filter(id => people.get(id)?.core).length, donationsPerHourMinor: currencyRates(row.donationTotals, Math.round(row.minutes * 60000)), messagesPerHour: row.minutes ? row.messages * 60 / row.minutes : 0, observedPerMinute: row.minutes ? row.observedMinutes / row.minutes : 0, observedPerKnownMinute: row.observedKnownMinutes ? row.observedMinutes / row.observedKnownMinutes : null, coverageRatio: row.minutes ? row.observedKnownMinutes / row.minutes : null }; });

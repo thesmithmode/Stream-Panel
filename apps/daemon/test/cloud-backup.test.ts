@@ -92,3 +92,42 @@ test('an explicit cloud allocation counts owned parts and reserves new upload sp
  if(mode==='allowed'){await c.uploadFile(filename,source);assert.equal(writes,1);}else{await assert.rejects(c.uploadFile(filename,source),mode==='missing'?/BACKUP_STORAGE_USAGE_UNAVAILABLE/:/BACKUP_CLOUD_BUDGET_EXCEEDED/);assert.equal(writes,0);}
  }}finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test('cloud budget preflight reclaims only already superseded points and preserves recovery on upload failure',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:Date.parse('2099-02-01T05:00:00Z')});
+ const dir=await mkdtemp(join(tmpdir(),'sp-cloud-budget-recovery-')),service=join(dir,'key'),source=join(dir,'source');
+ await writeFile(service,'fixture');await writeFile(source,'small backup');
+ const expired='stream-panel-2098-12-01T00-00-00-000Z-12345678.spbk',latest='stream-panel-2099-01-31T00-00-00-000Z-12345678.spbk',next='stream-panel-2099-02-01T00-00-00-000Z-12345678.spbk';
+ try{
+  for(const mode of ['recovered','upload-failed','verify-failed','last-expired','protected-budget','historical-retry']){
+   const objects=new Map<string,Buffer>([[expired,Buffer.from('small backup')],...(mode==='last-expired'?[]:[[latest,Buffer.from('small backup')] as [string,Buffer]])]);
+   const deletes:string[]=[],writes:string[]=[];
+   const request:typeof fetch=async(input,init)=>{
+    const path=new URL(String(input)).pathname;
+    if(path.includes('/bucket/'))return Response.json({public:false});
+    if(path.includes('/object/list/'))return Response.json([...objects].map(([name,data])=>({name,metadata:{size:data.length}})));
+    if(init?.method==='DELETE'){
+     for(const key of JSON.parse(String(init.body)).prefixes){const name=key.slice('stream-panel/'.length);deletes.push(name);objects.delete(name);}
+     return Response.json({});
+    }
+    const name=path.slice(path.lastIndexOf('/')+1);
+    if(path.includes('/object/authenticated/'))return new Response(mode==='verify-failed'?'corrupt':new Uint8Array(objects.get(name)!));
+    assert.equal(init?.method,'POST');writes.push(name);
+    if(mode==='upload-failed'||mode==='historical-retry')return Response.json({},{status:503});
+    objects.set(name,Buffer.from(init.body as Uint8Array));return Response.json({});
+   };
+   const cloud=new CloudBackup({url:'https://fixture.supabase.co',serviceKeyFile:service,budgetBytes:mode==='last-expired'||mode==='protected-budget'?20:24},request);
+   const target=mode==='historical-retry'?expired:next;
+   if(mode==='recovered'){
+    await cloud.uploadFile(target,source);assert.deepEqual(deletes,[expired]);assert.deepEqual(writes,[next]);assert.ok(objects.has(latest));assert.ok(objects.has(next));
+   }else{
+    await assert.rejects(cloud.uploadFile(target,source),mode==='verify-failed'?/BACKUP_UPLOAD_VERIFY_FAILED/:mode==='upload-failed'||mode==='historical-retry'?/BACKUP_UPLOAD_FAILED/:/BACKUP_CLOUD_BUDGET_EXCEEDED/);
+    assert.ok(objects.has(mode==='last-expired'?expired:latest));
+    if(mode==='last-expired'||mode==='historical-retry')assert.deepEqual(deletes,[]);
+    else assert.deepEqual(deletes,mode==='verify-failed'?[expired,next]:[expired]);
+    if(mode==='historical-retry')assert.ok(objects.has(expired));
+    if(mode==='last-expired'||mode==='protected-budget')assert.deepEqual(writes,[]);
+   }
+  }
+ }finally{await rm(dir,{recursive:true,force:true});}
+});

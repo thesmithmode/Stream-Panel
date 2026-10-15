@@ -32,7 +32,9 @@ PYDIAGNOSTICS
 date -u +%FT%TZ
 uptime
 systemctl is-active stream-panel
-systemctl show stream-panel -p MainPID -p NRestarts -p MemoryCurrent -p CPUUsageNSec -p TasksCurrent
+systemctl show stream-panel -p MainPID -p NRestarts -p MemoryCurrent -p MemoryPeak -p MemoryMax -p MemoryHigh -p CPUUsageNSec -p TasksCurrent
+journalctl --disk-usage
+systemd-analyze cat-config systemd/journald.conf | sed -n '/^SystemMaxUse=/p;/^RuntimeMaxUse=/p;/^SystemKeepFree=/p;/^MaxRetentionSec=/p'
 free -m
 df -Pm /var/lib/stream-panel
 for path in / /healthz /api/v1/events; do
@@ -59,8 +61,10 @@ else
   echo 'Redis service is unavailable'; exit 1
 fi
 # Only metadata is printed; never output secrets, objects or database contents.
+STREAM_PANEL_BACKUP_MAX_AGE_MS=$(/opt/stream-panel/current/bin/node --input-type=module -e 'import * as policy from "/opt/stream-panel/current/dist/apps/daemon/src/backup-policy.js"; console.log(policy.BACKUP_MAX_AGE_MS ?? policy.BACKUP_INTERVAL_MS+2*3600000)')
+export STREAM_PANEL_BACKUP_MAX_AGE_MS
 python3 - <<'PYCLOUD'
-import json, time, re, hashlib
+import json, time, re, hashlib, os
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.parse import urlsplit
@@ -85,6 +89,10 @@ key=Path(keyfile).read_text().strip()
 bucket='stream-panel-backups'
 ledger=json.loads((Path(config.get('STREAM_PANEL_DATA_DIR','/var/lib/stream-panel'))/'backup-state.json').read_text())
 prefix='stream-panel/'+ledger['installationId']
+local_directory=Path(config.get('STREAM_PANEL_DATA_DIR','/var/lib/stream-panel'))/'backups'
+local_archives=sorted(local_directory.glob('stream-panel-*.spbk'))
+print('local backups='+str(len(local_archives))+' bytes='+str(sum(p.stat().st_size for p in local_archives))+' pending_uploads='+str(len(ledger.get('pending',[]))))
+if local_archives: print('local oldest='+local_archives[0].name+' newest='+local_archives[-1].name)
 def call(path,body=None):
     request=Request(url.rstrip('/')+'/storage/v1/'+path,data=None if body is None else json.dumps(body).encode(),headers={'Authorization':'Bearer '+key,'apikey':key,'Content-Type':'application/json'})
     with urlopen(request,timeout=30) as response:
@@ -121,10 +129,10 @@ try:
         if size!=latest.stat().st_size or digest.hexdigest()!=local_hash: raise ValueError('Cloud archive content mismatch')
         verification='download_sha256'
     print('cloud verification='+verification+' content_match=true')
-    age=max(0,int(time.time()-latest.stat().st_mtime))
+    age=int(time.time()-latest.stat().st_mtime)
     print('cloud bucket_private=true copies='+str(len(copies))+' matching_local=true age_seconds='+str(age))
     print('cloud latest='+latest.name+' uploaded_at='+str(remote.get('updated_at')))
-    if age>13*3600: raise ValueError('Cloud backup is stale')
+    if age<0 or age*1000>int(os.environ['STREAM_PANEL_BACKUP_MAX_AGE_MS']): raise ValueError('Cloud backup is stale')
 except Exception as error:
     # Error bodies can contain credentials; report only known local checks.
     print('Cloud verification failed ('+type(error).__name__+')')

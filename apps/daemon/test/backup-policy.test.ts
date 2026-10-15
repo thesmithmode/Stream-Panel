@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {retainedBackups,backupDue,backupTimestamp} from '../src/backup-policy.js';
+import {retainedBackups,backupDue,backupTimestamp,backupFresh,BACKUP_INTERVAL_MS,BACKUP_MAX_AGE_MS} from '../src/backup-policy.js';
 const day=86400000,now=Date.parse('2026-10-12T15:00:00Z');
 const name=(at:number)=>`stream-panel-${new Date(at).toISOString().replace(/[:.]/g,'-')}-1234abcd.spbk`;
 test('retention keeps one most recent copy per Moscow day and three older weekly points',()=>{
@@ -27,4 +27,10 @@ test('retention preserves the current verified snapshot when timestamps tie',()=
  assert.deepEqual([...retainedBackups([second,first],now,first)],[first]);
  assert.deepEqual([...retainedBackups([first,second],now,first)],[first]);
  assert.equal(backupTimestamp('stream-panel-2026-99-99T99-99-99-000Z-1234abcd.spbk'),null);
+});
+test('daily freshness accepts a whole interval plus retry grace and rejects missing, future and stale copies',()=>{
+ assert.equal(BACKUP_INTERVAL_MS,24*3600000);
+ for(const age of [13*3600000,BACKUP_INTERVAL_MS,BACKUP_MAX_AGE_MS])assert.equal(backupFresh(now-age,now),true);
+ for(const at of [0,NaN,Infinity,now+1,now-BACKUP_MAX_AGE_MS-1])assert.equal(backupFresh(at,now),false);
+ assert.equal(backupFresh(Date.now()),true);
 });

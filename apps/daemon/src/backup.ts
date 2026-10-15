@@ -255,7 +255,9 @@ export class BackupService {
       const filename = `stream-panel-${new Date().toISOString().replace(/[:.]/g,"-")}-${randomBytes(4).toString("hex")}.spbk`;
       const path = join(directory, filename);
       const temporary = path + ".tmp";
-      const streaming = metadata.length + 4 + snapshotSize > 40*1024*1024;
+      // Keep the legacy path only for tiny snapshots. Several simultaneous
+      // plaintext/compressed/verification buffers otherwise amplify RSS spikes.
+      const streaming = metadata.length + 4 + snapshotSize > 1024*1024;
       let blob:Buffer|undefined,payloadHash:string;
       if(streaming) {
         const source=async function*(){yield length;yield metadata;yield* createReadStream(snapshot);};
