@@ -34,7 +34,9 @@ export async function createHostedApplication(
   const backup = backupOptions ? new BackupService(dir, backupOptions) : undefined;
   let lastBackupRequest = 0;
   let restoreBusy = false;
-  await prepareChatStorage(join(dir,"data.sqlite"));
+  console.log("Storage maintenance check started");
+  const maintenance=await prepareChatStorage(join(dir,"data.sqlite"));
+  console.log("Storage maintenance check completed"+(maintenance?": "+JSON.stringify(maintenance):""));
   const accounts = new AccountStore(join(dir, "data.sqlite"));
   const selectedProfile = (request: FastifyRequest, fallback: Profile): Profile =>
     request.headers["x-stream-panel-profile"] as Profile | undefined ?? fallback;

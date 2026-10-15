@@ -62,6 +62,16 @@ class ReceiverTests(unittest.TestCase):
     self.assertTrue(r.health('https://panel.example.test','release'))
    self.assertEqual(requests[0].full_url,'http://127.0.0.1:47831/healthz')
    self.assertEqual(requests[0].get_header('Host'),'panel.example.test')
+ def test_health_allows_migration_past_thirty_seconds_but_has_a_finite_deadline(self):
+  with tempfile.TemporaryDirectory() as folder:
+   missing=pathlib.Path(folder)/'bind-host'
+   replies=[OSError('not listening')]*35+[io.BytesIO(b'{"ok":true,"release":"release"}')]
+   with patch.object(r,'BIND_HOST_FILE',missing),patch.object(r.urllib.request,'urlopen',side_effect=replies) as request,patch.object(r.time,'sleep'):
+    self.assertTrue(r.health('https://panel.example.test','release'))
+    self.assertEqual(request.call_count,36)
+   with patch.object(r,'BIND_HOST_FILE',missing),patch.object(r.urllib.request,'urlopen',side_effect=OSError('not listening')) as request,patch.object(r.time,'sleep'),patch('sys.stderr',new=io.StringIO()):
+    self.assertFalse(r.health('https://panel.example.test','release'))
+    self.assertEqual(request.call_count,300)
  def test_health_uses_validated_bridge_host_and_preserves_public_host_header(self):
   with tempfile.TemporaryDirectory() as folder:
    bind_host=pathlib.Path(folder)/'bind-host';bind_host.write_text('172.21.0.1');requests=[]

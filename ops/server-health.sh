@@ -27,7 +27,7 @@ text=result.stdout
 codes=sorted(set(re.findall(r'\b(?:SQLITE_(?:ERROR|BUSY|LOCKED|CONSTRAINT|FULL|CORRUPT|NOTADB|READONLY)|ERR_(?:WORKER_OUT_OF_MEMORY|MODULE_NOT_FOUND|DLLOPEN_FAILED|INVALID_ARG_TYPE)|DB_WORKER_STOPPED)\b',text)))
 schema=sorted(set(re.findall(r'(?:no such (?:table|column)|already exists):? [a-z_][a-z0-9_.]{0,80}',text)))
 frames=sorted(set(re.findall(r'(?:dist|node_modules)/[a-zA-Z0-9_./-]+\.(?:js|mjs|cjs):[0-9]+(?::[0-9]+)?',text)))
-print('startup_diagnostics='+json.dumps({'codes':codes,'schema':schema,'frames':frames[-20:],'heapLimitReached':'heap out of memory' in text.lower(),'oomKilled':'oom-kill' in text.lower()}))
+print('startup_diagnostics='+json.dumps({'codes':codes,'schema':schema,'frames':frames[-20:],'heapLimitReached':'heap out of memory' in text.lower(),'oomKilled':'oom-kill' in text.lower(),'maintenanceStarted':text.count('Storage maintenance check started'),'maintenanceCompleted':text.count('Storage maintenance check completed'),'serverReady':text.count('Stream Panel server listening')}))
 PYDIAGNOSTICS
 date -u +%FT%TZ
 uptime

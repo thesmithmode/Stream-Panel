@@ -68,7 +68,7 @@ def health(origin, release):
     host = urlparse(origin).netloc
     request = urllib.request.Request(f'http://{address}:47831/healthz', headers={'Host':host})
     observed = {'expectedRelease': release}
-    for _ in range(30):
+    for _ in range(300):
         try:
             with urllib.request.urlopen(request, timeout=2) as response:
                 result = json.load(response)
