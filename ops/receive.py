@@ -67,13 +67,17 @@ def health(origin, release):
         raise RuntimeError('Invalid configured health host')
     host = urlparse(origin).netloc
     request = urllib.request.Request(f'http://{address}:47831/healthz', headers={'Host':host})
+    observed = {'expectedRelease': release}
     for _ in range(30):
         try:
             with urllib.request.urlopen(request, timeout=2) as response:
                 result = json.load(response)
+                value = result.get('release')
+                observed = {'expectedRelease':release, 'status':getattr(response,'status',200), 'ok':result.get('ok') is True, 'observedRelease':value if isinstance(value,str) and re.fullmatch(r'[a-f0-9]{40}|development',value) else 'invalid'}
                 if result.get('ok') is True and result.get('release') == release: return True
-        except (OSError, ValueError): pass
+        except (OSError, ValueError) as error: observed = {'expectedRelease':release,'errorType':type(error).__name__}
         time.sleep(1)
+    print('Deployment health failed: '+json.dumps(observed),file=sys.stderr)
     return False
 
 def service(action):
@@ -201,5 +205,7 @@ def main():
 if __name__ == '__main__':
     try: main()
     except Exception as error:
-        print('Deployment failed: '+type(error).__name__,file=sys.stderr)
+        reasons = {'New release failed health check','Active release failed health check','Snapshot integrity failed','Snapshot foreign keys failed','Rollback snapshot invalid; maintenance retained','Rollback failed; maintenance retained','Invalid configured health host'}
+        reason = str(error) if isinstance(error, RuntimeError) and str(error) in reasons else type(error).__name__
+        print('Deployment failed: '+reason,file=sys.stderr)
         sys.exit(1)
