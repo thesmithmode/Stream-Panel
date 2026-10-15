@@ -19,6 +19,16 @@ PYCONFIG
 public_host=${endpoint[0]}
 local_origin=${endpoint[1]}
 test -n "$public_host"
+# Report only known startup failures and source locations, never arbitrary log messages.
+python3 - <<'PYDIAGNOSTICS'
+import json, re, subprocess
+result=subprocess.run(['journalctl','-u','stream-panel','--since','-20 minutes','-n','500','--no-pager','-o','cat'],capture_output=True,text=True,timeout=10)
+text=result.stdout
+codes=sorted(set(re.findall(r'\b(?:SQLITE_(?:ERROR|BUSY|LOCKED|CONSTRAINT|FULL|CORRUPT|NOTADB|READONLY)|ERR_(?:WORKER_OUT_OF_MEMORY|MODULE_NOT_FOUND|DLLOPEN_FAILED|INVALID_ARG_TYPE)|DB_WORKER_STOPPED)\b',text)))
+schema=sorted(set(re.findall(r'(?:no such (?:table|column)|already exists):? [a-z_][a-z0-9_.]{0,80}',text)))
+frames=sorted(set(re.findall(r'(?:dist|node_modules)/[a-zA-Z0-9_./-]+\.(?:js|mjs|cjs):[0-9]+(?::[0-9]+)?',text)))
+print('startup_diagnostics='+json.dumps({'codes':codes,'schema':schema,'frames':frames[-20:],'heapLimitReached':'heap out of memory' in text.lower(),'oomKilled':'oom-kill' in text.lower()}))
+PYDIAGNOSTICS
 date -u +%FT%TZ
 uptime
 systemctl is-active stream-panel
