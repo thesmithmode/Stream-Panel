@@ -92,3 +92,17 @@ test('a completed report refreshes channel reports and excludes them from Twitch
  const twitch={...query,source:'twitch' as const};ready(h,twitch);assert.equal(h.report(twitch).youtubeReport,null);
  }finally{s.close();}
 });
+
+
+test('half-hour timezone midnight divides weekday and weekend clock buckets',()=>{
+ const s=new StreamStore(':memory:');try{
+ const at=Date.UTC(2026,9,2,18,29),id=s.startSession('owner','fractional-midnight',at,'platform',at);
+ s.streamSample(id,at,'game','Game','',10);s.endSession(id,at+2*minute);
+ const r=ready(new AnalyticsHistory((s as any).db),{...options,timezone:'Asia/Kolkata'});
+ const minuteBuckets=r.clockBuckets.filter((b:any)=>b.resolution===1);
+ assert.ok(minuteBuckets.some((b:any)=>b.day==='weekdays'&&b.minute===1439));
+ assert.ok(minuteBuckets.some((b:any)=>b.day==='weekends'&&b.minute===0));
+ assert.ok(!minuteBuckets.some((b:any)=>b.day==='weekdays'&&b.minute===0));
+ assert.ok(!minuteBuckets.some((b:any)=>b.day==='weekends'&&b.minute===1439));
+ }finally{s.close();}
+});

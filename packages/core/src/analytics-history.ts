@@ -79,9 +79,11 @@ export class AnalyticsHistory {
         // within that report before counts from different streams are added.
         const clockBuckets: ClockBucket[] = [];
         const clock = new Intl.DateTimeFormat('ru-RU', { timeZone: options.timezone ?? 'Europe/Moscow', weekday: 'short' }), presentDays = new Set<string>();
-        for (const span of report.activityWindows)
+        for (const span of report.activityWindows) {
+            presentDays.add(clock.format(span.to - 1));
             for (let at = span.from; at < span.to; at = Math.min(span.to, (Math.floor(at / 3600000) + 1) * 3600000))
                 presentDays.add(clock.format(at));
+        }
         const common = presentDays.size === 1 ? new Map(resolutions.map(resolution => [resolution, timeAudience(report.activityWindows, report.audience, options.timezone ?? 'Europe/Moscow', resolution, 'all')])) : null;
         for (const day of days) {
             if (![...presentDays].some(d => matchesActivityDay(day, d)))
