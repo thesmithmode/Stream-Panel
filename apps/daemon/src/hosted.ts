@@ -233,7 +233,7 @@ export async function createHostedApplication(
     const filename=(request.params as {filename:string}).filename;
     try {
       const blob=await backup!.download(filename);
-      return reply.type("application/octet-stream").header("Content-Disposition",`attachment; filename="${filename}"`).send(blob);
+      return reply.type("application/octet-stream").header("Content-Disposition",`attachment; filename="${filename}"`).header("Content-Length",blob.size).send(blob);
     }catch(error){if((error as Error).message==="BACKUP_NOT_FOUND")return reply.code(404).send({error:"BACKUP_NOT_FOUND"});throw error;}
   });
   app.post("/api/v1/backup", async (request, reply) => {
@@ -244,7 +244,7 @@ export async function createHostedApplication(
     if (!backup) return reply.code(503).send({error:"BACKUP_NOT_CONFIGURED"});
     if (Date.now() - lastBackupRequest < 600000) return reply.code(429).send({error:"BACKUP_RATE_LIMIT"});
     lastBackupRequest = Date.now();
-    return backup.run();
+    return backup.run({waitForCloud:false});
   });
   app.all("/api/v1/*", forward);
   app.get("/oauth/:provider/callback", forward);

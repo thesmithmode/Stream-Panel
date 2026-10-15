@@ -140,9 +140,9 @@ export class BackupService {
     this.status.local.state = "pending";
     this.status.cloud.state = options.url ? "pending" : "disabled";
   }
-  run() {
+  run(options: {waitForCloud?:boolean} = {}) {
     if (this.active) return this.active;
-    this.active = this.perform().catch(error => {
+    this.active = this.perform(options.waitForCloud !== false).catch(error => {
       const code = /^[A-Z_]+$/.test(error.message) ? error.message : "BACKUP_FAILED";
       this.status.state = "error";
       this.status.error = code;
@@ -171,8 +171,11 @@ export class BackupService {
     for(const name of names){const size=(await lstat(join(directory,name))).size;sizes.set(name,size);if(keep.has(name))bytes+=size;}
     for(const name of [...ordered].reverse())if(bytes>2*1024**3&&keep.has(name)&&!minimum.has(name)&&name!==this.uploading){keep.delete(name);bytes-=sizes.get(name)!;}
     for(const name of names)if(!keep.has(name))await rm(join(directory,name),{force:true});
-    this.ledger!.pending=this.options.url?this.ledger!.pending.filter(n=>!names.includes(n)||keep.has(n)):[];
-    this.ledger!.uploaded=this.ledger!.uploaded.filter(n=>keep.has(n));await this.save();
+    const pending=this.options.url?this.ledger!.pending.filter(n=>!names.includes(n)||keep.has(n)):[];
+    const uploaded=this.ledger!.uploaded.filter(n=>keep.has(n));
+    if(pending.length!==this.ledger!.pending.length||uploaded.length!==this.ledger!.uploaded.length){
+      this.ledger!.pending=pending;this.ledger!.uploaded=uploaded;await this.save();
+    }
   }
   async files() {
     await this.purgeLocal();
@@ -211,14 +214,14 @@ export class BackupService {
       if(!info.isFile()||info.size<33||info.size>BACKUP_STREAM_MAX_SIZE)throw new Error("BACKUP_NOT_FOUND");
       await handle.read(header,0,5,0);
       if(!["SPBK1","SPBK2"].includes(header.toString()))throw new Error("BACKUP_NOT_FOUND");
-      return handle.createReadStream({start:0,autoClose:true});
+      return Object.assign(handle.createReadStream({start:0,autoClose:true}),{size:info.size});
     } catch(error) {await handle.close();throw error;}
     } catch(error) {
       if(["ENOENT","ELOOP","ENOTDIR"].includes((error as NodeJS.ErrnoException).code??""))throw new Error("BACKUP_NOT_FOUND");
       throw error;
     }
   }
-  private async perform() {
+  private async perform(waitForCloud:boolean) {
     const directory = join(this.dir, "backups"); await mkdir(directory, {recursive:true,mode:0o700});
     await this.ready();
     await this.purgeLocal();
@@ -305,6 +308,9 @@ export class BackupService {
       };
       if(this.options.url)this.ledger!.pending.push(filename);this.ledger!.local=this.status.local;this.ledger!.schemaSignature=signature;await this.save();
       if(!this.options.url){await this.purgeLocal();return {filename};}
+      // A manual snapshot is downloadable as soon as local verification finishes.
+      // Cloud retries remain tracked independently and must not hold the HTTP request open.
+      if(!waitForCloud){void this.retryPending(Date.now(),true).catch(()=>{});return {filename};}
       // Creating a snapshot explicitly retries pending uploads; the timer respects backoff.
       await this.retryPending(Date.now(),true);
       if(this.status.cloud.state==='error')return {filename,cloudError:this.status.cloud.error};

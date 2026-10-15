@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {ReadCache} from '../src/read-cache.js';
+import test from 'node:test';import assert from 'node:assert/strict';import {ReadCache,READ_CACHE_TTL_MS} from '../src/read-cache.js';
 import net from 'node:net';
 test('local-only cache preserves cloneable values without requiring JSON serialization',async()=>{
  const cache=new ReadCache('');try{
@@ -43,12 +43,15 @@ test('Redis cache handles hits, corrupt values, deadlines and bounded local evic
   await tick();await tick();let loads=0;
   assert.equal(await cache.read('key',async()=>++loads),1);await tick();
   t.mock.timers.enable({apis:['Date'],now:Date.now()});
-  t.mock.timers.tick(3001);
-  assert.equal(await cache.read('key',async()=>++loads),1,'Redis survives expiration of the short local cache');
+  t.mock.timers.tick(15000);
+  for(let n=0;n<129;n++)await cache.read(`evict-${n}`,async()=>n);
+  assert.equal(await cache.read('key',async()=>++loads),1,'Redis serves an evicted local entry');
+  t.mock.timers.tick(15001);
+  assert.equal(await cache.read('key',async()=>++loads),2,'Redis hits must not extend the original freshness deadline');
   t.mock.timers.reset();
   // Eviction leaves the shared Redis value available.
   for(let n=0;n<129;n++)await cache.read(`other-${n}`,async()=>n);
-  assert.equal(await cache.read('key',async()=>++loads),1);assert.equal(loads,1);
+  assert.equal(await cache.read('key',async()=>++loads),2);assert.equal(loads,2);
   mode='corrupt';assert.equal(await cache.read('corrupt',async()=>8),8);
   mode='normal';assert.equal((await cache.read('large',async()=> 'x'.repeat(2_000_001))).length,2_000_001);
   mode='timeout';const start=Date.now();assert.equal(await cache.read('deadline',async()=>9),9);assert.ok(Date.now()-start<500);assert.equal(await cache.read('after-timeout',async()=>10),10);
@@ -57,7 +60,7 @@ test('Redis cache handles hits, corrupt values, deadlines and bounded local evic
 });
 
 test('expired local values reload without returning stale snapshots',async t=>{
- t.mock.timers.enable({apis:['Date'],now:1000});const cache=new ReadCache('');try{assert.equal(await cache.read('key',async()=>1),1);t.mock.timers.tick(3001);assert.equal(await cache.read('key',async()=>2),2);}finally{cache.close();t.mock.timers.reset();}
+ t.mock.timers.enable({apis:['Date'],now:1000});const cache=new ReadCache('');try{assert.equal(await cache.read('key',async()=>1),1);t.mock.timers.tick(READ_CACHE_TTL_MS+1);assert.equal(await cache.read('key',async()=>2),2);}finally{cache.close();t.mock.timers.reset();}
 });
 
 test('local cache bounds total serialized bytes and never retains oversized analytics responses',async()=>{
@@ -68,4 +71,9 @@ test('local cache bounds total serialized bytes and never retains oversized anal
   let loads=0;await cache.read('huge',async()=>{loads++;return 'x'.repeat(2_000_001);});await cache.read('huge',async()=>{loads++;return 'x'.repeat(2_000_001);});assert.equal(loads,2);
   cache.invalidate();assert.equal(inspect.localBytes,0);
  }finally{cache.close();}
+});
+
+test('unchanged reports survive several polling cycles but expire without writes',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:1000});const cache=new ReadCache('');let loads=0;
+ try{await cache.read('report',async()=>++loads);t.mock.timers.tick(15000);assert.equal(await cache.read('report',async()=>++loads),1);t.mock.timers.tick(READ_CACHE_TTL_MS);assert.equal(await cache.read('report',async()=>++loads),2);}finally{cache.close();t.mock.timers.reset();}
 });

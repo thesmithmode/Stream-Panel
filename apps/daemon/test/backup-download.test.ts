@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,writeFile,symlink} from 'node:fs/promises';
+import {mkdtemp,rm,writeFile,symlink,readdir,stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHostedApplication} from '../src/hosted.js';
@@ -18,6 +18,16 @@ test('backup listing and encrypted downloads require login, reject cross-site re
   const list=await h.app.inject({url:'/api/v1/backups',headers});assert.equal(list.statusCode,200);assert.equal(list.json().directory,join(dir,'backups'));assert.equal(list.json().files[0].filename,filename);
   assert.equal(list.json().local.state,'success');assert.equal(list.json().cloud.state,'disabled');
   const file=await h.app.inject({url:`/api/v1/backups/${filename}`,headers});assert.equal(file.statusCode,200);assert.equal(file.rawPayload.subarray(0,5).toString(),'SPBK1');assert.match(String(file.headers['content-disposition']),/attachment/);assert.equal(file.headers['cache-control'],'no-store');
+  assert.equal(Number(file.headers['content-length']),file.rawPayload.length);
+  const before=await readdir(join(dir,'backups')),stateBefore=await stat(join(dir,'backup-state.json'));
+  for(let i=0;i<10;i++){
+   const repeated=await h.app.inject({url:`/api/v1/backups/${filename}`,headers});
+   assert.deepEqual(repeated.rawPayload,file.rawPayload);
+  }
+  await h.app.inject({url:'/api/v1/backups',headers});
+  assert.equal((await stat(join(dir,'backup-state.json'))).ino,stateBefore.ino,'listing unchanged backups must not rewrite and fsync the ledger');
+  assert.deepEqual(await readdir(join(dir,'backups')),before,'downloads create no archives or temporary files');
+  assert.ok(before.every(name=>name.endsWith('.spbk')),'snapshot and verification files are removed');
   assert.equal((await h.app.inject({url:`/api/v1/backups/${filename}`,headers:base})).statusCode,401);
   assert.equal((await h.app.inject({url:`/api/v1/backups/${filename}`,headers:{...headers,'sec-fetch-site':'cross-site'}})).statusCode,403);
   assert.equal((await h.app.inject({url:`/api/v1/backups/${filename}`,headers:{...headers,origin:'https://evil.test'}})).statusCode,403);

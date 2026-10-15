@@ -4,13 +4,13 @@ import type {StreamStore} from '../../../packages/core/src/store.js';
 export const storeOperations={
   channelOverview:"cached",
   analytics:"cached",
-  warmAnalytics:"write",
+  warmAnalytics:"maintenance",
   streamSample:"write",
   youtubeViewers:"write",
   followingSnapshot:"write",
   personFollowing:"cached",
   followingAnalytics:"cached",
-  youtubeQuota:"write",
+  youtubeQuota:"maintenance",
   youtubeSnapshot:"write",
   providerSnapshot:"write",
   collectionLifecycle:"write",
@@ -21,8 +21,8 @@ export const storeOperations={
   donationImportStates:"read",
   pendingDonationImports:"read",
   pendingDonationImportCount:"read",
-  saveDonationImportFailure:"write",
-  removePendingDonation:"write",
+  saveDonationImportFailure:"maintenance",
+  removePendingDonation:"maintenance",
   ingestLiveDonation:"write",
   sessions:"cached",
   platformStreams:"read",
@@ -67,7 +67,7 @@ export const storeOperations={
   undoMerge:"write",
   gap:"write",
   gaps:"read",
-  backup:"write",
+  backup:"maintenance",
   close:"write",
   candidatePersons:"cached",
   insights:"read",
@@ -75,7 +75,7 @@ export const storeOperations={
   personStats:"cached",
   personActivity:"cached",
   ensureOwnerIdentity:"write",
-} as const satisfies Partial<Record<keyof StreamStore,'cached'|'read'|'write'>>;
+} as const satisfies Partial<Record<keyof StreamStore,'cached'|'read'|'write'|'maintenance'>>;
 export type StoreMethod=keyof typeof storeOperations;
 export type StoreRequest={
   [Method in StoreMethod]:[method:Method,...args:Parameters<StreamStore[Method]>]
@@ -83,6 +83,6 @@ export type StoreRequest={
 export function isStoreMethod(value:string):value is StoreMethod {
   return Object.hasOwn(storeOperations,value);
 }
-export function operationsWithPolicy(policy:'cached'|'read'|'write'):Set<string> {
+export function operationsWithPolicy(policy:'cached'|'read'|'write'|'maintenance'):Set<string> {
   return new Set(Object.entries(storeOperations).filter(([,value])=>value===policy).map(([name])=>name));
 }

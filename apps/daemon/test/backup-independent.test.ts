@@ -140,3 +140,25 @@ test('wrong key or corrupted persisted blob never rotates prior local backups', 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('manual local creation and downloads finish while the cloud request is still pending',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-backup-async-cloud-'));
+ const db=new StreamStore(join(dir,'data.sqlite'));
+ await writeFile(join(dir,'key'),'a'.repeat(64));await writeFile(join(dir,'service-key'),'fixture');
+ let release!:(response:Response)=>void,started!:()=>void;
+ const cloudStarted=new Promise<void>(resolve=>started=resolve);
+ const request:typeof fetch=async()=>{started();return new Promise<Response>(resolve=>release=resolve);};
+ const backup=new BackupService(dir,{keyFile:join(dir,'key'),url:'https://fixture.supabase.co',serviceKeyFile:join(dir,'service-key')},request);
+ let timer:ReturnType<typeof setTimeout>|undefined;
+ try{
+  const result=await Promise.race([backup.run({waitForCloud:false}),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('LOCAL_BACKUP_WAITED_FOR_CLOUD')),3000);})]);
+  clearTimeout(timer);await cloudStarted;
+  assert.equal(backup.status.local.state,'success');assert.equal(backup.status.cloud.state,'pending');
+  const stream=await backup.download(result.filename);const chunks:Buffer[]=[];
+  for await(const chunk of stream)chunks.push(Buffer.from(chunk));
+  assert.deepEqual(Buffer.concat(chunks),await readFile(join(dir,'backups',result.filename)));
+  assert.deepEqual((await readdir(join(dir,'backups'))),[result.filename]);
+  release(Response.json({}, {status:503}));await backup.stop();
+  assert.equal(backup.status.cloud.state,'error');assert.equal(backup.status.pendingUploads,1);
+ }finally{clearTimeout(timer);release?.(Response.json({}, {status:503}));await backup.stop();db.close();await rm(dir,{recursive:true,force:true});}
+});

@@ -1,4 +1,5 @@
-import {type StoreRequest,isStoreMethod} from "./store-contract.js";
+import {type StoreRequest,isStoreMethod,storeOperations} from "./store-contract.js";
+import {readCacheKey} from "./read-cache-key.js";
 import {StorageGuard} from "./storage-guard.js";
 import {ReadCache,cachedReads,uncachedReads} from "./read-cache.js";
 import type { Worker } from "node:worker_threads";
@@ -62,9 +63,11 @@ export class StoreClient {
     if(!isStoreMethod(method))throw new Error("UNKNOWN_OPERATION");
     await this.ready;
     if(this.dead)throw new Error("DB_WORKER_STOPPED");
-    if(cachedReads.has(method))return this.cache.read(JSON.stringify([method,args]),()=>this.execute<T>(method,...args));
+    if(cachedReads.has(method))return this.cache.read(readCacheKey(method,args),()=>this.execute<T>(method,...args));
     if(uncachedReads.has(method))return this.execute<T>(method,...args);
     if(method!=="close")await this.storage.check();
+    // These operations write operational state, not facts used by cached reports.
+    if(storeOperations[method]==='maintenance'||method==='collectionLifecycle'&&args[0]==='heartbeat')return this.execute<T>(method,...args);
     this.cache.invalidate();
     try{return await this.execute<T>(method,...args);}finally{this.cache.invalidate();}
   }

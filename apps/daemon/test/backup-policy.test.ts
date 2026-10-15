@@ -16,10 +16,10 @@ test('retention uses Moscow midnight, fills sparse older weeks, and preserves fu
  assert.deepEqual([...retained].sort(),[files[0],files[1],files[2],files[4],files[5],files[7]].sort());
  assert.equal(backupTimestamp('bad'),null);
 });
-test('scheduled backups are due after twelve hours, on first startup and after a backwards clock jump',()=>{
+test('scheduled backups are due after twenty-four hours, on first startup and after a backwards clock jump',()=>{
  assert.equal(backupDue(0,now),true);
- assert.equal(backupDue(now-12*3600000+1,now),false);
- assert.equal(backupDue(now-12*3600000,now),true);
+ assert.equal(backupDue(now-24*3600000+1,now),false);
+ assert.equal(backupDue(now-24*3600000,now),true);
  assert.equal(backupDue(now+1,now),true);
 });
 test('retention preserves the current verified snapshot when timestamps tie',()=>{

@@ -35,3 +35,5 @@
 5. Крупные запросы статистики и обработчик входящих событий можно делить дальше при добавлении соответствующих функций, без создания универсального фреймворка.
 
 Рефакторинг сохраняет поведение и проверяется профильными, миграционными и интеграционными тестами. Паттерны добавляются только для решения конкретной проблемы. Количество классов и строк само по себе не служит мерой качества.
+
+Cached reads live for at most 30 seconds in local memory and Redis, and domain mutations invalidate both immediately. Concurrent identical requests share one calculation. Live analytics and rolling People windows use a 30-second cache key interval while retaining the original query timestamps; historical filters remain exact. Heartbeats, quota accounting, import retry bookkeeping, backup reads and derived-cache warming do not discard domain reports. Start/stop lifecycle and domain writes still invalidate reports. Memory/entry/response size limits and outage fallback remain enforced.
