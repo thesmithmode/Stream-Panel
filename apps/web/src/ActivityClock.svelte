@@ -1,10 +1,11 @@
 <script lang="ts">
+ import type {Snippet} from 'svelte';
  import {clockActivitySeries,type ClockActivity,type ClockMetric} from '../../../packages/core/src/clock-activity';
  import {clockLabel} from './time-audience';
  import {chartMetrics,type ChartMetric,isMessageMetric} from './chart-series';
  import Help from './Help.svelte';
  import PeriodSelect from './PeriodSelect.svelte';
- let {rows,metric=$bindable('viewers'),resolution=$bindable(15),timezone,period='all',onperiod}:{rows:ClockActivity[];metric?:ChartMetric;resolution?:number;timezone:string;period?:number|'all'|'custom';onperiod:(value:number|'all'|'custom')=>void}=$props();
+ let {categoryFilter,rows,metric=$bindable('viewers'),resolution=$bindable(15),timezone,period='all',onperiod}:{categoryFilter:Snippet<[string]>;rows:ClockActivity[];metric?:ChartMetric;resolution?:number;timezone:string;period?:number|'all'|'custom';onperiod:(value:number|'all'|'custom')=>void}=$props();
  let day=$state('all'),selected=$state<number|null>(null),availableWidth=$state(800);
  const plotWidth=$derived(Math.max(300,availableWidth));
  const step=$derived([1,15,30,60].includes(resolution)?resolution:15);
@@ -17,7 +18,7 @@
  $effect(()=>{void metric;void step;void day;void rows;selected=null;});
 </script>
 <section class="panel activity-clock">
- <header><h2>Активность по времени суток</h2><Help id="activity-clock-help" label="О суточном графике" text="Все дни выбранного периода совмещены на шкале 00:00–24:00 в часовом поясе аналитики. Зрители — среднее по времени с известными замерами; сообщения — число на час эфира. Время без эфиров и пропущенные замеры не считаются нулями. Для общей аудитории используются только полные замеры площадок. Сумма зрителей площадок не означает уникальных людей. Нажмите столбец для точного значения."/></header>
+ <header><h2>Активность по времени суток</h2><Help id="activity-clock-help" label="О суточном графике" text="Все дни выбранного периода совмещены на шкале 00:00–24:00 в часовом поясе аналитики. Зрители — среднее по времени с известными замерами; сообщения — число на час эфира. Время без эфиров и пропущенные замеры не считаются нулями. Для общей аудитории используются только полные замеры площадок. Сумма зрителей площадок не означает уникальных людей. Нажмите столбец для точного значения."/></header>{@render categoryFilter("Категория суточного графика")}
  <div class="clock-controls">
   <PeriodSelect value={period} label="Период суточного графика" days={[7,30]} custom={period==='custom'} onchange={onperiod}/>
   <label>Метрика графика<select bind:value={metric}>{#each chartMetrics as choice}<option value={choice.value}>{choice.label}</option>{/each}</select></label>

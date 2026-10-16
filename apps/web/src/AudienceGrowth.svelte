@@ -1,7 +1,8 @@
 <script lang="ts">
+ import type {Snippet} from 'svelte';
  import {audienceGrowth,type GrowthStream,type ViewerPlatform} from './audience-growth';
  import Help from './Help.svelte';
- let {streams,timezone='Europe/Moscow',onStream}:{streams:GrowthStream[];timezone?:string;onStream:(id:string)=>void}=$props();
+ let {categoryFilter,streams,timezone='Europe/Moscow',onStream}:{categoryFilter:Snippet<[string]>;streams:GrowthStream[];timezone?:string;onStream:(id:string)=>void}=$props();
  let platform=$state<ViewerPlatform>('all'),page=$state(0),availableWidth=$state(800),selected=$state(0);
  const points=$derived(audienceGrowth(streams,platform));
  const pages=$derived(Math.max(1,Math.ceil(points.length/12)));
@@ -25,7 +26,7 @@
  const color=$derived(platform==='twitch'?'var(--twitch,#a970ff)':platform==='youtube'?'var(--youtube,#ff5959)':'var(--teal)');
 </script>
 <section class="panel audience-growth">
- <header><h2>Динамика аудитории</h2><Help id="audience-growth-help" label="О динамике аудитории" text="Одна точка — один эфир; расстояния между эфирами равные. Средние рассчитаны по известным замерам в выбранной категории. Золотая линия — среднее за этот и шесть предыдущих эфиров выбранного периода, с одинаковым весом каждого эфира. Она появляется с седьмого эфира; неизвестные значения прерывают линию. Сумма площадок не означает уникальных людей."/></header>
+ <header><h2>Динамика аудитории</h2><Help id="audience-growth-help" label="О динамике аудитории" text="Одна точка — один эфир; расстояния между эфирами равные. Средние рассчитаны по известным замерам в выбранной категории. Золотая линия — среднее за этот и шесть предыдущих эфиров выбранного периода, с одинаковым весом каждого эфира. Она появляется с седьмого эфира; неизвестные значения прерывают линию. Сумма площадок не означает уникальных людей."/></header>{@render categoryFilter("Категория динамики")}
  <div class="growth-controls" role="group" aria-label="Источник динамики">{#each [['all','Вместе'],['twitch','Twitch'],['youtube','YouTube']] as [value,label]}<button class:active={platform===value} aria-pressed={platform===value} onclick={()=>platform=value as ViewerPlatform}>{label}</button>{/each}</div>
  {#if !displayed.length}<p class="growth-caption muted">Нужны собранные эфиры.</p>{:else}
  <div class="growth-legend"><span style:color={color}>● Средние зрители</span><span class="trend-legend">┄ За 7 эфиров</span></div>

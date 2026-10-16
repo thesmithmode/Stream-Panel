@@ -138,7 +138,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await page.getByRole('button',{name:`Интервалы YT ${profile}`,exact:true}).click();await page.getByText('Оценка по чату YouTube',{exact:true}).first().waitFor();assert.ok(await page.locator('.minute-dot.estimated').count()>0);await page.getByRole('button',{name:'Закрыть детализацию'}).click();
    const autoFilter=watchAnalytics({source:'all',category:'game',timezone:'UTC'});
    if(await page.locator('.analytics-thresholds').getAttribute('open')===null)await page.getByText('Настроить отображение',{exact:true}).click();
-   await page.getByLabel('Часовой пояс сравнения').selectOption('UTC');await page.getByLabel('Категория Twitch').selectOption('game');await advanceAutoFilter(autoFilter);
+   await page.getByLabel('Часовой пояс сравнения').selectOption('UTC');await page.getByLabel('Категория динамики').selectOption('game');await advanceAutoFilter(autoFilter);assert.equal(await page.getByLabel('Категория Twitch').inputValue(),'game');assert.equal(await page.getByLabel('Категория суточного графика').inputValue(),'game');
    await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
    assert.equal(await page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).count(),0);
    const resetCategory=watchAnalytics({source:'all',category:'',timezone:'UTC'});await page.getByRole('button',{name:'Сбросить категорию',exact:true}).click();await advanceAutoFilter(resetCategory);assert.equal(await page.getByLabel('Категория Twitch').inputValue(),'');
