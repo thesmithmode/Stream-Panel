@@ -173,9 +173,9 @@ export class AudienceQueries {
           WHERE ${inSession}
           AND ${twitchMessageFilter}
         ) AS messages,
-        (SELECT count(*) FROM effective_events e WHERE ${inSession} AND e.type = 'donation') AS donations`,
+        (SELECT count(*) FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))) AS donations`,
       )
-      .get(...scope, ...scope, botJson, ...scope) as {
+      .get(...scope, ...scope, botJson, ...scope, botJson) as {
       event_count: number;
       messages: number;
       donations: number;
@@ -191,11 +191,11 @@ export class AudienceQueries {
         `SELECT json_extract(e.payload_json, '$.currency') AS currency,
                 json_extract(e.payload_json, '$.amountMinor') AS amount_minor
          FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id
-         WHERE ${inSession} AND e.type = 'donation'
+         WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))
            AND json_extract(e.payload_json, '$.currency') IS NOT NULL
            AND json_extract(e.payload_json, '$.amountMinor') IS NOT NULL`,
       )
-      .all(...scope) as { currency: string; amount_minor: string }[];
+      .all(...scope, botJson) as { currency: string; amount_minor: string }[];
     const totals: Record<string, string> = {};
     for (const row of donationRows) {
       totals[row.currency] = (

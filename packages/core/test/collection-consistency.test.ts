@@ -31,13 +31,14 @@ test('stream cards and detail count the same messages after owner, bot, shared-c
   }
  }finally{s.close();}
 });
-test('donation totals include excluded donors and agree across overview, ledger and stream; old tips stay unlinked',()=>{
+test('donation statistics exclude bot tips consistently while ledger retains them and old tips stay unlinked',()=>{
  const s=new StreamStore(':memory:');try{
   const id=s.observePlatformStream('twitch','owner','stream',at,at,null,'Stream')!;
   const tip={source:'donationalerts' as const,accountId:'da',externalId:'live-tip',type:'donation',actor:{externalId:daDonorExternalId('StreamElements'),displayName:'StreamElements'},occurredAtMs:at+minute,receivedAtMs:at+minute,sourceTime:null,timeQuality:'provider' as const,transport:'rest' as const,payload:{amountMinor:'22800',currency:'RUB'}};
-  s.ingest(tip);s.ingest({...tip,externalId:'before-stream',occurredAtMs:at-minute});
+  const real={...tip,actor:{externalId:daDonorExternalId('RealDonor'),displayName:'RealDonor'}};
+  s.ingest(tip);s.ingest({...real,externalId:'real-tip'});s.ingest({...real,externalId:'before-stream',occurredAtMs:at-minute});
   s.endSession(id,at+2*minute);
-  assert.equal(s.channelOverview().donations,s.donations().total);
+  assert.equal(s.donations().total,3);
   assert.equal(s.channelOverview().donations,2);assert.deepEqual(s.channelOverview().totals,{RUB:'45600'});
   assert.equal(s.summary(id,[],false).donations,1);assert.equal(s.sessions(id)[0]!.donationCount,1);
   assert.deepEqual(s.summary(id,[],false).totals,{RUB:'22800'});
