@@ -21,3 +21,14 @@ test('cached stream merging preserves sufficient statistics and does not mutate 
  assert.equal(series(merged).find(b=>b.minute===600)!.value,4);assert.equal(JSON.stringify(row),snapshot);
  assert.equal(clockActivity([{at:base,viewers:4,isBreak:true}],[{from:base,to:base+minute}],'Europe/Moscow').length,0);
 });
+
+test('offline samples do not create exposure; unsupported saved steps and legacy empty counters are safe',()=>{
+ assert.deepEqual(clockActivity([{at:base,viewers:8}],[],'Europe/Moscow'),[]);
+ const legacy=[{day:'пн',minute:600,totals:[],durations:[]}];
+ const empty=clockActivitySeries(legacy,'youtubeMessages',5);
+ assert.equal(empty.length,24);assert.ok(empty.every(b=>b.value===null));
+ const point={at:base,twitchViewers:4,youtubeViewers:2,twitchMessages:2,youtubeMessages:1,viewers:6,messages:3};
+ const rows=clockActivity([point],[{from:base,to:base+minute}],'Europe/Moscow');
+ assert.equal(clockActivitySeries(rows,'twitchViewers',30).find(b=>b.minute===600)!.value,4);
+ assert.equal(clockActivitySeries(rows,'youtubeMessages',30).find(b=>b.minute===600)!.value,60);
+});

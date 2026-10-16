@@ -35,6 +35,8 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
   const first=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await first;
   await page.getByRole('button',{name:person.name,exact:true}).waitFor();
   assert.ok(await page.getByText('0 из 1 (нет данных)',{exact:true}).count());
+  const legacyGrowth=page.locator('.audience-growth');await legacyGrowth.locator('svg g').first().click();await legacyGrowth.locator('svg g').first().focus();await page.keyboard.press(' ');await page.keyboard.press('ArrowRight');assert.ok(new URL(page.url()).searchParams.get('view')==='analytics');await legacyGrowth.locator('summary').click();assert.equal(await legacyGrowth.locator('tbody button:disabled').count(),2);assert.equal(await legacyGrowth.getByText('Без категории',{exact:true}).count(),2);
+  await page.getByLabel('Период аналитики').selectOption('custom');assert.equal(await page.getByLabel('Период суточного графика').inputValue(),'custom');
   const report=page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).locator('..').locator('..');
   assert.equal(await report.locator('th').count(),0);assert.equal(await report.locator('tbody tr').count(),0);
   const hours=page.locator('.hour-table');await hours.locator('summary').click();
@@ -47,11 +49,14 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
   assert.equal((await streams.locator('tbody tr td').nth(5).textContent()).trim(),'0 / 0 / —');
   assert.equal((await streams.locator('tbody tr td').nth(6).textContent()).trim(),'— / —');
   assert.equal((await streams.locator('tbody tr td').nth(7).textContent()).trim(),'— / —');
+  data.aggregate=true;await renderNextHistory();await page.getByRole('button',{name:person.name,exact:true}).waitFor();
+  await page.route('**/api/v1/analytics?*',route=>new URL(route.request().url()).searchParams.get('from')==='0'?route.fulfill({json:data}):route.fulfill({status:400,json:{error:'DETAIL_UNAVAILABLE'}}));
   await page.getByRole('button',{name:`Интервалы ${person.name}`,exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'DETAIL_UNAVAILABLE'}).waitFor();
   await page.getByRole('heading',{name:`Активность: ${person.name}`,exact:true}).waitFor();
   await page.locator('.minute-dot.unknown').first().waitFor();
   assert.equal(await page.locator('.minute-dot.unknown').count(),1440);
-  await page.getByRole('button',{name:'Закрыть детализацию'}).click();
+  await page.getByRole('button',{name:'Закрыть детализацию'}).click();await page.unroute('**/api/v1/analytics?*');await page.route('**/api/v1/analytics?*',route=>route.fulfill({json:data}));
   data={summary:{entities:205,core:0,streams:0,messages:0,regulars:0,regularShare:0},audience:Array.from({length:205},(_,i)=>({...person,id:`legacy-${i}`,name:`Архив ${i}`,source:'youtube',tags:['архив'],attendanceSessionIds:[],attendanceRatio:0,observedMinutesPerSession:0})),categories:[],hours:[],timeline:[]};
   await renderNextHistory();
   await page.getByText('Показаны первые 200; используйте поиск или меньший период.',{exact:true}).waitFor();
