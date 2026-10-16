@@ -1207,3 +1207,11 @@ main{align-self:start;}
 }
 
 .icon-button{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:36px;min-width:36px;height:36px;padding:8px;background:transparent;border:1px solid transparent;border-radius:7px;color:var(--muted);}.icon-button:hover{background:#ffffff0a;border-color:var(--border);color:var(--text);}.icon-button.danger-icon{color:#f0808c;}.icon-button.danger-icon:hover{background:#e4576b18;border-color:#e4576b55;}
+
+/* Keep long broadcast titles inside the history instead of widening the page. */
+.sessions-page .panel{min-width:0;max-width:100%;}
+.sessions-page table{table-layout:fixed;}
+.sessions-page th,.sessions-page td{white-space:normal;overflow-wrap:anywhere;padding:14px 10px;}
+.sessions-page .platform-details a{display:inline-block;margin-right:8px;}
+.sessions-page td:last-child button{max-width:100%;}
+@media(min-width:901px){.sessions-page th:first-child{width:17%;}.sessions-page th:nth-child(4){width:22%;}.sessions-page th:last-child{width:100px;}}

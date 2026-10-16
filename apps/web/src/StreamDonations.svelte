@@ -5,13 +5,13 @@
  type Donation={id:string;personId:string|null;personName:string|null;amountMinor:string;currency:string;occurredAtMs:number|null;sourceTime?:string|null;sessionIds?:string[];message:string;originalActorName:string;revision:number};
  type Candidate={id:string;name:string;messages:number};
  let {sessionId,onPerson,changed}:{sessionId?:string;onPerson:(id:string)=>void;changed:()=>Promise<void>}=$props();
- let rows=$state<Donation[]>([]),total=$state(0),offset=$state(0),loading=$state(false),busy=$state(false),error=$state('');
+ let rows=$state<Donation[]>([]),total=$state(0),statisticsCount=$state(0),offset=$state(0),loading=$state(false),busy=$state(false),error=$state('');
  let editing=$state<Donation|null>(null),candidates=$state<Candidate[]>([]),people=$state<Person[]>([]),recipient=$state(''),search=$state(''),finding=$state(false);
  const value=(row:Donation)=>/^\d+$/.test(row.amountMinor)?money(row.amountMinor,row.currency):'Сумма неизвестна';
  let generation=0,editorGeneration=0;
  let connection=$state('');
  const showAll=$derived(!sessionId);
- async function refresh(){const ticket=++generation;loading=true;try{const [result,status]=await Promise.all([api(`donations?${showAll?'':`session=${encodeURIComponent(sessionId!)}&`}offset=${offset}&limit=10`),api('status')]);if(ticket===generation){rows=result.items;total=result.total;connection=status.donationalerts.state;error='';}}catch(e){if(ticket===generation)error=(e as Error).message;}finally{if(ticket===generation)loading=false;}}
+ async function refresh(){const ticket=++generation;loading=true;try{const [result,status]=await Promise.all([api(`donations?${showAll?'':`session=${encodeURIComponent(sessionId!)}&`}offset=${offset}&limit=10`),api('status')]);if(ticket===generation){rows=result.items;total=result.total;statisticsCount=result.statisticsCount??result.total;connection=status.donationalerts.state;error='';}}catch(e){if(ticket===generation)error=(e as Error).message;}finally{if(ticket===generation)loading=false;}}
  $effect(()=>{sessionId;offset;showAll;untrack(()=>void refresh());return()=>{generation++;};});
  onMount(()=>{const update=()=>void refresh();window.addEventListener('sp:data-refresh',update);return()=>{editorGeneration++;window.removeEventListener('sp:data-refresh',update);};});
  async function edit(row:Donation){const ticket=++editorGeneration;editing=row;recipient=row.personId??'';candidates=[];people=[];search='';finding=true;error='';try{const [suggested,all]=await Promise.all([api<Candidate[]>(`donations/${encodeURIComponent(row.id)}/candidates`),api<Person[]>('persons')]);if(ticket===editorGeneration){candidates=suggested;people=all.filter(p=>!p.is_bot);}}catch(e){if(ticket===editorGeneration)error=(e as Error).message;}finally{if(ticket===editorGeneration)finding=false;}}
@@ -20,8 +20,9 @@
  async function rescan(){busy=true;error='';try{await api('donationalerts/rescan?recent=1',{},AbortSignal.timeout(60000));await refresh();await changed();}catch(e){error=(e as Error).message;}finally{busy=false;}}
 </script>
 <section class="panel stream-donations" aria-label={sessionId?'Донаты стрима':'Все донаты'}>
- <header><h2>{sessionId?'Донаты стрима':'Все донаты'} <span class="small muted">{total}</span></h2><button class="outline small" disabled={busy||loading} onclick={rescan}>{busy?'Обновляем…':'Обновить донаты'}</button></header>
+ <header><h2>{sessionId?'Донаты стрима':'Все донаты'} <span class="small muted">{statisticsCount}</span></h2><button class="outline small" disabled={busy||loading} onclick={rescan}>{busy?'Обновляем…':'Обновить донаты'}</button></header>
  <div class="donation-list">
+ {#if total!==statisticsCount}<p class="small muted">В статистике: {statisticsCount} · Всего записей: {total}. Донаты исключённых аккаунтов сохранены в журнале.</p>{/if}
  {#if connection==='disconnected'||connection==='error'}<p class="small muted">DonationAlerts не подключён. Проверьте «Интеграции».</p>{/if}
  {#if error}<p class="notice error" role="alert">{error}</p>{/if}
  {#each rows as row (row.id)}<article data-donation-id={row.id}>

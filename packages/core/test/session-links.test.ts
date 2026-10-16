@@ -26,3 +26,13 @@ test('stream history exposes only confirmed source URLs and latest nonempty titl
   assert.equal(manualRow.primaryTitle,null);
  } finally {store.close();}
 });
+
+test('URL variants of one YouTube recording collapse while distinct recordings are retained',()=>{
+ const s=new StreamStore(':memory:');try{
+  const id=s.observePlatformStream('twitch','owner','stream',1000,1000,null,'Stream')!;
+  s.observePlatformStream('youtube','channel','one',1000,1100,'https://youtube.com/watch?v=one','One');
+  s.observePlatformStream('youtube','channel','two',1000,1200,'https://www.youtube.com/watch?v=one&feature=share','Same recording');
+  s.observePlatformStream('youtube','channel','three',1000,1300,'https://www.youtube.com/watch?v=three','Another recording');
+  assert.equal((s.sessions(id)[0]!.confirmedUrls as unknown[]).length,2);
+ }finally{s.close();}
+});

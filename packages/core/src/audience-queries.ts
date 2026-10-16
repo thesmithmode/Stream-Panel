@@ -1,3 +1,4 @@
+import {twitchMessageFilter,youtubeMessageFilter} from './message-filters.js';
 import type Database from "better-sqlite3";
 import {assertTimestamp,candidateKey} from "./domain.js";
 import {botExclusionSet} from "./bots.js";
@@ -170,15 +171,7 @@ export class AudienceQueries {
         (SELECT count(*) FROM effective_events e
           LEFT JOIN identities i ON i.id = e.identity_id
           WHERE ${inSession}
-          AND e.type = 'chat.message'
-          AND (
-            json_extract(e.payload_json, '$.originChannelId') IS NULL
-            OR json_extract(e.payload_json, '$.originChannelId') = e.account_id
-          )
-          AND (
-            i.id IS NULL
-            OR i.match_key NOT IN (SELECT value FROM json_each(?))
-          )
+          AND ${twitchMessageFilter}
         ) AS messages,
         (SELECT count(*) FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))) AS donations`,
       )
@@ -189,8 +182,7 @@ export class AudienceQueries {
     };
     const youtubeParticipants=this.db.prepare(`SELECT y.person_id,y.display_name,count(*) AS messages
       FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id
-      WHERE json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
-        AND y.is_owner=0 AND y.external_id<>y.account_id AND y.match_key NOT IN(SELECT value FROM json_each(?))
+      WHERE ${youtubeMessageFilter}
         AND (? IS NULL OR EXISTS(SELECT 1 FROM platform_streams ps WHERE ps.session_id=? AND ps.platform='youtube' AND ps.account_id=m.account_id AND m.published_at_ms>=ps.started_at_ms AND (ps.ended_at_ms IS NULL OR m.published_at_ms<ps.ended_at_ms)))
       GROUP BY y.person_id`).all(botJson,sid,sid) as {person_id:string;display_name:string;messages:number}[];
     const youtubeMessageCount=youtubeParticipants.reduce((sum,row)=>sum+row.messages,0);

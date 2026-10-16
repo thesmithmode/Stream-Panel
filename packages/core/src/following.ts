@@ -45,7 +45,7 @@ export function followingAnalytics(db:Database.Database,id:string){
  const add=(source:string,account:string,f:Follower)=>{
   if(f.followedAtMs===null||f.followedAtMs<stream.start||f.followedAtMs>end)return;
   const person=source==='youtube'?db.prepare('SELECT person_id AS id FROM youtube_identities WHERE account_id=? AND external_id=?').get(account,f.id):db.prepare('SELECT person_id AS id FROM identities WHERE source=? AND account_id=? AND external_id=?').get(source,account,f.id);
-  signups.set(`${source}:${account}:${f.id}:${f.followedAtMs}`,{source,account,externalId:f.id,name:f.name,at:f.followedAtMs,personId:(person as {id:string}|undefined)?.id??null});
+  signups.set(`${source}:${account}:${f.id}:${Math.floor(f.followedAtMs/1000)}`,{source,account,externalId:f.id,name:f.name,at:f.followedAtMs,personId:(person as {id:string}|undefined)?.id??null});
  };
  for(const p of polls)for(const f of (JSON.parse(p.payload_json) as Snapshot).followers)add(p.source,p.account,f);
  const events=db.prepare("SELECT e.source,e.account_id AS account,i.external_id AS id,i.display_name AS name,e.occurred_at_ms AS at FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE e.type='follow' AND e.occurred_at_ms BETWEEN ? AND ?").all(stream.start,end) as {source:string;account:string;id:string;name:string;at:number}[];

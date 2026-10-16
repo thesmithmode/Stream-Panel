@@ -12,6 +12,9 @@ test('stream donation history survives busy chat; suggestions assign one donatio
  await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`[data-session-id="${sid}"]`).getByRole('button',{name:'Открыть',exact:true}).click();
  const donations=page.getByRole('region',{name:'Донаты стрима'});await donations.getByText('228,00 RUB',{exact:true}).waitFor();await donations.getByRole('button',{name:'Привязать к человеку'}).click();await donations.getByRole('button',{name:/Viewer.*1 сообщ/}).click();await donations.getByRole('button',{name:'Сохранить привязку',exact:true}).click();await donations.getByRole('button',{name:'Связан: Viewer',exact:true}).waitFor();
  assert.equal((await app.db.call('donations',viewer)).total,1);assert.equal((await app.db.call('summary',sid)).totals.RUB,'22800');
+ await app.db.call('ingest',{...tip,payload:{...tip.payload,text:'Донат исключённого аккаунта'},externalId:'excluded-tip',actor:{externalId:'name:streamelements',displayName:'StreamElements'}});
+ await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));
+ await donations.getByText('В статистике: 1 · Всего записей: 2. Донаты исключённых аккаунтов сохранены в журнале.',{exact:true}).waitFor();
  assert.equal(await page.locator('.stream-feed').count(),0);await donations.getByText('Спасибо за стрим',{exact:true}).waitFor();
  for(const width of [1280,390,320]){await page.setViewportSize({width,height:900});await assertUiLayout(page);}
  await page.setViewportSize({width:1280,height:900});await page.screenshot({path:'/tmp/sp-donations-desktop.png',fullPage:true});await page.setViewportSize({width:390,height:844});await page.screenshot({path:'/tmp/sp-donations-mobile.png',fullPage:true});
