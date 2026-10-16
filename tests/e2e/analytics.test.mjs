@@ -140,6 +140,9 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    if(await page.locator('.analytics-thresholds').getAttribute('open')===null)await page.getByText('Настроить отображение',{exact:true}).click();
    await page.getByLabel('Часовой пояс сравнения').selectOption('UTC');await page.getByLabel('Категория Twitch').selectOption('game');await advanceAutoFilter(autoFilter);
    await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
+   assert.equal(await page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).count(),0);
+   const resetCategory=watchAnalytics({source:'all',category:'',timezone:'UTC'});await page.getByRole('button',{name:'Сбросить категорию',exact:true}).click();await advanceAutoFilter(resetCategory);assert.equal(await page.getByLabel('Категория Twitch').inputValue(),'');
+   const selectCategory=watchAnalytics({source:'all',category:'game',timezone:'UTC'});await page.getByLabel('Категория Twitch').selectOption('game');await advanceAutoFilter(selectCategory);
    const youtubeFilter=watchAnalytics({source:'youtube',category:'game',timezone:'UTC'});
    await page.getByLabel('Площадка').selectOption('youtube');await advanceAutoFilter(youtubeFilter);
    await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor({state:'detached'});assert.equal(await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).count(),0);
