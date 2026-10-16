@@ -14,3 +14,8 @@ test('missing measurements leave gaps instead of zero or a shorter rolling windo
  const result=audienceGrowth(input,'all');assert.equal(result[3]!.value,null);assert.equal(result[6]!.trend,null);assert.equal(result[8]!.trend,null);
  assert.deepEqual(audienceGrowth([],'all'),[]);assert.equal(audienceGrowth([{id:'x',startedAt:0}],'all')[0]!.value,null);
 });
+
+test('legacy snapshots without stream identifiers remain renderable and do not invent links',()=>{
+ const rows=audienceGrowth([{startedAt:1,viewers:{all:{mean:null}}},{startedAt:1,viewers:{all:{mean:4}}}],'all');
+ assert.equal(rows.length,2);assert.equal(rows[0]!.id,undefined);assert.equal(rows[1]!.value,4);
+});

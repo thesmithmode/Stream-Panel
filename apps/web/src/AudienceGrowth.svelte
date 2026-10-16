@@ -29,14 +29,14 @@
   <text x="4" y="20" fill="currentColor" font-size="12">{format(maximum)}</text><text x="12" y="190" fill="currentColor" font-size="12">0</text>
   <line x1="40" x2={width-20} y1="190" y2="190" stroke="currentColor" opacity=".3"/>
   <path d={path('value')} stroke={color} stroke-width="2" fill="none"/><path d={path('trend')} stroke="#e4c568" stroke-width="3" stroke-dasharray="6 3" fill="none"/>
-  {#each displayed as p}<g role="button" tabindex="0" aria-label={title(p)} onclick={()=>onStream(p.id)} onkeydown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onStream(p.id);}}}>
+  {#each displayed as p}<g role="button" tabindex={p.id?0:-1} aria-label={title(p)} onclick={()=>{if(p.id)onStream(p.id);}} onkeydown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();if(p.id)onStream(p.id);}}}>
    <circle cx={x(p.startedAt)} cy={p.value===null?190:y(p.value)} r={4} fill={p.value===null?'#737c8a':color}/><circle cx={x(p.startedAt)} cy={p.value===null?190:y(p.value)} r="12" fill="transparent"><title>{title(p)}</title></circle>
   </g>{/each}
   {#each ticks as p,i}<text x={x(p.startedAt)} y="220" text-anchor={i===0?'start':i===ticks.length-1?'end':'middle'} fill="currentColor" font-size="12">{dateLabel(p.startedAt)}</text>{/each}
  </svg></div>
  <p class="growth-caption small muted">Одна точка — один эфир · {timezone}. Нажмите точку, чтобы открыть эфир.{#if points.length<7} Для линии тенденции нужно 7 эфиров.{/if}</p>
  {#if pages>1}<div class="growth-pages"><button class="outline small" disabled={page+1>=pages} onclick={()=>page++}>Раньше</button><span>{page+1} / {pages}</span><button class="outline small" disabled={page===0} onclick={()=>page--}>Позже</button></div>{/if}
- <details class="growth-details"><summary>Даты, категории и значения</summary><div class="table-wrap"><table><thead><tr><th>Эфир</th><th>Средние зрители</th><th>За 7 эфиров</th></tr></thead><tbody>{#each displayed as p}<tr><td><button class="text-button" onclick={()=>onStream(p.id)}>{new Date(p.startedAt).toLocaleString('ru-RU',{timeZone:timezone})}</button><small>{p.categories?.join(', ')||'Без категории'}</small></td><td>{format(p.value)}</td><td>{format(p.trend)}</td></tr>{/each}</tbody></table></div></details>
+ <details class="growth-details"><summary>Даты, категории и значения</summary><div class="table-wrap"><table><thead><tr><th>Эфир</th><th>Средние зрители</th><th>За 7 эфиров</th></tr></thead><tbody>{#each displayed as p}<tr><td><button class="text-button" disabled={!p.id} onclick={()=>{if(p.id)onStream(p.id);}}>{new Date(p.startedAt).toLocaleString('ru-RU',{timeZone:timezone})}</button><small>{p.categories?.join(', ')||'Без категории'}</small></td><td>{format(p.value)}</td><td>{format(p.trend)}</td></tr>{/each}</tbody></table></div></details>
  {/if}
 </section>
 <style>
