@@ -19,6 +19,7 @@ test('incremental reports agree with raw facts, clocks and cohorts; late data an
  fixture(s);s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:base}],true,options.toMs);
  const db=(s as any).db,h=new AnalyticsHistory(db),raw=audienceAnalytics(db,options),r=ready(h);
  assert.deepEqual(r.summary,raw.summary);assert.deepEqual(r.composition,raw.composition);assert.deepEqual(r.streamComparison,raw.streamComparison);assert.deepEqual(r.hours,raw.hours);
+ const clockSort=(rows:any[])=>[...rows].sort((a,b)=>a.day.localeCompare(b.day)||a.minute-b.minute);assert.deepEqual(clockSort(r.activityClock),clockSort(raw.activityClock));
  for(const field of ['messages','observedMinutes','estimatedChatMinutes','visits','core','follower','attendanceRatio','donations'])assert.deepEqual(r.audience[0][field],(raw.audience[0] as any)[field]);
  assert.equal(r.timeline.reduce((n:number,p:any)=>n+p.messages,0),raw.summary.messages);assert.ok(r.clockBuckets.some((p:any)=>p.day==='weekends'));assert.ok(r.clockBuckets.some((p:any)=>p.day==='weekdays'));
  const person=r.audience[0].id;s.setPersonMetadata(person,[],false,s.personRevision(person));assert.equal(ready(h).summary.core,0);

@@ -262,7 +262,7 @@
           changed={()=>refresh(true)}
         />
       {:else if tab === "analytics"}
-        <Analytics profile={profile} defaultTimezone={status.config.analyticsSettings?.timezone??"Europe/Moscow"} onPerson={openPerson} />
+        <Analytics profile={profile} defaultTimezone={status.config.analyticsSettings?.timezone??"Europe/Moscow"} onPerson={openPerson} onStream={id=>{sessionFilter=id;navigate("stream");}} />
       {:else if tab === "donations"}<StreamDonations onPerson={openPerson} changed={()=>refresh(true)} />
       {:else if tab === "settings"}<Settings {profile} {status} />
       {:else if tab === "connections"}<Connections

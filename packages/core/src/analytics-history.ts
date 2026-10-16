@@ -1,3 +1,4 @@
+import {mergeClockActivity, type ClockActivity} from './clock-activity.js';
 import { HistoryTimeline } from "./history-timeline.js";
 import type Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
@@ -78,7 +79,7 @@ export class AnalyticsHistory {
    WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND s.started_at_ms<? AND coalesce(s.ended_at_ms,?)>? ORDER BY s.started_at_ms,s.id`).all(options.toMs, options.toMs, options.fromMs) as Session[];
     }
     private key(options: AnalyticsOptions, session: Session): string {
-        const fields = { format: 1, from: Math.max(options.fromMs, session.started_at_ms), to: Math.min(options.toMs, session.ended_at_ms ?? options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: [...(options.excludedLogins ?? [])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
+        const fields = { format: 2, from: Math.max(options.fromMs, session.started_at_ms), to: Math.min(options.toMs, session.ended_at_ms ?? options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: [...(options.excludedLogins ?? [])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
         return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
     }
     private globalRevision() { return (this.statement('SELECT revision FROM analytics_global_revision WHERE id=1').get() as {
@@ -260,11 +261,13 @@ export class AnalyticsHistory {
             id: string;
             name: string;
         }>();
+        const activityClock = new Map<string,ClockActivity>();
         let sample: Report | undefined;
         let selectedStreams = 0;
         for (const session of sessions) {
             const report = read(session);
             sample = report;
+            mergeClockActivity(report.activityClock,activityClock);
             if (report.summary.streams)
                 selectedStreams++;
             for (const category of report.availableCategories)
@@ -430,6 +433,6 @@ export class AnalyticsHistory {
             payload_json: string;
             updated_at_ms: number;
         } | undefined : undefined;
-        return { ...sample, youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, aggregate: true, filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs }, activityWindows: [], timeline: daily.values(), breaks: [], sessions: [sessions[0]!], audience, categories: outputCategories, availableCategories: [...categories.values()], streamComparison: streams, clockBuckets: [...clockRows.values()], hours: [...hours.values()], patterns: timePatterns([...hours.values()]), summary: { entities: audience.length, attendees: attendees.length, regulars: core, regularShare: audience.length ? core / audience.length : null, core, streams: selectedStreams, chatters: audience.filter(p => p.messages > 0).length, messages: audience.reduce((n, p) => n + p.messages, 0) }, composition: { core: attendees.filter(p => p.core).length, followers: attendees.filter(p => !p.core && p.follower === true).length, nonFollowers: attendees.filter(p => !p.core && p.follower === false).length, unknown: attendees.filter(p => !p.core && p.follower === null).length, twitch: attendees.filter(p => p.sources.includes('twitch')).length, youtube: attendees.filter(p => p.sources.includes('youtube')).length, both: attendees.filter(p => p.sources.length > 1).length }, donationTiming: donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow') };
+        return { ...sample, activityClock:[...activityClock.values()], youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, aggregate: true, filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs }, activityWindows: [], timeline: daily.values(), breaks: [], sessions: [sessions[0]!], audience, categories: outputCategories, availableCategories: [...categories.values()], streamComparison: streams, clockBuckets: [...clockRows.values()], hours: [...hours.values()], patterns: timePatterns([...hours.values()]), summary: { entities: audience.length, attendees: attendees.length, regulars: core, regularShare: audience.length ? core / audience.length : null, core, streams: selectedStreams, chatters: audience.filter(p => p.messages > 0).length, messages: audience.reduce((n, p) => n + p.messages, 0) }, composition: { core: attendees.filter(p => p.core).length, followers: attendees.filter(p => !p.core && p.follower === true).length, nonFollowers: attendees.filter(p => !p.core && p.follower === false).length, unknown: attendees.filter(p => !p.core && p.follower === null).length, twitch: attendees.filter(p => p.sources.includes('twitch')).length, youtube: attendees.filter(p => p.sources.includes('youtube')).length, both: attendees.filter(p => p.sources.length > 1).length }, donationTiming: donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow') };
     }
 }

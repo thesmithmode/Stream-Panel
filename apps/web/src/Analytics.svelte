@@ -5,16 +5,14 @@
   import {analyticsView,loadAnalyticsView,saveAnalyticsView} from "./analytics-view";
   import Help from "./Help.svelte";
   import PeriodSelect from './PeriodSelect.svelte';
-  import TrendChart from "./TrendChart.svelte";
+  import ActivityClock from "./ActivityClock.svelte";
   import {localDateWindow} from "./time-audience";
   import TimeAudience from './TimeAudience.svelte';
   import DonationPatterns from './DonationPatterns.svelte';
   import {platformClass} from './period';
   import TimePatterns from "./TimePatterns.svelte";
   import ComparisonCharts from "./ComparisonCharts.svelte";
-  import {chartMetrics} from './chart-series';
-  import AudienceChart from "./AudienceChart.svelte";
-  let { profile = "local", defaultTimezone="Europe/Moscow", onPerson }: {profile?:string;defaultTimezone?:string;onPerson:(id:string)=>void} = $props();
+  let { profile = "local", defaultTimezone="Europe/Moscow", onPerson, onStream }: {profile?:string;defaultTimezone?:string;onPerson:(id:string)=>void;onStream:(id:string)=>void} = $props();
   let view=$state(analyticsView(null));
   const localInput=(at:number)=>{const d=new Date(at);return new Date(at-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
   let from=$state(localInput(0)),to=$state(localInput(Date.now())),source=$state("all"),category=$state("");
@@ -91,7 +89,7 @@
   });
 </script>
 <section class="panel analytics-filter">
-  <header><h2>Период и фильтры</h2><PeriodSelect value={period} label="Период аналитики" days={[1,7,14,30,60,90,180,365]} custom onchange={value=>{if(value==='custom')period='custom';else preset(value);}}/></header>
+  <header><h2>Период и фильтры</h2><PeriodSelect value={period} label="Период аналитики" days={[7,30]} custom onchange={value=>{if(value==='custom')period='custom';else preset(value);}}/></header>
   <div class="analytics-controls">
     <label>Начало периода<input type="datetime-local" value={from===localInput(0)&&data?.sessions?.length?localInput(data.sessions[0].started_at_ms):from} oninput={e=>{period='custom';from=e.currentTarget.value;}} required /></label>
     <label>Конец периода<input type="datetime-local" bind:value={to} onchange={()=>{liveEnd=false;period='custom';}} required /></label>
@@ -103,7 +101,6 @@
     <label>Часовой пояс сравнения<select bind:value={timezone}><option value="Europe/Moscow">Москва</option><option value="UTC">UTC</option><option value="Asia/Yekaterinburg">Екатеринбург</option></select></label>
 
     <label>Вид дней и часов<select bind:value={view.hourView}><option value="both">Карта и таблица</option><option value="map">Только карта</option><option value="table">Только таблица</option></select></label>
-    <label class="check"><input type="checkbox" bind:checked={view.showRegulars} /> Жёлтая доля ядра</label>
     <label class="check"><input type="checkbox" bind:checked={view.report} /> Отчёт YouTube</label>
     <label class="check"><input type="checkbox" bind:checked={view.trend} /> График активности</label>
     <label class="check"><input type="checkbox" bind:checked={view.categories} /> Сравнение категорий</label>
@@ -126,14 +123,10 @@
   {#if data.donationTiming}<DonationPatterns timing={data.donationTiming}/>{/if}
 
   {#if data.patterns&&data.composition}<TimePatterns {data} />{/if}
-  <ComparisonCharts streams={data.streamComparison??[]} categories={(data.categories??[]).filter((c:any)=>c.id&&c.name!=="Категория неизвестна")} />
-  {#if view.trend}<section class="panel analytics-chart"><header><h2>Активность по времени</h2><Help id="analytics-signals" label="О сигналах активности" text="Twitch — присутствие в опросах чата. YouTube — окно после сообщения, оценка активности. Эти сигналы не подтверждают просмотр видео. Счётчик площадки агрегатный и не раскрывает личности зрителей."/><label>Метрика графика<select bind:value={view.metric}>{#each chartMetrics as choice}<option value={choice.value}>{choice.label}</option>{/each}</select></label></header>
-    <p class="small regular-summary">Ядро аудитории: <strong>{data.summary.regulars??0} из {data.summary.entities??0} ({data.summary.regularShare==null?"нет данных":(data.summary.regularShare*100).toFixed(1)+"%"})</strong></p>
-    {#if data.aggregate}<p class="small muted aggregate-hint">Большой период показан по дням. Нажмите столбец для поминутных данных этого дня.</p><TrendChart points={data.timeline} metric={view.metric} resolution={1440} showRegulars={view.showRegulars} {timezone} onselect={point=>{const bounds=localDateWindow(new Date(point.at).toLocaleDateString('sv-SE',{timeZone:timezone}),timezone);liveEnd=false;period='custom';from=localInput(bounds.from);to=localInput(bounds.to);}}/>{:else}<AudienceChart points={data.timeline} audience={data.audience} metric={view.metric} bind:resolution={view.resolution} showRegulars={view.showRegulars} {timezone} {onPerson}/>{/if}
-
-  </section>
-  {/if}
+  <ComparisonCharts {timezone} {onStream} streams={data.streamComparison??[]} categories={(data.categories??[]).filter((c:any)=>c.id&&c.name!=="Категория неизвестна")} />
+  {#if view.trend}<ActivityClock rows={data.activityClock??[]} bind:metric={view.metric} bind:resolution={view.resolution} {timezone} {period} onperiod={value=>{if(value!=='custom')preset(value);}}/>{/if}
   {#if view.audience}<section class="panel"><header><h2>Возвращаемость участников</h2><Help id="analytics-audience" label="О минутах в чате" text="Наблюдаемые минуты Twitch учитывают молчавших участников и исключают неизвестные промежутки. Оценка YouTube показана отдельно. Выберите сортировку по минутам или сообщениям; нажмите имя для подробностей."/><span>{visible.length} профилей</span></header>
+    <p class="small regular-summary">Ядро аудитории: <strong>{data.summary.regulars??0} из {data.summary.entities??0} ({data.summary.regularShare==null?"нет данных":(data.summary.regularShare*100).toFixed(1)+"%"})</strong></p>
     <div class="analytics-controls"><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label>Сортировка<select bind:value={view.sort}><option value="observedMinutes">Минуты в чате</option><option value="estimatedChatMinutes">Оценка активности YouTube</option><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option><option value="attendanceRatio">Доля посещённых эфиров</option></select></label><label class="check"><input type="checkbox" bind:checked={view.coreOnly} /> Только ядро</label></div>
     <div class="table-wrap compact-audience"><table class="compact-audience-table"><thead><tr><th>Участник</th><th>Посещаемость</th><th>Минуты в чате</th><th>Сообщения</th><th>Подробности</th></tr></thead><tbody>{#each visible.slice(0,200) as e}<tr>
       <td class="audience-name" data-label="Участник"><div><button class={`text-button ${platformClass(e.sources??[e.source])}`} disabled={busy} onclick={()=>onPerson(e.id)}>{e.name}</button>{#if e.core}<span class="core-badge">Ядро</span>{:else if e.follower}<span class="follower-badge">Подписчик</span>{/if}{#each e.tags??[] as tag}<span class="person-tag">{tag}</span>{/each}</div><small>{(e.sources??[e.source]).map((source:string)=>source==='youtube'?'YouTube':source==='donationalerts'?'DA':'Twitch').join(' · ')}</small></td>
