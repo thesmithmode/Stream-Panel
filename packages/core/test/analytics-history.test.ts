@@ -175,3 +175,28 @@ test('expired or displaced report preparation can restart without losing histori
   assert.equal(ready(h,first).summary.messages,60);assert.equal(s.eventCount(),60);
  }finally{s.close();}
 });
+
+test('simulcast category switches filter YouTube metrics and donations in raw, historical and reused reports',()=>{
+ const s=new StreamStore(':memory:');try{
+ const at=base+12*3600000,id=s.startSession('owner','categories',at,'platform',at);
+ s.attachPlatformStream(id,'youtube','yt-owner','categories-video',at,at,null,'Same broadcast');
+ s.streamSample(id,at,'dota','Dota 2','',10);s.youtubeViewers(at,4);
+ s.streamSample(id,at+minute,'irl','IRL','',20);s.youtubeViewers(at+minute,8);
+ s.youtubeMessages('yt-owner','chat',[{id:'dota-message',snippet:{type:'textMessageEvent',publishedAt:new Date(at+1000).toISOString()},authorDetails:{channelId:'viewer',displayName:'Viewer'}},{id:'irl-message',snippet:{type:'textMessageEvent',publishedAt:new Date(at+minute+1000).toISOString()},authorDetails:{channelId:'viewer',displayName:'Viewer'}}]);
+ s.endSession(id,at+2*minute);
+ const person=s.persons()[0]!.id as string;
+ // Two tips in the same minute on opposite sides of a category change.
+ s.streamSample(id,at+30000,'irl','IRL','',15);
+ for(const [n,time] of [at+29999,at+30000,at+2*minute].entries())s.createDonation({personId:person,amount:String(n+1),currency:'RUB',occurredAtMs:time,message:'',sourceName:'Cash'},time);
+ const db=(s as any).db,h=new AnalyticsHistory(db),opts={fromMs:at,toMs:at+3*minute,timezone:'UTC',ownerId:'owner',youtubeAccount:'yt-owner',source:'youtube' as const};
+ for(const [category,count,amount] of [['dota',1,'100'],['irl',1,'200'],['missing',0,undefined]] as const){
+  const query={...opts,category},raw=audienceAnalytics(db,query),cached=ready(h,query);
+  assert.deepEqual(cached.donationTiming,raw.donationTiming);assert.deepEqual(h.report(query).donationTiming,raw.donationTiming);
+  assert.equal(raw.donationTiming.count,count);assert.equal(raw.donationTiming.totals.RUB,amount);
+  assert.deepEqual(cached.summary,raw.summary);assert.deepEqual(cached.streamComparison,raw.streamComparison);
+  assert.deepEqual(raw.availableCategories.map(c=>c.name).sort(),['Dota 2','IRL']);
+  if(category!=='missing'){assert.equal(raw.summary.messages,1);assert.equal(raw.streamComparison[0]!.viewers.youtube.mean,category==='dota'?4:20/3);assert.deepEqual(raw.streamComparison[0]!.categories,[category==='dota'?'Dota 2':'IRL']);}
+ }
+ assert.equal(ready(h,opts).donationTiming.count,3);
+ }finally{s.close();}
+});
