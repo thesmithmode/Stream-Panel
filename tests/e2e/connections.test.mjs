@@ -278,20 +278,14 @@ test(
       await page.getByRole("button", { name: "Стримы", exact: true }).click();
       await page.getByText("Twitch", { exact: true }).waitFor();
       await page.getByRole("button", { name: "Открыть", exact: true }).click();
-      await page.getByLabel("Фильтр событий").selectOption("donation");
-      await page.getByText("Событий этого типа нет", { exact: true }).waitFor();
-      assert.equal(await page.locator(".event-row").count(), 0);
-      await page.getByLabel("Фильтр событий").selectOption("all");
-      await page.getByText("Событий этого типа нет", { exact: true }).waitFor();
-      assert.equal(await page.locator(".event-row").count(), 0,'chat content stays outside the event feed');
+      assert.equal(await page.locator('.stream-feed').count(),0);
       await page.getByRole('region',{name:'Рейтинг участников'}).getByRole('button',{name:'Тестовый зритель',exact:true}).click();
       await page.getByRole("tab", {name:"Редактировать аккаунты",exact:true}).click();await page.getByLabel("Имя группы").waitFor();
       await page.getByRole("button", { name: "Стримы", exact: true }).click();
       await page.getByRole("button", { name: "Открыть", exact: true }).click();
       assert.equal(await page.getByRole("button", {name:"К списку стримов",exact:true}).count(),0);
       assert.equal(await page.getByLabel("Период аналитики").count(), 0);
-      await page.getByLabel("Фильтр событий").selectOption("donation");
-      await page.getByText("Событий этого типа нет", { exact: true }).waitFor();
+      assert.equal(await page.locator('.stream-feed').count(),0);
       await page.getByRole("button", {name:"Обзор",exact:true}).click();
 
       await a.db.call("endSession", s, Date.now(), "estimated");

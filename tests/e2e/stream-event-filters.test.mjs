@@ -12,16 +12,16 @@ test('stream charts retain exact message counts while the event feed contains no
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});await goto(page,app.bootstrap());
   await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`tr[data-session-id="${id}"]`).getByRole('button',{name:'Открыть',exact:true}).click();
   const feed=page.locator('.stream-feed'),messages=page.locator('.stream-metrics .metric').filter({hasText:'Сообщения'}).locator('strong');
-  await messages.getByText('2',{exact:true}).waitFor();await feed.getByText('Подписка на канал',{exact:true}).waitFor();
+  await messages.getByText('2',{exact:true}).waitFor();assert.equal(await feed.count(),0);
   for(const metric of ['messages','twitchMessages','youtubeMessages','viewers','twitchViewers','youtubeViewers']){
    await page.getByLabel('Показатель графика стрима').selectOption(metric);
    assert.equal(await feed.getByText('Twitch message content',{exact:true}).count(),0);assert.equal(await feed.getByText('YouTube message content',{exact:true}).count(),0);
   }
-  assert.deepEqual(await page.getByLabel('Фильтр событий').locator('option').allTextContents(),['Все события','Донаты']);
+  assert.equal(await page.getByLabel('Фильтр событий').count(),0);
   await page.getByLabel('Показатель графика стрима').selectOption('messages');
   await page.locator('.series-panel .chart-bar').filter({has:page.locator('rect title',{hasText:/всего: 1/})}).first().click();
   await page.getByRole('region',{name:'Детали выбранного столбца'}).waitFor();assert.equal(new URL(page.url()).searchParams.get('stream'),id);
   await page.getByRole('button',{name:'Закрыть детализацию',exact:true}).click();
-  await page.getByLabel('Фильтр событий').selectOption('donation');await feed.getByText('Событий этого типа нет',{exact:true}).waitFor();await saveCoverage(page);
+  assert.equal(await feed.count(),0);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });

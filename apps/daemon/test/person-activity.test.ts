@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {StoreClient} from '../src/db.js';import {mkdtemp,rm} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';
-test('person activity stays isolated, deduplicates overlapping observations and retains raw reward events without computing unavailable balances',async()=>{
+test('person activity stays isolated, deduplicates overlapping observations and discards redundant reward events without computing unavailable balances',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-person-activity-'));const db=new StoreClient(join(dir,'db.sqlite'));const at=Date.UTC(2026,9,11,12);
  try{
   const sid=await (db.call('observePlatformStream','twitch','owner','stream',at,at,null,'Stream') as Promise<string>);
@@ -12,7 +12,7 @@ test('person activity stays isolated, deduplicates overlapping observations and 
   await db.call('youtubeMessages','yt-owner','chat',[{id:'yt-message',snippet:{type:'textMessageEvent',publishedAt:new Date(at).toISOString()},authorDetails:{channelId:'author',displayName:'YT viewer'}}]);
   await db.call('endSession',yt,at+3*60000);
   const activity=await (db.call('personActivity','youtube:author') as Promise<any>);assert.equal(activity.hasEstimatedActivity,true);assert.equal(activity.hours[15].minutes,3);assert.equal(activity.visits.length,1);assert.equal('rewards' in activity,false);
-  const archived=await (db.call('events',sid,person.personId) as Promise<any[]>);assert.equal(archived.filter(e=>e.type.startsWith('channel_points')).length,2);
+  const archived=await (db.call('events',sid,person.personId) as Promise<any[]>);assert.equal(archived.filter(e=>e.type.startsWith('channel_points')).length,0);
   await assert.rejects(db.call('personActivity','missing'),/PERSON_NOT_FOUND/);
  }finally{await db.stop();await rm(dir,{recursive:true,force:true});}
 });

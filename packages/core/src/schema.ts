@@ -436,6 +436,15 @@ CREATE TRIGGER IF NOT EXISTS analytics_youtube_messages_delete AFTER DELETE ON y
 PRAGMA user_version=18;
 `;
 
+// Redundant channel notifications have no analytical consumers. Lifecycle lives in platform_streams.
+export const schemaV19 = `
+DELETE FROM event_sessions WHERE event_id IN (
+ SELECT id FROM events WHERE source='twitch' AND type NOT IN ('chat.message','chat.message_delete','chat.clear','chat.clear_user_messages','channel.update','follow','subscription','subscription.gift','subscription.message','raid','bits')
+);
+DELETE FROM events WHERE source='twitch' AND type NOT IN ('chat.message','chat.message_delete','chat.clear','chat.clear_user_messages','channel.update','follow','subscription','subscription.gift','subscription.message','raid','bits');
+PRAGMA user_version=19;
+`;
+
 /** One ordered registry drives upgrades and profile SQL identifiers. Append new versions here. */
-export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18] as const;
+export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19] as const;
 export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;

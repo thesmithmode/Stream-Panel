@@ -1,5 +1,4 @@
 import WebSocket from "ws";
-import {extraTwitchEvents,extraTwitchScopes} from './twitch-events.js';
 import type { ConfigurationPort, Tokens } from "./config.js";
 import type {StorePort} from './store-contract.js';
 type TwitchStore = StorePort<'activeLogicalStream' | 'ensureOwnerIdentity' | 'followingSnapshot' | 'gap' | 'ingest' | 'observePlatformStream' | 'platformMissing' | 'platformStreams' | 'recordPoll' | 'streamSample' | 'updateChatterNames'>;
@@ -22,7 +21,6 @@ const baseScopes = ["user:read:chat", "moderator:read:chatters", "moderator:read
 const optionalScopes = [
   "channel:read:subscriptions",
   "bits:read",
-  ...extraTwitchScopes,
 ];
 
 export function normalizeTwitch(
@@ -51,7 +49,7 @@ export function normalizeTwitch(
     "channel.chat.clear": "chat.clear",
     "channel.chat.clear_user_messages": "chat.clear_user_messages",
   };
-  const mapped = mappings[type] ?? (extraTwitchEvents.some(([name])=>name===type)?type.replace(/^channel\./,''):undefined);
+  const mapped = mappings[type];
   if (!mapped) return null;
   const userId =
     string(event.chatter_user_id) ||
@@ -584,8 +582,6 @@ export class TwitchConnection {
           ] as [string, string, Record<string, string>, string],
       ),
       ["channel.cheer", "1", { broadcaster_user_id: id }, "bits:read"],
-      ...extraTwitchEvents.map(([type,version,scope])=>[type,version,
-        type.startsWith('channel.chat')?{broadcaster_user_id:id,user_id:id}:{broadcaster_user_id:id},scope] as [string,string,Record<string,string>,string|null]),
     ];
     for (const [type, version, condition, scope] of definitions) {
       if (scope && !this.token.scopes.includes(scope)) {
