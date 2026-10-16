@@ -67,7 +67,7 @@
     void api(`analytics?${q}`,undefined,controller.signal).then(result=>{if(!controller.signal.aborted)detailData=result;}).catch(e=>{if(!controller.signal.aborted)error=e.message;}).finally(()=>{if(!controller.signal.aborted)detailBusy=false;});
     return ()=>controller.abort();
   });
-  function selectEntity(e:any){selected=e;day=localInput(e.intervals.at(-1)?.from??new Date(to).getTime()).slice(0,10);}
+  function selectEntity(e:any){selected=e;day=new Date(e.intervals.at(-1)?.from??new Date(to).getTime()).toLocaleDateString('sv-SE',{timeZone:timezone});}
   function preset(days:number|'all'){period=days;liveEnd=true;const now=Date.now();from=localInput(days==='all'?0:now-days*86400000);to=localInput(now);}
   async function refresh(){
     const id=++requestId;busy=true;error="";

@@ -12,7 +12,11 @@ test('audience trend switches platforms, shows seven-stream smoothing and opens 
   await chart.getByLabel('Источник динамики').selectOption('twitch');assert.ok((await chart.locator('svg g').nth(1).getAttribute('aria-label')).includes('среднее за 7 эфиров: 3'));
   await chart.getByLabel('Источник динамики').selectOption('youtube');assert.ok((await chart.locator('svg g').first().getAttribute('aria-label')).includes('средние зрители: нет данных'));
   await chart.getByLabel('Источник динамики').selectOption('all');await chart.locator('summary').click();assert.equal(await chart.locator('tbody tr').count(),50);assert.ok((await chart.locator('tbody tr').first().textContent()).includes('Game'));
-  const clock=page.locator('.activity-clock');await clock.locator('svg g').first().focus();await page.keyboard.press(' ');await page.keyboard.press('ArrowRight');assert.ok((await clock.getByRole('status').textContent()).includes('00:00'));
+  const clock=page.locator('.activity-clock');
+  await clock.getByLabel('Метрика графика').selectOption('messages');await clock.getByText('Сообщения на час эфира · Europe/Moscow',{exact:true}).waitFor();
+  await clock.getByLabel('Период суточного графика').selectOption('7');await chart.getByText('Для линии тенденции нужно 7 эфиров.',{exact:false}).waitFor();
+  assert.ok(await chart.locator('svg g').count()<7);assert.equal(await chart.locator('.growth-pages').count(),0);
+  await clock.getByLabel('Период суточного графика').selectOption('all');await chart.locator('svg g').nth(49).waitFor();await clock.locator('svg g').first().focus();await page.keyboard.press(' ');await page.keyboard.press('ArrowRight');assert.ok((await clock.getByRole('status').textContent()).includes('00:00'));
   await assertUiLayout(page);await page.setViewportSize({width:1280,height:800});await assertUiLayout(page);
   await chart.locator('svg g').first().click();await page.waitForURL(url=>url.searchParams.get('stream')===ids[5]);await page.goBack();await chart.waitFor();
   await chart.locator('summary').click();await chart.locator('tbody button').first().click();await page.waitForURL(url=>url.searchParams.get('stream')===ids[5]);await page.goBack();await chart.waitFor();
