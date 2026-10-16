@@ -15,9 +15,10 @@
  const x=(index:number)=>displayed.length===1?width/2:36+index/(displayed.length-1)*(width-56);
  const y=(value:number)=>174-value/maximum*144;
  const dateLabel=(at:number)=>new Date(at).toLocaleDateString('ru-RU',{timeZone:timezone,day:'2-digit',month:'2-digit'});
+ const fullDate=(at:number)=>new Date(at).toLocaleDateString('ru-RU',{timeZone:timezone});
  const timeLabel=(at:number)=>new Date(at).toLocaleTimeString('ru-RU',{timeZone:timezone,hour:'2-digit',minute:'2-digit'});
  const format=(value:number|null)=>value===null?'нет данных':value.toLocaleString('ru-RU',{maximumFractionDigits:2});
- const title=(p:typeof points[number])=>`${dateLabel(p.startedAt)}, ${timeLabel(p.startedAt)} · ${p.categories?.join(', ')||'Без категории'} · средние зрители: ${format(p.value)} · среднее за 7 эфиров: ${format(p.trend)}`;
+ const title=(p:typeof points[number])=>`${fullDate(p.startedAt)}, ${timeLabel(p.startedAt)} · ${p.categories?.join(', ')||'Без категории'} · средние зрители: ${format(p.value)} · среднее за 7 эфиров: ${format(p.trend)}`;
  function path(key:'value'|'trend'){
   let open=false;
   return displayed.map((p,i)=>{const value=p[key];if(value===null){open=false;return '';}const part=`${open?'L':'M'}${x(i)},${y(value)}`;open=true;return part;}).join(' ');
@@ -38,10 +39,10 @@
   </g>{/each}
   {#each ticks as index,i}<text x={x(index)} y="200" text-anchor={i===0?'start':i===ticks.length-1?'end':'middle'} fill="currentColor" font-size="12">{dateLabel(displayed[index]!.startedAt)}</text>{/each}
  </svg></div>
- {#if current}<div class="growth-selection" role="status"><div class="growth-selection-head"><div><strong>{dateLabel(current.startedAt)} · {timeLabel(current.startedAt)}</strong><small>{current.categories?.join(' · ')||'Без категории'}</small></div><button class="outline small" disabled={!current.id} onclick={()=>{if(current.id)onStream(current.id);}}>Открыть эфир</button></div><dl><div><dt>Средние зрители</dt><dd style:color={color}>{format(current.value)}</dd></div><div><dt>За 7 эфиров</dt><dd class="trend-legend">{format(current.trend)}</dd></div></dl></div>{/if}
+ {#if current}<div class="growth-selection" role="status"><div class="growth-selection-head"><div><strong>{fullDate(current.startedAt)} · {timeLabel(current.startedAt)}</strong><small>{current.categories?.join(' · ')||'Без категории'}</small></div><button class="outline small" disabled={!current.id} onclick={()=>{if(current.id)onStream(current.id);}}>Открыть эфир</button></div><dl><div><dt>Средние зрители</dt><dd style:color={color}>{format(current.value)}</dd></div><div><dt>За 7 эфиров</dt><dd class="trend-legend">{format(current.trend)}</dd></div></dl></div>{/if}
  <p class="growth-caption small muted">Нажмите точку, чтобы увидеть значения · {timezone}.{#if points.length<7} Для линии тенденции нужно 7 эфиров.{/if}</p>
  {#if pages>1}<div class="growth-pages"><button class="outline small" disabled={page+1>=pages} onclick={()=>page++}>Раньше</button><span>{page+1} / {pages}</span><button class="outline small" disabled={page===0} onclick={()=>page--}>Позже</button></div>{/if}
- <div class="growth-recent" aria-label="Последние эфиры">{#each [...displayed].reverse().slice(0,3) as p}<button disabled={!p.id} onclick={()=>{if(p.id)onStream(p.id);}}><span>{dateLabel(p.startedAt)} · {timeLabel(p.startedAt)}<small>{p.categories?.join(' · ')||'Без категории'}</small></span><strong>{format(p.value)}</strong></button>{/each}</div>
+ <div class="growth-recent" aria-label="Последние эфиры">{#each [...displayed].reverse().slice(0,3) as p}<button disabled={!p.id} onclick={()=>{if(p.id)onStream(p.id);}}><span>{fullDate(p.startedAt)} · {timeLabel(p.startedAt)}<small>{p.categories?.join(' · ')||'Без категории'}</small></span><strong>{format(p.value)}</strong></button>{/each}</div>
  {/if}
 </section>
 <style>
