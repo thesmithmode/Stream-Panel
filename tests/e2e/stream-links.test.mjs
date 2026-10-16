@@ -91,7 +91,7 @@ test('long stream titles and several YouTube recordings keep Open visible on des
   const at=Date.now()-120000;
   const id=await app.db.call('observePlatformStream','twitch','owner','stream',at,at,null,'Очень длинное название стрима '.repeat(15));
   for(const video of ['one','two'])await app.db.call('observePlatformStream','youtube','yt-owner',video,at,at,`https://youtube.com/watch?v=${video}`,'YouTube title');
-  browser=await launchBrowser();const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  browser=await launchBrowser();const page=await browser.newPage();page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();
   const row=page.locator(`tr[data-session-id="${id}"]`),open=row.getByRole('button',{name:'Открыть',exact:true});
   await row.getByRole('link',{name:'YouTube · часть 1',exact:true}).waitFor();

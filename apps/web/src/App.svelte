@@ -305,7 +305,7 @@
                       ><td data-label="Название" class="platform-details">
                         {#if session.primaryTitle}<span>{session.primaryTitle}</span>{/if}
                         {#each (session.confirmedUrls ?? []).filter((entry) => isConfirmedPlatformUrl(entry)) as entry,linkIndex}
-                          <a href={entry.url} target="_blank" rel="noopener noreferrer">{entry.platform === "twitch" ? "Twitch" : "YouTube"}{#if (session.confirmedUrls??[]).filter(link=>link.platform===entry.platform).length>1} · часть {(session.confirmedUrls??[]).slice(0,linkIndex+1).filter(link=>link.platform===entry.platform).length}{/if}</a>
+                          <a href={entry.url} target="_blank" rel="noopener noreferrer">{entry.platform === "twitch" ? "Twitch" : "YouTube"}{#if (session.confirmedUrls??[]).filter(link=>link.platform===entry.platform).length>1}{` · часть ${(session.confirmedUrls??[]).slice(0,linkIndex+1).filter(link=>link.platform===entry.platform).length}`}{/if}</a>
                         {/each}
                       </td
                       ><td data-label="Зрители · пик / среднее">{session.viewerPeak??'—'} / {session.viewerMean==null?'—':session.viewerMean.toLocaleString('ru-RU',{maximumFractionDigits:1})}</td><td data-label="Донаты">{#each Object.entries(session.donationTotals??{}) as [currency,amount]}<div>{money(amount,currency)}</div>{:else}—{/each}<small>{donationCountLabel(session.donationCount??0)}</small></td><td data-label="Сообщения">{session.messageCount??0}</td><td
