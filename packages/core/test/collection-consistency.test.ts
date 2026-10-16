@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {StreamStore} from '../src/store.js';
-import {eventKey} from '../src/domain.js';
+import {eventKey,daDonorExternalId} from '../src/domain.js';
 const at=Date.UTC(2026,9,15,12),minute=60000;
 test('follow retries and snapshot precision count one signup, while later refollows remain separate',()=>{
  const s=new StreamStore(':memory:');try{
@@ -34,7 +34,7 @@ test('stream cards and detail count the same messages after owner, bot, shared-c
 test('donation totals include excluded donors and agree across overview, ledger and stream; old tips stay unlinked',()=>{
  const s=new StreamStore(':memory:');try{
   const id=s.observePlatformStream('twitch','owner','stream',at,at,null,'Stream')!;
-  const tip={source:'donationalerts' as const,accountId:'da',externalId:'live-tip',type:'donation',actor:{externalId:'donor',displayName:'StreamElements'},occurredAtMs:at+minute,receivedAtMs:at+minute,sourceTime:null,timeQuality:'provider' as const,transport:'rest' as const,payload:{amountMinor:'22800',currency:'RUB'}};
+  const tip={source:'donationalerts' as const,accountId:'da',externalId:'live-tip',type:'donation',actor:{externalId:daDonorExternalId('StreamElements'),displayName:'StreamElements'},occurredAtMs:at+minute,receivedAtMs:at+minute,sourceTime:null,timeQuality:'provider' as const,transport:'rest' as const,payload:{amountMinor:'22800',currency:'RUB'}};
   s.ingest(tip);s.ingest({...tip,externalId:'before-stream',occurredAtMs:at-minute});
   s.endSession(id,at+2*minute);
   assert.equal(s.channelOverview().donations,s.donations().total);
