@@ -38,6 +38,8 @@ export class EventIngestion {
     }
     if (event.actor && !event.actor.externalId)
       throw new Error("MISSING_ACTOR_KEY");
+    if(event.source==='twitch'&&!['chat.message','chat.message_delete','chat.clear','chat.clear_user_messages','channel.update','follow','subscription','subscription.gift','subscription.message','raid','bits'].includes(event.type))
+      return {inserted:false,identityId:null,personId:null};
     JSON.stringify(event.payload); // Validate the transport payload before any writes; content is never retained.
     const payload = JSON.stringify(event.type === "chat.message" ? chatMetadata(event.payload) :
       ["chat.message_delete","chat.clear","chat.clear_user_messages"].includes(event.type) ? moderationMetadata(event.payload) : event.payload);

@@ -1,4 +1,4 @@
-/** EventSub collection only: provider API mutations are never issued. */
+/** Former archive-only subscriptions: none should enter the collector. */
 export const extraTwitchEvents:ReadonlyArray<readonly [string,string,string|null]>=[
  ['channel.chat.notification','1','user:read:chat'],
  ['channel.chat_settings.update','1','user:read:chat'],

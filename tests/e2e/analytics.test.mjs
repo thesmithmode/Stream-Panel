@@ -157,7 +157,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    for(const metric of ['youtubeMessages','messages','viewers','twitchMessages']){await page.getByLabel('Метрика графика').selectOption(metric);await page.getByLabel('Метрика карты').selectOption(metric.endsWith('Messages')?'messages':metric);if(metric==='twitchMessages'||metric==='messages')assert.ok(await page.locator('.trend-chart rect.regular-segment').count()>0);else assert.equal(await page.locator('.trend-chart rect.regular-segment').count(),0);}
    assert.equal(await page.getByLabel('Обновлять каждую минуту').count(),0);
    const initialRefresh=page.waitForResponse(r=>r.url().includes('/api/v1/analytics?')&&r.status()===200);
-   await page.getByRole('button',{name:/Автообновление/}).click();await initialRefresh;
+   await page.getByRole('button',{name:'Обновить данные',exact:true}).click();await initialRefresh;
    await page.getByLabel('Интервал автообновления').selectOption('60');
    const previousEnd=await page.getByLabel('Конец периода').inputValue();
    const refreshed=page.waitForResponse(r=>r.url().includes('/api/v1/analytics?')&&r.status()===200);const statusUpdate=page.waitForResponse(r=>r.url().endsWith('/api/v1/status')&&r.status()===200);await page.clock.fastForward(60000);await statusUpdate;await page.waitForFunction(previous=>[...document.querySelectorAll('input[type=\"datetime-local\"]')][1]?.value>previous,previousEnd);await page.clock.fastForward(300);await refreshed;

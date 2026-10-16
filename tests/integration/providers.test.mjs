@@ -100,7 +100,8 @@ test(
       const subs = p.requests
         .filter((r) => r.url.includes("/subscriptions"))
         .map((r) => JSON.parse(r.body));
-      assert.equal(subs.length, 13);
+      assert.equal(subs.length, 8);
+      assert.ok(subs.every(s=>!s.type.includes("goal")&&!s.type.includes("shared_chat")&&s.type!=="channel.chat.notification"));
       assert.equal(subs[0].transport.session_id, "session");
       assert.equal(c.status.capabilities["channel.cheer"], "Нет разрешения");
       p.sockets[0].send(JSON.stringify(chat()));

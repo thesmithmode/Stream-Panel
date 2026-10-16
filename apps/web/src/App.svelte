@@ -27,12 +27,11 @@
     type Session,
     money,
     type Summary,
-    type Event,
   } from "./api";
   import {sessionGroup} from "./session-group";
   import {formatDuration} from "./duration";
   let retryInitialization=()=>{};
-  let autoRefresh=$state(false),refreshSeconds=$state(60);
+  let autoRefresh=$state(true),refreshSeconds=$state(60);
   function toggleRefresh(){autoRefresh=!autoRefresh;if(autoRefresh)void action(async()=>{});}
   let tab = $state("overview"),
     authorized = $state(false),
@@ -40,7 +39,6 @@
     error = $state(""),
     status = $state<any>(null),
     sessions = $state<Session[]>([]),
-    events = $state<Event[]>([]),
     summary = $state<Summary>({
       messages: 0,
       donations: 0,
@@ -62,7 +60,7 @@
   let outdated=$state(false);
   let refreshTask:{epoch:number;task:Promise<void>;controller:AbortController}|null=null;
   function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
-  function clearScope(){sessionPage=0;refreshTask?.controller.abort();busy=false;scopeReady=false;events=[];summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
+  function clearScope(){sessionPage=0;refreshTask?.controller.abort();busy=false;scopeReady=false;summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
   function restoreRoute(){const route=readRoute(location.search,getProfile()),selected=accessibleProfile(route.profile),denied=selected!==route.profile;epoch++;tab=denied&&route.view==='stream'?'overview':route.view;sessionFilter=denied?'':route.session;personId=denied?'':route.person;setProfile(selected);profile=selected;clearScope();}
   function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}connectionLost=!navigator.onLine;if(document.hidden||!navigator.onLine)return;error=authMessage((e as Error).message);}
 
@@ -120,7 +118,7 @@
       const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter).map(async([key,path])=>[key,await api(key==='sessions'&&tab==='sessions'&&sessionPage>0?`sessions?offset=${sessionPage*100}`:path,undefined,controller.signal)])));
       if(current!==epoch)return;
       status=values.status;{setCsrf(status.csrf);user=status.user??user;outdated=isOutdatedRelease(status.release);}
-      sessions=values.sessions??sessions;events=values.events??events;summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';window.dispatchEvent(new Event('sp:data-refresh'));
+      sessions=values.sessions??sessions;summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';window.dispatchEvent(new Event('sp:data-refresh'));
     })();refreshTask={epoch:current,task,controller};
     try{await task;}finally{clearTimeout(deadline);if(refreshTask?.task===task)refreshTask=null;}
   }
@@ -145,14 +143,14 @@
   async function switchProfile(next: Profile) {
     if (!allowedProfiles.includes(next) || next === profile) return;
     epoch++;if(tab==="stream")tab="overview"; setProfile(next); profile = next;
-    status = null; sessions = []; events = []; personId = sessionFilter = ""; error = "";
+    status = null; sessions = []; personId = sessionFilter = ""; error = "";
     summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
     clearScope();saveRoute();await action(async () => {});
     if(outdated)location.reload();
   }
   onMount(() => {
-    let alive=true,initializing=false,pendingInitialization=false,lastRefresh=0;
-    const update=()=>{if(!alive||!autoRefresh||busy||initializing||document.hidden||!navigator.onLine)return;if(!authorized){if(connectionLost&&!username&&!password)void initialize();return;}const current=epoch;void refresh().catch(e=>{if(current!==epoch||!alive)return;if(['LOGIN_REQUIRED','LOCAL_LOGIN_REQUIRED'].includes(e.message)){epoch++;authorized=false;events=[];sessions=[];clearScope();}reportFailure(e);});};
+    let alive=true,initializing=false,pendingInitialization=false,lastRefresh=Date.now();
+    const update=()=>{if(!alive||!autoRefresh||busy||initializing||document.hidden||!navigator.onLine)return;if(!authorized){if(connectionLost&&!username&&!password)void initialize();return;}const current=epoch;void refresh().catch(e=>{if(current!==epoch||!alive)return;if(['LOGIN_REQUIRED','LOCAL_LOGIN_REQUIRED'].includes(e.message)){epoch++;authorized=false;sessions=[];clearScope();}reportFailure(e);});};
     const timer=setInterval(()=>{if(Date.now()-lastRefresh>=refreshSeconds*1000){lastRefresh=Date.now();update();}},1000);
     async function initialize() {
       if(initializing||busy){pendingInitialization=true;return;}pendingInitialization=false;initializing=true;
@@ -186,16 +184,15 @@
         void initialize();
     };
     const back=()=>{if(new URLSearchParams(location.hash.slice(1)).has('key')){void initialize();return;}restoreRoute();void action(async()=>{});};
-    const leave=()=>{autoRefresh=false;};
-    const visibility=()=>{if(document.hidden)leave();};
-    window.addEventListener("pagehide",leave);document.addEventListener("visibilitychange",visibility);
+    const visibility=()=>{if(!document.hidden)update();};
+    document.addEventListener("visibilitychange",visibility);
     const offline=()=>connectionLost=true;window.addEventListener('offline',offline);window.addEventListener('popstate',back);window.addEventListener('online',update);window.addEventListener('focus',update);
     window.addEventListener("hashchange", onHashChange);
     return () => {
       alive = false;retryInitialization=()=>{};
       refreshTask?.controller.abort();
       window.removeEventListener("hashchange", onHashChange);
-      window.removeEventListener('offline',offline);window.removeEventListener('popstate',back);window.removeEventListener('online',update);window.removeEventListener('focus',update);document.removeEventListener("visibilitychange",visibility);window.removeEventListener("pagehide",leave);clearInterval(timer);
+      window.removeEventListener('offline',offline);window.removeEventListener('popstate',back);window.removeEventListener('online',update);window.removeEventListener('focus',update);document.removeEventListener("visibilitychange",visibility);clearInterval(timer);
     };
   });
 </script>
@@ -258,7 +255,6 @@
       {#if tab === "overview"}<ChannelOverview connect={()=>navigate("connections")} />
       {:else if tab === "stream"}<Overview session={sessions.find(s=>s.id===sessionFilter)}
           {summary}
-          {events}
           {sessionFilter}
           connect={() => navigate("connections")}
           onPerson={openPerson}
