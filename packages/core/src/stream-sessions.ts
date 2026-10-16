@@ -1,3 +1,4 @@
+import {twitchMessageFilter,youtubeMessageFilter} from './message-filters.js';
 import type Database from "better-sqlite3";
 import {randomUUID} from "node:crypto";
 import {assertTimestamp} from "./domain.js";
@@ -125,7 +126,7 @@ export class StreamSessions {
     }).immediate();
   }
 
-  sessions(sessionId?: string,offset=0,limit=100): Record<string, unknown>[] {
+  sessions(sessionId?: string,offset=0,limit=100,botJson='[]'): Record<string, unknown>[] {
     if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>100)throw new Error("INVALID_PAGINATION");
     const rows = this.db
       .prepare(
@@ -139,9 +140,9 @@ export class StreamSessions {
       .all(sessionId??null,sessionId??null,limit,sessionId?0:offset) as Record<string, unknown>[];
     const ids=JSON.stringify(rows.map(row=>row.id));
     const counts=this.db.prepare(`SELECT session_id,sum(n) AS n FROM (
-      SELECT es.session_id,count(*) AS n FROM event_sessions es INDEXED BY event_sessions_session CROSS JOIN events e ON e.id=es.event_id WHERE e.type='chat.message' AND es.session_id IN(SELECT value FROM json_each(?)) AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id) GROUP BY es.session_id
-      UNION ALL SELECT ps.session_id,count(DISTINCT m.account_id||':'||m.id) AS n FROM youtube_messages m JOIN platform_streams ps ON ps.platform='youtube' AND ps.account_id=m.account_id AND ps.started_at_ms<=m.published_at_ms AND (ps.ended_at_ms IS NULL OR ps.ended_at_ms>m.published_at_ms) WHERE ps.session_id IN(SELECT value FROM json_each(?)) AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent') GROUP BY ps.session_id
-    ) GROUP BY session_id`).all(ids,ids) as {session_id:string;n:number}[];
+      SELECT es.session_id,count(*) AS n FROM event_sessions es INDEXED BY event_sessions_session CROSS JOIN events e ON e.id=es.event_id LEFT JOIN identities i ON i.id=e.identity_id WHERE ${twitchMessageFilter} AND es.session_id IN(SELECT value FROM json_each(?)) GROUP BY es.session_id
+      UNION ALL SELECT ps.session_id,count(DISTINCT m.account_id||':'||m.id) AS n FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id JOIN platform_streams ps ON ps.platform='youtube' AND ps.account_id=m.account_id AND ps.started_at_ms<=m.published_at_ms AND (ps.ended_at_ms IS NULL OR ps.ended_at_ms>m.published_at_ms) WHERE ps.session_id IN(SELECT value FROM json_each(?)) AND ${youtubeMessageFilter} GROUP BY ps.session_id
+    ) GROUP BY session_id`).all(botJson,ids,ids,botJson) as {session_id:string;n:number}[];
     const messagesBySession=new Map(counts.map(row=>[row.session_id,row.n]));
     const samples=this.db.prepare('SELECT session_id,observed_at_ms,twitch_viewers,youtube_viewers FROM stream_samples WHERE session_id IN(SELECT value FROM json_each(?)) ORDER BY observed_at_ms').all(ids) as {session_id:string;observed_at_ms:number;twitch_viewers:number|null;youtube_viewers:number|null}[];
     const platforms=this.db.prepare('SELECT session_id,platform,started_at_ms AS "from",coalesce(ended_at_ms,?) AS "to" FROM platform_streams WHERE session_id IN(SELECT value FROM json_each(?))').all(Date.now(),ids) as {session_id:string;platform:string;from:number;to:number}[];
@@ -161,7 +162,8 @@ export class StreamSessions {
       breaks:sessionBreaks(windows),
       platforms: JSON.parse(platforms_json as string) as string[],
       confirmedUrls: (JSON.parse(urls_json as string) as {platform:"twitch"|"youtube";url:string}[])
-        .filter(link=>this.validPlatformStreamUrl(link.platform,link.url)),
+        .filter(link=>this.validPlatformStreamUrl(link.platform,link.url))
+        .filter((link,index,links)=>{const key=(item:typeof link)=>{const url=new URL(item.url);return item.platform==='youtube'?`youtube:${url.searchParams.get('v')}`:`twitch:${url.pathname.toLowerCase().replace(/\/$/,'')}`;};return links.findIndex(other=>key(other)===key(link))===index;}),
     });});
   }
 

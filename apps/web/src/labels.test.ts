@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { statusLabel, isAudioDonation, audioUrl } from "./labels.ts";
+import { statusLabel, isAudioDonation, audioUrl, donationCountLabel } from "./labels.ts";
 
 test("statusLabel maps known states and passes through unknowns", () => {
   assert.equal(statusLabel("connected"), "подключено");
@@ -30,4 +30,8 @@ test("audioUrl returns http(s) text only", () => {
   assert.equal(audioUrl({ text: "https://x/a.mp3" }), "https://x/a.mp3");
   assert.equal(audioUrl({ text: "not-url" }), null);
   assert.equal(audioUrl({}), null);
+});
+
+test('donation counts use Russian singular, plural and teen forms',()=>{
+ assert.deepEqual([0,1,2,5,11,12,14,21,22,101].map(donationCountLabel),['0 донатов','1 донат','2 доната','5 донатов','11 донатов','12 донатов','14 донатов','21 донат','22 доната','101 донат']);
 });

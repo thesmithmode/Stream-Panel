@@ -39,3 +39,8 @@ export function audioUrl(payload: { text?: unknown }): string | null {
   if (/^https?:\/\/\S+/i.test(text)) return text;
   return null;
 }
+
+export function donationCountLabel(count:number):string {
+ const form=count%100>=11&&count%100<=14?'донатов':count%10===1?'донат':count%10>=2&&count%10<=4?'доната':'донатов';
+ return `${count} ${form}`;
+}

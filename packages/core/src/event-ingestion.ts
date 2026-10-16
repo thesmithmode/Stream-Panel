@@ -71,6 +71,13 @@ export class EventIngestion {
           personId: identity?.person_id ?? null,
         };
       }
+      if(event.type==='follow' && event.actor && event.occurredAtMs!==null){
+        const second=Math.floor(event.occurredAtMs/1000)*1000;
+        const duplicate=this.db.prepare(`SELECT i.id,i.person_id FROM events e JOIN identities i ON i.id=e.identity_id
+          WHERE e.source=? AND e.account_id=? AND e.type='follow' AND i.external_id=?
+            AND e.occurred_at_ms>=? AND e.occurred_at_ms<? LIMIT 1`).get(event.source,event.accountId,event.actor.externalId,second,second+1000) as IdentityRow|undefined;
+        if(duplicate)return {inserted:false,identityId:duplicate.id,personId:duplicate.person_id};
+      }
       if(event.source==='donationalerts' && event.type==='donation' && (!event.actor || ["аноним","anonymous","anon"].includes(matchKey(event.actor.displayName))))new DonationLedger(this.db).ensureAnonymous(event.accountId);
       let identity: IdentityRow | null = null;
       let newIdentity = false;

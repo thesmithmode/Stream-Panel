@@ -67,7 +67,7 @@ export class StreamStore {
   ) {return this.streams.startSession(accountId,streamId,startedAtMs,kind,nowMs);}
   endSession(id: string, atMs: number, quality = "observed") {return this.streams.endSession(id,atMs,quality);}
   deleteManualSession(id: string, atMs: number) {return this.streams.deleteManualSession(id,atMs);}
-  sessions(sessionId?: string,offset=0,limit=100) {return this.streams.sessions(sessionId,offset,limit);}
+  sessions(sessionId?: string,offset=0,limit=100,excludedBotLogins:readonly string[]=[]) {return this.streams.sessions(sessionId,offset,limit,this.queries.botJson(excludedBotLogins));}
   platformStreams(sessionId: string) {return this.streams.platformStreams(sessionId);}
   platformMissing(platform: "twitch" | "youtube", accountId: string, presentIds: string[], observedAtMs: number) {return this.streams.platformMissing(platform,accountId,presentIds,observedAtMs);}
   attachPlatformStream(

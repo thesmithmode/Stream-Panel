@@ -84,3 +84,23 @@ test("stream history shows only confirmed Twitch and YouTube links from the plat
     await a.close();
   }
 });
+
+test('long stream titles and several YouTube recordings keep Open visible on desktop, tablet and mobile',{timeout:60000},async()=>{
+ const app=await application();let browser;
+ try{
+  const at=Date.now()-120000;
+  const id=await app.db.call('observePlatformStream','twitch','owner','stream',at,at,null,'Очень длинное название стрима '.repeat(15));
+  for(const video of ['one','two'])await app.db.call('observePlatformStream','youtube','yt-owner',video,at,at,`https://youtube.com/watch?v=${video}`,'YouTube title');
+  browser=await launchBrowser();const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();
+  const row=page.locator(`tr[data-session-id="${id}"]`),open=row.getByRole('button',{name:'Открыть',exact:true});
+  await row.getByRole('link',{name:'YouTube · часть 1',exact:true}).waitFor();
+  await row.getByRole('link',{name:'YouTube · часть 2',exact:true}).waitFor();
+  for(const width of [1440,1024,820,390]){
+   await page.setViewportSize({width,height:900});await open.scrollIntoViewIfNeeded();
+   const rect=await open.boundingBox();assert.ok(rect&&rect.x>=0&&rect.x+rect.width<=width,JSON.stringify({width,rect}));
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  }
+  await open.click();await page.locator('.stream-page').waitFor();assert.deepEqual(errors,[]);await saveCoverage(page);
+ }finally{await browser?.close();await app.close();}
+});
