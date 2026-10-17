@@ -185,7 +185,7 @@ export class StreamStore {
     if(id&&!session)throw new Error('SESSION_NOT_FOUND');
     const now=Date.now(),to=session?Math.min(session.end??now,now):options.toMs??now;
     const report=this.history.report({...options,fromMs:session?Math.max(0,session.start-90*86400000):options.fromMs??0,toMs:to,excludedLogins:[...excludedBotLogins],includeInsights:true,...(id?{insightSessionId:id}:{})});
-    return {...report,insights:report.insights??[]};
+    return {insights:report.insights??[],preparing:report.preparing===true};
   }
 
   close(): void {

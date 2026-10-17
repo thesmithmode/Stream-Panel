@@ -51,7 +51,8 @@ export class InsightAccumulator {
   const beforePause=(at:number)=>report.audience.filter(p=>p.intervals.some(i=>i.kind==='observed'&&i.from<at&&i.to>at-5*60000));
   if(s.known)for(const pause of report.breaks??[]){const before=beforePause(pause.from),returned=before.filter(p=>p.intervals.some(i=>i.kind==='observed'&&i.from<pause.to+15*60000&&i.to>pause.to));if(before.length>=3&&s.end>=pause.to+15*60000)s.restarts.push({before:before.length,returned:returned.length,at:pause.to});}
   const donorSlots=new Map<string,Set<string>>();
-  for(const tip of tips){if(!report.audience.some(p=>p.id===tip.personId)||!windows.some(w=>tip.at>=w.from&&tip.at<w.to))continue;const local=this.local(tip.at),key=`${local.day}:${local.hour}`,ids=donorSlots.get(key)??new Set<string>();ids.add(tip.personId);donorSlots.set(key,ids);}
+  const donorIds=new Set(report.audience.filter(p=>Object.values(p.donations).some(n=>BigInt(n)>0n)).map(p=>p.id)),namedDonors=new Set(report.audience.filter(p=>! /^(аноним|anonymous|anon)$/i.test(p.name)).map(p=>p.id));
+  for(const tip of tips){if(!donorIds.has(tip.personId)||!windows.some(w=>tip.at>=w.from&&tip.at<w.to))continue;const local=this.local(tip.at),key=`${local.day}:${local.hour}`,ids=donorSlots.get(key)??new Set<string>();ids.add(tip.personId);donorSlots.set(key,ids);}
   const e=evidence(s),eligible=new Map<string,number>();
   for(const w of windows)for(let at=w.from;at<w.to;){const end=Math.min(w.to,(Math.floor(at/3600000)+1)*3600000),local=this.local(at),key=`${local.day}:${local.hour}`;eligible.set(key,(eligible.get(key)??0)+(end-at)/60000);at=end;}
   const slotKeys=[...eligible].filter(([,minutes])=>minutes>=15).map(([key])=>key);
@@ -63,7 +64,7 @@ export class InsightAccumulator {
    // Use only full combined-platform samples, never sums with a missing platform.
    const points=timeline.filter(p=>{const l=this.local(p.at);return `${l.day}:${l.hour}`===key;});
    if(closed&&points.length/minutes>=.8){row.viewerSum+=points.reduce((n,p)=>n+p.viewers!,0);row.viewerMinutes+=points.length;}
-   if(closed&&donorSlots.has(key)){row.donorVisits++;for(const person of donorSlots.get(key)!)if(!row.donors.includes(person))row.donors.push(person);}
+   if(closed&&donorSlots.has(key)){row.donorVisits++;for(const person of donorSlots.get(key)!)if(namedDonors.has(person)&&!row.donors.includes(person))row.donors.push(person);}
    if(s.known&&report.timeline.filter(p=>{const l=this.local(p.at);return p.presenceKnown&&`${l.day}:${l.hour}`===key;}).length/minutes>=.8)knownSlots.add(key);
    this.slots.set(key,row);
   }
@@ -124,7 +125,7 @@ export class InsightAccumulator {
   for(const slot of reliable){
    const day=slot.key.split(':')[0],others=reliable.filter(s=>s!==slot&&s.key.split(':')[0]===day),baselineMinutes=others.reduce((n,s)=>n+s.viewerMinutes,0),baseline=baselineMinutes?others.reduce((n,s)=>n+s.viewerSum,0)/baselineMinutes:0,mean=slot.viewerSum/slot.viewerMinutes;
    if(!focus&&baseline>0&&mean>=baseline*1.3&&mean-baseline>=2){const starts=this.streams.filter(s=>s.day===day),missed=starts.filter(s=>{const end=this.local(s.end-1);return s.closed&&!s.slots.includes(slot.key)&&end.day===day&&end.date===this.local(s.at).date&&end.hour<Number(slot.key.split(':')[1]);});yield card('strong_hour','schedule',`${slot.label} · аудитория выше`,`${decimal(mean)} зрителя в среднем против ${decimal(baseline)} в других изученных часах этого дня.${missed.length?` ${missed.length} эфиров этого дня закончились раньше этого окна.`:''}`,`${slot.visits} эфиров; ${Math.round(slot.viewerMinutes)} минут замеров. Категория и длительность эфира могут влиять на разницу.`,'Стоит проверить это окно в нескольких сопоставимых эфирах. Неизученные часы не оцениваются.',90,slot.visits,slot.evidence);}
-   if(!focus&&slot.donorVisits>=3&&slot.donors.length>=2)yield card('donor_window','support',`${slot.label} · окно поддержки`,`Донаты на ${slot.donorVisits} из ${slot.visits} эфиров в этом окне; в этом окне поддержали ${slot.donors.length} разных участников.`,'Подтверждённое время донатов и установленные связи аккаунтов. Сумма не используется для выбора окна: один крупный донат не создаёт закономерность.','Учитывай окно поддержки вместе с числом зрителей и своим расписанием.',85,slot.visits,slot.evidence);
+   if(!focus&&slot.donorVisits>=3&&slot.donors.length>=2)yield card('donor_window','support',`${slot.label} · окно поддержки`,`Донаты на ${slot.donorVisits} из ${slot.visits} эфиров в этом окне; поддержка от ${slot.donors.length} известных участников.`,'Подтверждённое время донатов и установленные связи аккаунтов. Сумма не используется для выбора окна: один крупный донат не создаёт закономерность.','Учитывай окно поддержки вместе с числом зрителей и своим расписанием.',85,slot.visits,slot.evidence);
   }
   const categories=[...this.categories.values()].filter(c=>c.visits>=4&&c.viewerMinutes/c.minutes>=.8).sort((a,b)=>b.viewerSum/b.viewerMinutes-a.viewerSum/a.viewerMinutes);
   const best=categories[0],worst=categories.at(-1);

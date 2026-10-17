@@ -76,3 +76,8 @@ test('anonymous money is part of the total but cannot masquerade as a dominant s
  const e=engine();for(let i=0;i<4;i++)e.add(report(i,{people:[person('anonymous',0,'1000'),person('named',0,'100'),person('other',0,'10')]}),true);
  assert.equal(kinds(e).has('support_concentration'),false);
 });
+test('donor windows cannot be inferred from coincident names or donation times outside the selected stream',()=>{
+ const e=engine();for(let i=0;i<6;i++)e.add(report(i,{people:[person('one'),person('two')]}),true,[{personId:'one',at:base+i*7*day+60*minute},{personId:'two',at:base+i*7*day+60*minute}]);
+ assert.equal(kinds(e).has('donor_window'),false);
+ const out=engine();for(let i=0;i<6;i++)out.add(report(i),true,[{personId:'quiet',at:base-1},{personId:'supporter',at:base-1}]);assert.equal(kinds(out).has('donor_window'),false);
+});
