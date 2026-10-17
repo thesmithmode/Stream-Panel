@@ -113,3 +113,14 @@ test('YouTube inferred minutes and person activity stop at each physical broadca
   assert.equal(s.analytics({...options,sessionId:root,youtubeAccount:'yt'}).audience.find(p=>p.id===youtube)!.estimatedChatMinutes,2);
  }finally{s.close();}
 });
+test('automatic continuation of a grouped tail keeps collection physical and the logical end state current',()=>{
+ const s=new StreamStore(':memory:');try{
+  const a=part(s,0),b=part(s,1),root=grouping(s).mergeSessions([a,b]);
+  const tail=s.observePlatformStream('twitch','owner','resumed',at+123*m,at+123*m,null,'Resumed',['resumed'])!;
+  assert.equal(tail,b);assert.equal(s.sessions()[0]!.id,root);assert.equal(s.sessions()[0]!.ended_at_ms,null);
+  assert.throws(()=>grouping(s).unmergeSessions(root),/INVALID_SESSION_GROUP/);
+  s.endSession(tail,at+125*m,'estimated');const row=s.sessions()[0]!;
+  assert.equal(row.ended_at_ms,at+125*m);assert.equal(row.end_quality,'estimated');assert.equal(row.durationMs,6*m);
+  grouping(s).unmergeSessions(root);assert.equal(s.sessions().length,2);
+ }finally{s.close();}
+});
