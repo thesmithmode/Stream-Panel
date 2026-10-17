@@ -56,7 +56,7 @@ test("Overview insights render loading, empty, error and person paths; expand in
     await trigger.click();
     const insightDialog = page.locator(".insight-body");
     await page.locator(".insight-body").getByText("Ищем закономерности…", { exact: true }).waitFor();
-    await page.getByText("Подтверждённых закономерностей пока нет. Нужны повторения на нескольких эфирах; пропуски данных не считаются отсутствием людей.", { exact: true }).waitFor();
+    await page.getByText("Заметных особенностей этого эфира пока не найдено.", { exact: true }).waitFor();
     await page.locator(".insights-section").getByRole("button",{name:"Скрыть",exact:true}).click();
     assert.equal(await insightDialog.count(), 0);
 

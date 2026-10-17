@@ -103,7 +103,7 @@
   onMount(()=>{
     try{const saved=JSON.parse(localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved?.timezone)timezone=saved.timezone;}catch{/* private browser may deny storage */}
     view=loadAnalyticsView(()=>localStorage,profile);
-    mounted=true;const update=()=>{if(!document.hidden&&navigator.onLine&&!busy){if(liveEnd){const next=localInput(Date.now());if(next===to)void refresh();else to=next;}else void refresh();}};window.addEventListener('sp:data-refresh',update);return ()=>{requestId++;window.removeEventListener('sp:data-refresh',update);};
+    mounted=true;const update=()=>{if(!document.hidden&&navigator.onLine&&!busy){if(liveEnd){const now=Date.now();if(typeof period==='number')from=localInput(now-period*86400000);const next=localInput(now);if(next===to)void refresh();else to=next;}else void refresh();}};window.addEventListener('sp:data-refresh',update);return ()=>{requestId++;window.removeEventListener('sp:data-refresh',update);};
   });
 </script>
 {#snippet categoryFilter(label:string)}

@@ -226,7 +226,7 @@ test('completed reports have fixed entry and byte budgets, and oversized reports
  const s=new StreamStore(':memory:');try{
  fixture(s,1);const db=(s as any).db,h=new AnalyticsHistory(db,{maxCompletedBytes:200000});
  for(let minMessages=0;minMessages<12;minMessages++)h.query({...options,minMessages});
- const memory=h as any;assert.ok(memory.completed.size<=8);assert.ok(memory.completedBytes<=200000);
+ const memory=h as any;assert.ok(memory.completed.size<=16);assert.ok(memory.completedBytes<=200000);
  const tiny=new AnalyticsHistory(db,{maxCompletedBytes:1});for(let i=0;i<2;i++)assert.equal(tiny.query(options).summary.messages,1);assert.equal((tiny as any).completed.size,0);
  }finally{s.close();}
 });
@@ -292,16 +292,26 @@ test('temporary-space pressure evicts only derived work and resource errors pres
  const s=new StreamStore(':memory:');try{
   fixture(s,60);const db=(s as any).db,h=new AnalyticsHistory(db),opts={...options,toMs:base+62*86400000,summaryOnly:true};
   assert.equal(ready(h,opts).summary.messages,60);
-  const original=AnalyticsWorkspace.prototype.checkBudget;let fail=false;
-  t.mock.method(AnalyticsWorkspace.prototype,'checkBudget',function(this:AnalyticsWorkspace<unknown>){if(fail){fail=false;throw Error('ANALYTICS_WORKSPACE_LIMIT');}return original.call(this);});
+  const original=AnalyticsWorkspace.prototype.checkBudget;let fail=false,fatal='';
+  t.mock.method(AnalyticsWorkspace.prototype,'checkBudget',function(this:AnalyticsWorkspace<unknown>){if(fatal)throw Error(fatal);if(fail){fail=false;throw Error('ANALYTICS_WORKSPACE_LIMIT');}return original.call(this);});
   fail=true;assert.equal(ready(h,{...opts,minMessages:100}).summary.messages,60,'completed derived work is safely evicted');h.close();
   let cpu=0;t.mock.method(performance,'now',()=>cpu+=10);
   assert.equal(h.report({...opts,minMessages:101}).preparing,true);fail=true;
   assert.equal(ready(h,{...opts,minMessages:102}).summary.messages,60,'another pending filter can be safely displaced');h.close();
   for(const error of ['ANALYTICS_WORKSPACE_LIMIT','ANALYTICS_DISK_RESERVE']){
-   t.mock.method(AnalyticsWorkspace.prototype,'checkBudget',()=>{throw Error(error);});assert.throws(()=>h.report(opts),new RegExp(error));
+   fatal=error;assert.throws(()=>h.report(opts),new RegExp(error));
    assert.equal(db.prepare("SELECT count(*) n FROM sqlite_temp_master WHERE type='table' AND name LIKE 'sp_analytics_%'").get().n,0);
   }
-  t.mock.method(AnalyticsWorkspace.prototype,'checkBudget',original);assert.equal(ready(h,opts).summary.messages,60);h.close();assert.equal(s.eventCount(),60);
+  fatal='';assert.equal(ready(h,opts).summary.messages,60);h.close();assert.equal(s.eventCount(),60);
+ }finally{s.close();}
+});
+
+test('background warm finishes standard periods before navigation, independent of option property order',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,4);const h=new AnalyticsHistory((s as any).db),toMs=Math.floor(options.toMs/60000)*60000;
+  let progress;do{progress=h.warm({...options,toMs});}while(progress.preparing);
+  const aggregate=(h as any).aggregate;(h as any).aggregate=()=>{throw Error('hot report rebuilt');};
+  for(const days of [7,30,0])for(const source of ['all','twitch','youtube'] as const){const r=h.report({includeInsights:true,summaryOnly:true,category:'',source,toMs,fromMs:days?toMs-days*86400000:0,...Object.fromEntries(Object.entries(options).filter(([k])=>!['fromMs','toMs'].includes(k)))});assert.equal(r.preparing,undefined);assert.ok(Array.isArray(r.insights));}
+  (h as any).aggregate=aggregate;h.close();
  }finally{s.close();}
 });

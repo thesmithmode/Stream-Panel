@@ -21,14 +21,14 @@ test('insights use complete historical audience beyond the first page; period, c
   await section.locator('.insight-card').first().waitFor();assert.equal(await section.locator('.insight-card').count(),1);await section.getByText('Молчаливое ядро · 45 участников',{exact:true}).waitFor();await section.locator('.grouped>summary').click();assert.equal(await section.locator('.person-finding').count(),12);
   await section.getByRole('button',{name:/Ещё участники/}).click();assert.equal(await section.locator('.person-finding').count(),24);
   await section.locator('.person-finding>summary').first().click();await section.locator('.evidence>summary').first().click();await section.getByText('Полные опросы Twitch',{exact:false}).first().waitFor();
-  await section.getByRole('button',{name:/Люди/}).click();assert.ok(await section.locator('.insight-card').count()>0);
+  assert.equal(await section.locator('.insight-filters').count(),0);assert.ok(await section.locator('.insight-card').count()>0);
   const screenshots=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;
   if(screenshots){await mkdir(screenshots,{recursive:true});await section.screenshot({path:join(screenshots,'insights-desktop.png')});}
-  await page.getByLabel('Период аналитики',{exact:true}).selectOption('7');await section.getByText('Подтверждённых закономерностей пока нет.',{exact:false}).waitFor();
+  await page.getByLabel('Период аналитики',{exact:true}).selectOption('7');await section.getByText('Для выбранного периода пока недостаточно данных для выводов.',{exact:false}).waitFor();
   await page.getByLabel('Период аналитики',{exact:true}).selectOption('30');await section.locator('.insight-card').first().waitFor();
-  await page.locator('.analytics-category-filter select').selectOption('wow');await section.getByText('Подтверждённых закономерностей пока нет.',{exact:false}).waitFor();
+  await page.locator('.analytics-category-filter select').selectOption('wow');await section.getByText('Для выбранного периода пока недостаточно данных для выводов.',{exact:false}).waitFor();
   await page.locator('.analytics-category-filter select').selectOption('dota');await section.locator('.insight-card').first().waitFor();
-  await page.locator('.analytics-controls label').filter({hasText:'Площадка'}).locator('select').selectOption('youtube');await section.getByText('Подтверждённых закономерностей пока нет.',{exact:false}).waitFor();
+  await page.locator('.analytics-controls label').filter({hasText:'Площадка'}).locator('select').selectOption('youtube');await section.getByText('Для выбранного периода пока недостаточно данных для выводов.',{exact:false}).waitFor();
   await page.locator('.analytics-controls label').filter({hasText:'Площадка'}).locator('select').selectOption('all');await section.locator('.insight-card').first().waitFor();
   await page.setViewportSize({width:390,height:844});await section.scrollIntoViewIfNeeded();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);

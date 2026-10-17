@@ -15,7 +15,7 @@ export function startAnalyticsWarmer(runtimes:()=>Iterable<Runtime>,enabled:()=>
     preparing ||= result.preparing;
    }catch{onError();}
   }
-  if(!stopped)timer=setTimeout(()=>void run(),preparing?5000:60000);
+  if(!stopped)timer=setTimeout(()=>void run(),preparing?50:60000);
  };
  void run();
  return ()=>{stopped=true;clearTimeout(timer);};

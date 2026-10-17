@@ -1,4 +1,4 @@
-import {InsightAccumulator,type InsightCard} from './insights.js';
+import {streamInsights,InsightAccumulator,type InsightCard} from './insights.js';
 import {mergeClockActivity, type ClockActivity} from './clock-activity.js';
 import {AnalyticsWorkspace} from './analytics-workspace.js';
 import { HistoryTimeline } from "./history-timeline.js";
@@ -64,7 +64,7 @@ export class AnalyticsHistory {
         const limit=this.cachePolicy.maxCompletedBytes??16*1024*1024,bytes=serialize(value).byteLength;
         if(bytes>limit){workspace?.dispose();return;}
         const previous=this.completed.get(key);if(previous){previous.workspace?.dispose();this.completedBytes-=previous.bytes;this.completed.delete(key);}
-        while(this.completed.size>=8||this.completedBytes+bytes>limit){const oldest=this.completed.keys().next().value!;this.completedBytes-=this.completed.get(oldest)!.bytes;this.completed.get(oldest)!.workspace?.dispose();this.completed.delete(oldest);}
+        while(this.completed.size>=16||this.completedBytes+bytes>limit){const oldest=this.completed.keys().next().value!;this.completedBytes-=this.completed.get(oldest)!.bytes;this.completed.get(oldest)!.workspace?.dispose();this.completed.delete(oldest);}
         this.completed.set(key,{value:structuredClone(value),bytes,...(workspace?{workspace}:{}),...(liveRevision?{liveRevision}:{})});this.completedBytes+=bytes;
     }
     private readonly jobs = new Map<string, {
@@ -86,7 +86,7 @@ export class AnalyticsHistory {
         if(db.pragma('temp_store',{simple:true})!==1)db.pragma('temp_store=FILE');
         db.pragma('temp.cache_size=-2048');
     }
-    close(){for(const job of this.jobs.values())job.workspace.dispose();this.jobs.clear();for(const entry of this.completed.values())entry.workspace?.dispose();this.completed.clear();this.completedBytes=0;}
+    close(){this.liveStreams.clear();for(const job of this.jobs.values())job.workspace.dispose();this.jobs.clear();for(const entry of this.completed.values())entry.workspace?.dispose();this.completed.clear();this.completedBytes=0;}
     private page(value:Report,workspace:AnalyticsWorkspace<Person>|undefined,options:AnalyticsOptions):Report{
         if(!workspace)return value;
         const page=workspace.people.page(options.audienceOffset??0,options.audienceSearch??'',options.audienceSort??'core',options.audienceCoreOnly??false);
@@ -115,7 +115,7 @@ export class AnalyticsHistory {
    WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND s.started_at_ms<? AND coalesce(s.ended_at_ms,?)>? ORDER BY s.started_at_ms,s.id`).all(options.toMs, options.toMs, options.fromMs) as Session[];
     }
     private key(options: AnalyticsOptions, session: Session): string {
-        const fields = { format: 4, from: Math.max(options.fromMs, session.started_at_ms), to: Math.min(options.toMs, session.ended_at_ms ?? options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: [...(options.excludedLogins ?? [])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
+        const fields = { format: 5, from: Math.max(options.fromMs, session.started_at_ms), to: Math.min(options.toMs, session.ended_at_ms ?? options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: [...(options.excludedLogins ?? [])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
         return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
     }
     private globalRevision() { return (this.statement('SELECT revision FROM analytics_global_revision WHERE id=1').get() as {
@@ -156,7 +156,7 @@ export class AnalyticsHistory {
                     clockBuckets.push({ day, resolution, minute: bucket.minute, streams: bucket.streams.size, airtimeMs: bucket.airtimeMs, personTimeMs: bucket.personTimeMs, averageAudience: bucket.averageAudience, people: [...bucket.people].map(([id, streams]) => ({ id, visits: streams.size })) });
                 }
         }
-        return { ...report, clockBuckets };
+        return { ...report, clockBuckets, insights:streamInsights(report,options.timezone) };
     }
     private cached(options: AnalyticsOptions, session: Session, global: number): Report | undefined {
         if (session.ended_at_ms === null)
@@ -237,6 +237,31 @@ export class AnalyticsHistory {
         }
         return {preparing:ready<sessions.length,ready,total:sessions.length};
     }
+    private liveStreams=new Map<string,{revision:string;report:Report}>();
+    streamReport(options:AnalyticsOptions):Report {
+        const session=this.sessions(options).find(s=>s.id===options.sessionId);
+        if(!session)return audienceAnalytics(this.db,options);
+        const global=this.globalRevision(),key=this.key(options,session),revision=`${global}:${session.revision}`,live=this.liveStreams.get(key),cached=session.ended_at_ms===null&&live?.revision===revision?live.report:this.cached(options,session,global);
+        if(cached)return cached;
+        const report=this.build(options,session);this.save(options,session,global,report);
+        if(session.ended_at_ms===null){while(this.liveStreams.size>=12)this.liveStreams.delete(this.liveStreams.keys().next().value!);this.liveStreams.set(key,{revision,report});}return report;
+    }
+    private warmCursor=0;
+    private warmCutoff=0;
+    warm(options:AnalyticsOptions){
+        // One bounded chunk per call. A fixed snapshot prevents moving live windows
+        // from restarting a build. Standard periods are ready before navigation.
+        if(!this.warmCutoff)this.warmCutoff=Math.floor(options.toMs/60000)*60000;
+        const toMs=this.warmCutoff,variants=[7,30,0].flatMap(days=>['all','twitch','youtube'].map(source=>({...options,source:source as NonNullable<AnalyticsOptions['source']>,fromMs:days?Math.max(0,toMs-days*86400000):0,toMs,summaryOnly:true,includeInsights:true})));
+        const current={...variants[this.warmCursor]!,category:options.category??''};
+        const prepared=this.prepare(current);if(prepared.preparing)return prepared;
+        const report=this.report(current);
+        if(report.preparing)return {preparing:true,ready:this.warmCursor,total:variants.length};
+        this.warmCursor++;
+        const preparing=this.warmCursor<variants.length;
+        if(!preparing){this.warmCursor=0;this.warmCutoff=0;}
+        return {preparing,ready:preparing?this.warmCursor:variants.length,total:variants.length};
+    }
     query(options:AnalyticsOptions):Report{
         return options.sessionId?audienceAnalytics(this.db,options):this.resolve(options,options.summaryOnly??false);
     }
@@ -252,8 +277,8 @@ export class AnalyticsHistory {
         const lastEnd = sessions.reduce((end, session) => Math.max(end, session.ended_at_ms ?? options.toMs), options.fromMs);
         const {audienceOffset,audienceSearch,audienceSort,audienceCoreOnly,clockDay,clockMinute,clockResolution,clockOffset,...baseOptions}=options;
         void audienceOffset;void audienceSearch;void audienceSort;void audienceCoreOnly;void clockDay;void clockMinute;void clockResolution;void clockOffset;
-        const canonical = { ...baseOptions, fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
-        const fingerprint = createHash('sha256').update(JSON.stringify([historical, canonical, this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.statement('SELECT * FROM person_preferences ORDER BY person_id').all(), this.statement('SELECT * FROM person_tags ORDER BY person_id,label').all(), this.followerRevision()])).digest('hex');
+        const canonical = { ...baseOptions,source:options.source??'all',category:options.category??'', fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
+        const fingerprint = createHash('sha256').update(JSON.stringify([historical, Object.fromEntries(Object.entries(canonical).sort(([a],[b])=>a.localeCompare(b))), this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.statement('SELECT * FROM person_preferences ORDER BY person_id').all(), this.statement('SELECT * FROM person_tags ORDER BY person_id,label').all(), this.followerRevision()])).digest('hex');
         const liveRevision=JSON.stringify(sessions.filter(s=>s.ended_at_ms===null).map(s=>[s.id,s.revision]));
         const retained=this.completed.get(fingerprint);
         const cached=retained&&(!live||retained.liveRevision===liveRevision)?retained:undefined;
@@ -305,7 +330,7 @@ export class AnalyticsHistory {
             if (session.ended_at_ms === null) {
                 let report = active.get(session.id);
                 if (!report) {
-                    report = this.build(options, session);
+                    report = this.streamReport({...options,sessionId:session.id});
                     active.set(session.id, report);
                 }
                 return report;
@@ -421,7 +446,7 @@ export class AnalyticsHistory {
             }
         }
         if (!sample)
-            return audienceAnalytics(this.db, options);
+            return {...audienceAnalytics(this.db, options),...(options.includeInsights?{insights:[]}: {})};
         const preferences = new Map((this.statement('SELECT person_id,manual_core FROM person_preferences').all() as {
             person_id: string;
             manual_core: number | null;
@@ -509,6 +534,6 @@ export class AnalyticsHistory {
             payload_json: string;
             updated_at_ms: number;
         } | undefined : undefined;
-        return { ...sample,...(options.includeInsights?{insights}:{}), activityClock:[...activityClock.values()], youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, aggregate: true, filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs }, activityWindows: [], timeline: daily.values(), breaks: [], sessions: [sessions[0]!], audience, categories: outputCategories, availableCategories: [...categories.values()], streamComparison: streams, clockBuckets: [...clockRows.values()], hours: [...hours.values()], patterns: timePatterns([...hours.values()]), summary,composition,donationTiming:donationTiming(this.db,options.fromMs,options.toMs,options.timezone??'Europe/Moscow',options.category)};
+        return { ...sample,insights:options.includeInsights?insights:[], activityClock:[...activityClock.values()], youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, aggregate: true, filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs }, activityWindows: [], timeline: daily.values(), breaks: [], sessions: [sessions[0]!], audience, categories: outputCategories, availableCategories: [...categories.values()], streamComparison: streams, clockBuckets: [...clockRows.values()], hours: [...hours.values()], patterns: timePatterns([...hours.values()]), summary,composition,donationTiming:donationTiming(this.db,options.fromMs,options.toMs,options.timezone??'Europe/Moscow',options.category)};
     }
 }
