@@ -130,3 +130,9 @@ test('daily hour opportunities and support work over different weekdays without 
  const noViewers=engine();for(let i=0;i<3;i++)noViewers.add(report(i,{viewers:0,start:base+i*day}),false,[{personId:'quiet',at:base+i*day+65*minute},{personId:'supporter',at:base+i*day+70*minute}]);assert.ok(kinds(noViewers).has('daily_support_window'));assert.equal(kinds(noViewers).has('daily_audience_window'),false);
  const chat=engine();for(let i=0;i<3;i++)chat.add(report(i,{people:[person('author',5)]}),false);assert.ok(kinds(chat).has('chat_regular'));
 });
+
+test('whole-history participation and support keep counts and proof beyond the recent-visit tail',()=>{
+ const e=engine();for(let i=0;i<30;i++)e.add(report(i,{people:[person('longtime',5,i<3?'100':'0')]}),true);
+ const cards=collect(e),chat=cards.find(c=>c.kind==='chat_regular')!,support=cards.find(c=>c.kind==='repeat_support')!;
+ assert.match(chat.detail,/30 из 30/);assert.equal(chat.sampleSize,30);assert.equal(support.sampleSize,3);assert.equal(support.evidence.length,3);assert.ok(support.evidence.every(e=>['s0','s1','s2'].includes(e.sessionId)));
+});

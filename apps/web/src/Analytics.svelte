@@ -38,7 +38,7 @@
   const visible=$derived(data?.audiencePage?(pagedAudience?.audience??data.audience):(data?.audience??[]).filter((e:any)=>(!view.coreOnly||e.core)&&e.name.toLowerCase().includes(search.toLowerCase())).sort((a:any,b:any)=>view.sort==="sessions"?(b.sessionCount??b.sessionIds.length)-(a.sessionCount??a.sessionIds.length):(b[view.sort]??0)-(a[view.sort]??0)));
   async function reportPage(extra:Record<string,string|number>,signal?:AbortSignal){
     const filters=data?.filters;if(!filters)throw new Error('Отчёт ещё не загружен');
-    const q=new URLSearchParams(Object.entries({...filters,from:filters.fromMs,to:filters.toMs,mode:'summary',...extra}).map(([key,value])=>[key,String(value)]));
+    const q=new URLSearchParams(Object.entries({...filters,from:filters.fromMs,to:filters.toMs,mode:'summary',insights:'1',...extra}).map(([key,value])=>[key,String(value)]));
     let result=await api(`analytics?${q}`,undefined,signal);
     while(result.preparing&&!signal?.aborted){await new Promise(resolve=>setTimeout(resolve,100));result=await api(`analytics?${q}`,undefined,signal);}
     return result;
