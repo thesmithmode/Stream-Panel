@@ -502,7 +502,8 @@ CREATE TRIGGER IF NOT EXISTS session_groups_delete AFTER DELETE ON session_group
 CREATE VIEW IF NOT EXISTS logical_sessions AS
  SELECT s.id,s.account_id,s.stream_id,s.kind,s.started_at_ms,s.recording_started_at_ms,
  CASE WHEN EXISTS(SELECT 1 FROM session_groups g JOIN sessions x ON x.id=g.member_id WHERE g.group_id=s.id AND x.ended_at_ms IS NULL) THEN NULL
- ELSE coalesce((SELECT max(x.ended_at_ms) FROM session_groups g JOIN sessions x ON x.id=g.member_id WHERE g.group_id=s.id),s.ended_at_ms) END AS ended_at_ms,s.end_quality
+ ELSE coalesce((SELECT max(x.ended_at_ms) FROM session_groups g JOIN sessions x ON x.id=g.member_id WHERE g.group_id=s.id),s.ended_at_ms) END AS ended_at_ms,
+ coalesce((SELECT x.end_quality FROM session_groups g JOIN sessions x ON x.id=g.member_id WHERE g.group_id=s.id ORDER BY x.ended_at_ms IS NULL DESC,x.ended_at_ms DESC,x.id LIMIT 1),s.end_quality) AS end_quality
  FROM sessions s WHERE NOT EXISTS(SELECT 1 FROM session_groups g WHERE g.member_id=s.id AND g.group_id<>s.id);
 CREATE VIEW IF NOT EXISTS logical_event_sessions AS
  SELECT p.session_id,p.event_id FROM event_sessions p WHERE NOT EXISTS(SELECT 1 FROM session_groups g WHERE g.member_id=p.session_id)
