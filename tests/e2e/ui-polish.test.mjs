@@ -8,6 +8,7 @@ test('real data screens fit small phones and desktop without duplicated overview
    if(name==='Обзор'){await page.locator('.channel-metrics').waitFor();assert.equal(await page.locator('.trend-chart,.event-list,.audience-ranking,input[type="datetime-local"]').count(),0);}
    if(name==='Стримы'){const row=page.locator(`tr[data-session-id="${sid}"]`);await row.waitFor();if(width<=720){const box=await row.boundingBox();const panel=await page.locator(".sessions-page .panel").boundingBox(),heading=await page.locator(".page-heading").boundingBox();assert.ok(box.y<480&&box.x+box.width<=width,JSON.stringify(box));assert.ok(panel.y-(heading.y+heading.height)<=24,"No blank vertical space before stream history");}}
    if(name==='Люди'){for(const tab of ['Чаттеры','Донатеры','Зрители']){await page.getByRole('tab',{name:tab,exact:true}).click();await page.locator('.person-row .count').first().waitFor();if(tab==='Донатеры')await page.locator('.person-row .count').filter({hasText:'250,00 RUB'}).waitFor();}await page.getByRole('tab',{name:'Все',exact:true}).click();await page.locator('.person-row').first().waitFor();}
+   if(name==='Интеграции'&&width===320){const title=await page.getByRole('heading',{name:'Twitch',exact:true}).boundingBox();assert.ok(title.height<30,'provider names keep a readable width beside connection controls');}
    if(name==='Аналитика'){
     await page.locator('.comparison-charts').waitFor();
     if(width===320){

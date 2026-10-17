@@ -1217,5 +1217,5 @@ main{align-self:start;}
 @media(min-width:901px){.sessions-page th:first-child{width:17%;}.sessions-page th:nth-child(4){width:22%;}.sessions-page th:last-child{width:100px;}}
 
 /* Keep long headings beside their help control without pushing it onto a new row. */
-.panel>header h2{flex:1 1 0;min-width:0;overflow-wrap:anywhere;}
+.panel>header:has(>.help)>h2{flex:1 1 0;min-width:0;overflow-wrap:anywhere;}
 @media(max-width:720px){.analytics-filter>header h2{flex-basis:100%;}}
