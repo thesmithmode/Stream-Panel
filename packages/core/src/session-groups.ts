@@ -11,7 +11,11 @@ export class SessionGroups {
    const members=[...new Set(ids.flatMap(id=>this.members(id)))];
    if(members.length>100)throw new Error('INVALID_SESSION_GROUP');
    const rows=this.db.prepare(`SELECT s.* FROM sessions s WHERE id IN(SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) ORDER BY started_at_ms,id`).all(JSON.stringify(members)) as {id:string;kind:string;started_at_ms:number;ended_at_ms:number|null}[];
-   if(rows.length!==members.length||rows.some(row=>row.kind!=='platform'||row.ended_at_ms===null||row.ended_at_ms<=row.started_at_ms)||rows.some((row,i)=>i>0&&row.started_at_ms<rows[i-1]!.ended_at_ms!)||rows.at(-1)!.ended_at_ms!-rows[0]!.started_at_ms>31*86400000)throw new Error('INVALID_SESSION_GROUP');
+   if(rows.length!==members.length||rows.some((row,index)=>row.kind!=='platform'||(row.ended_at_ms===null?index!==rows.length-1:row.ended_at_ms<=row.started_at_ms)))throw new Error('INVALID_SESSION_GROUP');
+   // Estimated ends may overlap a replacement's confirmed start. Read-side windows
+   // already take their union; collection keeps writing the original live tail.
+   const end=Math.max(...rows.map(row=>row.ended_at_ms??Date.now()));
+   if(end-rows[0]!.started_at_ms>31*86400000)throw new Error('INVALID_SESSION_GROUP');
    const root=rows[0]!.id,insert=this.db.prepare('INSERT INTO session_groups(member_id,group_id) VALUES(?,?) ON CONFLICT(member_id) DO UPDATE SET group_id=excluded.group_id');
    for(const row of rows)insert.run(row.id,root);
    return root;
@@ -19,9 +23,8 @@ export class SessionGroups {
  }
  unmerge(id:string):void{
   this.db.transaction(()=>{
-   const root=this.root(id),members=this.members(root);
+   const root=this.root(id);
    if(!this.db.prepare('SELECT 1 FROM session_groups WHERE group_id=?').get(root))throw new Error('SESSION_GROUP_NOT_FOUND');
-   if(this.db.prepare('SELECT 1 FROM sessions WHERE id IN(SELECT value FROM json_each(?)) AND ended_at_ms IS NULL').get(JSON.stringify(members)))throw new Error('INVALID_SESSION_GROUP');
    this.db.prepare('DELETE FROM session_groups WHERE group_id=?').run(root);
   }).immediate();
  }
