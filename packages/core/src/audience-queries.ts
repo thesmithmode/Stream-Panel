@@ -382,7 +382,7 @@ export class AudienceQueries {
         this.db
           .prepare(
             `SELECT m.poll_id FROM identities i
-      CROSS JOIN presence_members m INDEXED BY presence_members_identity
+      JOIN presence_members m ON m.identity_id=i.id
       CROSS JOIN presence_polls p
       WHERE i.person_id=? AND m.identity_id=i.id AND p.id=m.poll_id
       AND p.session_id=? AND p.started_at_ms<? AND p.completed_at_ms>=?`,

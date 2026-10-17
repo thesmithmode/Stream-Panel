@@ -16,10 +16,10 @@ export class HistoryTimeline {
     private rows = new Map<number, DayRow>();
     private dates = new Map<string, number>();
     private formatter: Intl.DateTimeFormat;
-    constructor(private timezone: string, private people: ReadonlyMap<string, {
+    constructor(private timezone: string, private people: Pick<ReadonlyMap<string, {
         core: boolean;
         follower: boolean | null;
-    }>) { this.formatter = new Intl.DateTimeFormat('sv-SE', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }); }
+    }>,'get'>) { this.formatter = new Intl.DateTimeFormat('sv-SE', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }); }
     private day(at: number) { const label = this.formatter.format(at); let start = this.dates.get(label); if (start === undefined) {
         start = localDateWindow(label, this.timezone).from;
         this.dates.set(label, start);

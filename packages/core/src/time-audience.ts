@@ -76,4 +76,4 @@ export function localDateWindow(day:string,timezone:string):{from:number;to:numb
  return {from:midnight(calendar),to:midnight(calendar+86400000)};
 }
 
-export interface TimeAudienceSummary {day:string;resolution:number;minute:number;streams:number;airtimeMs:number;personTimeMs:number;averageAudience:number|null;people:{id:string;visits:number}[]}
+export interface TimeAudienceSummary {day:string;resolution:number;minute:number;streams:number;airtimeMs:number;personTimeMs:number;averageAudience:number|null;people:{id:string;visits:number}[];peopleDeferred?:boolean}
