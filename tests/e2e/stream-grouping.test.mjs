@@ -57,7 +57,7 @@ test('phone stream cards stay compact with full-width day headings and usable gr
    });
    assert.equal(boxes.overflow,false,JSON.stringify({width,...boxes}));
    if(width<=720){assert.ok(boxes.heights[0]<290,JSON.stringify({width,...boxes}));assert.ok(boxes.heights[1]<370,JSON.stringify({width,...boxes}));assert.ok(boxes.heading>=boxes.table-2,JSON.stringify({width,...boxes}));}
-   for(const button of [live.getByRole('button',{name:'Открыть',exact:true}),group.getByRole('button',{name:'Разъединить',exact:true})]){await button.scrollIntoViewIfNeeded();const box=await button.boundingBox();assert.ok(box&&box.width>=36&&box.height>=32&&box.x>=0&&box.x+box.width<=width,JSON.stringify({width,box}));}
+   for(const button of [live.getByRole('button',{name:'Открыть',exact:true}),group.getByRole('button',{name:'Разъединить',exact:true})]){await button.scrollIntoViewIfNeeded();const box=await button.boundingBox();assert.ok(box&&box.width>=36&&box.height>=32&&box.x>=0&&box.x+box.width<=width,JSON.stringify({width,box}));assert.equal(await button.evaluate(node=>{const range=document.createRange();range.selectNodeContents(node);return range.getClientRects().length;}),1,'action text must fit on one line');}
    if(process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR&&[390,1280].includes(width)){
     const {mkdir}=await import('node:fs/promises');const {join}=await import('node:path');await mkdir(process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR,{recursive:true});await page.screenshot({path:join(process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR,`compact-streams-${width}.png`),fullPage:true});
    }
