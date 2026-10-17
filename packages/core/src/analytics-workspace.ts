@@ -25,7 +25,7 @@ export class DiskMap<T> {
  firstVisit(id:string){return this.db.prepare(`UPDATE ${this.table} SET seen=1 WHERE id=? AND seen=0`).run(id).changes===1;}
  page(offset=0,search='',sort='core',coreOnly=false,limit=100){
   const fields:Record<string,string>={sessions:'sessionCount',observedMinutes:'observedMinutes',estimatedChatMinutes:'estimatedChatMinutes',messages:'messages',attendanceRatio:'attendanceRatio'};
-  const metric=fields[sort],order=metric?`json_extract(value,'$.${metric}') DESC`:`json_extract(value,'$.core') DESC,json_extract(value,'$.observedMinutes') DESC,json_extract(value,'$.messages') DESC`;
+  const metric=fields[sort],baseOrder="json_extract(value,'$.core') DESC,json_extract(value,'$.observedMinutes') DESC,json_extract(value,'$.messages') DESC",order=metric?`json_extract(value,'$.${metric}') DESC,${baseOrder}`:baseOrder;
   const where="(?=0 OR json_extract(value,'$.core')=1) AND (?='' OR instr(sp_analytics_lower(json_extract(value,'$.name')),sp_analytics_lower(?))>0)";
   const total=(this.db.prepare(`SELECT count(*) n FROM ${this.table} WHERE ${where}`).get(Number(coreOnly),search,search) as {n:number}).n;
   const rows=this.db.prepare(`SELECT value FROM ${this.table} WHERE ${where} ORDER BY ${order},id LIMIT ? OFFSET ?`).all(Number(coreOnly),search,search,limit,offset) as {value:string}[];

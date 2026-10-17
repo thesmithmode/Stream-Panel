@@ -90,6 +90,18 @@ export class AnalyticsHistory {
         const page=workspace.people.page(options.audienceOffset??0,options.audienceSearch??'',options.audienceSort??'core',options.audienceCoreOnly??false);
         return {...value,audience:page.items,...(workspace.people.size>100?{audiencePage:{total:page.total,offset:page.offset,limit:page.limit}}:{}),...(options.clockMinute!==undefined?{clockVisitors:workspace.clockPage(options.clockDay??'all',options.clockMinute,options.clockResolution??60,options.clockOffset??0)}:{})};
     }
+    private checkWorkspace(workspace:AnalyticsWorkspace<Person>){
+        for(;;){
+            try{workspace.checkBudget();return;}catch(error){
+                if(!(error instanceof Error)||error.message!=='ANALYTICS_WORKSPACE_LIMIT')throw error;
+                const retained=[...this.completed].find(([,entry])=>entry.workspace);
+                if(retained){const [key,entry]=retained;entry.workspace!.dispose();this.completedBytes-=entry.bytes;this.completed.delete(key);continue;}
+                const pending=[...this.jobs].find(([,job])=>job.workspace!==workspace);
+                if(pending){pending[1].workspace.dispose();this.jobs.delete(pending[0]);continue;}
+                throw error;
+            }
+        }
+    }
     private budgetChecked = false;
     private checkCacheBudget() {
         if (this.budgetChecked) return;
@@ -391,7 +403,7 @@ export class AnalyticsHistory {
                 row.personTimeMs += bucket.personTimeMs;
             }
             workspace.addClock(session.id,report.clockBuckets??[]);
-            workspace.checkBudget();
+            this.checkWorkspace(workspace);
             processed++;
             if (performance.now() - sliceStart > 250) {
                 yield { preparing: true, ready: processed, total: sessions.length * 2 };
@@ -463,7 +475,7 @@ export class AnalyticsHistory {
                 stream.returning = visitors.length - stream.newInPeriod;
 
             }
-            workspace.checkBudget();
+            this.checkWorkspace(workspace);
             processed++;
             if (performance.now() - sliceStart > 250) {
                 yield { preparing: true, ready: processed, total: sessions.length * 2 };

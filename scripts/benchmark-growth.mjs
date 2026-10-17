@@ -19,7 +19,7 @@ const nums=n=>`WITH RECURSIVE nums(n) AS(VALUES(0) UNION ALL SELECT n+1 FROM num
 const polls=old.prepare(`${nums(240)} INSERT INTO presence_polls SELECT fixture_uuid(),?,'owner',?+max(0,n-1)*60000,?+n*60000,'complete' FROM nums`);
 const members=old.prepare("INSERT INTO presence_members SELECT p.id,i.id FROM presence_polls p CROSS JOIN identities i WHERE p.session_id=? AND i.source='twitch' AND i.account_id='owner' AND i.external_id BETWEEN ? AND ?");
 const samples=old.prepare(`${nums(240)} INSERT INTO stream_samples SELECT ?,?+n*60000,'game','Game','Fixture',40,NULL FROM nums`);
-const events=old.prepare(`${nums(500)} INSERT INTO events SELECT fixture_uuid(),'twitch','owner',fixture_uuid(),'chat.message',(SELECT id FROM identities WHERE source='twitch' AND account_id='owner' AND external_id=cast(?+n%40 AS TEXT)),?+cast(n*14400000/500 AS INTEGER),?+cast(n*14400000/500 AS INTEGER),NULL,'provider','eventsub','{"count":1,"originChannelId":null,"redacted":0}' FROM nums`);
+const events=old.prepare(`${nums(500)} INSERT INTO events SELECT fixture_uuid(),'twitch','owner',fixture_uuid(),'chat.message',(SELECT id FROM identities WHERE source='twitch' AND account_id='owner' AND external_id=cast(cast(? AS INTEGER)+n%40 AS TEXT)),?+cast(n*14400000/500 AS INTEGER),?+cast(n*14400000/500 AS INTEGER),NULL,'provider','eventsub','{"count":1,"originChannelId":null,"redacted":0}' FROM nums`);
 let start=performance.now();
 for(let n=0;n<count;n++)old.transaction(()=>{
  const at=base+n*86400000,id=uuid(),first=100000000+n*40;
@@ -30,6 +30,7 @@ for(let n=0;n<count;n++)old.transaction(()=>{
  old.prepare('INSERT INTO event_sessions SELECT id,? FROM events WHERE occurred_at_ms>=? AND occurred_at_ms<?').run(id,at,at+240*minute);
  if((n+1)%100===0)console.log(JSON.stringify({seeded:n+1,seconds:Math.round((performance.now()-start)/1000)}));
 })();
+if(old.prepare('SELECT count(*) missing FROM events WHERE identity_id IS NULL').get().missing)throw Error('FIXTURE_IDENTITY_MISMATCH');
 const before=statSync(path).size;old.close();start=performance.now();
 const migrated=new StreamStore(path),d=migrated.db;
 if(d.prepare('SELECT count(*) n FROM presence_members_compact').get().n!==count*240*40)throw Error('MEMBERSHIP_COUNT_MISMATCH');
@@ -39,6 +40,7 @@ const client=new StoreClient(path);start=performance.now();let requests=0;
 try{
  await client.ready;const q={fromMs:base,toMs:base+(count+1)*86400000,timezone:'Europe/Moscow',ownerId:'owner',summaryOnly:true};let r;
  do{r=await client.call('analytics',q);requests++;if(requests%100===0)console.log(JSON.stringify({requests,ready:r.ready,total:r.total,seconds:Math.round((performance.now()-start)/1000)}));}while(r.preparing);
+ console.log(JSON.stringify({observed:r.summary}));
  if(r.summary.streams!==count||r.summary.messages!==count*500||r.summary.entities!==count*40)throw Error('SUMMARY_MISMATCH');
  console.log(JSON.stringify({complete:true,seconds:Math.round((performance.now()-start)/1000),summary:r.summary,page:r.audiencePage}));
  for(const extra of [{audienceOffset:Math.max(0,count*40-100),audienceSort:'messages'},{clockDay:'all',clockMinute:180,clockResolution:60,clockOffset:Math.max(0,count*40-100)}]){

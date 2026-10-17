@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {StreamStore} from '../src/store.js';
 import {AnalyticsHistory} from '../src/analytics-history.js';
+import {AnalyticsWorkspace} from '../src/analytics-workspace.js';
 import {audienceAnalytics} from '../src/analytics.js';
 const base=Date.UTC(2026,9,1),minute=60000;
 function fixture(s:StreamStore,n=4,youtube=false){for(let i=0;i<n;i++){
@@ -284,5 +285,23 @@ test('live writes do not restart historical preparation, but invalidate the comp
   const first=h.report(opts);assert.equal(first.preparing,true);
   s.streamSample(live,at,'game','Game','',10);const second=h.report(opts);assert.ok(second.ready!>first.ready!);
   assert.equal(ready(h,opts).summary.streams,61);s.streamSample(live,at+1000,'game','Game','',12);assert.equal(h.report(opts).preparing,true);assert.equal(ready(h,opts).summary.messages,60);h.close();
+ }finally{s.close();}
+});
+
+test('temporary-space pressure evicts only derived work and resource errors preserve all facts',t=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,60);const db=(s as any).db,h=new AnalyticsHistory(db),opts={...options,toMs:base+62*86400000,summaryOnly:true};
+  assert.equal(ready(h,opts).summary.messages,60);
+  const original=AnalyticsWorkspace.prototype.checkBudget;let fail=false;
+  t.mock.method(AnalyticsWorkspace.prototype,'checkBudget',function(this:AnalyticsWorkspace<unknown>){if(fail){fail=false;throw Error('ANALYTICS_WORKSPACE_LIMIT');}return original.call(this);});
+  fail=true;assert.equal(ready(h,{...opts,minMessages:100}).summary.messages,60,'completed derived work is safely evicted');h.close();
+  let cpu=0;t.mock.method(performance,'now',()=>cpu+=10);
+  assert.equal(h.report({...opts,minMessages:101}).preparing,true);fail=true;
+  assert.equal(ready(h,{...opts,minMessages:102}).summary.messages,60,'another pending filter can be safely displaced');h.close();
+  for(const error of ['ANALYTICS_WORKSPACE_LIMIT','ANALYTICS_DISK_RESERVE']){
+   t.mock.method(AnalyticsWorkspace.prototype,'checkBudget',()=>{throw Error(error);});assert.throws(()=>h.report(opts),new RegExp(error));
+   assert.equal(db.prepare("SELECT count(*) n FROM sqlite_temp_master WHERE type='table' AND name LIKE 'sp_analytics_%'").get().n,0);
+  }
+  t.mock.method(AnalyticsWorkspace.prototype,'checkBudget',original);assert.equal(ready(h,opts).summary.messages,60);h.close();assert.equal(s.eventCount(),60);
  }finally{s.close();}
 });
