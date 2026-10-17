@@ -266,7 +266,7 @@
             <PeriodSelect label="Период аналитики" value={peoplePeriod?Number(peoplePeriod):'all'} onchange={value=>{peoplePeriod=value==='all'?'':String(value);epoch++;saveRoute();void action(async()=>{});}}/>
           </div>{/if}
       {#if tab === "overview"}<ChannelOverview connect={()=>navigate("connections")} />
-      {:else if tab === "stream"}<Overview session={sessions.find(s=>s.id===sessionFilter)}
+      {:else if tab === "stream"}<Overview onStream={id=>{sessionFilter=id;navigate("stream");}} session={sessions.find(s=>s.id===sessionFilter)}
           {summary}
           {sessionFilter}
           connect={() => navigate("connections")}

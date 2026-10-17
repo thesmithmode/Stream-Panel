@@ -30,12 +30,14 @@ test("Overview insights render loading, empty, error and person paths; expand in
       insightUrls.push(route.request().url());
       if (requestCount === 1) {
         await new Promise((resolve) => setTimeout(resolve, 150));
-        await route.fulfill({ json: [] });
-      } else if (requestCount === 2) {
+        await route.fulfill({ json: {preparing:true,comparisonToMs:12345} });
+      } else if(requestCount===2){
+        await route.fulfill({json:{insights:[]}});
+      } else if (requestCount === 3) {
         await route.fulfill({ status: 500, json: { error: "INSIGHTS_UNAVAILABLE" } });
       } else {
         await route.fulfill({
-          json: [{ kind: "person", title: "Активный участник", detail: "Тестовый паттерн", personId, sessionId: null, metrics: {} }],
+          json: {insights:[{ id:"person",kind: "person",group:"people",title: "Активный участник", detail: "Тестовый паттерн", personId,basis:"Четыре эфира",action:"Посмотри историю",sampleSize:4,evidence:[] }]},
         });
       }
     });
@@ -50,16 +52,16 @@ test("Overview insights render loading, empty, error and person paths; expand in
     await page.getByRole("button", { name: "Обзор", exact: true }).waitFor();
     await page.getByRole("button", { name: "Стримы", exact: true }).click();
     await page.getByRole("button", { name: "Открыть", exact: true }).click();
-    const trigger = page.getByRole("button", { name: "Показать паттерны", exact: true });
+    const trigger = page.getByRole("button", { name: "Показать инсайты", exact: true });
     await trigger.click();
-    const insightDialog = page.locator(".insight-grid");
-    await page.locator(".insight-grid").getByText("Загружаем…", { exact: true }).waitFor();
-    await page.getByText("Пока недостаточно данных для заметных паттернов.", { exact: true }).waitFor();
+    const insightDialog = page.locator(".insight-body");
+    await page.locator(".insight-body").getByText("Ищем закономерности…", { exact: true }).waitFor();
+    await page.getByText("Подтверждённых закономерностей пока нет. Нужны повторения на нескольких эфирах; пропуски данных не считаются отсутствием людей.", { exact: true }).waitFor();
     await page.locator(".insights-section").getByRole("button",{name:"Скрыть",exact:true}).click();
     assert.equal(await insightDialog.count(), 0);
 
     await reload(page);
-    await page.getByRole("button", { name: "Показать паттерны", exact: true }).click();
+    await page.getByRole("button", { name: "Показать инсайты", exact: true }).click();
     await page.getByRole("alert").filter({ hasText: "INSIGHTS_UNAVAILABLE" }).waitFor();
     await page.locator(".insights-section").getByRole("button",{name:"Скрыть",exact:true}).click();
     assert.equal(await insightDialog.count(), 0);
@@ -67,9 +69,10 @@ test("Overview insights render loading, empty, error and person paths; expand in
     await reload(page);
     await page.getByRole("button", { name: "Стримы", exact: true }).click();
     await page.getByRole("button", { name: "Открыть", exact: true }).click();
-    await page.getByRole("button", { name: "Показать паттерны", exact: true }).click();
+    await page.getByRole("button", { name: "Показать инсайты", exact: true }).click();
     await page.getByText("Активный участник", { exact: true }).waitFor();
-    assert.match(insightUrls[2], new RegExp(`[?&]session=${sessionId}$`));
+    assert.equal(new URL(insightUrls[1]).searchParams.get('to'),'12345');
+    assert.match(insightUrls[3], new RegExp(`[?&]session=${sessionId}$`));
     await page.getByRole("button", { name: "Открыть человека", exact: true }).click();
     await page.getByRole("heading", { name: "Тестовый зритель", exact: true }).waitFor();
     assert.equal(await page.getByRole("dialog", { name: "Инсайты" }).count(), 0);

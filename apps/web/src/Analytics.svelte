@@ -3,6 +3,7 @@
   import { onMount, untrack } from "svelte";
   import { api, date, money } from "./api";
   import {analyticsView,loadAnalyticsView,saveAnalyticsView} from "./analytics-view";
+  import Insights from "./Insights.svelte";
   import Help from "./Help.svelte";
   import PeriodSelect from './PeriodSelect.svelte';
   import ActivityClock from "./ActivityClock.svelte";
@@ -91,7 +92,7 @@
     const fromMs=new Date(from).getTime(),toMs=new Date(to).getTime();
     try{
       try {localStorage.setItem(`sp-analytics-${profile}`,JSON.stringify({timezone}));}catch{/* optional local preferences */}
-      const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,timezone,mode:'summary'});
+      const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,timezone,mode:'summary',insights:'1'});
       let result=await api(`analytics?${q}`);
       while(result.preparing&&id===requestId){buildProgress=`${result.stage==='aggregate'?'Собираем отчёт':'Готовим историю'}: ${Math.round(result.ready/Math.max(1,result.total)*100)}%`;await new Promise(resolve=>setTimeout(resolve,result.stage==='aggregate'?100:250));if(id!==requestId)return;result=await api(`analytics?${q}`);}
       buildProgress='';
@@ -137,6 +138,7 @@
 </div>
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 {#if data}
+  <Insights report={data} loading={busy} {onPerson} {onStream}/>
   {#if view.hours}<section class="panel"><header><h2>Активность по дням и часам</h2><label>Метрика карты<select aria-label="Метрика карты" bind:value={view.heatMetric}><option value="viewers">Зрители (все)</option><option value="observed">Наблюдения Twitch</option><option value="estimated">Оценка активности YouTube</option><option value="messages">Сообщения</option><option value="donations">Число донатов</option><option value="amount">Сумма донатов</option></select></label>{#if view.heatMetric==='amount'}<label>Валюта карты<select aria-label="Валюта карты" bind:value={heatCurrency}>{#each [...new Set<string>((data.hours??[]).flatMap((h:any)=>Object.keys(h.donationTotals)))] as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select></label>{/if}<label>Расчёт карты<select aria-label="Расчёт карты" bind:value={heatCalculation}><option value="average">Среднее / на час эфира</option><option value="total">Накопленная сумма</option></select></label></header>
     {@render categoryFilter("Категория карты активности")}
     {#if view.hourView!=="table"}<div class="hour-heatmap" aria-label="Карта активности по дням и часам">

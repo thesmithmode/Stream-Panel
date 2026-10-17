@@ -1,3 +1,4 @@
+import {InsightAccumulator,type InsightCard} from './insights.js';
 import {mergeClockActivity, type ClockActivity} from './clock-activity.js';
 import {AnalyticsWorkspace} from './analytics-workspace.js';
 import { HistoryTimeline } from "./history-timeline.js";
@@ -22,6 +23,7 @@ type Session = {
     revision: number;
 };
 type Report = ReturnType<typeof audienceAnalytics> & {
+    insights?:InsightCard[];
     clockBuckets?: ClockBucket[];
     aggregate?: boolean;
     preparing?: boolean;
@@ -318,11 +320,19 @@ export class AnalyticsHistory {
         let processed = 0;
         const people=workspace.people,streams:Stream[]=[],categoryRows=new Map<string,Category>(),hours=new Map<string,Hour>(),clockRows=new Map<string,ClockBucket>(),categories=new Map<string,{id:string;name:string}>();
         const activityClock = new Map<string,ClockActivity>();
+        const insightBuilder=options.includeInsights?new InsightAccumulator(workspace.insightPeople,options.timezone,options.insightSessionId):undefined;
         let sample: Report | undefined;
         let selectedStreams = 0;
         for (const session of sessions) {
             const report = read(session);
             sample = report;
+            if(insightBuilder){
+                const start=report.activityWindows[0]?.from??session.started_at_ms,end=report.activityWindows.at(-1)?.to??start;
+                const recording=this.statement('SELECT recording_started_at_ms AS start FROM sessions WHERE id=?').get(session.id) as {start:number};
+                const gaps=this.statement("SELECT 1 FROM collection_gaps WHERE source IN('twitch','youtube') AND started_at_ms<? AND coalesce(ended_at_ms,?)>? LIMIT 1").get(end,end,start);
+                const tips=this.statement("SELECT i.person_id AS personId,e.occurred_at_ms AS at FROM event_sessions es CROSS JOIN effective_events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE es.session_id=? AND e.type='donation' AND e.occurred_at_ms>=? AND e.occurred_at_ms<?").all(session.id,start,end) as {personId:string;at:number}[];
+                insightBuilder.add(report,recording.start<=start&&!gaps,tips);
+            }
             mergeClockActivity(report.activityClock,activityClock);
             if (report.summary.streams)
                 selectedStreams++;
@@ -482,6 +492,12 @@ export class AnalyticsHistory {
                 sliceStart = performance.now();
             }
         }
+        const insights:InsightCard[]=[];
+        if(insightBuilder)for(const card of insightBuilder.find()){
+            if(card)insights.push(card);
+            if(performance.now()-sliceStart>250){yield {preparing:true,ready:processed,total:sessions.length*2};sliceStart=performance.now();}
+        }
+        insights.sort((a,b)=>b.score-a.score||(a.personName??'').localeCompare(b.personName??'','ru',{numeric:true})||a.id.localeCompare(b.id));
         const audience=people.page().items;
         const outputCategories=[...categoryRows.values()].map(row=>({...row,...workspace.categoryCounts(row.id),donationsPerHourMinor:currencyRates(row.donationTotals,Math.round(row.minutes*60000)),messagesPerHour:row.minutes?row.messages*60/row.minutes:0,observedPerMinute:row.minutes?row.observedMinutes/row.minutes:0,observedPerKnownMinute:row.observedKnownMinutes?row.observedMinutes/row.observedKnownMinutes:null,coverageRatio:row.minutes?row.observedKnownMinutes/row.minutes:null}));
         for(const row of clockRows.values()){
@@ -493,6 +509,6 @@ export class AnalyticsHistory {
             payload_json: string;
             updated_at_ms: number;
         } | undefined : undefined;
-        return { ...sample, activityClock:[...activityClock.values()], youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, aggregate: true, filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs }, activityWindows: [], timeline: daily.values(), breaks: [], sessions: [sessions[0]!], audience, categories: outputCategories, availableCategories: [...categories.values()], streamComparison: streams, clockBuckets: [...clockRows.values()], hours: [...hours.values()], patterns: timePatterns([...hours.values()]), summary,composition,donationTiming:donationTiming(this.db,options.fromMs,options.toMs,options.timezone??'Europe/Moscow',options.category)};
+        return { ...sample,...(options.includeInsights?{insights}:{}), activityClock:[...activityClock.values()], youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, aggregate: true, filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs }, activityWindows: [], timeline: daily.values(), breaks: [], sessions: [sessions[0]!], audience, categories: outputCategories, availableCategories: [...categories.values()], streamComparison: streams, clockBuckets: [...clockRows.values()], hours: [...hours.values()], patterns: timePatterns([...hours.values()]), summary,composition,donationTiming:donationTiming(this.db,options.fromMs,options.toMs,options.timezone??'Europe/Moscow',options.category)};
     }
 }

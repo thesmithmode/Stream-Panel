@@ -73,7 +73,7 @@ export const storeOperations={
   backup:"maintenance",
   close:"write",
   candidatePersons:"cached",
-  insights:"read",
+  insights:"cached",
   personsTop:"cached",
   personStats:"cached",
   personActivity:"cached",

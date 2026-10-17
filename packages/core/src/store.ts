@@ -11,7 +11,7 @@ import {registerDonationSum} from './donation-statistics.js';
 import {parseDonationTime} from './donation-time.js';
 import {personActivity} from "./person-activity.js";
 import {DonationLedger,type DonationInput} from "./donations.js";
-import { audienceAnalytics, type AnalyticsOptions } from "./analytics.js";
+import { type AnalyticsOptions } from "./analytics.js";
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { openProfileDatabase } from "./profile-db.js";
@@ -179,10 +179,14 @@ export class StreamStore {
     limit = 50,
     fromMs=0,toMs?:number,currency='RUB',
   ) {return this.queries.personsTop(sortBy,sessionId?this.groups.root(sessionId):undefined,excludedBotLogins,limit,fromMs,toMs,currency);}
-  insights(
-    sessionId?: string,
-    excludedBotLogins: readonly string[] = [],
-  ) {return this.queries.insights(sessionId?this.groups.root(sessionId):undefined,excludedBotLogins);}
+  insights(sessionId?:string,excludedBotLogins:readonly string[]=[],options:Partial<AnalyticsOptions>={}) {
+    const id=sessionId?this.groups.root(sessionId):undefined;
+    const session=id?this.reads.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id)').get(id) as {start:number;end:number|null}|undefined:undefined;
+    if(id&&!session)throw new Error('SESSION_NOT_FOUND');
+    const now=Date.now(),to=session?Math.min(session.end??now,now,options.toMs??now):options.toMs??now;
+    const report=this.history.report({...options,fromMs:session?Math.max(0,session.start-90*86400000):options.fromMs??0,toMs:to,excludedLogins:[...excludedBotLogins],includeInsights:true,...(id?{insightSessionId:id}:{})});
+    return {insights:report.insights??[],preparing:report.preparing===true,comparisonToMs:to};
+  }
 
   close(): void {
     this.history.close();
@@ -293,7 +297,7 @@ export class StreamStore {
     const windowsBySession=new Map<string,typeof links>();for(const link of links){const list=windowsBySession.get(link.session_id)??[];list.push(link);windowsBySession.set(link.session_id,list);}
     return {streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+windowsFromLinks(windowsBySession.get(s.id)??[],s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees,messages:summary.messages,totals:summary.totals,donations:summary.donations};
   }
-  analytics(options: AnalyticsOptions):ReturnType<typeof audienceAnalytics> {
+  analytics(options: AnalyticsOptions):ReturnType<AnalyticsHistory['query']> {
     return this.history.query(options.sessionId?{...options,sessionId:this.groups.root(options.sessionId)}:options);
   }
 
