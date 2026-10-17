@@ -183,8 +183,9 @@ export class StreamStore {
     const id=sessionId?this.groups.root(sessionId):undefined;
     const session=id?this.reads.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id)').get(id) as {start:number;end:number|null}|undefined:undefined;
     if(id&&!session)throw new Error('SESSION_NOT_FOUND');
-    const now=Date.now(),to=session?Math.min(session.end??now,now,options.toMs??now):options.toMs??now;
-    const report=this.history.report({...options,fromMs:session?Math.max(0,session.start-90*86400000):options.fromMs??0,toMs:to,excludedLogins:[...excludedBotLogins],includeInsights:true,...(id?{insightSessionId:id}:{})});
+    const now=Date.now(),to=session?Math.min(session.end??options.toMs??(now-session.start>=60000?Math.floor(now/60000)*60000:now),now,options.toMs??now):options.toMs??now;
+    const settings={...options,fromMs:session?session.start:options.fromMs??0,toMs:to,excludedLogins:[...excludedBotLogins],includeInsights:true,...(id?{sessionId:id}:{})};
+    const report=id?this.history.streamReport(settings):this.history.report(settings);
     return {insights:report.insights??[],preparing:report.preparing===true,comparisonToMs:to};
   }
 
@@ -301,7 +302,7 @@ export class StreamStore {
     return this.history.query(options.sessionId?{...options,sessionId:this.groups.root(options.sessionId)}:options);
   }
 
-  warmAnalytics(options:AnalyticsOptions){return this.history.prepare(options);}
+  warmAnalytics(options:AnalyticsOptions){return this.history.warm(options);}
 
   youtubeQuota(day: string, profile: string, cost = 1): boolean {
     if (!/^\d{2}\/\d{2}\/\d{4}$/.test(day) || !profile || !Number.isInteger(cost) || cost < 1 || cost > 4000) throw new Error("INVALID_QUOTA");

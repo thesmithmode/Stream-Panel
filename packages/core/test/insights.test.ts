@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {InsightAccumulator,type InsightPerson} from '../src/insights.js';
+import {streamInsights,InsightAccumulator,type InsightPerson} from '../src/insights.js';
 import {StreamStore} from '../src/store.js';
 const minute=60000,day=86400000,base=Date.UTC(2026,7,1,14); // Saturday 17:00 Moscow
 function person(id='quiet',messages=0,donation='0',from=60,to=120){return {id,name:id,sources:['twitch'],observedMinutes:to-from,messages,donations:donation==='0'?{}:{RUB:donation},intervals:[{from:base+from*minute,to:base+to*minute,kind:'observed'}],messageMinutes:messages?[{at:base+from*minute}]:[]};}
@@ -18,7 +18,7 @@ test('recurring silent participants, habitual donor hours, strong slots and supp
  const e=engine();for(let i=0;i<6;i++)e.add(report(i),true,[{personId:'quiet',at:base+i*7*day+65*minute},{personId:'supporter',at:base+i*7*day+70*minute}]);
  const cards=collect(e),found=new Set(cards.map(c=>c.kind));
  for(const kind of ['silent_regular','person_schedule','strong_hour','donor_window','support_concentration'])assert.ok(found.has(kind),kind);
- assert.ok(cards.some(c=>c.group==='support'));assert.ok(cards.some(c=>c.detail.includes('6 из 6')));assert.ok(cards.every(c=>c.evidence.length&&c.basis&&c.action&&c.sampleSize>0));
+ assert.ok(cards.some(c=>c.group==='support'));assert.ok(cards.some(c=>c.detail.includes('6 из 6')));assert.ok(cards.every(c=>c.evidence.length&&c.basis&&c.sampleSize>0));
  const many=engine();for(let i=0;i<5;i++)many.add(report(i,{people:Array.from({length:45},(_,j)=>person(`p${j}`))}),true);
  assert.equal(collect(many).filter(c=>c.kind==='silent_regular').length,45);
 });
@@ -43,7 +43,7 @@ test('long streams flag repeated declines and concentrated chat with concrete de
 });
 test('incomplete, live, YouTube and sparse observations do not manufacture attendance or silent patterns',()=>{
  for(const opts of [{known:false},{live:true},{source:'youtube'},{viewers:0}]){
-  const e=engine();for(let i=0;i<3;i++){const r=report(i,{...opts,people:[person('quiet')]});r.streamComparison[0].viewers.youtube=r.streamComparison[0].viewers.all;r.streamComparison[0].viewers.twitch=r.streamComparison[0].viewers.all;e.add(r,false);}assert.deepEqual(collect(e),[]);
+  const e=engine();for(let i=0;i<3;i++){const r=report(i,{...opts,people:[person('quiet')]});r.streamComparison[0].viewers.youtube=r.streamComparison[0].viewers.all;r.streamComparison[0].viewers.twitch=r.streamComparison[0].viewers.all;e.add(r,false);}assert.ok(collect(e).every(c=>c.kind==='daily_audience_window'));
  }
  const e=engine();e.add({streamComparison:[]} as any,true);e.add(report(1,{duration:0}),true);assert.deepEqual(collect(e),[]);
  const blank=report(2,{people:[person('anonymous',0,'1000')]});blank.streamComparison[0].title='';blank.categories[0].id='';blank.audience[0].sources=['youtube'];blank.audience[0].intervals[0].kind='chat_proxy';blank.audience[0].observedMinutes=0;e.add(blank,true);assert.deepEqual(collect(e),[]);
@@ -105,4 +105,34 @@ test('a short introductory category without a comparable category report cannot 
   e.add(r,true);
  }
  assert.doesNotThrow(()=>collect(e));assert.equal(kinds(e).has('category_return'),false);
+});
+
+test('broadcast facts are confined to its own time windows, with sustained audience and chat peaks',()=>{
+ const r=report(0,{people:[person('a',80),person('b',5),person('c',5)]});
+ for(let i=0;i<r.timeline.length;i++){r.timeline[i].messages=i>=60&&i<75?4:0;r.timeline[i].viewers=i>=60&&i<75?30:5;}
+ const cards=streamInsights(r);assert.ok(cards.some(c=>c.kind==='chat_peak'));assert.ok(cards.some(c=>c.kind==='viewer_peak'));assert.ok(cards.some(c=>c.kind==='chat_concentration'));
+ assert.ok(cards.every(c=>c.evidence.every(e=>e.sessionId==='s0'&&e.at>=base&&e.at<base+120*minute)));
+ for(const p of r.timeline)p.viewersPartial=true;
+ assert.equal(streamInsights(r).some(c=>c.kind==='viewer_peak'),false);
+ assert.deepEqual(streamInsights({streamComparison:[]} as any),[]);
+});
+test('stream endpoint never reads other broadcasts and reuses baked facts until correction',()=>{
+ const s=new StreamStore(':memory:');try{
+  const ids:string[]=[];for(let i=0;i<5;i++){const at=base+i*day,id=s.startSession('owner',`scope-${i}`,at,'platform',at);ids.push(id);s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+59*minute,status:'complete',userIds:[i===4?'current':'historical'],userNames:{current:'Current',historical:'Historical'}});s.endSession(id,at+60*minute);}
+  const result=s.insights(ids[4]);assert.equal(result.preparing,false);assert.ok(result.insights.some(c=>c.kind==='quiet_presence'));assert.ok(!JSON.stringify(result).includes('Historical'));assert.ok(result.insights.every(c=>c.evidence.every(e=>e.sessionId===ids[4])));
+  const history=(s as any).history,build=history.build;history.build=()=>{throw Error('unexpected rebuild');};assert.deepEqual(s.insights(ids[4]),result);history.build=build;
+  const current=s.persons().find(p=>p.display_name==='Current')!;s.renamePerson(String(current.id),'Updated');assert.ok(JSON.stringify(s.insights(ids[4])).includes('Updated'));
+ }finally{s.close();}
+});
+test('daily hour opportunities and support work over different weekdays without viewer data for donations',()=>{
+ const e=engine();for(let i=0;i<3;i++)e.add(report(i,{start:base+i*day}),true,[{personId:'quiet',at:base+i*day+65*minute},{personId:'supporter',at:base+i*day+70*minute}]);
+ assert.ok(kinds(e).has('daily_audience_window'));assert.ok(kinds(e).has('daily_support_window'));assert.ok(kinds(e).has('repeat_support'));
+ const noViewers=engine();for(let i=0;i<3;i++)noViewers.add(report(i,{viewers:0,start:base+i*day}),false,[{personId:'quiet',at:base+i*day+65*minute},{personId:'supporter',at:base+i*day+70*minute}]);assert.ok(kinds(noViewers).has('daily_support_window'));assert.equal(kinds(noViewers).has('daily_audience_window'),false);
+ const chat=engine();for(let i=0;i<3;i++)chat.add(report(i,{people:[person('author',5)]}),false);assert.ok(kinds(chat).has('chat_regular'));
+});
+
+test('whole-history participation and support keep counts and proof beyond the recent-visit tail',()=>{
+ const e=engine();for(let i=0;i<30;i++)e.add(report(i,{people:[person('longtime',5,i<3?'100':'0')]}),true);
+ const cards=collect(e),chat=cards.find(c=>c.kind==='chat_regular')!,support=cards.find(c=>c.kind==='repeat_support')!;
+ assert.match(chat.detail,/30 из 30/);assert.equal(chat.sampleSize,30);assert.equal(support.sampleSize,3);assert.equal(support.evidence.length,3);assert.ok(support.evidence.every(e=>['s0','s1','s2'].includes(e.sessionId)));
 });

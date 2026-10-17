@@ -7,7 +7,7 @@ test('warming catches up serially, backs off when ready and stops without schedu
  const stop=startAnalyticsWarmer(()=>[runtime],()=>enabled,()=>failures++);
  try{
   assert.equal(calls,0);enabled=true;t.mock.timers.tick(60000);await settle();assert.equal(calls,1);
-  t.mock.timers.tick(4999);await settle();assert.equal(calls,1);t.mock.timers.tick(1);await settle();assert.equal(calls,2);
+  t.mock.timers.tick(49);await settle();assert.equal(calls,1);t.mock.timers.tick(1);await settle();assert.equal(calls,2);
   t.mock.timers.tick(59999);await settle();assert.equal(calls,2);t.mock.timers.tick(1);await settle();assert.equal(calls,3);assert.equal(failures,0);
   stop();t.mock.timers.tick(60000);await settle();assert.equal(calls,3);
  }finally{stop();t.mock.timers.reset();}
