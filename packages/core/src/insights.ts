@@ -88,7 +88,7 @@ export class InsightAccumulator {
  }
  *find():Generator<InsightCard|undefined>{
   const focus=this.streams.find(s=>s.id===this.focus),closed=this.streams.filter(s=>s.closed);
-  const card=(kind:string,group:InsightGroup,title:string,detail:string,basis:string,action:string,score:number,sampleSize:number,proof:InsightEvidence[],personId?:string):InsightCard=>({id:JSON.stringify([kind,personId,title,detail,proof[0]?.sessionId]),kind,group,title,detail,basis,action,score,sampleSize,evidence:proof,...(personId?{personId,personName:this.people.get(personId)!.name}:{})});
+  const card=(kind:string,group:InsightGroup,title:string,detail:string,basis:string,action:string,score:number,sampleSize:number,proof:InsightEvidence[],personId?:string):InsightCard=>({id:JSON.stringify([kind,personId,title,detail,proof[0]?.sessionId,proof[0]?.at]),kind,group,title,detail,basis,action,score,sampleSize,evidence:proof,...(personId?{personId,personName:this.people.get(personId)!.name}:{})});
   const cohorts=new Map<string,{total:number;returned:number;evidence:InsightEvidence[]}>();
   const money=new Map<string,{total:bigint;top:bigint;person:InsightPerson;supporters:number}>();
   const qualified=closed.filter(s=>s.known),qualifiedIds=new Set(qualified.map(s=>s.id)),recent=qualified.slice(-5),earlier=qualified.filter(s=>!recent.includes(s)).slice(-7);

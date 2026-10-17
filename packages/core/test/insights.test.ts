@@ -81,3 +81,8 @@ test('donor windows cannot be inferred from coincident names or donation times o
  assert.equal(kinds(e).has('donor_window'),false);
  const out=engine();for(let i=0;i<6;i++)out.add(report(i),true,[{personId:'quiet',at:base-1},{personId:'supporter',at:base-1}]);assert.equal(kinds(out).has('donor_window'),false);
 });
+test('identical return counts after two interruptions have distinct stable finding IDs',()=>{
+ const e=engine('s0'),r=report(0,{people:['a','b','c'].map(id=>person(id,0,'0',0,30))});
+ r.breaks=[{from:base+30*minute,to:base+35*minute},{from:base+60*minute,to:base+65*minute}];for(const p of r.audience)p.intervals.push({from:base+35*minute,to:base+60*minute,kind:'observed'},{from:base+65*minute,to:base+90*minute,kind:'observed'});
+ e.add(r,true);const cards=collect(e).filter(c=>c.kind==='restart_return');assert.equal(cards.length,2);assert.equal(new Set(cards.map(c=>c.id)).size,2);
+});
