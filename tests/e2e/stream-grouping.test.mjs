@@ -35,3 +35,33 @@ test('a current stream is selectable, remains selected after refresh and merges 
   await page.getByRole('button',{name:'Разъединить',exact:true}).click();await acceptConfirmation(page,'Разъединить');await page.locator(`tr[data-session-id="${live}"]`).waitFor();assert.equal((await app.db.call('sessions')).length,2);assert.equal((await app.db.call('activeLogicalStream')).id,live);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });
+test('phone stream cards stay compact with full-width day headings and usable group actions',{timeout:60000},async()=>{
+ const app=await application();let browser;
+ try{
+  const m=60000,at=Date.now()-5*3600000,ids=[];
+  for(let n=0;n<3;n++){
+   const start=at+n*90*m,id=await app.db.call('startSession','owner',`compact-${n}`,start,'platform',start);ids.push(id);
+   await app.db.call('attachPlatformStream',id,'youtube','yt',`video-${n}`,start,start,`https://youtube.com/watch?v=video-${n}`,'Дота 2, женщина кери научите играть');
+   if(n<2)await app.db.call('endSession',id,start+30*m);
+  }
+  await app.db.call('mergeSessions',ids.slice(0,2));
+  browser=await launchBrowser();const page=await browser.newPage();page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();
+  for(const width of [360,390,720,1280]){
+   await page.setViewportSize({width,height:900});
+   const live=page.locator(`tr[data-session-id="${ids[2]}"]`),group=page.locator(`tr[data-session-id="${ids[0]}"]`);
+   await live.getByRole('button',{name:'Открыть',exact:true}).waitFor();
+   const boxes=await page.evaluate(()=>{
+    const rows=[...document.querySelectorAll('tr[data-session-id]')];
+    return {overflow:document.documentElement.scrollWidth>innerWidth,heights:rows.map(row=>row.getBoundingClientRect().height),heading:document.querySelector('.session-group th').getBoundingClientRect().width,table:document.querySelector('.sessions-page table').getBoundingClientRect().width};
+   });
+   assert.equal(boxes.overflow,false,JSON.stringify({width,...boxes}));
+   if(width<=720){assert.ok(boxes.heights[0]<290,JSON.stringify({width,...boxes}));assert.ok(boxes.heights[1]<370,JSON.stringify({width,...boxes}));assert.ok(boxes.heading>=boxes.table-2,JSON.stringify({width,...boxes}));}
+   for(const button of [live.getByRole('button',{name:'Открыть',exact:true}),group.getByRole('button',{name:'Разъединить',exact:true})]){await button.scrollIntoViewIfNeeded();const box=await button.boundingBox();assert.ok(box&&box.width>=36&&box.height>=32&&box.x>=0&&box.x+box.width<=width,JSON.stringify({width,box}));}
+   if(process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR&&[390,1280].includes(width)){
+    const {mkdir}=await import('node:fs/promises');const {join}=await import('node:path');await mkdir(process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR,{recursive:true});await page.screenshot({path:join(process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR,`compact-streams-${width}.png`),fullPage:true});
+   }
+  }
+  assert.deepEqual(errors,[]);await saveCoverage(page);
+ }finally{await browser?.close();await app.close();}
+});
