@@ -23,3 +23,14 @@ test('a shared worker crash fails both clients once and a replacement reads thei
  next=new StoreClient(path,'ruslan');await next.ready;assert.deepEqual((await (next.call('persons') as Promise<any[]>)).map(p=>p.display_name),['Preserved']);
  }finally{await Promise.all([a.stop(),b.stop(),next?.stop()]);await rm(dir,{recursive:true,force:true});}
 });
+
+test('writes through another client invalidate long-lived analytics without crossing profile boundaries',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-worker-cache-')),path=join(dir,'data.sqlite'),a=new StoreClient(path,'ruslan'),b=new StoreClient(path,'ruslan'),other=new StoreClient(path,'gulnaz');
+ try{
+  await Promise.all([a.ready,b.ready,other.ready]);const at=Date.UTC(2026,9,1),sid=String(await a.call('startSession','owner','shared-cache',at,'platform',at));await a.call('streamSample',sid,at,'game','Game','',3);await a.call('endSession',sid,at+60000);
+  const query={fromMs:at,toMs:at+120000};assert.equal((await a.call('analytics',query)).streamComparison[0]!.viewers.twitch.mean,3);
+  const calls=a.queueStatus().operations.analytics!.calls;assert.equal((await a.call('analytics',query)).summary.streams,1);assert.equal(a.queueStatus().operations.analytics!.calls,calls);
+  await b.call('streamSample',sid,at,'game','Game','',9);assert.equal((await a.call('analytics',query)).streamComparison[0]!.viewers.twitch.mean,9);
+  assert.equal((await other.call('analytics',query)).summary.streams,0);
+ }finally{await Promise.all([a.stop(),b.stop(),other.stop()]);await rm(dir,{recursive:true,force:true});}
+});

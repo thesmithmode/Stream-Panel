@@ -16,7 +16,7 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
         if (coreRule !== 'either' && coreRule !== 'both' && coreRule !== 'frequency')
             throw new Error('INVALID_ANALYTICS_FILTER');
         return db.call("analytics", {
-            ...(sessionId ? { sessionId } : {}), fromMs: sessionId ? 0 : Number(q.from), toMs: sessionId ? Date.now() : Math.min(Number(q.to), Date.now()), source, category: string(q.category),
+            ...(sessionId ? { sessionId } : {}), ...(string(q.mode)==='summary'?{summaryOnly:true}:{}), fromMs: sessionId ? 0 : Number(q.from), toMs: sessionId ? Date.now() : Math.min(Number(q.to), Date.now()), source, category: string(q.category),
             regularThresholdPercent: q.regularThresholdPercent === undefined ? defaults.regularThresholdPercent : Number(q.regularThresholdPercent), minSessions: q.minSessions === undefined ? defaults.minSessions : Number(q.minSessions), minMinutes: q.minMinutes === undefined ? defaults.minMinutes : Number(q.minMinutes), minMessages: q.minMessages === undefined ? defaults.minMessages : Number(q.minMessages),
             chatWindowMinutes: q.chatWindowMinutes === undefined ? defaults.chatWindowMinutes : Number(q.chatWindowMinutes), coreRule, timezone: string(q.timezone) || defaults.timezone,
             excludedLogins: configuration.value.excludedBotLogins, ownerId: configuration.value.twitch?.userId ?? "", youtubeAccount: configuration.value.youtube?.userId ?? configuration.value.youtubeAccountId ?? "",

@@ -1,5 +1,5 @@
 import {parentPort,workerData} from 'node:worker_threads';
-import {isStoreMethod} from './store-contract.js';
+import {isStoreMethod,invalidatesCachedReads} from './store-contract.js';
 import {StreamStore} from '../../../packages/core/src/store.js';
 const initial=String(workerData.clientId??'legacy'),path=String(workerData.path);
 const stores=new Map<string,StreamStore>([[initial,new StreamStore(path,workerData.profile)]]);
@@ -13,7 +13,12 @@ parentPort!.on('message',async({id,method,args,clientId=workerData.clientId?'':i
   const store=stores.get(clientId);if(!store)throw new Error('DB_WORKER_STOPPED');
   const fn=(store as unknown as Record<string,(...args:unknown[])=>unknown>)[method]!;
   const started=performance.now();
-  const result=await fn.apply(store,args);
+  let result:unknown;
+  try{result=await fn.apply(store,args);}
+  finally{
+   // All clients sharing this worker must observe writes before their next cache hit.
+   if(invalidatesCachedReads(method,args))for(const id of stores.keys())parentPort!.postMessage({clientId:id,invalidate:true});
+  }
   const executionMs=performance.now()-started;
   if(method==='close')stores.delete(clientId);
   parentPort!.postMessage({clientId,id,result,executionMs});
