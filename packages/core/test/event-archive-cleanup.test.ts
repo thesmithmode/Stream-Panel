@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {StreamStore} from '../src/store.js';
 import {openProfileDatabase} from '../src/profile-db.js';
-import {CURRENT_SCHEMA_VERSION} from '../src/schema.js';
+import {CURRENT_SCHEMA_VERSION,schemaV2} from '../src/schema.js';
 
 test('archive cleanup upgrades both profiles atomically while retaining chat counts, donations, categories and lifecycle',()=>{
  const dir=mkdtempSync(join(tmpdir(),'sp-archive-cleanup-')),path=join(dir,'data.sqlite');
@@ -21,6 +21,12 @@ test('archive cleanup upgrades both profiles atomically while retaining chat cou
    db.prepare('INSERT INTO events VALUES (?,?,?,?,?,NULL,?,?,NULL,?,?,?)').run(type,'twitch','owner',type,type,at,at,'provider','eventsub',JSON.stringify({raw:{text:'trash'}}));
    db.prepare('INSERT INTO event_sessions VALUES (?,?)').run(type,sid);
   }
+  // Simulate the actual v18 layout, not a version downgrade of v20 tables.
+  db.exec(`DROP VIEW presence_members;DROP TABLE presence_members_compact;
+   DROP TRIGGER presence_poll_keys_insert;DROP TRIGGER presence_identity_keys_insert;
+   DROP TRIGGER presence_poll_keys_delete;DROP TRIGGER presence_identity_keys_delete;
+   DROP TABLE presence_poll_keys;DROP TABLE presence_identity_keys;`);
+  db.exec(schemaV2.slice(schemaV2.indexOf('CREATE TABLE presence_members'),schemaV2.indexOf('CREATE TABLE identity_aliases')));
   db.exec('PRAGMA user_version=18;');db.close();
  }
  for(const profile of ['ruslan','gulnaz']){
