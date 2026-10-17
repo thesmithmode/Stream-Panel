@@ -1219,3 +1219,8 @@ main{align-self:start;}
 /* Keep long headings beside their help control without pushing it onto a new row. */
 .panel>header:has(>.help)>h2{flex:1 1 0;min-width:0;overflow-wrap:anywhere;}
 @media(max-width:720px){.analytics-filter>header h2{flex-basis:100%;}}
+
+.stream-group-controls{margin-bottom:14px;flex-wrap:wrap;gap:8px;}
+.sessions-page .stream-selection{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;}
+.sessions-page .stream-selection input[type=checkbox]{width:16px;height:16px;min-height:0;flex:none;}
+.sessions-page td:last-child{gap:6px;}

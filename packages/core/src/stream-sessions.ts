@@ -7,7 +7,7 @@ import {windowsFromLinks,sessionBreaks} from "./session-windows.js";
 
 /** Owns broadcast lifecycle and event attribution on the shared profile connection. */
 export class StreamSessions {
-  constructor(private readonly db:Database.Database) {}
+  constructor(private readonly db:Database.Database, private readonly reads:Database.Database=db) {}
 
   assignEvent(id: string, accountId: string, atMs: number): void {
     // v1 has one Twitch channel: known-time DA facts share that channel's session.
@@ -128,9 +128,10 @@ export class StreamSessions {
 
   sessions(sessionId?: string,offset=0,limit=100,botJson='[]'): Record<string, unknown>[] {
     if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>100)throw new Error("INVALID_PAGINATION");
-    const rows = this.db
+    const rows = this.reads
       .prepare(
         `SELECT s.*,
+          (SELECT json_group_array(member_id) FROM session_groups g WHERE g.group_id=s.id) AS members_json,
           (SELECT count(*) FROM event_sessions es WHERE es.session_id=s.id) AS event_count,
           (SELECT title FROM platform_streams p WHERE p.session_id=s.id AND trim(title)<>'' ORDER BY CASE platform WHEN 'twitch' THEN 0 ELSE 1 END,last_observed_at_ms DESC,account_id,external_id LIMIT 1) AS primaryTitle,
           (SELECT json_group_array(platform) FROM (SELECT DISTINCT platform FROM platform_streams p WHERE p.session_id=s.id ORDER BY platform)) AS platforms_json,
@@ -139,17 +140,18 @@ export class StreamSessions {
       )
       .all(sessionId??null,sessionId??null,limit,sessionId?0:offset) as Record<string, unknown>[];
     const ids=JSON.stringify(rows.map(row=>row.id));
-    const counts=this.db.prepare(`SELECT session_id,sum(n) AS n FROM (
+    const counts=this.reads.prepare(`SELECT session_id,sum(n) AS n FROM (
       SELECT es.session_id,count(*) AS n FROM event_sessions es INDEXED BY event_sessions_session CROSS JOIN events e ON e.id=es.event_id LEFT JOIN identities i ON i.id=e.identity_id WHERE ${twitchMessageFilter} AND es.session_id IN(SELECT value FROM json_each(?)) GROUP BY es.session_id
       UNION ALL SELECT ps.session_id,count(DISTINCT m.account_id||':'||m.id) AS n FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id JOIN platform_streams ps ON ps.platform='youtube' AND ps.account_id=m.account_id AND ps.started_at_ms<=m.published_at_ms AND (ps.ended_at_ms IS NULL OR ps.ended_at_ms>m.published_at_ms) WHERE ps.session_id IN(SELECT value FROM json_each(?)) AND ${youtubeMessageFilter} GROUP BY ps.session_id
     ) GROUP BY session_id`).all(botJson,ids,ids,botJson) as {session_id:string;n:number}[];
     const messagesBySession=new Map(counts.map(row=>[row.session_id,row.n]));
-    const samples=this.db.prepare('SELECT session_id,observed_at_ms,twitch_viewers,youtube_viewers FROM stream_samples WHERE session_id IN(SELECT value FROM json_each(?)) ORDER BY observed_at_ms').all(ids) as {session_id:string;observed_at_ms:number;twitch_viewers:number|null;youtube_viewers:number|null}[];
-    const platforms=this.db.prepare('SELECT session_id,platform,started_at_ms AS "from",coalesce(ended_at_ms,?) AS "to" FROM platform_streams WHERE session_id IN(SELECT value FROM json_each(?))').all(Date.now(),ids) as {session_id:string;platform:string;from:number;to:number}[];
-    const tips=this.db.prepare("SELECT es.session_id,json_extract(e.payload_json,'$.currency') AS currency,json_extract(e.payload_json,'$.amountMinor') AS amount FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id JOIN event_sessions es ON es.event_id=e.id WHERE e.type='donation' AND es.session_id IN(SELECT value FROM json_each(?)) AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))").all(ids,botJson) as {session_id:string;currency:string|null;amount:string|null}[];
+    const samples=this.reads.prepare('SELECT session_id,observed_at_ms,twitch_viewers,youtube_viewers FROM stream_samples WHERE session_id IN(SELECT value FROM json_each(?)) ORDER BY observed_at_ms').all(ids) as {session_id:string;observed_at_ms:number;twitch_viewers:number|null;youtube_viewers:number|null}[];
+    const platforms=this.reads.prepare('SELECT session_id,platform,started_at_ms AS "from",coalesce(ended_at_ms,?) AS "to" FROM platform_streams WHERE session_id IN(SELECT value FROM json_each(?))').all(Date.now(),ids) as {session_id:string;platform:string;from:number;to:number}[];
+    const tips=this.reads.prepare("SELECT es.session_id,json_extract(e.payload_json,'$.currency') AS currency,json_extract(e.payload_json,'$.amountMinor') AS amount FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id JOIN event_sessions es ON es.event_id=e.id WHERE e.type='donation' AND es.session_id IN(SELECT value FROM json_each(?)) AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))").all(ids,botJson) as {session_id:string;currency:string|null;amount:string|null}[];
     const group=<T extends {session_id:string}>(values:T[])=>{const groups=new Map<string,T[]>();for(const value of values){const list=groups.get(value.session_id)??[];list.push(value);groups.set(value.session_id,list);}return groups;};
     const samplesBySession=group(samples),platformsBySession=group(platforms),tipsBySession=group(tips);
-    return rows.map(({platforms_json, urls_json, ...row}) => {
+    return rows.map(({platforms_json, urls_json, members_json, ...row}) => {
+      const members=JSON.parse(String(members_json)) as string[];
       const links=platformsBySession.get(String(row.id))??[];
       const windows=windowsFromLinks(links.map(p=>({started_at_ms:p.from,ended_at_ms:p.to})),Number(row.started_at_ms),Number(row.ended_at_ms??Date.now()));
       const merged=new Map<number,{observed_at_ms:number;twitch_viewers:number|null;youtube_viewers:number|null}>();
@@ -158,7 +160,7 @@ export class StreamSessions {
       const donations:Record<string,string>={};let donationCount=0;
       for(const tip of tipsBySession.get(String(row.id))??[]){donationCount++;if(tip.currency&&tip.amount&&/^\d+$/.test(tip.amount))donations[tip.currency]=(BigInt(donations[tip.currency]??'0')+BigInt(tip.amount)).toString();}
       return ({
-      ...row,messageCount:messagesBySession.get(String(row.id))??0, durationMs:windows.reduce((sum,w)=>sum+w.to-w.from,0),viewerMean:viewers.mean,viewerPeak:viewers.peak,donationTotals:donations,donationCount,
+      ...row,memberIds:members.length?members:[String(row.id)],messageCount:messagesBySession.get(String(row.id))??0, durationMs:windows.reduce((sum,w)=>sum+w.to-w.from,0),viewerMean:viewers.mean,viewerPeak:viewers.peak,donationTotals:donations,donationCount,
       breaks:sessionBreaks(windows),
       platforms: JSON.parse(platforms_json as string) as string[],
       confirmedUrls: (JSON.parse(urls_json as string) as {platform:"twitch"|"youtube";url:string}[])
@@ -279,10 +281,10 @@ export class StreamSessions {
           if (occupied || prior) return null;
           const recent=this.db.prepare(`SELECT s.id FROM sessions s
             WHERE s.kind='platform' AND s.ended_at_ms IS NOT NULL
-              AND s.ended_at_ms<=? AND s.ended_at_ms>?
+              AND s.started_at_ms<=? AND s.ended_at_ms<=? AND s.ended_at_ms>=?
               AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)
               AND EXISTS(SELECT 1 FROM platform_streams p WHERE p.session_id=s.id AND p.platform=? AND p.account_id=?)
-            ORDER BY s.ended_at_ms DESC,s.id DESC LIMIT 1`).get(startedAtMs,startedAtMs-30*60000,platform,accountId) as {id:string}|undefined;
+            ORDER BY s.ended_at_ms DESC,s.id DESC LIMIT 1`).get(startedAtMs,observedAtMs,startedAtMs-60*60000,platform,accountId) as {id:string}|undefined;
           if(recent){
             sessionId=recent.id;
             this.db.prepare("UPDATE sessions SET ended_at_ms=NULL,end_quality='unknown' WHERE id=?").run(sessionId);

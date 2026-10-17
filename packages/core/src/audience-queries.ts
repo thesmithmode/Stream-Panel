@@ -561,11 +561,11 @@ export class AudienceQueries {
     if (excluded) return {messageCount:0,estimatedChatMinutes:0,sessionIds:new Set<string>(),firstSeenMs:null};
     const now = Date.now();
     const rows = this.db.prepare(`SELECT m.id,m.published_at_ms FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE m.published_at_ms>=${fromMs} AND y.person_id=? AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(personId) as {id:string;published_at_ms:number}[];
-    const matched = this.db.prepare(`SELECT DISTINCT m.id,m.published_at_ms,s.id AS session_id,s.started_at_ms,coalesce(s.ended_at_ms,?) AS ended_at_ms
+    const matched = this.db.prepare(`SELECT DISTINCT m.id,m.published_at_ms,s.id AS session_id,s.started_at_ms,min(coalesce(s.ended_at_ms,?),coalesce(ps.ended_at_ms,?)) AS ended_at_ms
       FROM youtube_identities y JOIN youtube_messages m ON m.account_id=y.account_id AND m.author_id=y.external_id
       JOIN platform_streams ps ON ps.platform='youtube' AND ps.account_id=m.account_id AND m.published_at_ms>=ps.started_at_ms AND (ps.ended_at_ms IS NULL OR m.published_at_ms<ps.ended_at_ms)
       JOIN sessions s ON s.id=ps.session_id
-      WHERE m.published_at_ms>=${fromMs} AND y.person_id=? AND (? IS NULL OR s.id=?) AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(now,personId,sessionId??null,sessionId??null) as {id:string;published_at_ms:number;session_id:string;started_at_ms:number;ended_at_ms:number}[];
+      WHERE m.published_at_ms>=${fromMs} AND y.person_id=? AND (? IS NULL OR s.id=?) AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(now,now,personId,sessionId??null,sessionId??null) as {id:string;published_at_ms:number;session_id:string;started_at_ms:number;ended_at_ms:number}[];
     const spans = unionSpans(matched.map(row=>({session:row.session_id,kind:'chat_proxy' as const,from:Math.max(fromMs,row.started_at_ms,row.published_at_ms),to:Math.min(row.ended_at_ms,row.published_at_ms+chatWindowMinutes*60000)})));
     return {messageCount:sessionId?new Set(matched.map(row=>row.id)).size:rows.length,
       estimatedChatMinutes:spans.reduce((total,span)=>total+(span.to-span.from)/60000,0),

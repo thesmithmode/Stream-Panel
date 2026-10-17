@@ -492,5 +492,39 @@ END;
 PRAGMA user_version=20;
 `;
 
-export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20] as const;
+/** Grouping is a read-side projection: original facts and foreign keys are unchanged. */
+export const schemaV21 = `
+CREATE TABLE IF NOT EXISTS session_groups(member_id TEXT PRIMARY KEY REFERENCES sessions(id),group_id TEXT NOT NULL REFERENCES sessions(id)) STRICT;
+CREATE INDEX IF NOT EXISTS session_groups_root ON session_groups(group_id,member_id);
+CREATE TRIGGER IF NOT EXISTS session_groups_insert AFTER INSERT ON session_groups BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS session_groups_update AFTER UPDATE ON session_groups BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS session_groups_delete AFTER DELETE ON session_groups BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE VIEW IF NOT EXISTS logical_sessions AS
+ SELECT s.id,s.account_id,s.stream_id,s.kind,s.started_at_ms,s.recording_started_at_ms,
+ CASE WHEN EXISTS(SELECT 1 FROM session_groups g JOIN sessions x ON x.id=g.member_id WHERE g.group_id=s.id AND x.ended_at_ms IS NULL) THEN NULL
+ ELSE coalesce((SELECT max(x.ended_at_ms) FROM session_groups g JOIN sessions x ON x.id=g.member_id WHERE g.group_id=s.id),s.ended_at_ms) END AS ended_at_ms,
+ coalesce((SELECT x.end_quality FROM session_groups g JOIN sessions x ON x.id=g.member_id WHERE g.group_id=s.id ORDER BY x.ended_at_ms IS NULL DESC,x.ended_at_ms DESC,x.id LIMIT 1),s.end_quality) AS end_quality
+ FROM sessions s WHERE NOT EXISTS(SELECT 1 FROM session_groups g WHERE g.member_id=s.id AND g.group_id<>s.id);
+CREATE VIEW IF NOT EXISTS logical_event_sessions AS
+ SELECT p.session_id,p.event_id FROM event_sessions p WHERE NOT EXISTS(SELECT 1 FROM session_groups g WHERE g.member_id=p.session_id)
+ UNION ALL SELECT g.group_id AS session_id,p.event_id FROM session_groups g JOIN event_sessions p ON p.session_id=g.member_id;
+CREATE VIEW IF NOT EXISTS logical_presence_polls AS
+ SELECT p.session_id,p.id,p.account_id,p.started_at_ms,p.completed_at_ms,p.status FROM presence_polls p WHERE NOT EXISTS(SELECT 1 FROM session_groups g WHERE g.member_id=p.session_id)
+ UNION ALL SELECT g.group_id AS session_id,p.id,p.account_id,p.started_at_ms,p.completed_at_ms,p.status FROM session_groups g JOIN presence_polls p ON p.session_id=g.member_id;
+CREATE VIEW IF NOT EXISTS logical_platform_streams AS
+ SELECT p.session_id,p.platform,p.account_id,p.external_id,p.started_at_ms,p.ended_at_ms,p.last_observed_at_ms,p.offline_checks,p.first_missing_at_ms,p.url,p.title FROM platform_streams p WHERE NOT EXISTS(SELECT 1 FROM session_groups g WHERE g.member_id=p.session_id)
+ UNION ALL SELECT g.group_id AS session_id,p.platform,p.account_id,p.external_id,p.started_at_ms,p.ended_at_ms,p.last_observed_at_ms,p.offline_checks,p.first_missing_at_ms,p.url,p.title FROM session_groups g JOIN platform_streams p ON p.session_id=g.member_id;
+CREATE VIEW IF NOT EXISTS logical_stream_samples AS
+ SELECT p.session_id,p.observed_at_ms,p.category_id,p.category_name,p.title,p.twitch_viewers,p.youtube_viewers FROM stream_samples p WHERE NOT EXISTS(SELECT 1 FROM session_groups g WHERE g.member_id=p.session_id)
+ UNION ALL SELECT g.group_id AS session_id,p.observed_at_ms,p.category_id,p.category_name,p.title,p.twitch_viewers,p.youtube_viewers FROM session_groups g JOIN stream_samples p ON p.session_id=g.member_id;
+CREATE VIEW IF NOT EXISTS logical_follower_observations AS
+ SELECT p.session_id,p.id,p.source,p.account_id,p.key,p.observed_at_ms,p.payload_json FROM follower_observations p WHERE NOT EXISTS(SELECT 1 FROM session_groups g WHERE g.member_id=p.session_id)
+ UNION ALL SELECT g.group_id AS session_id,p.id,p.source,p.account_id,p.key,p.observed_at_ms,p.payload_json FROM session_groups g JOIN follower_observations p ON p.session_id=g.member_id;
+CREATE VIEW IF NOT EXISTS logical_analytics_stream_revisions AS SELECT r.session_id,
+ coalesce((SELECT sum(v.revision) FROM session_groups g JOIN analytics_stream_revisions v ON v.session_id=g.member_id WHERE g.group_id=r.session_id),r.revision) AS revision
+ FROM analytics_stream_revisions r;
+PRAGMA user_version=21;
+`;
+
+export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21] as const;
 export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;

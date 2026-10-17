@@ -60,6 +60,7 @@ export interface Person {
   sources: string;
 }
 export interface Session {
+  memberIds?:string[];
   id: string;
   kind: string;
   account_id: string;

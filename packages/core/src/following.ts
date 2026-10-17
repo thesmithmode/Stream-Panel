@@ -1,3 +1,4 @@
+import {sessionWindows} from './session-windows.js';
 import type Database from 'better-sqlite3';
 export interface Follower {id:string;name:string;followedAtMs:number|null;raw?:unknown}
 interface Poll {at:number;payload_json:string}
@@ -11,6 +12,8 @@ export function personFollowing(db:Database.Database,person:string,session:strin
  const identities=db.prepare(`SELECT source,account_id AS account,external_id AS externalId,display_name AS name FROM identities WHERE person_id=? AND source='twitch'
  UNION ALL SELECT 'youtube',account_id,external_id,display_name FROM youtube_identities WHERE person_id=?`).all(person,person) as {source:string;account:string;externalId:string;name:string}[];
  const stream=session?db.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=?').get(session) as {start:number;end:number|null}:undefined;
+ const windows=stream?sessionWindows(db,session,stream.start,stream.end??Date.now()):[];
+ const within=(at:number)=>windows.some(w=>at>=w.from&&at<=w.to);
  return identities.map(i=>{
   const polls=db.prepare("SELECT observed_at_ms AS at,payload_json FROM follower_observations WHERE source=? AND account_id=? AND key='followers' ORDER BY observed_at_ms DESC,id DESC LIMIT 1").all(i.source,i.account) as Poll[];
   let latest=state(polls[0],i.externalId,i.source);
@@ -22,8 +25,8 @@ export function personFollowing(db:Database.Database,person:string,session:strin
   const during=historical[0];
   let historic=state(during,i.externalId,i.source);
   const dates=[follow?.at,...[...polls,...historical].map(p=>state(p,i.externalId,i.source).followedAtMs)].filter((at):at is number=>at!=null);
-  const streamDate=stream?db.prepare("SELECT min(json_extract(f.value,'$.followedAtMs')) AS at FROM follower_observations p,json_each(p.payload_json,'$.followers') f WHERE p.source=? AND p.account_id=? AND p.key='followers' AND json_extract(f.value,'$.id')=? AND json_extract(f.value,'$.followedAtMs') BETWEEN ? AND ?").get(i.source,i.account,i.externalId,stream.start,stream.end??Date.now()) as {at:number|null}:undefined;
-  const followedDuringStreamMs=stream?dates.find(at=>at>=stream.start&&at<=(stream.end??Date.now()))??streamDate?.at??null:null;
+  const streamDates=stream?db.prepare("SELECT json_extract(f.value,'$.followedAtMs') AS at FROM follower_observations p,json_each(p.payload_json,'$.followers') f WHERE p.source=? AND p.account_id=? AND p.key='followers' AND json_extract(f.value,'$.id')=? AND json_extract(f.value,'$.followedAtMs') BETWEEN ? AND ?").all(i.source,i.account,i.externalId,stream.start,stream.end??Date.now()) as {at:number|null}[]:[];
+  const followedDuringStreamMs=stream?[...dates,...streamDates.flatMap(row=>row.at===null?[]:[row.at])].find(within)??null:null;
   if(followedDuringStreamMs!==null&&followedDuringStreamMs>(historic.checkedAtMs??-1))historic={status:true,checkedAtMs:followedDuringStreamMs,followedAtMs:followedDuringStreamMs};
   const liveFollows=db.prepare(`SELECT e.received_at_ms AS at,e.occurred_at_ms AS followedAtMs FROM effective_events e JOIN identities identity ON identity.id=e.identity_id WHERE identity.person_id=? AND e.source=? AND e.account_id=? AND e.type='follow' ORDER BY e.received_at_ms`).all(person,i.source,i.account) as {at:number;followedAtMs:number|null}[];
   const changes=db.prepare(`WITH states AS (
@@ -39,11 +42,11 @@ export function personFollowing(db:Database.Database,person:string,session:strin
  });
 }
 export function followingAnalytics(db:Database.Database,id:string){
- const stream=db.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=?').get(id) as {start:number;end:number|null};const end=stream.end??Date.now();
+ const stream=db.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=?').get(id) as {start:number;end:number|null};const end=stream.end??Date.now(),windows=sessionWindows(db,id,stream.start,end);
  const polls=db.prepare("SELECT source,account_id AS account,observed_at_ms AS at,payload_json FROM follower_observations p WHERE key='followers' AND ((observed_at_ms>=? AND observed_at_ms<=?) OR id=(SELECT q.id FROM follower_observations q WHERE q.source=p.source AND q.account_id=p.account_id AND q.key='followers' ORDER BY q.observed_at_ms DESC,q.id DESC LIMIT 1)) ORDER BY observed_at_ms").all(stream.start,end) as (Poll&{source:string;account:string})[];
  const signups=new Map<string,{source:string;account:string;externalId:string;name:string;at:number;personId:string|null}>();
  const add=(source:string,account:string,f:Follower)=>{
-  if(f.followedAtMs===null||f.followedAtMs<stream.start||f.followedAtMs>end)return;
+  if(f.followedAtMs===null||!windows.some(w=>f.followedAtMs!>=w.from&&f.followedAtMs!<=w.to))return;
   const person=source==='youtube'?db.prepare('SELECT person_id AS id FROM youtube_identities WHERE account_id=? AND external_id=?').get(account,f.id):db.prepare('SELECT person_id AS id FROM identities WHERE source=? AND account_id=? AND external_id=?').get(source,account,f.id);
   signups.set(`${source}:${account}:${f.id}:${Math.floor(f.followedAtMs/1000)}`,{source,account,externalId:f.id,name:f.name,at:f.followedAtMs,personId:(person as {id:string}|undefined)?.id??null});
  };

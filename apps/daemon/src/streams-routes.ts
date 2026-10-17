@@ -4,7 +4,7 @@ import type { StorePort } from './store-contract.js';
 import { object, string } from './provider-values.js';
 import { analyticsSettings } from './analytics-settings.js';
 import { randomUUID } from 'node:crypto';
-type Store = StorePort<'analytics' | 'channelOverview' | 'deleteManualSession' | 'endSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'startSession' | 'streamMetadata' | 'summary'>;
+type Store = StorePort<'mergeSessions' | 'unmergeSessions' | 'analytics' | 'channelOverview' | 'deleteManualSession' | 'endSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'startSession' | 'streamMetadata' | 'summary'>;
 export function registerStreamsRoutes(app: FastifyInstance, db: Store, configuration: ConfigurationPort) {
     app.get("/api/v1/overview", () => db.call("channelOverview", configuration.value.excludedBotLogins));
     app.get("/api/v1/analytics", async (request) => {
@@ -27,6 +27,8 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
     app.get("/api/v1/sessions", async (request) => db.call("sessions", string(object(request.query).session) || undefined, Number(object(request.query).offset ?? 0), Number(object(request.query).limit ?? 100), configuration.value.excludedBotLogins));
     app.get("/api/v1/sessions/:id/followers", async (request) => db.call("followingAnalytics", string(object(request.params).id)));
     app.get("/api/v1/sessions/:id/metadata", async (request) => db.call('streamMetadata', string(object(request.params).id)));
+    app.post('/api/v1/sessions/merge',async request=>({id:await db.call('mergeSessions',object(request.body).sessionIds as string[])}));
+    app.post('/api/v1/sessions/:id/unmerge',async request=>{await db.call('unmergeSessions',string(object(request.params).id));return {ok:true};});
     app.post("/api/v1/sessions/start", async () => {
         const existing = await db.call("sessions");
         if (existing.some((s) => s.ended_at_ms === null))
