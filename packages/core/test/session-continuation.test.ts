@@ -29,8 +29,8 @@ test('a restart under 30 minutes preserves the recording and excludes its break 
  } finally {store.close();await rm(dir,{recursive:true,force:true});}
 });
 
-test('30 minutes is a strict boundary and another account cannot extend a recording',async()=>{
- for(const [account,start,merged] of [['owner',1859999,true],['owner',1860000,false],['other',120000,false]] as const){
+test('60 minutes is an inclusive boundary and another account cannot extend a recording',async()=>{
+ for(const [account,start,merged] of [['owner',3660000,true],['owner',3660001,false],['other',120000,false]] as const){
   const store=new StreamStore(':memory:');
   try {
    const first=store.observePlatformStream('twitch','owner','first',0,0,null,'')!;
@@ -54,7 +54,7 @@ test('continuing YouTube keeps the logical stream live without a break during a 
 test('a new provider ID after a long collector outage does not invent a zero-length break',()=>{
  const s=new StreamStore(':memory:');try{
   const first=s.observePlatformStream('twitch','owner','old',0,60000,null,'')!;
-  const next=s.observePlatformStream('twitch','owner','next',31*60000,32*60000,null,'',['next'])!;
+  const next=s.observePlatformStream('twitch','owner','next',62*60000,63*60000,null,'',['next'])!;
   assert.notEqual(next,first);assert.equal(s.sessions().find(row=>row.id===first)!.ended_at_ms,60000);
  }finally{s.close();}
 });

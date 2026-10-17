@@ -27,8 +27,8 @@ test('EventSub follow beats an older poll and retains exact follow time after th
  const id=s.observePlatformStream('twitch','owner','one',at,at,null,'Stream')!,person=event(s,'message','chat.message',at);
  s.followingSnapshot('twitch','owner',[],true,at);event(s,'follow','follow',at+m,at+2*m);
  s.endSession(id,at+3*m);const row=s.personFollowing(person,id)[0]!;assert.equal(row.status,true);assert.equal(row.checkedAtMs,at+2*m);assert.equal(row.streamStatus,true);assert.equal(row.followedDuringStreamMs,at+m);assert.equal(s.followingAnalytics(id).newFollowers.length,1);
- const active=s.observePlatformStream('twitch','owner','next',at+40*m,at+40*m,null,'Next')!;assert.equal(s.personFollowing(person,active)[0]!.followedDuringStreamMs,null);assert.equal(s.followingAnalytics(active).newFollowers.length,0);
- s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:at+m},{id:'viewer',name:'New name',followedAtMs:at+m}],true,at+41*m);
+ const active=s.observePlatformStream('twitch','owner','next',at+80*m,at+80*m,null,'Next')!;assert.equal(s.personFollowing(person,active)[0]!.followedDuringStreamMs,null);assert.equal(s.followingAnalytics(active).newFollowers.length,0);
+ s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:at+m},{id:'viewer',name:'New name',followedAtMs:at+m}],true,at+81*m);
  assert.equal(s.followingAnalytics(id).newFollowers.length,1);assert.equal(s.followingAnalytics(active).polls[0]!.total,1);
  }finally{s.close();}
 });
