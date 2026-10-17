@@ -279,9 +279,11 @@ export class AnalyticsHistory {
         if (!next.done)
             return { ...validation, ...next.value, stage: 'aggregate' };
         this.jobs.delete(fingerprint);
-        const value=this.page(next.value,job.workspace,options);
-        this.remember(fingerprint,next.value,job.workspace,job.liveRevision);
-        return value;
+        try{
+            const value=this.page(next.value,job.workspace,options);
+            this.remember(fingerprint,next.value,job.workspace,job.liveRevision);
+            return value;
+        }catch(error){job.workspace.dispose();throw error;}
     }
     private *aggregate(options: AnalyticsOptions, sessions: Session[], validation: ReturnType<typeof audienceAnalytics>,workspace:AnalyticsWorkspace<Person>): Generator<Progress, Report, void> {
         let sliceStart = performance.now();

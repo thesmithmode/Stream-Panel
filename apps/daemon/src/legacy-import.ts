@@ -7,7 +7,6 @@ import {schemaMigrations} from '../../../packages/core/src/schema.js';
 import {AccountStore} from './auth.js';
 const schema=schemaMigrations.join('\n');
 const allTables=[...new Set([...schema.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?(\w+)/g)].map(m=>m[1]!))].filter(name=>!name.startsWith('sp_'));
-const tables=allTables.filter(name=>!name.startsWith('analytics_'));
 const auxiliary=[...new Set([...schema.matchAll(/CREATE (VIEW|TRIGGER) (?:IF NOT EXISTS )?(\w+)/g)].map(m=>({type:m[1]!,name:m[2]!})))];
 async function exists(path:string){try{await access(path);return true;}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return false;throw e;}}
 export async function migrateLegacy(source:string,destination:string) {
@@ -33,15 +32,27 @@ export async function migrateLegacy(source:string,destination:string) {
   const db=new Database(join(staging,'data.sqlite')),counts:Record<string,number>={};
   try{
    db.pragma('foreign_keys=OFF');
+   // Migration history includes objects that have since become views or been dropped.
+   const existing=new Set((db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as {name:string}[]).map(row=>row.name));
+   const actualTables=allTables.filter(name=>existing.has(name));
+   const keyTriggers=['presence_poll_keys_insert','presence_identity_keys_insert','presence_poll_keys_delete','presence_identity_keys_delete'].map(name=>'p_ruslan_'+name);
+   const recreate=db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name IN(SELECT value FROM json_each(?))").all(JSON.stringify(keyTriggers)) as {name:string;sql:string}[];
    db.transaction(()=>{
+    // Copy permanent keys verbatim, without allocating replacements during fact import.
+    for(const trigger of recreate)db.exec(`DROP TRIGGER "${trigger.name}"`);
     for(const object of auxiliary)db.exec(`DROP ${object.type} IF EXISTS "${object.name}"`);
-    for(const table of tables){
+    for(const table of actualTables.filter(name=>!name.startsWith('analytics_'))){
      counts[table]=(db.prepare(`SELECT count(*) AS n FROM "${table}"`).get() as {n:number}).n;
      db.exec(`INSERT INTO "p_ruslan_${table}" SELECT * FROM "${table}"`);
      const actual=(db.prepare(`SELECT count(*) AS n FROM "p_ruslan_${table}"`).get() as {n:number}).n;
      if(actual!==counts[table])throw new Error('IMPORT_COUNT_MISMATCH');
     }
-    for(const table of [...allTables].reverse())db.exec(`DROP TABLE "${table}"`);
+    for(const name of ['presence_poll_keys','presence_identity_keys']){
+     const source=(db.prepare('SELECT seq FROM sqlite_sequence WHERE name=?').get(name) as {seq:number}|undefined)?.seq;
+     if(source!==undefined){const target='p_ruslan_'+name;const changed=db.prepare('UPDATE sqlite_sequence SET seq=max(seq,?) WHERE name=?').run(source,target).changes;if(!changed)db.prepare('INSERT INTO sqlite_sequence(name,seq) VALUES(?,?)').run(target,source);}
+    }
+    for(const trigger of recreate)db.exec(trigger.sql);
+    for(const table of [...actualTables].reverse())db.exec(`DROP TABLE "${table}"`);
     if(db.pragma('integrity_check',{simple:true})!=='ok'||(db.pragma('foreign_key_check') as unknown[]).length)throw new Error('IMPORT_INTEGRITY_FAILED');
    }).immediate();
    db.pragma('wal_checkpoint(TRUNCATE)');

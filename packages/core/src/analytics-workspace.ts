@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import {randomUUID} from 'node:crypto';
-import {statfsSync} from 'node:fs';
+import {statfsSync,existsSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import {dirname} from 'node:path';
 import {matchesActivityDay,type TimeAudienceSummary} from './time-audience.js';
 
@@ -39,10 +40,10 @@ export class AnalyticsWorkspace<P> {
  private clock:string;
  private disposed=false;
  constructor(private db:Database.Database){
-  this.people=new DiskMap(db,`${this.prefix}_people`);
   this.category=`${this.prefix}_categories`;this.clock=`${this.prefix}_clock`;
+  this.people=db.transaction(()=>{const people=new DiskMap<P>(db,`${this.prefix}_people`);
   db.exec(`CREATE TEMP TABLE ${this.category}(category TEXT NOT NULL,person TEXT NOT NULL,PRIMARY KEY(category,person)) WITHOUT ROWID;
-   CREATE TEMP TABLE ${this.clock}(day TEXT NOT NULL,session TEXT NOT NULL,person TEXT NOT NULL,lo INTEGER NOT NULL,hi INTEGER NOT NULL,PRIMARY KEY(day,session,person,lo)) WITHOUT ROWID`);
+   CREATE TEMP TABLE ${this.clock}(day TEXT NOT NULL,session TEXT NOT NULL,person TEXT NOT NULL,lo INTEGER NOT NULL,hi INTEGER NOT NULL,PRIMARY KEY(day,session,person,lo)) WITHOUT ROWID`);return people;})();
  }
  categoryPerson(category:string,person:string){this.db.prepare(`INSERT OR IGNORE INTO ${this.category} VALUES(?,?)`).run(category,person);}
  categoryCounts(category:string){return this.db.prepare(`SELECT count(*) audience,coalesce(sum(json_extract(p.value,'$.core')),0) core FROM ${this.category} c JOIN ${this.people.table} p ON p.id=c.person WHERE c.category=?`).get(category) as {audience:number;core:number};}
@@ -75,7 +76,7 @@ export class AnalyticsWorkspace<P> {
  checkBudget(){
   const pages=Number(this.db.pragma('temp.page_count',{simple:true}))-Number(this.db.pragma('temp.freelist_count',{simple:true}));
   if(pages*Number(this.db.pragma('temp.page_size',{simple:true}))>512*1024*1024)throw new Error('ANALYTICS_WORKSPACE_LIMIT');
-  if(this.db.name!==':memory:'){const fs=statfsSync(dirname(this.db.name));if(fs.bavail*fs.bsize<1024*1024*1024)throw new Error('ANALYTICS_DISK_RESERVE');}
+  if(this.db.name!==':memory:')for(const path of new Set([dirname(this.db.name),process.env.SQLITE_TMPDIR??tmpdir(),'/var/tmp'])){if(!existsSync(path))continue;const fs=statfsSync(path);if(fs.bavail*fs.bsize<1024*1024*1024)throw new Error('ANALYTICS_DISK_RESERVE');}
  }
  dispose(){if(!this.disposed){this.db.exec(`DROP TABLE ${this.people.table};DROP TABLE ${this.category};DROP TABLE ${this.clock}`);this.disposed=true;}}
 }

@@ -21,6 +21,12 @@ test('large report pages, searches and clock visitor pages remain complete and r
   const clock=page.getByRole('heading',{name:'Кто бывает в это время',exact:true}).locator('../..');await clock.locator('.slots button:not(:disabled)').first().click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);
   await clock.getByRole('button',{name:'Следующие в интервале',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===25);
   await clock.getByRole('button',{name:'Предыдущие в интервале',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);
+  let fault=true;
+  await page.route('**/api/v1/analytics?*',route=>{if(fault&&new URL(route.request().url()).searchParams.has('clockMinute')){fault=false;return route.fulfill({status:400,json:{error:'CLOCK_UNAVAILABLE'}});}return route.continue();});
+  await clock.locator('.slots button:not(:disabled)').nth(1).click();await clock.getByRole('alert').filter({hasText:'CLOCK_UNAVAILABLE'}).waitFor();await page.unroute('**/api/v1/analytics?*');
+  let preparing=true;
+  await page.route('**/api/v1/analytics?*',route=>{if(preparing&&new URL(route.request().url()).searchParams.has('clockMinute')){preparing=false;return route.fulfill({json:{preparing:true}});}return route.continue();});
+  await clock.locator('.slots button:not(:disabled)').first().click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);await page.unroute('**/api/v1/analytics?*');
   for(const width of [1280,390,320]){await page.setViewportSize({width,height:900});await assertUiLayout(page);}
   if(process.env.STREAM_PANEL_QA_DIR){await mkdir(process.env.STREAM_PANEL_QA_DIR,{recursive:true});await clock.scrollIntoViewIfNeeded();await page.screenshot({path:join(process.env.STREAM_PANEL_QA_DIR,'analytics-paging-320.png')});}
   assert.deepEqual(errors,[]);assert.ok(page.url().startsWith(origin));

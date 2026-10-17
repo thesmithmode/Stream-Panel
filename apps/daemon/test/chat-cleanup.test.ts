@@ -1,3 +1,5 @@
+import {restoreLegacyPresence} from '../../../packages/core/test/legacy-presence.js';
+import {openProfileDatabase} from '../../../packages/core/src/profile-db.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
@@ -29,6 +31,7 @@ test('old chat content is scrubbed and compacted for both profiles without chang
    old.prepare(`UPDATE p_${profile}_events SET payload_json=? WHERE type='chat.message'`).run(JSON.stringify({text:marker.repeat(100),raw:{message:{text:marker.repeat(100)}}}));
    old.prepare(`UPDATE p_${profile}_youtube_messages SET payload_json=json_set(payload_json,'$.snippet.displayMessage',?)`).run(marker.repeat(100));
    old.prepare(`INSERT INTO p_${profile}_provider_snapshots VALUES (?,?,?,?,?,?,?)`).run(`raw-${profile}`,'youtube','yt-owner','chat:chat',at,null,JSON.stringify([{text:marker.repeat(10000)}]));
+   const legacy=openProfileDatabase(path,profile);restoreLegacyPresence(legacy);legacy.close();
    old.prepare('UPDATE sp_profile_schema SET version=14 WHERE profile=?').run(profile);
   }
   old.pragma('wal_checkpoint(TRUNCATE)');old.close();
