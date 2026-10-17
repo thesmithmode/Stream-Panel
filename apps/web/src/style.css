@@ -1211,7 +1211,8 @@ main{align-self:start;}
 /* Keep long broadcast titles inside the history instead of widening the page. */
 .sessions-page .panel{min-width:0;max-width:100%;}
 .sessions-page table{table-layout:fixed;}
-.sessions-page th,.sessions-page td{white-space:normal;overflow-wrap:anywhere;padding:14px 10px;}
+.sessions-page th,.sessions-page td{white-space:normal;overflow-wrap:anywhere;}
+@media(min-width:721px){.sessions-page th,.sessions-page td{padding:14px 10px;}}
 .sessions-page .platform-details a{display:inline-block;margin-right:8px;}
 .sessions-page td:last-child button{max-width:100%;}
 @media(min-width:901px){.sessions-page th:first-child{width:17%;}.sessions-page th:nth-child(4){width:22%;}.sessions-page th:last-child{width:100px;}}
@@ -1220,7 +1221,20 @@ main{align-self:start;}
 .panel>header:has(>.help)>h2{flex:1 1 0;min-width:0;overflow-wrap:anywhere;}
 @media(max-width:720px){.analytics-filter>header h2{flex-basis:100%;}}
 
-.stream-group-controls{margin-bottom:14px;flex-wrap:wrap;gap:8px;}
+.stream-group-controls{display:flex;align-items:center;justify-content:space-between;margin:0;padding:12px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px;}
+.stream-group-controls>span{font-size:12px;color:var(--muted);}
+.stream-group-controls>button{min-height:36px;padding:8px 12px;font-size:12px;}
 .sessions-page .stream-selection{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;}
 .sessions-page .stream-selection input[type=checkbox]{width:16px;height:16px;min-height:0;flex:none;}
 .sessions-page td:last-child{gap:6px;}
+
+/* The phone layout owns its spacing; desktop cell padding must not leak into cards. */
+@media(max-width:720px){
+ .sessions-page tr[data-session-id]{gap:10px 16px;padding:14px;align-content:start;}
+ .sessions-page tr[data-session-id]>td{width:auto;min-width:0;padding:0;border:0;}
+ .sessions-page tr.session-group>th{display:block;width:100%;padding:10px 14px;border-bottom:1px solid var(--border);}
+ .sessions-page .stream-selection{display:inline-flex;margin:0 0 4px;}
+ .sessions-page td:last-child{align-items:center;flex-wrap:wrap;padding-top:2px;}
+ .sessions-page td:last-child>button{min-height:36px;}
+ .sessions-page tr[data-session-id]:has(input:checked){background:#b5a3ff0a;}
+}
