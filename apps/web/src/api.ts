@@ -131,11 +131,4 @@ export interface PersonTop {
   donationTotals: Record<string, string>;
   observedMinutes: number;
 }
-export interface InsightCard {
-  kind: string;
-  title: string;
-  detail: string;
-  personId: string | null;
-  sessionId: string | null;
-  metrics: Record<string, unknown>;
-}
+export type {InsightCard} from '../../../packages/core/src/insights';

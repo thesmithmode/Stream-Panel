@@ -53,5 +53,17 @@ export function followingAnalytics(db:Database.Database,id:string){
  for(const p of polls)for(const f of (JSON.parse(p.payload_json) as Snapshot).followers)add(p.source,p.account,f);
  const events=db.prepare("SELECT e.source,e.account_id AS account,i.external_id AS id,i.display_name AS name,e.occurred_at_ms AS at FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE e.type='follow' AND e.occurred_at_ms BETWEEN ? AND ?").all(stream.start,end) as {source:string;account:string;id:string;name:string;at:number}[];
  for(const e of events)add(e.source,e.account,{id:e.id,name:e.name,followedAtMs:e.at});
- return {newFollowers:[...signups.values()].sort((a,b)=>a.at-b.at||Number(b.personId!==null)-Number(a.personId!==null)||a.externalId.localeCompare(b.externalId)),polls:polls.filter(p=>p.at>=stream.start&&p.at<=end).map(p=>{const data=JSON.parse(p.payload_json) as Snapshot;return {at:p.at,source:p.source,total:p.source==='youtube'?data.total:data.total??data.followers.length,visibleCount:data.followers.length,complete:data.complete};})};
+ const newFollowers=[...signups.values()].sort((a,b)=>b.at-a.at||Number(b.personId!==null)-Number(a.personId!==null)||a.externalId.localeCompare(b.externalId));
+ const observations=polls.filter(p=>p.at>=stream.start&&p.at<=end).map(p=>{const data=JSON.parse(p.payload_json) as Snapshot;return {at:p.at,source:p.source,account:p.account,total:p.source==='youtube'?data.total:data.total??(data.complete?data.followers.length:null),visibleCount:data.followers.length,complete:data.complete};});
+ const accounts=new Map<string,{source:string;account:string}>();
+ for(const p of polls)accounts.set(`${p.source}:${p.account}`,p);
+ for(const f of newFollowers)accounts.set(`${f.source}:${f.account}`,f);
+ const platforms=[...accounts.values()].map(({source,account})=>{
+  const checks=observations.filter(p=>p.source===source&&p.account===account&&p.total!==null),first=checks[0],last=checks.at(-1);
+  // YouTube totals currently come from the six-hour channel snapshot, not the
+  // subscriber poll. They cannot support a within-stream change calculation.
+  const comparable=source==='twitch'&&first!==undefined&&last!==undefined&&first.at<last.at;
+  return {source,account,knownNew:newFollowers.filter(f=>f.source===source&&f.account===account).length,change:comparable?last.total!-first.total!:null,fromAt:comparable?first.at:null,toAt:comparable?last.at:null,startTotal:comparable?first.total:null,endTotal:comparable?last.total:null};
+ });
+ return {newFollowers,platforms,polls:observations};
 }

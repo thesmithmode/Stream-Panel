@@ -13,6 +13,8 @@ export interface AnalyticsOptions {
     category?: string;
     sessionId?: string;
     summaryOnly?: boolean;
+    includeInsights?: boolean;
+    insightSessionId?: string;
     audienceOffset?:number;
     audienceSearch?:string;
     audienceSort?:string;

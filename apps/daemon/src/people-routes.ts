@@ -30,7 +30,10 @@ export function registerPeopleRoutes(app: FastifyInstance, db: Store, configurat
             : "messages";
         return db.call("personsTop", sortBy, string(q.session) || undefined, configuration.value.excludedBotLogins, q.limit === undefined ? 50 : Number(q.limit), q.from === undefined ? peopleFrom(request.query) : Number(q.from), q.to === undefined ? undefined : Number(q.to), string(q.currency) || 'RUB');
     });
-    app.get("/api/v1/insights", async (request) => db.call("insights", string(object(request.query).session) || undefined, configuration.value.excludedBotLogins));
+    app.get("/api/v1/insights", async request=>{
+        const q=object(request.query),defaults=analyticsSettings(configuration.value.analyticsSettings);
+        return db.call('insights',string(q.session)||undefined,configuration.value.excludedBotLogins,{...defaults,ownerId:configuration.value.twitch?.userId??'',youtubeAccount:configuration.value.youtube?.userId??configuration.value.youtubeAccountId??''});
+    });
     app.get("/api/v1/persons/:id", async (request) => db.call("person", string(object(request.params).id), string(object(request.query).events) !== "false"));
     app.get("/api/v1/persons/:id/activity", async (request) => db.call("personActivity", string(object(request.params).id), analyticsSettings(configuration.value.analyticsSettings).chatWindowMinutes, analyticsSettings(configuration.value.analyticsSettings).timezone));
     app.get("/api/v1/persons/:id/metadata", async (request) => db.call("personMetadata", string(object(request.params).id)));

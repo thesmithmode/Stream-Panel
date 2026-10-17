@@ -63,3 +63,16 @@ test('long stream history retains an early subscription after recent snapshot li
  assert.equal(state.history.length,2);
  }finally{s.close();}
 });
+test('stream follower summary distinguishes known identities, net count and stale YouTube totals',()=>{
+ const s=new StreamStore(':memory:');try{
+ const id=s.startSession('owner','summary',at,'platform',at);
+ s.followingSnapshot('twitch','owner',[],true,at,63);
+ s.followingSnapshot('twitch','owner',[{id:'old',name:'Old follower',followedAtMs:at-m}],true,at+10*m,65);
+ s.followingSnapshot('youtube','yt',[],true,at,100);
+ s.followingSnapshot('youtube','yt',[{id:'public',name:'Public',followedAtMs:at+5*m}],true,at+10*m,101);
+ s.endSession(id,at+11*m);
+ const summary=s.followingAnalytics(id),tw=summary.platforms.find(p=>p.source==='twitch')!,yt=summary.platforms.find(p=>p.source==='youtube')!;
+ assert.equal(tw.knownNew,0);assert.equal(tw.change,2);assert.equal(tw.fromAt,at);assert.equal(tw.toAt,at+10*m);assert.equal(yt.knownNew,1);assert.equal(yt.change,null);assert.equal(yt.fromAt,null);
+ const next=s.startSession('owner','next-summary',at+20*m,'platform',at+20*m);s.followingSnapshot('twitch','owner',[],true,at+21*m,60);s.endSession(next,at+22*m);assert.equal(s.followingAnalytics(next).platforms.find(p=>p.source==='twitch')!.change,null);
+ }finally{s.close();}
+});

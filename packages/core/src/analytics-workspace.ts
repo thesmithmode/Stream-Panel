@@ -1,3 +1,4 @@
+import type {InsightPerson} from './insights.js';
 import type Database from 'better-sqlite3';
 import {randomUUID} from 'node:crypto';
 import {statfsSync,existsSync} from 'node:fs';
@@ -35,12 +36,14 @@ export class DiskMap<T> {
 
 export class AnalyticsWorkspace<P> {
  readonly people:DiskMap<P>;
+ readonly insightPeople:DiskMap<InsightPerson>;
  private prefix=`sp_analytics_${randomUUID().replaceAll('-','')}`;
  private category:string;
  private clock:string;
  private disposed=false;
  constructor(private db:Database.Database){
   this.category=`${this.prefix}_categories`;this.clock=`${this.prefix}_clock`;
+  this.insightPeople=new DiskMap<InsightPerson>(db,`${this.prefix}_insights`);
   this.people=db.transaction(()=>{const people=new DiskMap<P>(db,`${this.prefix}_people`);
   db.exec(`CREATE TEMP TABLE ${this.category}(category TEXT NOT NULL,person TEXT NOT NULL,PRIMARY KEY(category,person)) WITHOUT ROWID;
    CREATE TEMP TABLE ${this.clock}(day TEXT NOT NULL,session TEXT NOT NULL,person TEXT NOT NULL,lo INTEGER NOT NULL,hi INTEGER NOT NULL,PRIMARY KEY(day,session,person,lo)) WITHOUT ROWID`);return people;})();
@@ -78,5 +81,5 @@ export class AnalyticsWorkspace<P> {
   if(pages*Number(this.db.pragma('temp.page_size',{simple:true}))>512*1024*1024)throw new Error('ANALYTICS_WORKSPACE_LIMIT');
   if(this.db.name!==':memory:')for(const path of new Set([dirname(this.db.name),process.env.SQLITE_TMPDIR??tmpdir(),'/var/tmp'])){if(!existsSync(path))continue;const fs=statfsSync(path);if(fs.bavail*fs.bsize<1024*1024*1024)throw new Error('ANALYTICS_DISK_RESERVE');}
  }
- dispose(){if(!this.disposed){this.db.exec(`DROP TABLE ${this.people.table};DROP TABLE ${this.category};DROP TABLE ${this.clock}`);this.disposed=true;}}
+ dispose(){if(!this.disposed){this.db.exec(`DROP TABLE ${this.insightPeople.table};DROP TABLE ${this.people.table};DROP TABLE ${this.category};DROP TABLE ${this.clock}`);this.disposed=true;}}
 }

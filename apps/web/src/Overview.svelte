@@ -2,6 +2,7 @@
   import {untrack} from 'svelte';
   import {ConnectionError} from "./request";
   import StreamDonations from "./StreamDonations.svelte";
+  import Insights from "./Insights.svelte";
   import Following from "./Following.svelte";
   import Help from "./Help.svelte";
   import {chartMetrics,type ChartMetric} from './chart-series';
@@ -13,13 +14,12 @@
     api,
     money,
     type Summary,
-    type InsightCard,
   } from "./api";
   let {
     summary,
     sessionFilter = "",
     onPerson,
-    session,changed,
+    session,changed,onStream,
   }: {
     summary: Summary;
     sessionFilter?: string;
@@ -27,6 +27,7 @@
     onPerson: (id: string) => void;
     session?:Session|undefined;
     changed:()=>Promise<void>;
+    onStream:(id:string)=>void;
   } = $props();
   let audienceData=$state<any>(null),audienceError=$state(''),audienceBusy=$state(false);
   let audienceMetric=$state<ChartMetric>('viewers');
@@ -49,25 +50,6 @@
     return()=>{audienceRequest++;controller.abort();};
     });
   });
-  let insightsOpen = $state(false),insightsLoadedAt=0;
-  let insights = $state<InsightCard[]>([]);
-  let insightsLoading = $state(false);
-  let insightsError = $state("");
-  async function loadInsights() {
-    insightsOpen = !insightsOpen;
-    if (!insightsOpen||Date.now()-insightsLoadedAt<60000) return;
-    insightsLoading = true;
-    insightsError = "";
-    try {
-      const q = sessionFilter ? `?session=${sessionFilter}` : "";
-      insights = await api<InsightCard[]>(`insights${q}`);insightsLoadedAt=Date.now();
-    } catch (e) {
-      insightsError = (e as Error).message;
-      insights = [];
-    } finally {
-      insightsLoading = false;
-    }
-  }
 </script>
 {#if session}<section class="panel stream-facts">
  <header><h2>{session.primaryTitle||'Описание стрима'}</h2><span>{streamRange(session.started_at_ms,session.ended_at_ms)} МСК</span></header>
@@ -84,12 +66,7 @@
  <div class="metric"><div><span>Донаты</span><strong>{Object.keys(summary.totals).length?Object.entries(summary.totals).map(([c,a])=>money(a,c)).join(' · '):'0'}</strong></div></div>
 </section>
 {#if sessionFilter}<StreamDonations sessionId={sessionFilter} {onPerson} {changed} />{/if}
-<section class="panel insights-section">
- <header><h2>Инсайты</h2><button class="outline small" aria-expanded={insightsOpen} onclick={loadInsights}>{insightsOpen?'Скрыть':'Показать паттерны'}</button></header>
- {#if insightsOpen}<div class="insight-grid">
- {#if insightsLoading}<p class="muted" role="status">Загружаем…</p>{:else if insightsError}<p class="notice error" role="alert">{insightsError}</p>{:else if !insights.length}<p class="muted">Пока недостаточно данных для заметных паттернов.</p>{:else}{#each insights as card}<article class="insight-card"><h3>{card.title}</h3><p class="small">{card.detail}</p>{#if card.personId}<button class="outline small" onclick={()=>onPerson(card.personId!)}>Открыть человека</button>{/if}</article>{/each}{/if}
- </div>{/if}
-</section>
+<Insights sessionId={sessionFilter} refreshToken={summary} {onPerson} {onStream} />
 <section class="panel series-panel">
   <header><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Поэтому 10 зрителей и 4 ника в чате возможны одновременно. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2><div class="chart-controls"><select aria-label="Показатель графика стрима" bind:value={audienceMetric}>{#each chartMetrics as choice}<option value={choice.value}>{choice.label}</option>{/each}</select><select aria-label="Детализация графика" bind:value={resolution}><option value={1}>1м</option><option value={5}>5м</option><option value={15}>15м</option></select></div></header>
   {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceData}
