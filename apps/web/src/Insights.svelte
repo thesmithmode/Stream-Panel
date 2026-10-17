@@ -15,8 +15,10 @@
   if(!id||!active)return;
   const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
   untrack(()=>{busy=true;error='';local=null;});
+  let cutoff:number|undefined;
   const load=async()=>{
-   try{const result=await api(`insights?${new URLSearchParams({session:id})}`,undefined,controller.signal);if(controller.signal.aborted)return;
+   try{const q=new URLSearchParams({session:id});if(cutoff!==undefined)q.set('to',String(cutoff));const result=await api(`insights?${q}`,undefined,controller.signal);if(controller.signal.aborted)return;
+    if(Number.isSafeInteger(result.comparisonToMs))cutoff=result.comparisonToMs;
     if(result.preparing){timer=setTimeout(()=>void load(),250);return;}
     local=result;busy=false;
    }catch(e){if(controller.signal.aborted)return;busy=false;error=e instanceof ConnectionError?'Не удалось загрузить инсайты. Проверь соединение.':(e as Error).message;}

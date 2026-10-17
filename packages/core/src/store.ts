@@ -183,9 +183,9 @@ export class StreamStore {
     const id=sessionId?this.groups.root(sessionId):undefined;
     const session=id?this.reads.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id)').get(id) as {start:number;end:number|null}|undefined:undefined;
     if(id&&!session)throw new Error('SESSION_NOT_FOUND');
-    const now=Date.now(),to=session?Math.min(session.end??now,now):options.toMs??now;
+    const now=Date.now(),to=session?Math.min(session.end??now,now,options.toMs??now):options.toMs??now;
     const report=this.history.report({...options,fromMs:session?Math.max(0,session.start-90*86400000):options.fromMs??0,toMs:to,excludedLogins:[...excludedBotLogins],includeInsights:true,...(id?{insightSessionId:id}:{})});
-    return {insights:report.insights??[],preparing:report.preparing===true};
+    return {insights:report.insights??[],preparing:report.preparing===true,comparisonToMs:to};
   }
 
   close(): void {

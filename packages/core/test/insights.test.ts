@@ -86,3 +86,11 @@ test('identical return counts after two interruptions have distinct stable findi
  r.breaks=[{from:base+30*minute,to:base+35*minute},{from:base+60*minute,to:base+65*minute}];for(const p of r.audience)p.intervals.push({from:base+35*minute,to:base+60*minute,kind:'observed'},{from:base+65*minute,to:base+90*minute,kind:'observed'});
  e.add(r,true);const cards=collect(e).filter(c=>c.kind==='restart_return');assert.equal(cards.length,2);assert.equal(new Set(cards.map(c=>c.id)).size,2);
 });
+test('live insight preparation reuses a fixed server cutoff across polls instead of restarting the history job',()=>{
+ const s=new StreamStore(':memory:');try{
+  const start=Date.now()-600000,id=s.startSession('owner','live-insight',start,'platform',start),cutoff=Date.now()-1000;
+  s.recordPoll(id,'owner',{startedAtMs:start,completedAtMs:cutoff-1,status:'complete',userIds:['viewer']});
+  const first=s.insights(id,[],{toMs:cutoff});assert.equal(first.comparisonToMs,cutoff);
+  const second=s.insights(id,[],{toMs:first.comparisonToMs});assert.equal(second.comparisonToMs,cutoff);assert.equal(second.preparing,false);
+ }finally{s.close();}
+});
