@@ -20,3 +20,18 @@ test('select completed streams, cancel, merge and unmerge on mobile without losi
   await page.getByRole('checkbox',{name:'Выбрать стрим',exact:true}).nth(1).waitFor();assert.equal((await app.db.call('sessions')).length,2);assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });
+test('a current stream is selectable, remains selected after refresh and merges into earlier parts',{timeout:60000},async()=>{
+ const app=await application();let browser;
+ try{
+  const m=60000,at=Date.now()-20*m,older=await app.db.call('startSession','owner','older',at,'platform',at);await app.db.call('endSession',older,at+10*m);
+  const live=await app.db.call('startSession','owner','live',at+10*m-1000,'platform',at+10*m-1000);
+  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(7000);await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();
+  await page.locator(`tr[data-session-id="${live}"]`).getByRole('checkbox',{name:'Выбрать стрим',exact:true}).check();
+  await page.locator(`tr[data-session-id="${older}"]`).getByRole('checkbox',{name:'Выбрать стрим',exact:true}).check();
+  await page.getByRole('button',{name:'Обновить данные',exact:true}).click();await page.getByText('Выбрано: 2',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'Объединить выбранные',exact:true}).click();await acceptConfirmation(page,'Объединить');
+  await page.getByText('Объединено частей: 2',{exact:true}).waitFor();const rows=await app.db.call('sessions');assert.equal(rows.length,1);assert.equal(rows[0].ended_at_ms,null);assert.equal((await app.db.call('activeLogicalStream')).id,live);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.getByRole('button',{name:'Разъединить',exact:true}).click();await acceptConfirmation(page,'Разъединить');await page.locator(`tr[data-session-id="${live}"]`).waitFor();assert.equal((await app.db.call('sessions')).length,2);assert.equal((await app.db.call('activeLogicalStream')).id,live);await saveCoverage(page);
+ }finally{await browser?.close();await app.close();}
+});

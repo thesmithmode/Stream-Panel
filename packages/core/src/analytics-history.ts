@@ -113,7 +113,7 @@ export class AnalyticsHistory {
    WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND s.started_at_ms<? AND coalesce(s.ended_at_ms,?)>? ORDER BY s.started_at_ms,s.id`).all(options.toMs, options.toMs, options.fromMs) as Session[];
     }
     private key(options: AnalyticsOptions, session: Session): string {
-        const fields = { format: 3, from: Math.max(options.fromMs, session.started_at_ms), to: Math.min(options.toMs, session.ended_at_ms ?? options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: [...(options.excludedLogins ?? [])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
+        const fields = { format: 4, from: Math.max(options.fromMs, session.started_at_ms), to: Math.min(options.toMs, session.ended_at_ms ?? options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: [...(options.excludedLogins ?? [])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
         return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
     }
     private globalRevision() { return (this.statement('SELECT revision FROM analytics_global_revision WHERE id=1').get() as {

@@ -66,7 +66,7 @@
   function restoreRoute(){const route=readRoute(location.search,getProfile()),selected=accessibleProfile(route.profile),denied=selected!==route.profile;epoch++;tab=denied&&route.view==='stream'?'overview':route.view;sessionFilter=denied?'':route.session;personId=denied?'':route.person;setProfile(selected);profile=selected;clearScope();}
   function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}connectionLost=!navigator.onLine;if(document.hidden||!navigator.onLine)return;error=authMessage((e as Error).message);}
 
-  const authMessage = (code: string) => ({ INVALID_SESSION_GROUP: "Выберите завершённые эфиры без пересечений, в пределах 31 дня (до 100 частей).", SESSION_GROUP_NOT_FOUND:"Объединение уже отменено. Обновите список.", INVALID_LOGIN: "Неверный логин или пароль", LOGIN_RATE_LIMIT: "Слишком много попыток. Попробуйте позже.", LOGIN_REQUIRED: "Войдите в свой профиль", LOCAL_LOGIN_REQUIRED: "Войдите в свой профиль" }[code] ?? code);
+  const authMessage = (code: string) => ({ INVALID_SESSION_GROUP: "Выберите эфиры в пределах 31 дня (до 100 частей). Активным может быть только последний.", SESSION_GROUP_NOT_FOUND:"Объединение уже отменено. Обновите список.", INVALID_LOGIN: "Неверный логин или пароль", LOGIN_RATE_LIMIT: "Слишком много попыток. Попробуйте позже.", LOGIN_REQUIRED: "Войдите в свой профиль", LOCAL_LOGIN_REQUIRED: "Войдите в свой профиль" }[code] ?? code);
   async function login() {
     busy = true; error = "";
     try {
@@ -120,7 +120,7 @@
       const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter).map(async([key,path])=>[key,await api(key==='sessions'&&tab==='sessions'&&sessionPage>0?`sessions?offset=${sessionPage*100}`:path,undefined,controller.signal)])));
       if(current!==epoch)return;
       status=values.status;{setCsrf(status.csrf);user=status.user??user;outdated=isOutdatedRelease(status.release);}
-      sessions=values.sessions??sessions;selectedSessions=selectedSessions.filter(id=>sessions.some(s=>s.id===id&&s.ended_at_ms!==null));summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';window.dispatchEvent(new Event('sp:data-refresh'));
+      sessions=values.sessions??sessions;selectedSessions=selectedSessions.filter(id=>sessions.some(s=>s.id===id));summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';window.dispatchEvent(new Event('sp:data-refresh'));
     })();refreshTask={epoch:current,task,controller};
     try{await task;}finally{clearTimeout(deadline);if(refreshTask?.task===task)refreshTask=null;}
   }
@@ -146,7 +146,7 @@
   async function mergeSelected(){
     const ids=[...selectedSessions],current=epoch;
     if(!await confirmAction('Объединить стримы?',`Выбрано: ${ids.length}. Статистика будет общей, перерывы сохранятся. Объединение можно отменить.`,'Объединить')||current!==epoch)return;
-    await api('sessions/merge',{sessionIds:ids});selectedSessions=[];
+    await api('sessions/merge',{sessionIds:ids});if(current===epoch)selectedSessions=[];
   }
   async function unmergeSession(id:string){
     const current=epoch;
@@ -306,7 +306,7 @@
                   ></thead
                 ><tbody
                   >{#each sessions as session,index}{#if index===0||sessionGroup(session.started_at_ms)!==sessionGroup(sessions[index-1]!.started_at_ms)}<tr class="session-group"><th colspan="8">{sessionGroup(session.started_at_ms)}</th></tr>{/if}<tr data-session-id={session.id}
-                      > <td data-label="Период · МСК">{#if session.kind==='platform'&&session.ended_at_ms!==null}<label class="stream-selection"><input type="checkbox" aria-label="Выбрать стрим" checked={selectedSessions.includes(session.id)} disabled={busy} onchange={event=>toggleSession(session.id,event.currentTarget.checked)}/> Выбрать</label>{/if}{#if (session.memberIds?.length??0)>1}<small>Объединено частей: {session.memberIds!.length}</small>{/if}{streamRange(session.started_at_ms,session.ended_at_ms)}
+                      > <td data-label="Период · МСК">{#if session.kind==='platform'}<label class="stream-selection"><input type="checkbox" aria-label="Выбрать стрим" checked={selectedSessions.includes(session.id)} disabled={busy} onchange={event=>toggleSession(session.id,event.currentTarget.checked)}/> Выбрать</label>{/if}{#if (session.memberIds?.length??0)>1}<small>Объединено частей: {session.memberIds!.length}</small>{/if}{streamRange(session.started_at_ms,session.ended_at_ms)}
                         {#each session.breaks??[] as pause}<small>Перерыв: {streamRange(pause.from,pause.to)}</small>{/each}
 
                         </td
@@ -327,7 +327,7 @@
                               sessionFilter = session.id;
                               navigate("stream");
                             }}>Открыть</button
-                          >{#if (session.memberIds?.length??0)>1&&session.ended_at_ms!==null}<button class="outline small" disabled={busy} onclick={()=>action(()=>unmergeSession(session.id))}>Разъединить</button>{/if}{#if session.kind === "manual"}<button class="icon-button danger-icon" aria-label="Удалить" title="Удалить стрим" onclick={()=>action(async()=>{if(!await confirmAction("Удалить стрим?","Стрим исчезнет из истории и аналитики. Сохранённые события останутся.","Удалить"))return;await api(`sessions/${session.id}/delete`,{});if(sessionFilter===session.id)sessionFilter="";await refresh();})}><Icon name="trash" size={18}/></button>{/if}
+                          >{#if (session.memberIds?.length??0)>1}<button class="outline small" disabled={busy} onclick={()=>action(()=>unmergeSession(session.id))}>Разъединить</button>{/if}{#if session.kind === "manual"}<button class="icon-button danger-icon" aria-label="Удалить" title="Удалить стрим" onclick={()=>action(async()=>{if(!await confirmAction("Удалить стрим?","Стрим исчезнет из истории и аналитики. Сохранённые события останутся.","Удалить"))return;await api(`sessions/${session.id}/delete`,{});if(sessionFilter===session.id)sessionFilter="";await refresh();})}><Icon name="trash" size={18}/></button>{/if}
                         </td
                       ></tr
                     >{/each}</tbody
