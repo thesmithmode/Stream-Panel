@@ -94,3 +94,7 @@ test('live insight preparation reuses a fixed server cutoff across polls instead
   const second=s.insights(id,[],{toMs:first.comparisonToMs});assert.equal(second.comparisonToMs,cutoff);assert.equal(second.preparing,false);
  }finally{s.close();}
 });
+test('a few silent visits over a long history do not label an occasional participant as the regular core',()=>{
+ const e=engine();for(let i=0;i<30;i++)e.add(report(i,{people:i<4?[person('occasional')]:[]}),true);
+ assert.equal(kinds(e).has('silent_regular'),false);
+});
