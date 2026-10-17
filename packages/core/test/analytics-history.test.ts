@@ -216,6 +216,8 @@ test('closed query variants survive category switches and clock changes without 
  assert.equal(h.query(queries[0]!).audience[0]!.messages,4);
  s.ingest({source:'twitch',accountId:'owner',externalId:'late-cached-category',type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:base+minute,receivedAtMs:options.toMs,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{count:1}});
  assert.equal(h.query(queries[0]!).summary.messages,5);assert.ok(scanned>before);
+ s.followingSnapshot('twitch','owner',[],true,base);h.query(queries[0]!);const beforeCheck=scanned;
+ s.followingSnapshot('twitch','owner',[],true,base+minute);h.query(queries[0]!);assert.equal(scanned,beforeCheck,'unchanged follower checks do not rebuild the report');
  }finally{s.close();}
 });
 

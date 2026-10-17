@@ -94,6 +94,19 @@ export class AnalyticsHistory {
     private globalRevision() { return (this.statement('SELECT revision FROM analytics_global_revision WHERE id=1').get() as {
         revision: number;
     }).revision; }
+    private followerRevision(){
+        // A repeated check of the same payload must not rebuild unchanged history.
+        // Seek the latest check for each distinct payload instead of scanning all checks.
+        return this.statement(`WITH versions AS (
+          SELECT p.source,p.account_id,p.id,
+           (SELECT c.observed_at_ms FROM follower_checks c WHERE c.snapshot_id=p.id ORDER BY c.observed_at_ms DESC,c.id DESC LIMIT 1) AS at,
+           (SELECT c.id FROM follower_checks c WHERE c.snapshot_id=p.id ORDER BY c.observed_at_ms DESC,c.id DESC LIMIT 1) AS check_id
+          FROM provider_snapshots p WHERE p.key='followers'
+        ), ranked AS (
+          SELECT source,account_id,id,row_number() OVER(PARTITION BY source,account_id ORDER BY at DESC,check_id DESC) AS rank
+          FROM versions WHERE at IS NOT NULL
+        ) SELECT source,account_id,id FROM ranked WHERE rank=1 ORDER BY source,account_id`).all();
+    }
     private build(options: AnalyticsOptions, session: Session): Report {
         const report = audienceAnalytics(this.db, { ...options, sessionId: session.id });
         // Each cached report represents one logical stream; attendance is deduplicated
@@ -211,7 +224,7 @@ export class AnalyticsHistory {
         const live = sessions.some(session => session.ended_at_ms === null);
         const lastEnd = sessions.reduce((end, session) => Math.max(end, session.ended_at_ms ?? options.toMs), options.fromMs);
         const canonical = { ...options, fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
-        const fingerprint = createHash('sha256').update(JSON.stringify([historical, canonical, this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.statement('SELECT * FROM person_preferences ORDER BY person_id').all(), this.statement('SELECT * FROM person_tags ORDER BY person_id,label').all(), this.statement('SELECT source,account_id,count(*) AS checks,max(observed_at_ms) AS at FROM follower_observations GROUP BY source,account_id').all()])).digest('hex');
+        const fingerprint = createHash('sha256').update(JSON.stringify([historical, canonical, this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.statement('SELECT * FROM person_preferences ORDER BY person_id').all(), this.statement('SELECT * FROM person_tags ORDER BY person_id,label').all(), this.followerRevision()])).digest('hex');
         const cached=!live?this.completed.get(fingerprint):undefined;
         if(cached){
             this.completed.delete(fingerprint);this.completed.set(fingerprint,cached);
