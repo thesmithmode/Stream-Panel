@@ -95,7 +95,7 @@ export class InsightAccumulator {
   const eligibleSince=Array(this.streams.length+1).fill(0) as number[];for(let i=this.streams.length-1;i>=0;i--)eligibleSince[i]=eligibleSince[i+1]!+Number(this.streams[i]!.closed&&this.streams[i]!.known);
   for(const p of this.people.values()){
    for(const [currency,n]of Object.entries(p.money)){const amount=BigInt(n);if(amount<=0n)continue;const row=money.get(currency)??{total:0n,top:0n,person:p,supporters:0};row.total+=amount;row.supporters+=Number(!/^(аноним|anonymous|anon)$/i.test(p.name));if(!/^(аноним|anonymous|anon)$/i.test(p.name)&&amount>row.top){row.top=amount;row.person=p;}money.set(currency,row);}
-   if(p.firstIndex>=0&&p.firstCategory&&this.streams.length-1-p.firstIndex>=3&&this.streams.slice(p.firstIndex+1,p.firstIndex+4).every(s=>s.closed&&s.known)){
+   if(p.firstIndex>=0&&p.firstCategory&&this.categories.has(p.firstCategory)&&this.streams.length-1-p.firstIndex>=3&&this.streams.slice(p.firstIndex+1,p.firstIndex+4).every(s=>s.closed&&s.known)){
     const cohort=cohorts.get(p.firstCategory)??{total:0,returned:0,evidence:[]};cohort.total++;cohort.returned+=Number(p.returned);const first=this.streams[p.firstIndex]!;if(!cohort.evidence.some(e=>e.sessionId===first.id))append(cohort.evidence,evidence(first));cohorts.set(p.firstCategory,cohort);
    }
    const relevant=!focus||p.recent.some(v=>v.sessionId===focus.id),proof=p.recent.map(v=>({sessionId:v.sessionId,at:v.at,label:v.label}));

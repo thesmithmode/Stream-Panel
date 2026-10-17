@@ -98,3 +98,11 @@ test('a few silent visits over a long history do not label an occasional partici
  const e=engine();for(let i=0;i<30;i++)e.add(report(i,{people:i<4?[person('occasional')]:[]}),true);
  assert.equal(kinds(e).has('silent_regular'),false);
 });
+test('a short introductory category without a comparable category report cannot crash cohort comparisons',()=>{
+ const e=engine();for(let i=0;i<8;i++){
+  const r=report(i,{category:i<4?'dota':'wow',people:i===0?Array.from({length:6},(_,j)=>person(`intro-${j}`,1,'0',0,120)):i===4?Array.from({length:6},(_,j)=>person(`wow-${j}`,1,'0',0,120)):[]});
+  if(i===0){r.activityWindows=[{from:base,to:base+5*minute,categoryId:'intro'},{from:base+5*minute,to:base+120*minute,categoryId:'dota'}];r.categories.push({id:'intro',name:'Intro',minutes:5,messages:0});}
+  e.add(r,true);
+ }
+ assert.doesNotThrow(()=>collect(e));assert.equal(kinds(e).has('category_return'),false);
+});
