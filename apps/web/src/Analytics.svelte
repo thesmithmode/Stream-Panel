@@ -49,7 +49,7 @@
   const hourMax=$derived(Math.max(1,...(data?.hours??[]).map((h:any)=>heatValue(h)??0)));
   function hourTitle(day:string,hour:number){const value=heatValue(hourCells.get(`${day}:${hour}`));return `${day} ${hour}:00 — ${value===null?"нет данных":view.heatMetric==='amount'?money(String(Math.round(value)),heatCurrency):value.toFixed(1)}`;}
   const categoryOptions=$derived([...(data?.availableCategories??data?.categories??[])].filter((c:any)=>c.id).sort((a:any,b:any)=>a.name.localeCompare(b.name,'ru')));
-  const timelineByMinute=$derived(new Map((detailData?.timeline??data?.timeline??[]).map((point:any)=>[point.at,point])) as Map<number,any>);
+  const timelineByMinute=$derived(new Map((data?.aggregate?(detailData?.timeline??[]):(data?.timeline??[])).map((point:any)=>[point.at,point])) as Map<number,any>);
   const detailPerson=$derived(data?.aggregate?detailData?.audience?.find((p:any)=>p.id===selected?.id):selected);
   const detailMinutes=$derived.by(()=>{
     if(!selected||!day)return [];

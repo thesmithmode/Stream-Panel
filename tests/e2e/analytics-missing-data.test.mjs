@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {localDateWindow} from '../../dist/packages/core/src/time-audience.js';
 import {AccountStore} from '../../dist/apps/daemon/src/auth.js';
 import {createHostedApplication} from '../../dist/apps/daemon/src/hosted.js';
 import {launchBrowser} from '../helpers/browser.mjs';
@@ -49,7 +50,7 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
   assert.equal((await streams.locator('tbody tr td').nth(5).textContent()).trim(),'0 / 0 / —');
   assert.equal((await streams.locator('tbody tr td').nth(6).textContent()).trim(),'— / —');
   assert.equal((await streams.locator('tbody tr td').nth(7).textContent()).trim(),'— / —');
-  data.aggregate=true;await renderNextHistory();await page.getByRole('button',{name:person.name,exact:true}).waitFor();
+  data.aggregate=true;data.timeline=[{at:localDateWindow(new Date(now).toLocaleDateString('sv-SE',{timeZone:'Europe/Moscow'}),'Europe/Moscow').from,presenceKnown:true,observed:1}];await renderNextHistory();await page.getByRole('button',{name:person.name,exact:true}).waitFor();
   await page.route('**/api/v1/analytics?*',route=>new URL(route.request().url()).searchParams.get('from')==='0'?route.fulfill({json:data}):route.fulfill({status:400,json:{error:'DETAIL_UNAVAILABLE'}}));
   await page.getByRole('button',{name:`Интервалы ${person.name}`,exact:true}).click();
   await page.getByRole('alert').filter({hasText:'DETAIL_UNAVAILABLE'}).waitFor();
