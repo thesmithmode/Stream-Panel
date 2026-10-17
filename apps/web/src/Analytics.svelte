@@ -49,7 +49,7 @@
   const hourMax=$derived(Math.max(1,...(data?.hours??[]).map((h:any)=>heatValue(h)??0)));
   function hourTitle(day:string,hour:number){const value=heatValue(hourCells.get(`${day}:${hour}`));return `${day} ${hour}:00 — ${value===null?"нет данных":view.heatMetric==='amount'?money(String(Math.round(value)),heatCurrency):value.toFixed(1)}`;}
   const categoryOptions=$derived([...(data?.availableCategories??data?.categories??[])].filter((c:any)=>c.id).sort((a:any,b:any)=>a.name.localeCompare(b.name,'ru')));
-  const timelineByMinute=$derived(new Map((detailData?.timeline??data?.timeline??[]).map((point:any)=>[point.at,point])) as Map<number,any>);
+  const timelineByMinute=$derived(new Map((data?.aggregate?(detailData?.timeline??[]):(data?.timeline??[])).map((point:any)=>[point.at,point])) as Map<number,any>);
   const detailPerson=$derived(data?.aggregate?detailData?.audience?.find((p:any)=>p.id===selected?.id):selected);
   const detailMinutes=$derived.by(()=>{
     if(!selected||!day)return [];
@@ -74,7 +74,7 @@
     const fromMs=new Date(from).getTime(),toMs=new Date(to).getTime();
     try{
       try {localStorage.setItem(`sp-analytics-${profile}`,JSON.stringify({timezone}));}catch{/* optional local preferences */}
-      const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,timezone});
+      const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,timezone,mode:'summary'});
       let result=await api(`analytics?${q}`);
       while(result.preparing&&id===requestId){buildProgress=`${result.stage==='aggregate'?'Собираем отчёт':'Готовим историю'}: ${Math.round(result.ready/Math.max(1,result.total)*100)}%`;await new Promise(resolve=>setTimeout(resolve,result.stage==='aggregate'?100:250));if(id!==requestId)return;result=await api(`analytics?${q}`);}
       buildProgress='';

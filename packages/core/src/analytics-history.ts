@@ -3,10 +3,11 @@ import { HistoryTimeline } from "./history-timeline.js";
 import type Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
 import { gzipSync, gunzipSync } from 'node:zlib';
+import {serialize} from 'node:v8';
 import { statfsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { audienceAnalytics, unionSpans, type AnalyticsOptions } from './analytics.js';
+import { audienceAnalytics, validateAnalyticsOptions, unionSpans, type AnalyticsOptions } from './analytics.js';
 import { timeAudience, matchesActivityDay, type TimeAudienceSummary } from './time-audience.js';
 import { timePatterns } from './time-patterns.js';
 import { currencyRates } from './rates.js';
@@ -54,7 +55,14 @@ export class AnalyticsHistory {
         if (!statement) { statement = this.db.prepare(sql); this.statements.set(sql, statement); }
         return statement;
     }
-    private completed: { key: string; value: Report } | undefined;
+    private readonly completed = new Map<string,{value:Report;bytes:number}>();
+    private completedBytes=0;
+    private remember(key:string,value:Report){
+        const limit=this.cachePolicy.maxCompletedBytes??16*1024*1024,bytes=serialize(value).byteLength;
+        if(bytes>limit)return;
+        while(this.completed.size>=8||this.completedBytes+bytes>limit){const oldest=this.completed.keys().next().value!;this.completedBytes-=this.completed.get(oldest)!.bytes;this.completed.delete(oldest);}
+        this.completed.set(key,{value:structuredClone(value),bytes});this.completedBytes+=bytes;
+    }
     private readonly jobs = new Map<string, {
         iterator: Generator<Progress, Report, void>;
         touchedAt: number;
@@ -67,6 +75,7 @@ export class AnalyticsHistory {
         availableBytes?: () => number;
         maxBytes?: number;
         maxTotalBytes?: number;
+        maxCompletedBytes?: number;
     } = {}) { }
     private budgetChecked = false;
     private checkCacheBudget() {
@@ -85,6 +94,19 @@ export class AnalyticsHistory {
     private globalRevision() { return (this.statement('SELECT revision FROM analytics_global_revision WHERE id=1').get() as {
         revision: number;
     }).revision; }
+    private followerRevision(){
+        // A repeated check of the same payload must not rebuild unchanged history.
+        // Seek the latest check for each distinct payload instead of scanning all checks.
+        return this.statement(`WITH versions AS (
+          SELECT p.source,p.account_id,p.id,
+           (SELECT c.observed_at_ms FROM follower_checks c WHERE c.snapshot_id=p.id ORDER BY c.observed_at_ms DESC,c.id DESC LIMIT 1) AS at,
+           (SELECT c.id FROM follower_checks c WHERE c.snapshot_id=p.id ORDER BY c.observed_at_ms DESC,c.id DESC LIMIT 1) AS check_id
+          FROM provider_snapshots p WHERE p.key='followers'
+        ), ranked AS (
+          SELECT source,account_id,id,row_number() OVER(PARTITION BY source,account_id ORDER BY at DESC,check_id DESC) AS rank
+          FROM versions WHERE at IS NOT NULL
+        ) SELECT source,account_id,id FROM ranked WHERE rank=1 ORDER BY source,account_id`).all();
+    }
     private build(options: AnalyticsOptions, session: Session): Report {
         const report = audienceAnalytics(this.db, { ...options, sessionId: session.id });
         // Each cached report represents one logical stream; attendance is deduplicated
@@ -172,42 +194,51 @@ export class AnalyticsHistory {
         this.pruneJobs();
         this.checkCacheBudget();
         const global = this.globalRevision(), start = performance.now();
-        let ready = 0, built = 0;
-        for (const session of [...sessions].reverse()) {
-            if (session.ended_at_ms === null) {
-                ready++;
-                continue;
+        let ready=0;
+        for(const session of [...sessions].reverse()){
+            if(session.ended_at_ms===null){ready++;continue;}
+            // Bake only recorded categories, with a fixed variant bound per stream.
+            const categories=options.category?[options.category]:['',...(this.statement("SELECT DISTINCT category_id FROM stream_samples WHERE session_id=? AND category_id<>'' AND category_name<>'' ORDER BY category_id LIMIT 7").all(session.id) as {category_id:string}[]).map(c=>c.category_id)];
+            let complete=true;
+            for(const category of categories){
+                const variant={...options,category};
+                if(this.statement('SELECT 1 FROM analytics_stream_cache WHERE session_id=? AND cache_key=? AND revision=? AND global_revision=?').get(session.id,this.key(variant,session),session.revision,global))continue;
+                if(performance.now()-start>=250){complete=false;break;}
+                if(!this.save(variant,session,global,this.build(variant,session),false))return {preparing:false,ready,total:sessions.length};
             }
-            if (this.statement('SELECT 1 FROM analytics_stream_cache WHERE session_id=? AND cache_key=? AND revision=? AND global_revision=?').get(session.id, this.key(options, session), session.revision, global)) {
-                ready++;
-                continue;
-            }
-            if (built >= 5 || performance.now() - start > 250)
-                continue;
-            // Warming is optional: a budget smaller than history must not loop forever.
-            if (!this.save(options, session, global, this.build(options, session), false))
-                return { preparing: false, ready, total: sessions.length };
-            ready++;
-            built++;
+            if(complete)ready++;
         }
-        return { preparing: ready < sessions.length, ready, total: sessions.length };
+        return {preparing:ready<sessions.length,ready,total:sessions.length};
     }
-    report(options: AnalyticsOptions): Report {
+    query(options:AnalyticsOptions):Report{
+        return options.sessionId?audienceAnalytics(this.db,options):this.resolve(options,options.summaryOnly??false);
+    }
+    report(options:AnalyticsOptions):Report{return this.resolve(options,true);}
+    private resolve(options: AnalyticsOptions,historical:boolean):Report {
         this.checkCacheBudget();
-        // Reuse the established validation, including timezone/core/source checks,
-        // without expanding the historical period before it is known to be valid.
+        // Validate filters without loading audience facts on a completed-cache hit.
         if (!Number.isSafeInteger(options.fromMs) || options.fromMs < 0 || !Number.isSafeInteger(options.toMs) || options.toMs <= options.fromMs)
             throw new Error('INVALID_ANALYTICS_FILTER');
-        const validation = audienceAnalytics(this.db, { ...options, fromMs: options.toMs - 1, toMs: options.toMs });
+        validateAnalyticsOptions(options);
         const sessions = this.sessions(options);
         const live = sessions.some(session => session.ended_at_ms === null);
         const lastEnd = sessions.reduce((end, session) => Math.max(end, session.ended_at_ms ?? options.toMs), options.fromMs);
         const canonical = { ...options, fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
-        const fingerprint = createHash('sha256').update(JSON.stringify([canonical, this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.statement('SELECT * FROM person_preferences ORDER BY person_id').all(), this.statement('SELECT * FROM person_tags ORDER BY person_id,label').all(), this.statement('SELECT source,account_id,max(observed_at_ms) AS at FROM follower_observations GROUP BY source,account_id').all()])).digest('hex');
-        if (!live && this.completed?.key === fingerprint) {
+        const fingerprint = createHash('sha256').update(JSON.stringify([historical, canonical, this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.statement('SELECT * FROM person_preferences ORDER BY person_id').all(), this.statement('SELECT * FROM person_tags ORDER BY person_id,label').all(), this.followerRevision()])).digest('hex');
+        const cached=!live?this.completed.get(fingerprint):undefined;
+        if(cached){
+            this.completed.delete(fingerprint);this.completed.set(fingerprint,cached);
             const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as { payload_json: string; updated_at_ms: number } | undefined : undefined;
-            return { ...this.completed.value, filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs }, youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, donationTiming: donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow', options.category) };
+            return { ...structuredClone(cached.value), filters: { ...cached.value.filters, fromMs: options.fromMs, toMs: options.toMs }, youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, donationTiming: donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow', options.category) };
         }
+        if(!historical&&sessions.length<=200){
+            try{
+                const value=audienceAnalytics(this.db,options);
+                if(!live)this.remember(fingerprint,value);
+                return value;
+            }catch(error){if(!(error instanceof Error)||error.message!=='ANALYTICS_RANGE_TOO_LARGE')throw error;}
+        }
+        const validation=audienceAnalytics(this.db,{...options,fromMs:options.toMs-1,toMs:options.toMs});
         const now = Date.now();
         this.pruneJobs(now);
         let job = this.jobs.get(fingerprint);
@@ -230,17 +261,16 @@ export class AnalyticsHistory {
         if (!next.done)
             return { ...validation, ...next.value, stage: 'aggregate' };
         this.jobs.delete(fingerprint);
-        if (!live) this.completed = { key: fingerprint, value: next.value };
+        if (!live) this.remember(fingerprint,next.value);
         return next.value;
     }
     private *aggregate(options: AnalyticsOptions, sessions: Session[], validation: ReturnType<typeof audienceAnalytics>): Generator<Progress, Report, void> {
-        let built = 0, sliceStart = performance.now();
+        let sliceStart = performance.now();
         const active = new Map<string, Report>(), read = (session: Session) => {
             if (session.ended_at_ms === null) {
                 let report = active.get(session.id);
                 if (!report) {
                     report = this.build(options, session);
-                    built++;
                     active.set(session.id, report);
                 }
                 return report;
@@ -248,7 +278,6 @@ export class AnalyticsHistory {
             let report = this.cached(options, session, this.globalRevision());
             if (!report) {
                 report = this.build(options, session);
-                built++;
                 this.save(options, session, this.globalRevision(), report);
             }
             return report;
@@ -352,9 +381,9 @@ export class AnalyticsHistory {
                         visits.set(person.id, { ...person });
                 }
             }
-            if (++processed % 25 === 0 || built >= 5 || performance.now() - sliceStart > 250) {
+            processed++;
+            if (performance.now() - sliceStart > 250) {
                 yield { preparing: true, ready: processed, total: sessions.length * 2 };
-                built = 0;
                 sliceStart = performance.now();
             }
         }
@@ -416,9 +445,9 @@ export class AnalyticsHistory {
                 stream.returning = visitors.length - stream.newInPeriod;
                 for (const id of visitors) seen.add(id);
             }
-            if (++processed % 25 === 0 || built >= 5 || performance.now() - sliceStart > 250) {
+            processed++;
+            if (performance.now() - sliceStart > 250) {
                 yield { preparing: true, ready: processed, total: sessions.length * 2 };
-                built = 0;
                 sliceStart = performance.now();
             }
         }

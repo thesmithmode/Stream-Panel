@@ -92,3 +92,8 @@ export function isStoreMethod(value:string):value is StoreMethod {
 export function operationsWithPolicy(policy:'cached'|'read'|'write'|'maintenance'):Set<string> {
   return new Set(Object.entries(storeOperations).filter(([,value])=>value===policy).map(([name])=>name));
 }
+
+/** Operational heartbeats and maintenance do not change analytical facts. */
+export function invalidatesCachedReads(method:StoreMethod,args:readonly unknown[]):boolean{
+  return storeOperations[method]==='write'&&method!=='close'&&!(method==='collectionLifecycle'&&args[0]==='heartbeat');
+}

@@ -163,15 +163,16 @@ test('expired or displaced report preparation can restart without losing histori
  try{
   fixture(s,60);const h=new AnalyticsHistory((s as any).db),query={...options,toMs:base+62*86400000};
   while(h.prepare(query).preparing){/* warm bounded batches */}
-  assert.equal(h.report(query).ready,25);assert.equal(h.report(query).ready,50);
+  let cpu=0;t.mock.method(performance,'now',()=>cpu+=5);
+  const firstProgress=h.report(query),nextProgress=h.report(query);assert.equal(firstProgress.preparing,true);assert.ok(nextProgress.ready!>firstProgress.ready!);
   now+=6*60000;
-  h.prepare(query); // Scheduled maintenance releases abandoned browser work.
-  assert.equal(h.report(query).ready,25);
+  h.prepare(query);
+  const restarted=h.report(query);assert.equal(restarted.preparing,true);assert.ok(restarted.ready!<nextProgress.ready!);
   assert.equal(ready(h,query).summary.messages,60);
   const first={...query,minMessages:100};
-  assert.equal(h.report(first).ready,25);assert.equal(h.report(first).ready,50);
+  const initial=h.report(first),progress=h.report(first);assert.ok(progress.ready!>initial.ready!);
   for(let filter=101;filter<106;filter++)assert.equal(h.report({...query,minMessages:filter}).preparing,true);
-  assert.equal(h.report(first).ready,25,'displaced work restarts safely instead of retaining unlimited jobs');
+  assert.ok(h.report(first).ready!<progress.ready!,'displaced work restarts safely instead of retaining unlimited jobs');
   assert.equal(ready(h,first).summary.messages,60);assert.equal(s.eventCount(),60);
  }finally{s.close();}
 });
@@ -198,5 +199,62 @@ test('simulcast category switches filter YouTube metrics and donations in raw, h
   if(category!=='missing'){assert.equal(raw.summary.messages,1);assert.equal(raw.streamComparison[0]!.viewers.youtube.mean,category==='dota'?4:20/3);assert.deepEqual(raw.streamComparison[0]!.categories,[category==='dota'?'Dota 2':'IRL']);}
  }
  assert.equal(ready(h,opts).donationTiming.count,3);
+ }finally{s.close();}
+});
+
+test('closed query variants survive category switches and clock changes without rescanning samples; corrections invalidate them',t=>{
+ const s=new StreamStore(':memory:');try{
+ fixture(s);const db=(s as any).db,h=new AnalyticsHistory(db),prepare=db.prepare.bind(db);let scanned=0;
+ db.prepare=(sql:string)=>{const statement=prepare(sql);if(sql.startsWith('SELECT * FROM stream_samples')){const all=statement.all.bind(statement);statement.all=(...args:any[])=>{const rows=all(...args);if(rows.length)scanned++;return rows;};}return statement;};
+ const queries=['','game','missing'].map(category=>({...options,category}));
+ const reports=queries.map(query=>h.query(query)),firstScans=scanned;assert.ok(firstScans>0);
+ reports[0]!.audience[0]!.messages=999;
+ t.mock.method(Date,'now',()=>options.toMs+100*86400000);
+ for(let n=0;n<3;n++)for(const query of queries)assert.deepEqual(h.query(query).summary,audienceAnalytics(db,query).summary);
+ // The comparison above deliberately reads raw facts; independently verify a cache-only pass.
+ const before=scanned;for(const query of queries)h.query(query);assert.equal(scanned,before);
+ assert.equal(h.query(queries[0]!).audience[0]!.messages,4);
+ s.ingest({source:'twitch',accountId:'owner',externalId:'late-cached-category',type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:base+minute,receivedAtMs:options.toMs,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{count:1}});
+ assert.equal(h.query(queries[0]!).summary.messages,5);assert.ok(scanned>before);
+ s.followingSnapshot('twitch','owner',[],true,base);h.query(queries[0]!);const beforeCheck=scanned;
+ s.followingSnapshot('twitch','owner',[],true,base+minute);h.query(queries[0]!);assert.equal(scanned,beforeCheck,'unchanged follower checks do not rebuild the report');
+ }finally{s.close();}
+});
+
+test('completed reports have fixed entry and byte budgets, and oversized reports remain correct',()=>{
+ const s=new StreamStore(':memory:');try{
+ fixture(s,1);const db=(s as any).db,h=new AnalyticsHistory(db,{maxCompletedBytes:200000});
+ for(let minMessages=0;minMessages<12;minMessages++)h.query({...options,minMessages});
+ const memory=h as any;assert.ok(memory.completed.size<=8);assert.ok(memory.completedBytes<=200000);
+ const tiny=new AnalyticsHistory(db,{maxCompletedBytes:1});for(let i=0;i<2;i++)assert.equal(tiny.query(options).summary.messages,1);assert.equal((tiny as any).completed.size,0);
+ }finally{s.close();}
+});
+
+test('background baking prepares actual category variants without adding facts or rewriting unchanged slices',()=>{
+ const s=new StreamStore(':memory:');try{
+ fixture(s,3);const db=(s as any).db,h=new AnalyticsHistory(db);let progress;do{progress=h.prepare(options);}while(progress.preparing);
+ const rows=db.prepare('SELECT session_id,cache_key,payload,updated_at_ms FROM analytics_stream_cache ORDER BY session_id,cache_key').all();assert.equal(rows.length,6);
+ for(const category of ['','game'])assert.equal(ready(h,{...options,category}).summary.messages,3);
+ h.prepare(options);assert.deepEqual(db.prepare('SELECT session_id,cache_key,payload,updated_at_ms FROM analytics_stream_cache ORDER BY session_id,cache_key').all(),rows);assert.equal(s.eventCount(),3);
+ }finally{s.close();}
+});
+
+test('summary queries reuse baked slices while day and stream drilldowns retain original minute facts',()=>{
+ const s=new StreamStore(':memory:');try{
+ fixture(s,4);const db=(s as any).db,raw=audienceAnalytics(db,options),summary=s.analytics({...options,summaryOnly:true}) as any;
+ assert.equal(summary.aggregate,true);assert.deepEqual(summary.summary,raw.summary);assert.deepEqual(summary.streamComparison,raw.streamComparison);assert.deepEqual(summary.hours,raw.hours);
+ const day=s.analytics({...options,toMs:base+86400000});assert.equal((day as any).aggregate,undefined);assert.equal(day.timeline.length,3);assert.ok(day.audience[0]!.intervals.length);
+ const saved=db.prepare('SELECT count(*) n FROM analytics_stream_cache').get().n;for(let i=0;i<3;i++)assert.deepEqual(s.analytics({...options,summaryOnly:true}).summary,summary.summary);assert.equal(db.prepare('SELECT count(*) n FROM analytics_stream_cache').get().n,saved);
+ }finally{s.close();}
+});
+
+test('follower corrections sharing a provider timestamp invalidate completed reports',()=>{
+ const s=new StreamStore(':memory:');try{
+ fixture(s,1);const db=(s as any).db,h=new AnalyticsHistory(db);
+ s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:base}],true,base);
+ assert.equal(h.query(options).composition.followers,1);
+ s.followingSnapshot('twitch','owner',[],true,base);
+ db.prepare("UPDATE follower_checks SET id='zzzz-new-check' WHERE rowid=(SELECT max(rowid) FROM follower_checks)").run();
+ assert.equal(audienceAnalytics(db,options).composition.followers,0);assert.equal(h.query(options).composition.followers,0);
  }finally{s.close();}
 });

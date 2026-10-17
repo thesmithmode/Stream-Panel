@@ -284,12 +284,9 @@ export class StreamStore {
     return {streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+windowsFromLinks(windowsBySession.get(s.id)??[],s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees,messages:summary.messages,totals:summary.totals,donations:summary.donations};
   }
   analytics(options: AnalyticsOptions):ReturnType<typeof audienceAnalytics> {
-    if(!options.sessionId){const count=(this.db.prepare("SELECT count(*) AS n FROM sessions WHERE started_at_ms<? AND coalesce(ended_at_ms,?)>? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id)").get(options.toMs,options.toMs,options.fromMs) as {n:number}).n;if(count>200)return this.history.report(options);}
-    try{return audienceAnalytics(this.db,options);}catch(error){
-      if(!options.sessionId&&error instanceof Error&&error.message==='ANALYTICS_RANGE_TOO_LARGE')return this.history.report(options);
-      throw error;
-    }
+    return this.history.query(options);
   }
+
   warmAnalytics(options:AnalyticsOptions){return this.history.prepare(options);}
 
   youtubeQuota(day: string, profile: string, cost = 1): boolean {

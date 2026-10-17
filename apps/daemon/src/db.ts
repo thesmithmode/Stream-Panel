@@ -1,4 +1,4 @@
-import {type StoreRequest,type StoreResult,isStoreMethod,storeOperations} from "./store-contract.js";
+import {type StoreRequest,type StoreResult,isStoreMethod,invalidatesCachedReads} from "./store-contract.js";
 import {readCacheKey} from "./read-cache-key.js";
 import {StorageGuard} from "./storage-guard.js";
 import {ReadCache,cachedReads,uncachedReads} from "./read-cache.js";
@@ -30,8 +30,9 @@ export class StoreClient {
     this.storage=new StorageGuard(path);
     this.lease=acquireStoreWorker(path,profile);this.worker=this.lease.worker;
     this.ready = new Promise((resolve, reject) => {
-      const onMessage=(message:{clientId?:string;ready?:boolean;error?:string;id:number;result?:unknown;executionMs?:number}) => {
+      const onMessage=(message:{clientId?:string;ready?:boolean;error?:string;invalidate?:boolean;id:number;result?:unknown;executionMs?:number}) => {
         if(message.clientId!==this.lease.clientId)return;
+        if(message.invalidate){this.cache.invalidate();return;}
         if (message.ready) {
           if(message.error)reject(new Error(message.error));else resolve();
           return;
@@ -66,11 +67,11 @@ export class StoreClient {
     if(!isStoreMethod(method))throw new Error("UNKNOWN_OPERATION");
     await this.ready;
     if(this.dead)throw new Error("DB_WORKER_STOPPED");
-    if(cachedReads.has(method))return this.cache.read(readCacheKey(method,args),()=>this.execute<T>(method,...args));
+    if(cachedReads.has(method))return this.cache.read(readCacheKey(method,args),()=>this.execute<T>(method,...args),method==='analytics'?{ttlMs:86400000,compressed:true}:undefined);
     if(uncachedReads.has(method))return this.execute<T>(method,...args);
     if(method!=="close")await this.storage.check();
     // These operations write operational state, not facts used by cached reports.
-    if(storeOperations[method]==='maintenance'||method==='collectionLifecycle'&&args[0]==='heartbeat')return this.execute<T>(method,...args);
+    if(!invalidatesCachedReads(method,args))return this.execute<T>(method,...args);
     this.cache.invalidate();
     try{return await this.execute<T>(method,...args);}finally{this.cache.invalidate();}
   }

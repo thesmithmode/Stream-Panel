@@ -12,6 +12,7 @@ export interface AnalyticsOptions {
     source?: 'all' | 'twitch' | 'youtube';
     category?: string;
     sessionId?: string;
+    summaryOnly?: boolean;
     minSessions?: number;
     regularThresholdPercent?: number;
     minMinutes?: number;
@@ -64,10 +65,7 @@ function groupBySession<T extends {session_id:string}>(rows:T[]):Map<string,T[]>
     for(const row of rows){const group=groups.get(row.session_id);if(group)group.push(row);else groups.set(row.session_id,[row]);}
     return groups;
 }
-export function audienceAnalytics(db: Database.Database, options: AnalyticsOptions) {
-    const recording=options.sessionId?db.prepare('SELECT started_at_ms,ended_at_ms FROM sessions WHERE id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id)').get(options.sessionId) as {started_at_ms:number;ended_at_ms:number|null}|undefined:undefined;
-    if(options.sessionId&&!recording)throw new Error('SESSION_NOT_FOUND');
-    const from=recording?Math.max(options.fromMs,recording.started_at_ms):options.fromMs,to=recording?Math.min(options.toMs,recording.ended_at_ms??options.toMs):options.toMs;
+export function validateAnalyticsOptions(options:AnalyticsOptions,from=options.fromMs,to=options.toMs){
     const source = options.source ?? 'all', category = options.category ?? '', timezone = options.timezone ?? 'Europe/Moscow';
     const regularThresholdPercent=options.regularThresholdPercent??80;
     const minSessions = options.minSessions ?? 3, minMinutes = options.minMinutes ?? 30, minMessages = options.minMessages ?? 5, window = options.chatWindowMinutes ?? 5, rule = options.coreRule ?? 'either';
@@ -80,6 +78,13 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     catch {
         throw new Error('INVALID_TIMEZONE');
     }
+    return {source,category,timezone,regularThresholdPercent,minSessions,minMinutes,minMessages,window,rule,clock};
+}
+export function audienceAnalytics(db: Database.Database, options: AnalyticsOptions) {
+    const recording=options.sessionId?db.prepare('SELECT started_at_ms,ended_at_ms FROM sessions WHERE id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id)').get(options.sessionId) as {started_at_ms:number;ended_at_ms:number|null}|undefined:undefined;
+    if(options.sessionId&&!recording)throw new Error('SESSION_NOT_FOUND');
+    const from=recording?Math.max(options.fromMs,recording.started_at_ms):options.fromMs,to=recording?Math.min(options.toMs,recording.ended_at_ms??options.toMs):options.toMs;
+    const {source,category,timezone,regularThresholdPercent,minSessions,minMinutes,minMessages,window,rule,clock}=validateAnalyticsOptions(options,from,to);
     const excluded = botExclusionSet(options.excludedLogins ?? []), botJson = JSON.stringify([...excluded]);
     const sessions = db.prepare('SELECT * FROM sessions WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id) AND started_at_ms<? AND coalesce(ended_at_ms,?)>? AND (? IS NULL OR id=?) ORDER BY started_at_ms LIMIT 1001').all(to, to, from, options.sessionId??null,options.sessionId??null) as any[];
     if (sessions.length > 1000)
