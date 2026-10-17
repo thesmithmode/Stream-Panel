@@ -1,3 +1,4 @@
+import {SessionGroups,logicalReadDatabase} from "./session-groups.js";
 import {AnalyticsHistory} from "./analytics-history.js";
 import {EventIngestion} from "./event-ingestion.js";
 export {priorModerationQuery} from "./event-ingestion.js";
@@ -31,6 +32,8 @@ import { type PresencePoll } from "./presence.js";
 
 export class StreamStore {
   private history:AnalyticsHistory;
+  private readonly reads:Database.Database;
+  private readonly groups:SessionGroups;
   private readonly db: Database.Database;
   private readonly annotations:PersonAnnotations;
   private readonly eventIngestion:EventIngestion;
@@ -40,15 +43,17 @@ export class StreamStore {
 
   constructor(path: string, private readonly profile?: string) {
     this.db = openProfileDatabase(path, profile);
+    this.reads=logicalReadDatabase(this.db);
+    this.groups=new SessionGroups(this.db);
     this.annotations = new PersonAnnotations(this.db);
-    this.streams=new StreamSessions(this.db);
+    this.streams=new StreamSessions(this.db,this.reads);
     this.links=new IdentityLinks(this.db,id=>this.annotations.personRevision(id));
-    this.queries=new AudienceQueries(this.db);
+    this.queries=new AudienceQueries(this.reads);
     this.eventIngestion=new EventIngestion(this.db,this.links,this.streams);
     registerDonationSum(this.db);
     try {
       migrateDatabase(this.db);
-    this.history=new AnalyticsHistory(this.db);
+    this.history=new AnalyticsHistory(this.reads);
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
       this.db.transaction(() => {this.collapseDuplicateDaDonors();this.reconcileNicknameLinks();}).immediate();
     } catch (error) {
@@ -67,7 +72,11 @@ export class StreamStore {
   ) {return this.streams.startSession(accountId,streamId,startedAtMs,kind,nowMs);}
   endSession(id: string, atMs: number, quality = "observed") {return this.streams.endSession(id,atMs,quality);}
   deleteManualSession(id: string, atMs: number) {return this.streams.deleteManualSession(id,atMs);}
-  sessions(sessionId?: string,offset=0,limit=100,excludedBotLogins:readonly string[]=[]) {return this.streams.sessions(sessionId,offset,limit,this.queries.botJson(excludedBotLogins));}
+  sessions(sessionId?: string,offset=0,limit=100,excludedBotLogins:readonly string[]=[]) {
+    return this.streams.sessions(sessionId?this.groups.root(sessionId):undefined,offset,limit,this.queries.botJson(excludedBotLogins));
+  }
+  mergeSessions(ids:string[]){return this.groups.merge(ids);}
+  unmergeSessions(id:string){this.groups.unmerge(id);}
   platformStreams(sessionId: string) {return this.streams.platformStreams(sessionId);}
   platformMissing(platform: "twitch" | "youtube", accountId: string, presentIds: string[], observedAtMs: number) {return this.streams.platformMissing(platform,accountId,presentIds,observedAtMs);}
   attachPlatformStream(
@@ -141,18 +150,18 @@ export class StreamStore {
     toMs?: number,
     type?:string,
     source?:string,
-  ) {return this.queries.events(sessionId,personId,fromMs,toMs,type,source);}
+  ) {return this.queries.events(sessionId?this.groups.root(sessionId):undefined,personId,fromMs,toMs,type,source);}
   summary(
     sessionId?: string,
     excludedBotLogins: readonly string[] = [],
     details = true,
-  ) {return this.queries.summary(sessionId,excludedBotLogins,details);}
+  ) {return this.queries.summary(sessionId?this.groups.root(sessionId):undefined,excludedBotLogins,details);}
   grid(
     sessionId: string,
     personId: string,
     fromMs: number,
     toMs: number,
-  ) {return this.queries.grid(sessionId,personId,fromMs,toMs);}
+  ) {return this.queries.grid(this.groups.root(sessionId),personId,fromMs,toMs);}
   private sessionRow(sessionId: string) {return this.queries.sessionRow(sessionId);}
   private botJson(excludedBotLogins: readonly string[] = []) {return this.queries.botJson(excludedBotLogins);}
   private notBotClause(alias = "i") {return this.queries.notBotClause(alias);}
@@ -162,18 +171,18 @@ export class StreamStore {
     excludedBotLogins: readonly string[] = [],
     chatWindowMinutes=5,
     fromMs=0,
-  ) {return this.queries.personStats(personId,sessionId,excludedBotLogins,chatWindowMinutes,fromMs);}
+  ) {return this.queries.personStats(personId,sessionId?this.groups.root(sessionId):undefined,excludedBotLogins,chatWindowMinutes,fromMs);}
   personsTop(
     sortBy: "messages" | "donations" | "observed_minutes" = "messages",
     sessionId?: string,
     excludedBotLogins: readonly string[] = [],
     limit = 50,
     fromMs=0,toMs?:number,currency='RUB',
-  ) {return this.queries.personsTop(sortBy,sessionId,excludedBotLogins,limit,fromMs,toMs,currency);}
+  ) {return this.queries.personsTop(sortBy,sessionId?this.groups.root(sessionId):undefined,excludedBotLogins,limit,fromMs,toMs,currency);}
   insights(
     sessionId?: string,
     excludedBotLogins: readonly string[] = [],
-  ) {return this.queries.insights(sessionId,excludedBotLogins);}
+  ) {return this.queries.insights(sessionId?this.groups.root(sessionId):undefined,excludedBotLogins);}
 
   close(): void {
     this.history.close();
@@ -217,9 +226,9 @@ export class StreamStore {
     }).immediate();
   }
 
-  personActivity(id:string,chatWindowMinutes=5,timezone="Europe/Moscow"){return personActivity(this.db,id,chatWindowMinutes,timezone);}
+  personActivity(id:string,chatWindowMinutes=5,timezone="Europe/Moscow"){return personActivity(this.reads,id,chatWindowMinutes,timezone);}
   donation(id:string) {return new DonationLedger(this.db).donation(id);}
-  donations(personId?:string,offset=0,limit=50,includeDeleted=false,sessionId?:string) {return new DonationLedger(this.db).list(personId,offset,limit,includeDeleted,sessionId);}
+  donations(personId?:string,offset=0,limit=50,includeDeleted=false,sessionId?:string) {return new DonationLedger(this.reads).list(personId,offset,limit,includeDeleted,sessionId?this.groups.root(sessionId):undefined);}
   resolveDonationTimes(offset:number) {
     if(!Number.isInteger(offset)||Math.abs(offset)>840)throw new Error('INVALID_UTC_OFFSET');
     return this.db.transaction(()=>{
@@ -274,18 +283,18 @@ export class StreamStore {
   }
   channelOverview(excludedBotLogins:readonly string[]=[]){
     const summary=this.summary(undefined,excludedBotLogins);
-    const sessions=this.db.prepare("SELECT id,started_at_ms AS start,ended_at_ms AS end FROM sessions s WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)").all() as {id:string;start:number;end:number|null}[];
+    const sessions=this.reads.prepare("SELECT id,started_at_ms AS start,ended_at_ms AS end FROM sessions s WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)").all() as {id:string;start:number;end:number|null}[];
     const excluded=this.botJson(excludedBotLogins);
-    const attendees=(this.db.prepare(`SELECT count(*) AS n FROM (
+    const attendees=(this.reads.prepare(`SELECT count(*) AS n FROM (
       SELECT i.person_id FROM presence_members m JOIN presence_polls p ON p.id=m.poll_id JOIN identities i ON i.id=m.identity_id WHERE p.status='complete' AND ${this.notBotClause('i')} AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=p.session_id)
       UNION SELECT value FROM json_each(?)
     )`).get(excluded,JSON.stringify((summary.participants as {personId:string}[]).map(p=>p.personId))) as {n:number}).n;
-    const links=this.db.prepare('SELECT session_id,started_at_ms,ended_at_ms FROM platform_streams').all() as {session_id:string;started_at_ms:number;ended_at_ms:number|null}[];
+    const links=this.reads.prepare('SELECT session_id,started_at_ms,ended_at_ms FROM platform_streams').all() as {session_id:string;started_at_ms:number;ended_at_ms:number|null}[];
     const windowsBySession=new Map<string,typeof links>();for(const link of links){const list=windowsBySession.get(link.session_id)??[];list.push(link);windowsBySession.set(link.session_id,list);}
     return {streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+windowsFromLinks(windowsBySession.get(s.id)??[],s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees,messages:summary.messages,totals:summary.totals,donations:summary.donations};
   }
   analytics(options: AnalyticsOptions):ReturnType<typeof audienceAnalytics> {
-    return this.history.query(options);
+    return this.history.query(options.sessionId?{...options,sessionId:this.groups.root(options.sessionId)}:options);
   }
 
   warmAnalytics(options:AnalyticsOptions){return this.history.prepare(options);}
@@ -326,11 +335,11 @@ export class StreamStore {
     for(const follower of followers){if(!follower.id||typeof follower.name!=='string')throw new Error('INVALID_FOLLOWERS');if(follower.followedAtMs!==null)assertTimestamp(follower.followedAtMs);}
     this.providerSnapshot(source,account,'followers',{followers:[...new Map(followers.map(f=>[f.id,f])).values()],complete,total},at);
   }
-  personFollowing(personId:string,sessionId=''){if(!this.db.prepare('SELECT 1 FROM persons WHERE id=?').get(personId))throw new Error('PERSON_NOT_FOUND');if(sessionId)this.sessionRow(sessionId);return personFollowing(this.db,personId,sessionId);}
-  followingAnalytics(sessionId:string){this.sessionRow(sessionId);return followingAnalytics(this.db,sessionId);}
+  personFollowing(personId:string,sessionId=''){sessionId=sessionId?this.groups.root(sessionId):'';if(!this.db.prepare('SELECT 1 FROM persons WHERE id=?').get(personId))throw new Error('PERSON_NOT_FOUND');if(sessionId)this.sessionRow(sessionId);return personFollowing(this.reads,personId,sessionId);}
+  followingAnalytics(sessionId:string){sessionId=this.groups.root(sessionId);this.sessionRow(sessionId);return followingAnalytics(this.reads,sessionId);}
   streamMetadata(sessionId:string){
-    this.sessionRow(sessionId);
-    return this.db.prepare(`SELECT observed_at_ms AS at,category_id AS categoryId,category_name AS categoryName,title
+    sessionId=this.groups.root(sessionId);this.sessionRow(sessionId);
+    return this.reads.prepare(`SELECT observed_at_ms AS at,category_id AS categoryId,category_name AS categoryName,title
       FROM stream_samples WHERE session_id=? AND (twitch_viewers IS NOT NULL OR category_id<>'' OR title<>'') ORDER BY observed_at_ms`).all(sessionId);
   }
   youtubeMessages(account: string, chat: string, messages: any[]): void {

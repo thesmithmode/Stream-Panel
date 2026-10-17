@@ -25,6 +25,8 @@ export const storeOperations={
   removePendingDonation:"maintenance",
   ingestLiveDonation:"write",
   sessions:"cached",
+  mergeSessions:"write",
+  unmergeSessions:"write",
   platformStreams:"read",
   platformMissing:"write",
   attachPlatformStream:"write",

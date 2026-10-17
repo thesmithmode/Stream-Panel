@@ -1,3 +1,4 @@
+import {windowsFromLinks} from './session-windows.js';
 import type Database from 'better-sqlite3';
 import {unionSpans} from './analytics.js';
 export function personActivity(db:Database.Database,id:string,chatWindowMinutes=5,timezone="Europe/Moscow"){
@@ -9,7 +10,10 @@ export function personActivity(db:Database.Database,id:string,chatWindowMinutes=
  // five-minute chat activity window as analytics and keep its inferred status.
  const messages=db.prepare(`SELECT m.published_at_ms AS at,ps.session_id AS session,ps.started_at_ms AS start,coalesce(ps.ended_at_ms,s.ended_at_ms,?) AS end FROM youtube_messages m JOIN youtube_identities i ON i.account_id=m.account_id AND i.external_id=m.author_id JOIN platform_streams ps ON ps.platform='youtube' AND ps.account_id=m.account_id AND m.published_at_ms>=ps.started_at_ms JOIN sessions s ON s.id=ps.session_id WHERE i.person_id=? AND m.published_at_ms<coalesce(ps.ended_at_ms,s.ended_at_ms,?) AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent') AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)`).all(now,id,now) as {at:number;session:string;start:number;end:number}[];
  const inferred=messages.map(m=>({session:m.session,kind:'observed' as const,from:Math.max(m.start,m.at),to:Math.min(m.end,m.at+chatWindowMinutes*60000)}));
- const spans=unionSpans([...observed,...inferred]);
+ const all=[...observed,...inferred],ids=JSON.stringify([...new Set(all.map(span=>span.session))]);
+ const links=db.prepare('SELECT session_id,started_at_ms,ended_at_ms FROM platform_streams WHERE session_id IN(SELECT value FROM json_each(?))').all(ids) as {session_id:string;started_at_ms:number;ended_at_ms:number|null}[];
+ const bySession=new Map<string,typeof links>();for(const link of links){const rows=bySession.get(link.session_id)??[];rows.push(link);bySession.set(link.session_id,rows);}
+ const spans=unionSpans(all.flatMap(span=>windowsFromLinks(bySession.get(span.session)??[],span.from,span.to).map(window=>({...span,...window}))));
  const hours=Array.from({length:24},(_,hour)=>({hour,minutes:0}));const clock=new Intl.DateTimeFormat('ru-RU',{timeZone:timezone,hour:'2-digit',hourCycle:'h23'});
  for(const span of spans)for(let at=span.from;at<span.to;){const next=Math.min(span.to,(Math.floor(at/3600000)+1)*3600000);hours[Number(clock.format(at))]!.minutes+=(next-at)/60000;at=next;}
  const visits=new Map<string,{session:string;at:number;minutes:number}>();
