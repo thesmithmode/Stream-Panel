@@ -33,7 +33,24 @@
     return ()=>{cancelled=true;window.clearTimeout(timer);requestId++;};
   });
   $effect(()=>{const saved=JSON.stringify(view);void saved;if(mounted)saveAnalyticsView(()=>localStorage,profile,view);});
-  const visible=$derived((data?.audience??[]).filter((e:any)=>(!view.coreOnly||e.core)&&e.name.toLowerCase().includes(search.toLowerCase())).sort((a:any,b:any)=>view.sort==="sessions"?(b.sessionCount??b.sessionIds.length)-(a.sessionCount??a.sessionIds.length):(b[view.sort]??0)-(a[view.sort]??0)));
+  let audienceOffset=$state(0),pagedAudience=$state<any>(null),audienceBusy=$state(false);
+  const visible=$derived(data?.audiencePage?(pagedAudience?.audience??data.audience):(data?.audience??[]).filter((e:any)=>(!view.coreOnly||e.core)&&e.name.toLowerCase().includes(search.toLowerCase())).sort((a:any,b:any)=>view.sort==="sessions"?(b.sessionCount??b.sessionIds.length)-(a.sessionCount??a.sessionIds.length):(b[view.sort]??0)-(a[view.sort]??0)));
+  async function reportPage(extra:Record<string,string|number>,signal?:AbortSignal){
+    const filters=data?.filters;if(!filters)throw new Error('Отчёт ещё не загружен');
+    const q=new URLSearchParams(Object.entries({...filters,from:filters.fromMs,to:filters.toMs,mode:'summary',...extra}).map(([key,value])=>[key,String(value)]));
+    let result=await api(`analytics?${q}`,undefined,signal);
+    while(result.preparing&&!signal?.aborted){await new Promise(resolve=>setTimeout(resolve,100));result=await api(`analytics?${q}`,undefined,signal);}
+    return result;
+  }
+  $effect(()=>{void search;void view.sort;void view.coreOnly;void data;audienceOffset=0;});
+  $effect(()=>{
+    const current=data,offset=audienceOffset,term=search,sort=view.sort,core=view.coreOnly;
+    pagedAudience=null;audienceBusy=false;
+    if(!current?.audiencePage)return;
+    const controller=new AbortController();audienceBusy=true;
+    const timer=window.setTimeout(()=>{void reportPage({audienceOffset:offset,audienceSearch:term,audienceSort:sort,audienceCoreOnly:core?1:0},controller.signal).then(result=>{if(!controller.signal.aborted)pagedAudience=result;}).catch(e=>{if(!controller.signal.aborted)error=e.message;}).finally(()=>{if(!controller.signal.aborted)audienceBusy=false;});},150);
+    return ()=>{controller.abort();window.clearTimeout(timer);};
+  });
   const weekdays=["пн","вт","ср","чт","пт","сб","вс"];
   const hourCells=$derived(new Map((data?.hours??[]).map((h:any)=>[`${h.day}:${h.hour}`,h])) as Map<string,any>);
   function heatValue(cell:any):number|null {
@@ -127,22 +144,23 @@
       {#each weekdays as weekday}<div class="heatmap-row"><strong>{weekday}</strong>{#each Array.from({length:24},(_,i)=>i) as hour}<button aria-label={hourTitle(weekday,hour)} title={hourTitle(weekday,hour)} onclick={()=>selectedHour={day:weekday,hour}} style:background={heatValue(hourCells.get(`${weekday}:${hour}`))!==null?`rgba(95,196,170,${.15+.85*(heatValue(hourCells.get(`${weekday}:${hour}`))??0)/hourMax})`:"#3b4350"}></button>{/each}</div>{/each}
     </div>{/if}{#if selectedHour}<p class="analytics-help small" role="status">{hourTitle(selectedHour.day,selectedHour.hour)} · {Math.round(hourCells.get(`${selectedHour.day}:${selectedHour.hour}`)?.sampleMinutes??0)} мин эфира</p>{/if}<div class="analytics-help"><Help id="analytics-hours" label="О карте активности" text="Яркость соответствует выбранной метрике. Наблюдения Twitch усредняются по минутам с полными опросами; оценка YouTube и сообщения — по записанным минутам эфира. Серый — нет данных."/></div></section>{/if}
 
-  <TimeAudience {categoryFilter} windows={data.activityWindows??[]} people={data.audience??[]} summary={data.clockBuckets??[]} {timezone} {onPerson}/>
+  <TimeAudience {categoryFilter} windows={data.activityWindows??[]} people={data.audience??[]} summary={data.clockBuckets??[]} loadVisitors={async (params,signal)=>(await reportPage(params,signal)).clockVisitors} {timezone} {onPerson}/>
   {#if data.donationTiming}<DonationPatterns {categoryFilter} timing={data.donationTiming}/>{/if}
 
   {#if data.patterns&&data.composition}<TimePatterns {categoryFilter} {data} />{/if}
   <ComparisonCharts {categoryFilter} {timezone} {onStream} streams={data.streamComparison??[]} categories={(data.categories??[]).filter((c:any)=>c.id&&c.name!=="Категория неизвестна")} />
   {#if view.trend}<ActivityClock {categoryFilter} rows={data.activityClock??[]} bind:metric={view.metric} bind:resolution={view.resolution} {timezone} {period} onperiod={value=>{if(value!=='custom')preset(value);}}/>{/if}
-  {#if view.audience}<section class="panel"><header><h2>Возвращаемость участников</h2><Help id="analytics-audience" label="О минутах в чате" text="Наблюдаемые минуты Twitch учитывают молчавших участников и исключают неизвестные промежутки. Оценка YouTube показана отдельно. Выберите сортировку по минутам или сообщениям; нажмите имя для подробностей."/><span>{visible.length} профилей</span></header>
+  {#if view.audience}<section class="panel"><header><h2>Возвращаемость участников</h2><Help id="analytics-audience" label="О минутах в чате" text="Наблюдаемые минуты Twitch учитывают молчавших участников и исключают неизвестные промежутки. Оценка YouTube показана отдельно. Выберите сортировку по минутам или сообщениям; нажмите имя для подробностей."/><span>{data.audiencePage?(pagedAudience?.audiencePage?.total??data.audiencePage.total):visible.length} профилей</span></header>
     <p class="small regular-summary">Ядро аудитории: <strong>{data.summary.regulars??0} из {data.summary.entities??0} ({data.summary.regularShare==null?"нет данных":(data.summary.regularShare*100).toFixed(1)+"%"})</strong></p>
     <div class="analytics-controls"><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label>Сортировка<select bind:value={view.sort}><option value="observedMinutes">Минуты в чате</option><option value="estimatedChatMinutes">Оценка активности YouTube</option><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option><option value="attendanceRatio">Доля посещённых эфиров</option></select></label><label class="check"><input type="checkbox" bind:checked={view.coreOnly} /> Только ядро</label></div>
-    <div class="table-wrap compact-audience"><table class="compact-audience-table"><thead><tr><th>Участник</th><th>Посещаемость</th><th>Минуты в чате</th><th>Сообщения</th><th>Подробности</th></tr></thead><tbody>{#each visible.slice(0,200) as e}<tr>
+    <div class="table-wrap compact-audience"><table class="compact-audience-table"><thead><tr><th>Участник</th><th>Посещаемость</th><th>Минуты в чате</th><th>Сообщения</th><th>Подробности</th></tr></thead><tbody>{#each visible.slice(0,data.audiencePage?100:200) as e}<tr>
       <td class="audience-name" data-label="Участник"><div><button class={`text-button ${platformClass(e.sources??[e.source])}`} disabled={busy} onclick={()=>onPerson(e.id)}>{e.name}</button>{#if e.core}<span class="core-badge">Ядро</span>{:else if e.follower}<span class="follower-badge">Подписчик</span>{/if}{#each e.tags??[] as tag}<span class="person-tag">{tag}</span>{/each}</div><small>{(e.sources??[e.source]).map((source:string)=>source==='youtube'?'YouTube':source==='donationalerts'?'DA':'Twitch').join(' · ')}</small></td>
       <td class="audience-stat" data-label="Посещаемость">{Math.round((e.attendanceRatio??0)*100)}%</td><td class="audience-stat" data-label="Минуты в чате">{e.observedMinutes}</td><td class="audience-stat" data-label="Сообщения">{e.messages}</td>
       <td class="audience-more"><button class="text-button small" aria-label={`Интервалы ${e.name}`} onclick={()=>selectEntity(e)}>Интервалы · {e.visits??e.intervals?.length??0}</button><details class="compact-details"><summary>Ещё</summary><dl><dt>Минут / посещённый эфир</dt><dd>{(e.observedMinutesPerSession??0).toFixed(1)}</dd><dt>YouTube · оценка, мин</dt><dd>{e.estimatedChatMinutes}</dd><dt>Часы появления</dt><dd>{(e.arrivalHours??[]).slice(0,3).map((h:any)=>`${h.day} ${h.hour}:00 (${h.visits})`).join(' · ')||'—'}</dd></dl></details></td>
     </tr>{/each}</tbody></table></div>
     {#if !visible.length}<p class="muted analytics-empty">Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.</p>{/if}
     {#if visible.length>200}<p class="small muted">Показаны первые 200; используйте поиск или меньший период.</p>{/if}
+  {#if data.audiencePage}<div class="analytics-controls"><button class="outline" disabled={audienceBusy||audienceOffset===0} onclick={()=>audienceOffset=Math.max(0,audienceOffset-100)}>Предыдущие участники</button><span>{audienceBusy?'Загрузка…':`Страница ${Math.floor(audienceOffset/100)+1}`}</span><button class="outline" disabled={audienceBusy||audienceOffset+100>=(pagedAudience?.audiencePage?.total??data.audiencePage.total)} onclick={()=>audienceOffset+=100}>Следующие участники</button></div>{/if}
   </section>
   {/if}
 {#if view.hours&&view.hourView!=="map"}<section class="panel hour-table"><details><summary>Таблица активности по дням и часам</summary><div class="table-wrap"><table class="analytics-table"><thead><tr><th>День / час ({timezone})</th><th>Выбранная метрика</th><th>Сообщения</th><th>Минут с опросами</th><th>Донатов/ч</th></tr></thead><tbody>{#each data.hours as h}<tr><td data-label="День / час">{h.day} · {h.hour}:00</td><td data-label="Выбранная метрика">{heatValue(h)===null?"нет данных":view.heatMetric==='amount'?money(String(Math.round(heatValue(h)!)),heatCurrency):heatValue(h)!.toFixed(1)}</td><td data-label="Сообщения">{h.messages}</td><td data-label="Минут с опросами">{h.observedKnownMinutes.toFixed(1)}</td><td data-label="Донатов/ч">{#each Object.entries(h.donationsPerHourMinor??{}) as [currency,amount]}<div>{amount===null?"—":money(String(amount),currency)}</div>{:else}—{/each}</td></tr>{/each}</tbody></table></div></details></section>{/if}

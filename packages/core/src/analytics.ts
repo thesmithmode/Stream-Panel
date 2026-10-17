@@ -13,6 +13,14 @@ export interface AnalyticsOptions {
     category?: string;
     sessionId?: string;
     summaryOnly?: boolean;
+    audienceOffset?:number;
+    audienceSearch?:string;
+    audienceSort?:string;
+    audienceCoreOnly?:boolean;
+    clockDay?:string;
+    clockMinute?:number;
+    clockResolution?:number;
+    clockOffset?:number;
     minSessions?: number;
     regularThresholdPercent?: number;
     minMinutes?: number;
@@ -66,6 +74,12 @@ function groupBySession<T extends {session_id:string}>(rows:T[]):Map<string,T[]>
     return groups;
 }
 export function validateAnalyticsOptions(options:AnalyticsOptions,from=options.fromMs,to=options.toMs){
+    if([options.audienceOffset,options.clockOffset].some(n=>n!==undefined&&(!Number.isSafeInteger(n)||n<0)) ||
+       (options.audienceSearch!==undefined&&(typeof options.audienceSearch!=='string'||options.audienceSearch.length>256)) ||
+       (options.audienceSort!==undefined&&!['core','sessions','observedMinutes','estimatedChatMinutes','messages','attendanceRatio'].includes(options.audienceSort)) ||
+       (options.clockDay!==undefined&&!['all','weekdays','weekends','пн','вт','ср','чт','пт','сб','вс'].includes(options.clockDay)) ||
+       (options.clockResolution!==undefined&&![1,5,15,60].includes(options.clockResolution)) ||
+       (options.clockMinute!==undefined&&(!Number.isInteger(options.clockMinute)||options.clockMinute<0||options.clockMinute>=1440||options.clockMinute%(options.clockResolution??60)!==0)))throw new Error('INVALID_ANALYTICS_FILTER');
     const source = options.source ?? 'all', category = options.category ?? '', timezone = options.timezone ?? 'Europe/Moscow';
     const regularThresholdPercent=options.regularThresholdPercent??80;
     const minSessions = options.minSessions ?? 3, minMinutes = options.minMinutes ?? 30, minMessages = options.minMessages ?? 5, window = options.chatWindowMinutes ?? 5, rule = options.coreRule ?? 'either';

@@ -1,4 +1,5 @@
 import {mergeClockActivity, type ClockActivity} from './clock-activity.js';
+import {AnalyticsWorkspace} from './analytics-workspace.js';
 import { HistoryTimeline } from "./history-timeline.js";
 import type Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
@@ -27,6 +28,8 @@ type Report = ReturnType<typeof audienceAnalytics> & {
     ready?: number;
     total?: number;
     stage?: string;
+    audiencePage?: {total:number;offset:number;limit:number};
+    clockVisitors?: ReturnType<AnalyticsWorkspace<Person>['clockPage']>;
 };
 type Person = Report['audience'][number] & {
     sessionCount: number;
@@ -35,9 +38,7 @@ type Person = Report['audience'][number] & {
     detailAvailable?: boolean;
 };
 type Stream = Report['streamComparison'][number];
-type Category = Report['categories'][number] & {
-    people: Set<string>;
-};
+type Category = Report['categories'][number];
 type Hour = Report['hours'][number];
 type Progress = {
     preparing: true;
@@ -55,28 +56,52 @@ export class AnalyticsHistory {
         if (!statement) { statement = this.db.prepare(sql); this.statements.set(sql, statement); }
         return statement;
     }
-    private readonly completed = new Map<string,{value:Report;bytes:number}>();
+    private readonly completed = new Map<string,{value:Report;bytes:number;workspace?:AnalyticsWorkspace<Person>;liveRevision?:string}>();
     private completedBytes=0;
-    private remember(key:string,value:Report){
+    private remember(key:string,value:Report,workspace?:AnalyticsWorkspace<Person>,liveRevision?:string){
         const limit=this.cachePolicy.maxCompletedBytes??16*1024*1024,bytes=serialize(value).byteLength;
-        if(bytes>limit)return;
-        while(this.completed.size>=8||this.completedBytes+bytes>limit){const oldest=this.completed.keys().next().value!;this.completedBytes-=this.completed.get(oldest)!.bytes;this.completed.delete(oldest);}
-        this.completed.set(key,{value:structuredClone(value),bytes});this.completedBytes+=bytes;
+        if(bytes>limit){workspace?.dispose();return;}
+        const previous=this.completed.get(key);if(previous){previous.workspace?.dispose();this.completedBytes-=previous.bytes;this.completed.delete(key);}
+        while(this.completed.size>=8||this.completedBytes+bytes>limit){const oldest=this.completed.keys().next().value!;this.completedBytes-=this.completed.get(oldest)!.bytes;this.completed.get(oldest)!.workspace?.dispose();this.completed.delete(oldest);}
+        this.completed.set(key,{value:structuredClone(value),bytes,...(workspace?{workspace}:{}),...(liveRevision?{liveRevision}:{})});this.completedBytes+=bytes;
     }
     private readonly jobs = new Map<string, {
         iterator: Generator<Progress, Report, void>;
         touchedAt: number;
+        workspace:AnalyticsWorkspace<Person>;
+        liveRevision:string;
     }>();
     private pruneJobs(now=Date.now()) {
         for (const [key, job] of this.jobs)
-            if (now-job.touchedAt>300000) this.jobs.delete(key);
+            if (now-job.touchedAt>300000) {job.workspace.dispose();this.jobs.delete(key);}
     }
     constructor(private readonly db: Database.Database, private readonly cachePolicy: {
         availableBytes?: () => number;
         maxBytes?: number;
         maxTotalBytes?: number;
         maxCompletedBytes?: number;
-    } = {}) { }
+    } = {}) {
+        if(db.pragma('temp_store',{simple:true})!==1)db.pragma('temp_store=FILE');
+        db.pragma('temp.cache_size=-2048');
+    }
+    close(){for(const job of this.jobs.values())job.workspace.dispose();this.jobs.clear();for(const entry of this.completed.values())entry.workspace?.dispose();this.completed.clear();this.completedBytes=0;}
+    private page(value:Report,workspace:AnalyticsWorkspace<Person>|undefined,options:AnalyticsOptions):Report{
+        if(!workspace)return value;
+        const page=workspace.people.page(options.audienceOffset??0,options.audienceSearch??'',options.audienceSort??'core',options.audienceCoreOnly??false);
+        return {...value,audience:page.items,...(workspace.people.size>100?{audiencePage:{total:page.total,offset:page.offset,limit:page.limit}}:{}),...(options.clockMinute!==undefined?{clockVisitors:workspace.clockPage(options.clockDay??'all',options.clockMinute,options.clockResolution??60,options.clockOffset??0)}:{})};
+    }
+    private checkWorkspace(workspace:AnalyticsWorkspace<Person>){
+        for(;;){
+            try{workspace.checkBudget();return;}catch(error){
+                if(!(error instanceof Error)||error.message!=='ANALYTICS_WORKSPACE_LIMIT')throw error;
+                const retained=[...this.completed].find(([,entry])=>entry.workspace);
+                if(retained){const [key,entry]=retained;entry.workspace!.dispose();this.completedBytes-=entry.bytes;this.completed.delete(key);continue;}
+                const pending=[...this.jobs].find(([,job])=>job.workspace!==workspace);
+                if(pending){pending[1].workspace.dispose();this.jobs.delete(pending[0]);continue;}
+                throw error;
+            }
+        }
+    }
     private budgetChecked = false;
     private checkCacheBudget() {
         if (this.budgetChecked) return;
@@ -223,13 +248,17 @@ export class AnalyticsHistory {
         const sessions = this.sessions(options);
         const live = sessions.some(session => session.ended_at_ms === null);
         const lastEnd = sessions.reduce((end, session) => Math.max(end, session.ended_at_ms ?? options.toMs), options.fromMs);
-        const canonical = { ...options, fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
+        const {audienceOffset,audienceSearch,audienceSort,audienceCoreOnly,clockDay,clockMinute,clockResolution,clockOffset,...baseOptions}=options;
+        void audienceOffset;void audienceSearch;void audienceSort;void audienceCoreOnly;void clockDay;void clockMinute;void clockResolution;void clockOffset;
+        const canonical = { ...baseOptions, fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
         const fingerprint = createHash('sha256').update(JSON.stringify([historical, canonical, this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.statement('SELECT * FROM person_preferences ORDER BY person_id').all(), this.statement('SELECT * FROM person_tags ORDER BY person_id,label').all(), this.followerRevision()])).digest('hex');
-        const cached=!live?this.completed.get(fingerprint):undefined;
+        const liveRevision=JSON.stringify(sessions.filter(s=>s.ended_at_ms===null).map(s=>[s.id,s.revision]));
+        const retained=this.completed.get(fingerprint);
+        const cached=retained&&(!live||retained.liveRevision===liveRevision)?retained:undefined;
         if(cached){
             this.completed.delete(fingerprint);this.completed.set(fingerprint,cached);
             const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as { payload_json: string; updated_at_ms: number } | undefined : undefined;
-            return { ...structuredClone(cached.value), filters: { ...cached.value.filters, fromMs: options.fromMs, toMs: options.toMs }, youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, donationTiming: donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow', options.category) };
+            return this.page({ ...structuredClone(cached.value), filters: { ...cached.value.filters, fromMs: options.fromMs, toMs: options.toMs }, youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, donationTiming: donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow', options.category) },cached.workspace,options);
         }
         if(!historical&&sessions.length<=200){
             try{
@@ -244,8 +273,9 @@ export class AnalyticsHistory {
         let job = this.jobs.get(fingerprint);
         if (!job) {
             // Each browser/filter keeps its own progress, with a bounded LRU budget.
-            while (this.jobs.size >= 4) this.jobs.delete(this.jobs.keys().next().value!);
-            job = { iterator: this.aggregate(options, sessions, validation), touchedAt: now };
+            while (this.jobs.size >= 4) {const key=this.jobs.keys().next().value!;this.jobs.get(key)!.workspace.dispose();this.jobs.delete(key);}
+            const workspace=new AnalyticsWorkspace<Person>(this.db);
+            job = { iterator: this.aggregate(options, sessions, validation,workspace), touchedAt: now,workspace,liveRevision };
         }
         this.jobs.delete(fingerprint);
         this.jobs.set(fingerprint, job);
@@ -255,16 +285,19 @@ export class AnalyticsHistory {
             next = job.iterator.next();
         }
         catch (error) {
-            this.jobs.delete(fingerprint);
+            this.jobs.delete(fingerprint);job.workspace.dispose();
             throw error;
         }
         if (!next.done)
             return { ...validation, ...next.value, stage: 'aggregate' };
         this.jobs.delete(fingerprint);
-        if (!live) this.remember(fingerprint,next.value);
-        return next.value;
+        try{
+            const value=this.page(next.value,job.workspace,options);
+            this.remember(fingerprint,next.value,job.workspace,job.liveRevision);
+            return value;
+        }catch(error){job.workspace.dispose();throw error;}
     }
-    private *aggregate(options: AnalyticsOptions, sessions: Session[], validation: ReturnType<typeof audienceAnalytics>): Generator<Progress, Report, void> {
+    private *aggregate(options: AnalyticsOptions, sessions: Session[], validation: ReturnType<typeof audienceAnalytics>,workspace:AnalyticsWorkspace<Person>): Generator<Progress, Report, void> {
         let sliceStart = performance.now();
         const active = new Map<string, Report>(), read = (session: Session) => {
             if (session.ended_at_ms === null) {
@@ -283,13 +316,7 @@ export class AnalyticsHistory {
             return report;
         };
         let processed = 0;
-        const people = new Map<string, Person>(), streams: Stream[] = [], categoryRows = new Map<string, Category>(), hours = new Map<string, Hour>(), clockRows = new Map<string, ClockBucket>(), clockPeople = new Map<string, Map<string, {
-            id: string;
-            visits: number;
-        }>>(), categories = new Map<string, {
-            id: string;
-            name: string;
-        }>();
+        const people=workspace.people,streams:Stream[]=[],categoryRows=new Map<string,Category>(),hours=new Map<string,Hour>(),clockRows=new Map<string,ClockBucket>(),categories=new Map<string,{id:string;name:string}>();
         const activityClock = new Map<string,ClockActivity>();
         let sample: Report | undefined;
         let selectedStreams = 0;
@@ -308,7 +335,7 @@ export class AnalyticsHistory {
                 let row = people.get(person.id);
                 if (!row) {
                     row = { ...person, sessionCount: 0, attendanceCount: 0, sessionIds: [], attendanceSessionIds: [], intervals: [], messageMinutes: [], messageCounts: [], messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, donations: {}, visits: 0, activityMinutes: 0, arrivalHours: [] };
-                    people.set(person.id, row);
+
                 }
                 row.messages += person.messages;
                 row.visits += person.visits;
@@ -337,11 +364,12 @@ export class AnalyticsHistory {
                     }
                     prior.visits += arrival.visits;
                 }
+                people.set(person.id,row);
             }
             for (const category of report.categories) {
                 let row = categoryRows.get(category.id);
                 if (!row) {
-                    row = { ...category, minutes: 0, messages: 0, observedMinutes: 0, observedKnownMinutes: 0, estimatedChatMinutes: 0, sessions: 0, donationCount: 0, donationTotals: {}, people: new Set<string>() };
+                    row = { ...category, minutes: 0, messages: 0, observedMinutes: 0, observedKnownMinutes: 0, estimatedChatMinutes: 0, sessions: 0, donationCount: 0, donationTotals: {} };
                     categoryRows.set(category.id, row);
                 }
                 for (const key of ['minutes', 'messages', 'observedMinutes', 'observedKnownMinutes', 'estimatedChatMinutes', 'sessions', 'donationCount'] as const)
@@ -349,7 +377,7 @@ export class AnalyticsHistory {
                 sumMoney(row.donationTotals, category.donationTotals);
                 for (const person of report.audience)
                     if (person.intervals.some(span => report.activityWindows.some(w => w.categoryId === category.id && w.session === span.session && w.from < span.to && w.to > span.from)) || person.messageMinutes.some(m => report.activityWindows.some(w => w.categoryId === category.id && w.session === m.session && m.at >= w.from && m.at < w.to)))
-                        row.people.add(person.id);
+                        workspace.categoryPerson(category.id,person.id);
             }
             for (const cell of report.hours) {
                 const key = cell.day + ':' + cell.hour;
@@ -368,19 +396,14 @@ export class AnalyticsHistory {
                 if (!row) {
                     row = { ...bucket, streams: 0, airtimeMs: 0, personTimeMs: 0, people: [] };
                     clockRows.set(key, row);
-                    clockPeople.set(key, new Map());
+
                 }
                 row.streams += bucket.streams;
                 row.airtimeMs += bucket.airtimeMs;
                 row.personTimeMs += bucket.personTimeMs;
-                for (const person of bucket.people) {
-                    const visits = clockPeople.get(key)!, prior = visits.get(person.id);
-                    if (prior)
-                        prior.visits += person.visits;
-                    else
-                        visits.set(person.id, { ...person });
-                }
             }
+            workspace.addClock(session.id,report.clockBuckets??[]);
+            this.checkWorkspace(workspace);
             processed++;
             if (performance.now() - sliceStart > 250) {
                 yield { preparing: true, ready: processed, total: sessions.length * 2 };
@@ -404,7 +427,8 @@ export class AnalyticsHistory {
             person.attendanceRatio = ratio;
             person.sessionRatio = selectedStreams ? person.sessionCount / selectedStreams : 0;
             person.observedMinutesPerSession = attendance ? person.observedMinutes / attendance : 0;
-            person.detailAvailable = true;
+            person.detailAvailable=true;people.set(person.id,person);
+            if(performance.now()-sliceStart>250){yield {preparing:true,ready:processed,total:sessions.length*2};sliceStart=performance.now();}
         }
         const current = this.statement("SELECT p.source,p.account_id,p.payload_json FROM follower_observations p WHERE p.id=(SELECT q.id FROM follower_observations q WHERE q.source=p.source AND q.account_id=p.account_id ORDER BY q.observed_at_ms DESC,q.id DESC LIMIT 1)").all() as {
             source: string;
@@ -427,41 +451,48 @@ export class AnalyticsHistory {
                 }[])
                     negative.add(row.person_id);
         }
+        const summary={entities:people.size,attendees:0,regulars:0,regularShare:null as number|null,core:0,streams:selectedStreams,chatters:0,messages:0};
+        const composition={core:0,followers:0,nonFollowers:0,unknown:0,twitch:0,youtube:0,both:0};
         for (const person of people.values()) {
             person.follower = followers.has(person.id) ? true : negative.has(person.id) && !person.sources.includes('youtube') ? false : null;
             person.tags = (this.statement(`WITH RECURSIVE owners(id) AS(SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT t.label FROM person_tags t JOIN owners o ON o.id=t.person_id ORDER BY t.label`).all(person.id) as {
                 label: string;
             }[]).map(t => t.label);
+            people.set(person.id,person);summary.core+=Number(person.core);summary.chatters+=Number(person.messages>0);summary.messages+=person.messages;
+            if(person.attendanceSessionIds.length){summary.attendees++;composition.core+=Number(person.core);composition.followers+=Number(!person.core&&person.follower===true);composition.nonFollowers+=Number(!person.core&&person.follower===false);composition.unknown+=Number(!person.core&&person.follower===null);composition.twitch+=Number(person.sources.includes('twitch'));composition.youtube+=Number(person.sources.includes('youtube'));composition.both+=Number(person.sources.length>1);}
+            if(performance.now()-sliceStart>250){yield {preparing:true,ready:processed,total:sessions.length*2};sliceStart=performance.now();}
         }
+        summary.regulars=summary.core;summary.regularShare=summary.entities?summary.core/summary.entities:null;
         const daily = new HistoryTimeline(options.timezone ?? 'Europe/Moscow', people);
-        const seen = new Set<string>(), streamsById = new Map(streams.map(stream => [stream.id, stream]));
+        const streamsById = new Map(streams.map(stream => [stream.id, stream]));
         for (const session of sessions) {
             const report = read(session), stream = streamsById.get(session.id);
             daily.add(report);
             if (stream) {
                 const visitors = report.audience.filter(person => person.attendanceSessionIds.length).map(person => person.id);
                 stream.core = visitors.filter(id => people.get(id)?.core).length;
-                stream.newInPeriod = visitors.filter(id => !seen.has(id)).length;
+                stream.newInPeriod = visitors.filter(id => people.firstVisit(id)).length;
                 stream.returning = visitors.length - stream.newInPeriod;
-                for (const id of visitors) seen.add(id);
+
             }
+            this.checkWorkspace(workspace);
             processed++;
             if (performance.now() - sliceStart > 250) {
                 yield { preparing: true, ready: processed, total: sessions.length * 2 };
                 sliceStart = performance.now();
             }
         }
-        const audience = [...people.values()].sort((a, b) => Number(b.core) - Number(a.core) || b.observedMinutes - a.observedMinutes || b.messages - a.messages);
-        const outputCategories = [...categoryRows.values()].map(row => { const { people: ids, ...category } = row; return { ...category, audience: ids.size, core: [...ids].filter(id => people.get(id)?.core).length, donationsPerHourMinor: currencyRates(row.donationTotals, Math.round(row.minutes * 60000)), messagesPerHour: row.minutes ? row.messages * 60 / row.minutes : 0, observedPerMinute: row.minutes ? row.observedMinutes / row.minutes : 0, observedPerKnownMinute: row.observedKnownMinutes ? row.observedMinutes / row.observedKnownMinutes : null, coverageRatio: row.minutes ? row.observedKnownMinutes / row.minutes : null }; });
-        for (const [key, row] of clockRows) {
-            row.people = [...clockPeople.get(key)!.values()];
-            row.averageAudience = row.airtimeMs ? row.personTimeMs / row.airtimeMs : null;
+        const audience=people.page().items;
+        const outputCategories=[...categoryRows.values()].map(row=>({...row,...workspace.categoryCounts(row.id),donationsPerHourMinor:currencyRates(row.donationTotals,Math.round(row.minutes*60000)),messagesPerHour:row.minutes?row.messages*60/row.minutes:0,observedPerMinute:row.minutes?row.observedMinutes/row.minutes:0,observedPerKnownMinute:row.observedKnownMinutes?row.observedMinutes/row.observedKnownMinutes:null,coverageRatio:row.minutes?row.observedKnownMinutes/row.minutes:null}));
+        for(const row of clockRows.values()){
+            if(people.size<=100)row.people=workspace.clockPage(row.day,row.minute,row.resolution).items.map(({id,visits})=>({id,visits}));
+            else row.peopleDeferred=true;
+            row.averageAudience=row.airtimeMs?row.personTimeMs/row.airtimeMs:null;
         }
-        const attendees = audience.filter(p => p.attendanceSessionIds.length), core = audience.filter(p => p.core).length;
         const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {
             payload_json: string;
             updated_at_ms: number;
         } | undefined : undefined;
-        return { ...sample, activityClock:[...activityClock.values()], youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, aggregate: true, filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs }, activityWindows: [], timeline: daily.values(), breaks: [], sessions: [sessions[0]!], audience, categories: outputCategories, availableCategories: [...categories.values()], streamComparison: streams, clockBuckets: [...clockRows.values()], hours: [...hours.values()], patterns: timePatterns([...hours.values()]), summary: { entities: audience.length, attendees: attendees.length, regulars: core, regularShare: audience.length ? core / audience.length : null, core, streams: selectedStreams, chatters: audience.filter(p => p.messages > 0).length, messages: audience.reduce((n, p) => n + p.messages, 0) }, composition: { core: attendees.filter(p => p.core).length, followers: attendees.filter(p => !p.core && p.follower === true).length, nonFollowers: attendees.filter(p => !p.core && p.follower === false).length, unknown: attendees.filter(p => !p.core && p.follower === null).length, twitch: attendees.filter(p => p.sources.includes('twitch')).length, youtube: attendees.filter(p => p.sources.includes('youtube')).length, both: attendees.filter(p => p.sources.length > 1).length }, donationTiming: donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow', options.category) };
+        return { ...sample, activityClock:[...activityClock.values()], youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, aggregate: true, filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs }, activityWindows: [], timeline: daily.values(), breaks: [], sessions: [sessions[0]!], audience, categories: outputCategories, availableCategories: [...categories.values()], streamComparison: streams, clockBuckets: [...clockRows.values()], hours: [...hours.values()], patterns: timePatterns([...hours.values()]), summary,composition,donationTiming:donationTiming(this.db,options.fromMs,options.toMs,options.timezone??'Europe/Moscow',options.category)};
     }
 }

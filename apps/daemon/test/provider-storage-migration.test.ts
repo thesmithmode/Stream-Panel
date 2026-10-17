@@ -1,3 +1,5 @@
+import {restoreLegacyPresence} from '../../../packages/core/test/legacy-presence.js';
+import {openProfileDatabase} from '../../../packages/core/src/profile-db.js';
 import test from 'node:test';import assert from 'node:assert/strict';import Database from 'better-sqlite3';
 import {mkdtemp,rm,readFile} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {StreamStore} from '../../../packages/core/src/store.js';import {normalizeDonation} from '../src/donationalerts.js';import {prepareChatStorage} from '../src/chat-cleanup.js';
@@ -20,6 +22,7 @@ test('diagnostic cleanup preserves missing donations, follower history and both 
    insert.run(`notification-${profile}`,'donationalerts','owner','donation_notification',at,null,JSON.stringify({data:'{"id":9007199254740993,"amount":0.29,"currency":"RUB","created_at":"2026-10-10 12:00:00"}'}));
    insert.run(`chatter-${profile}`,'twitch','owner','chatters',at,null,JSON.stringify({users:['UNUSED_DIAGNOSTIC_CONTENT']}));
    db.prepare(`UPDATE p_${profile}_provider_snapshots SET payload_json=json_set(payload_json,'$.followers[0].raw',json(?)) WHERE key='followers'`).run('{"unused":"UNUSED_DIAGNOSTIC_CONTENT"}');
+   const legacy=openProfileDatabase(path,profile);restoreLegacyPresence(legacy);legacy.close();
    db.prepare('UPDATE sp_profile_schema SET version=15 WHERE profile=?').run(profile);
   }
   db.pragma('wal_checkpoint(TRUNCATE)');db.close();

@@ -176,6 +176,7 @@ export class StreamStore {
   ) {return this.queries.insights(sessionId,excludedBotLogins);}
 
   close(): void {
+    this.history.close();
     this.db.close();
   }
   collectionLifecycle(action:'start'|'heartbeat'|'stop',at:number):void{

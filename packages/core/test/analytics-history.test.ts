@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {StreamStore} from '../src/store.js';
 import {AnalyticsHistory} from '../src/analytics-history.js';
+import {AnalyticsWorkspace} from '../src/analytics-workspace.js';
 import {audienceAnalytics} from '../src/analytics.js';
 const base=Date.UTC(2026,9,1),minute=60000;
 function fixture(s:StreamStore,n=4,youtube=false){for(let i=0;i<n;i++){
@@ -256,5 +257,51 @@ test('follower corrections sharing a provider timestamp invalidate completed rep
  s.followingSnapshot('twitch','owner',[],true,base);
  db.prepare("UPDATE follower_checks SET id='zzzz-new-check' WHERE rowid=(SELECT max(rowid) FROM follower_checks)").run();
  assert.equal(audienceAnalytics(db,options).composition.followers,0);assert.equal(h.query(options).composition.followers,0);
+ }finally{s.close();}
+});
+
+test('large reports page people and clock attendance without changing global metrics or cohorts',()=>{
+ const s=new StreamStore(':memory:');try{
+  for(let n=0;n<3;n++){
+   const at=base+n*86400000,id=s.startSession('owner',`paged-${n}`,at,'platform',at),ids=Array.from({length:125},(_,i)=>`viewer${String(i).padStart(3,'0')}`);
+   s.streamSample(id,at,'game','Game','',125);s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+minute-1,status:'complete',userIds:ids,userNames:Object.fromEntries(ids.map(id=>[id,id]))});s.endSession(id,at+2*minute);
+  }
+  const db=(s as any).db,h=new AnalyticsHistory(db),opts={...options,summaryOnly:true,minMinutes:0,minMessages:0,minSessions:1},raw=audienceAnalytics(db,opts),r=ready(h,opts);
+  assert.deepEqual(r.summary,raw.summary);assert.deepEqual(r.composition,raw.composition);assert.deepEqual(r.categories,raw.categories);assert.deepEqual(r.streamComparison,raw.streamComparison);
+  assert.equal(r.audience.length,100);assert.equal(r.audiencePage.total,125);assert.ok(r.clockBuckets.every((b:any)=>b.peopleDeferred));
+  const next=h.query({...opts,audienceOffset:100});assert.equal(next.audience.length,25);assert.equal(new Set([...r.audience,...next.audience].map(p=>p.id)).size,125);
+  const found=h.query({...opts,audienceSearch:'viewer124',audienceSort:'sessions'});assert.equal(found.audiencePage?.total,1);assert.equal(found.audience[0]!.name,'viewer124');
+  const bucket=r.clockBuckets.find((b:any)=>b.day==='all'&&b.resolution===1),q={...opts,clockDay:'all',clockMinute:bucket.minute,clockResolution:1};
+  const first=h.query(q);assert.equal(first.clockVisitors?.total,125);assert.ok(first.clockVisitors!.items.every(p=>p.visits===3));assert.equal(h.query({...q,clockOffset:100}).clockVisitors?.items.length,25);
+  const id=found.audience[0]!.id;s.setPersonMetadata(id,['Exact'],true,s.personRevision(id));assert.equal(ready(h,{...opts,audienceCoreOnly:true}).audiencePage.total,125);assert.equal(ready(h,{...opts,audienceSearch:'viewer124'}).audience[0].tags[0],'Exact');
+  for(const bad of [{audienceOffset:-1},{clockOffset:0.5},{audienceSearch:'x'.repeat(257)},{audienceSort:'unsafe'},{clockDay:'never'},{clockResolution:7},{clockMinute:1440},{clockMinute:1,clockResolution:60}])assert.throws(()=>h.query({...opts,...bad}),/INVALID_ANALYTICS_FILTER/);
+  h.close();assert.equal(db.prepare("SELECT count(*) n FROM sqlite_temp_master WHERE type='table' AND name LIKE 'sp_analytics_%'").get().n,0);
+ }finally{s.close();}
+});
+test('live writes do not restart historical preparation, but invalidate the completed live snapshot',t=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,60);const at=base+61*86400000,live=s.startSession('owner','ongoing',at,'platform',at),h=new AnalyticsHistory((s as any).db),opts={...options,toMs:at+minute,summaryOnly:true};
+  let cpu=0;t.mock.method(performance,'now',()=>cpu+=10);
+  const first=h.report(opts);assert.equal(first.preparing,true);
+  s.streamSample(live,at,'game','Game','',10);const second=h.report(opts);assert.ok(second.ready!>first.ready!);
+  assert.equal(ready(h,opts).summary.streams,61);s.streamSample(live,at+1000,'game','Game','',12);assert.equal(h.report(opts).preparing,true);assert.equal(ready(h,opts).summary.messages,60);h.close();
+ }finally{s.close();}
+});
+
+test('temporary-space pressure evicts only derived work and resource errors preserve all facts',t=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,60);const db=(s as any).db,h=new AnalyticsHistory(db),opts={...options,toMs:base+62*86400000,summaryOnly:true};
+  assert.equal(ready(h,opts).summary.messages,60);
+  const original=AnalyticsWorkspace.prototype.checkBudget;let fail=false;
+  t.mock.method(AnalyticsWorkspace.prototype,'checkBudget',function(this:AnalyticsWorkspace<unknown>){if(fail){fail=false;throw Error('ANALYTICS_WORKSPACE_LIMIT');}return original.call(this);});
+  fail=true;assert.equal(ready(h,{...opts,minMessages:100}).summary.messages,60,'completed derived work is safely evicted');h.close();
+  let cpu=0;t.mock.method(performance,'now',()=>cpu+=10);
+  assert.equal(h.report({...opts,minMessages:101}).preparing,true);fail=true;
+  assert.equal(ready(h,{...opts,minMessages:102}).summary.messages,60,'another pending filter can be safely displaced');h.close();
+  for(const error of ['ANALYTICS_WORKSPACE_LIMIT','ANALYTICS_DISK_RESERVE']){
+   t.mock.method(AnalyticsWorkspace.prototype,'checkBudget',()=>{throw Error(error);});assert.throws(()=>h.report(opts),new RegExp(error));
+   assert.equal(db.prepare("SELECT count(*) n FROM sqlite_temp_master WHERE type='table' AND name LIKE 'sp_analytics_%'").get().n,0);
+  }
+  t.mock.method(AnalyticsWorkspace.prototype,'checkBudget',original);assert.equal(ready(h,opts).summary.messages,60);h.close();assert.equal(s.eventCount(),60);
  }finally{s.close();}
 });
