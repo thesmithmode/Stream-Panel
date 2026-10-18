@@ -64,12 +64,21 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    assert.equal(await page.getByText('Как определять ядро аудитории',{exact:true}).count(),0);
    for(const name of ['RenamedOwner','jeetbot','streamlabs','streemelements','CreatisBot','Nightbot','franky_showman',`Regular ${profile==='ruslan'?'gulnaz':'ruslan'}`])assert.equal(await page.getByRole('button',{name,exact:true}).count(),0);
    const activity=page.locator('.activity-clock');
-   await activity.getByText('00:00',{exact:true}).waitFor();await activity.getByText('24:00',{exact:true}).waitFor();
+   assert.equal(await activity.getByRole('heading',{name:'Активность по часам',exact:true}).count(),1);
+   assert.equal(await activity.evaluate(el=>el.previousElementSibling?.querySelector('h2')?.textContent),'Активность по дням и часам');
+   assert.equal(await activity.evaluate(el=>el.nextElementSibling?.querySelector('h2')?.textContent),'Когда приходят донаты');
+   assert.equal(await page.locator('.activity-clock svg').count(),1);
+   const heatCell=page.locator('.heatmap-row button');
+   const sampled=await page.locator('.heatmap-row button').evaluateAll(cells=>cells.findIndex(c=>/эфиров: [1-9]/.test(c.getAttribute('aria-label')??'')));
+   assert.ok(sampled>=0);await heatCell.nth(sampled).click();
+   assert.match(await page.locator('.hour-heatmap').locator('..').getByRole('status').textContent(),/эфиров: [1-9].*мин с данными/);
+
+   await activity.locator('svg').getByText('00:00',{exact:true}).waitFor();await activity.getByText('24:00',{exact:true}).waitFor();
    for(const [step,count] of [['1',1440],['15',96],['30',48],['60',24]]){
     await activity.getByLabel('Шаг графика').selectOption(step);assert.equal(await activity.getByRole('button').filter({hasNot:page.locator('header')}).count()>0,true);
     assert.equal(await activity.locator('svg g').count(),count);
    }
-   for(const metric of ['viewers','twitchViewers','youtubeViewers','messages','twitchMessages','youtubeMessages']){
+   for(const metric of ['viewers','twitchViewers','youtubeViewers','messages','twitchMessages','youtubeMessages','watchHours','twitchWatchHours','youtubeWatchHours','donations']){
     await activity.getByLabel('Метрика графика').selectOption(metric);
     const expected=clockActivitySeries(analyticsData.activityClock,metric,60);
     const labels=await activity.locator('svg g').evaluateAll(groups=>groups.map(g=>g.getAttribute('aria-label')));
@@ -87,15 +96,15 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    for(const metric of ['observed','estimated','messages','viewers']){await page.getByLabel('Метрика карты').selectOption(metric);const displayed=(await hourSection.locator('.analytics-table tbody tr').first().locator('td').nth(1).textContent()).trim(),value=metricValue(firstHour,metric);assert.equal(displayed,value===null?'нет данных':value.toFixed(1),`hour table should render ${metric} from API data`);}
    await page.getByLabel('Вид дней и часов').selectOption('map');assert.equal(await page.locator('.hour-heatmap').count(),1);
    for(const metric of ['observed','estimated','messages','viewers']){await page.getByLabel('Метрика карты').selectOption(metric);assert.ok(await page.locator('.hour-heatmap').count()>0);}
-   const sections=[['Отчёт YouTube','Агрегатный отчёт YouTube: все видео канала'],['График активности','Активность по времени суток'],['Сравнение категорий','Категории'],['Дни и часы','Активность по дням и часам'],['Сравнение стримов','Сравнение стримов'],['Возвращаемость участников','Возвращаемость участников']];
+   const sections=[['Отчёт YouTube','Агрегатный отчёт YouTube: все видео канала'],['График активности','Активность по часам'],['Сравнение категорий','Категории'],['Дни и часы','Активность по дням и часам'],['Сравнение стримов','Сравнение стримов'],['Возвращаемость участников','Возвращаемость участников']];
    for(const [label,heading] of sections){await page.getByLabel(label,{exact:true}).uncheck();assert.equal(await page.getByRole('heading',{name:heading,exact:true}).count(),0);await page.getByLabel(label,{exact:true}).check();}
    await page.getByLabel('График активности',{exact:true}).uncheck();
    await page.getByRole('button',{name:'Обзор',exact:true}).click();await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
-   assert.equal(await page.getByRole('heading',{name:'Активность по времени суток',exact:true}).count(),0);
+   assert.equal(await page.getByRole('heading',{name:'Активность по часам',exact:true}).count(),0);
    await page.getByText('Настроить отображение',{exact:true}).click();
    await page.getByLabel('График активности',{exact:true}).check();
    assert.equal(await page.getByLabel('Шаг графика').inputValue(),'1');assert.equal(await page.getByLabel('Только ядро').isChecked(),true);
-   await page.getByRole('button',{name:'Сбросить отображение',exact:true}).click();await page.getByRole('heading',{name:'Активность по времени суток',exact:true}).waitFor();
+   await page.getByRole('button',{name:'Сбросить отображение',exact:true}).click();await page.getByRole('heading',{name:'Активность по часам',exact:true}).waitFor();
    assert.equal(await page.getByLabel('Только постоянники').count(),0);await page.getByLabel('Метрика графика').selectOption('messages');assert.equal(await page.locator('.activity-clock svg g').count(),96);
    if(profile==='ruslan'){
     for(const width of [320,390,768,1280,1440]){

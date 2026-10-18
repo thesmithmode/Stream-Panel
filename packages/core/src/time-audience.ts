@@ -28,7 +28,7 @@ function unionBySession(spans:readonly Window[]):Map<string,Window[]> {
 }
 /** Duration-weighted active audience; attendance still counts distinct overlapping streams. */
 export function timeAudience(windows:Window[],people:TimePerson[],timezone='Europe/Moscow',resolution=60,day='all',hour:number|null=null){
- const step=[1,5,15,60].includes(resolution)?resolution:60;
+ const step=[1,5,15,30,60].includes(resolution)?resolution:60;
  const buckets=new Map<number,TimeBucket>();
  for(let minute=hour===null?0:hour*60;minute<(hour===null?1440:(hour+1)*60);minute+=step)
   buckets.set(minute,{minute,streams:new Set(),people:new Map(),airtimeMs:0,personTimeMs:0,averageAudience:null});

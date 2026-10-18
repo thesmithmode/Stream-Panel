@@ -15,8 +15,8 @@ test('real data screens fit small phones and desktop without duplicated overview
      const start=await page.getByLabel('Начало периода',{exact:true}).boundingBox(),end=await page.getByLabel('Конец периода',{exact:true}).boundingBox(),panel=await page.locator('.analytics-filter').boundingBox();
      assert.ok(start.width>panel.width*.75&&end.y>=start.y+start.height,'date and time fields remain readable on narrow phones');
      const heading=await page.locator('.activity-clock h2').boundingBox(),help=await page.getByRole('button',{name:'О суточном графике',exact:true}).boundingBox();assert.ok(help.y<heading.y+heading.height,'help stays beside the wrapping heading');
-     const labels=await page.locator('.time-audience .hour-axis span').evaluateAll(nodes=>nodes.filter(n=>getComputedStyle(n).visibility!=='hidden').map(n=>{const r=document.createRange();r.selectNodeContents(n);const box=r.getBoundingClientRect();return {text:n.textContent,left:box.left,right:box.right};}));
-     assert.deepEqual(labels.map(n=>n.text),['0','3','6','9','12','15','18','21']);assert.ok(labels.every((n,i)=>!i||n.left>=labels[i-1].right),'clock labels do not overlap');
+     const labels=await page.locator('.activity-clock svg text[y="230"]').evaluateAll(nodes=>nodes.filter(n=>getComputedStyle(n).visibility!=='hidden').map(n=>{const r=document.createRange();r.selectNodeContents(n);const box=r.getBoundingClientRect();return {text:n.textContent,left:box.left,right:box.right};}));
+     assert.deepEqual(labels.map(n=>n.text),['00:00','06:00','12:00','18:00','24:00']);assert.ok(labels.every((n,i)=>!i||n.left>=labels[i-1].right),'clock labels do not overlap');
     }
    }
    assert.equal(await page.getByRole('button',{name:'Демо',exact:true}).count(),0);assert.deepEqual(errors,[]);await assertUiLayout(page);if(width===390&&['Обзор','Стримы','Аналитика'].includes(name)&&process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR){const dir=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;await mkdir(dir,{recursive:true});await page.screenshot({path:join(dir,`mobile-${['Обзор','Стримы','Аналитика'].indexOf(name)}.png`),fullPage:name!=='Аналитика'});}
