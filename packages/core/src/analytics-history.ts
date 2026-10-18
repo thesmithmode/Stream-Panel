@@ -25,6 +25,7 @@ type Session = {
 type Report = ReturnType<typeof audienceAnalytics> & {
     insights?:InsightCard[];
     clockBuckets?: ClockBucket[];
+    clockRevision?:string;
     aggregate?: boolean;
     preparing?: boolean;
     ready?: number;
@@ -330,6 +331,7 @@ export class AnalyticsHistory {
         if (!next.done)
             return clockOnly?{filters:validation.filters,...next.value,stage:'aggregate'}:{ ...validation, ...next.value, stage: 'aggregate' };
         this.jobs.delete(fingerprint);
+        next.value.clockRevision=fingerprint;
         try{
             job.workspace.clockPages('all',0,30);
             const value=clockOnly?this.clockResult(next.value,job.workspace,options):this.page(next.value,job.workspace,options);

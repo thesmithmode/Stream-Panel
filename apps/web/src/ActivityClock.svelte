@@ -7,7 +7,7 @@
  import {chartMetrics} from './chart-series';
  import Help from './Help.svelte';
  import PeriodSelect from './PeriodSelect.svelte';
- let {scope,categoryFilter,rows,metric=$bindable('viewers'),resolution=$bindable(15),timezone,period='all',onperiod,windows=[],people=[],summary=[],onPerson,loadVisitors}:{scope?:string;categoryFilter:Snippet<[string]>;rows:ClockActivity[];metric?:ActivityMetric;resolution?:number;timezone:string;period?:number|'all'|'custom';onperiod:(value:number|'all'|'custom')=>void;windows?:Window[];people?:TimePerson[];summary?:TimeAudienceSummary[];onPerson:(id:string)=>void;loadVisitors?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>}=$props();
+ let {scope,visitorRevision,categoryFilter,rows,metric=$bindable('viewers'),resolution=$bindable(15),timezone,period='all',onperiod,windows=[],people=[],summary=[],onPerson,loadVisitors}:{visitorRevision?:string|undefined;scope?:string;categoryFilter:Snippet<[string]>;rows:ClockActivity[];metric?:ActivityMetric;resolution?:number;timezone:string;period?:number|'all'|'custom';onperiod:(value:number|'all'|'custom')=>void;windows?:Window[];people?:TimePerson[];summary?:TimeAudienceSummary[];onPerson:(id:string)=>void;loadVisitors?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>}=$props();
  let day=$state('all'),currency=$state('RUB'),selected=$state<number|null>(null),availableWidth=$state(800);
  const plotWidth=$derived(Math.max(300,availableWidth));
  const step=$derived([1,5,15,30,60].includes(resolution)?resolution:15);
@@ -54,7 +54,7 @@
   {#each ticks as minute}<text x={45+(minute-start)/span*(plotWidth-70)} y="230" text-anchor={minute===start?'start':minute===start+span?'end':'middle'} fill="currentColor" font-size="12">{clockLabel(minute)}</text>{/each}
  </svg></div>
  <p class="clock-caption small" role="status">{chosen?description(chosen):'Нажмите столбец: точное значение, люди и их явка. Серый — нет данных.'}</p>
-<TimeAudience {scope} {windows} {people} {summary} {timezone} {onPerson} {loadVisitors} {day} resolution={step} {selected}/>
+<TimeAudience {scope} revision={visitorRevision} {windows} {people} {summary} {timezone} {onPerson} {loadVisitors} {day} resolution={step} {selected}/>
 </section>
 <style>
  .clock-controls{display:flex;flex-wrap:wrap;gap:12px;padding:16px 20px}.clock-controls label{display:grid;gap:6px;font-size:12px;flex:1 1 160px;min-width:0}select{width:100%;min-width:0}.clock-caption{padding:0 20px 12px;margin:0}.clock-plot{padding:8px 16px;min-width:0}svg{display:block;width:100%;height:auto;overflow:visible}g{cursor:pointer}g.chosen{outline:1px solid var(--accent)}g:focus{outline:2px solid var(--accent)}
