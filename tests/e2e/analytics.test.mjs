@@ -52,8 +52,8 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    },days);
    await goto(page,origin);await page.getByLabel('Логин',{exact:true}).fill(profile);await page.getByLabel('Пароль',{exact:true}).fill(`${profile}-analytics-password`);await page.getByRole('button',{name:'Войти',exact:true}).click();
    const analyticsResponse=await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});let analyticsData=await analyticsResponse.json();await page.getByRole('heading',{name:'YouTube · итоги канала',exact:true}).waitFor();await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
-   const report=page.getByRole('heading',{name:'YouTube · итоги канала',exact:true}).locator('..').locator('..');
-   await report.locator('summary').click();
+   const report=page.locator('.youtube-report');
+   await report.getByRole('button',{name:'По дням',exact:true}).click();
    for(const label of ['Дата','Просмотры','Минуты просмотра','Подписались','Отписались','unknownMetric'])assert.equal(await report.getByRole('columnheader',{name:label,exact:true}).count(),1);
    assert.equal(await report.getByRole('cell',{name:'2026-10-05',exact:true}).count(),1);
    const comparison=page.getByRole('heading',{name:'Сравнение стримов',exact:true}).locator('..').locator('..');
