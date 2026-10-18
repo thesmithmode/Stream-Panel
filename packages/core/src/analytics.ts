@@ -23,6 +23,7 @@ export interface AnalyticsOptions {
     clockMinute?:number;
     clockResolution?:number;
     clockOffset?:number;
+    clockBatch?:boolean;
     minSessions?: number;
     regularThresholdPercent?: number;
     minMinutes?: number;

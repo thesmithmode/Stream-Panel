@@ -302,6 +302,7 @@ export class StreamStore {
     return this.history.query(options.sessionId?{...options,sessionId:this.groups.root(options.sessionId)}:options);
   }
 
+  clockAudience(options:AnalyticsOptions){return this.history.clockAudience(options);}
   warmAnalytics(options:AnalyticsOptions){return this.history.warm(options);}
 
   youtubeQuota(day: string, profile: string, cost = 1): boolean {

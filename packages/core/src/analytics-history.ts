@@ -33,6 +33,7 @@ type Report = ReturnType<typeof audienceAnalytics> & {
     audiencePage?: {total:number;offset:number;limit:number};
     clockVisitors?: ReturnType<AnalyticsWorkspace<Person>['clockPage']>;
 };
+type ClockResponse={filters:Report['filters'];clockVisitors?:ReturnType<AnalyticsWorkspace<Person>['clockPage']>;clockPages?:ReturnType<AnalyticsWorkspace<Person>['clockPages']>;preparing?:boolean;ready?:number;total?:number;stage?:string};
 type Person = Report['audience'][number] & {
     sessionCount: number;
     attendanceCount: number;
@@ -92,6 +93,11 @@ export class AnalyticsHistory {
         const page=workspace.people.page(options.audienceOffset??0,options.audienceSearch??'',options.audienceSort??'core',options.audienceCoreOnly??false);
         return {...value,audience:page.items,...(workspace.people.size>100?{audiencePage:{total:page.total,offset:page.offset,limit:page.limit}}:{}),...(options.clockMinute!==undefined?{clockVisitors:workspace.clockPage(options.clockDay??'all',options.clockMinute,options.clockResolution??60,options.clockOffset??0)}:{})};
     }
+    private clockResult(value:Report,workspace:AnalyticsWorkspace<Person>|undefined,options:AnalyticsOptions):ClockResponse{
+        const day=options.clockDay??'all',minute=options.clockMinute??0,resolution=options.clockResolution??60;
+        return {filters:value.filters,...(options.clockBatch?{clockPages:workspace?.clockPages(day,minute,resolution)??[]}:{clockVisitors:workspace?.clockPage(day,minute,resolution,options.clockOffset??0)??{items:[],total:0,offset:options.clockOffset??0,limit:100}})};
+    }
+    clockAudience(options:AnalyticsOptions):ClockResponse{return this.resolve(options,true,true);}
     private checkWorkspace(workspace:AnalyticsWorkspace<Person>){
         for(;;){
             try{workspace.checkBudget();return;}catch(error){
@@ -248,25 +254,30 @@ export class AnalyticsHistory {
     }
     private warmCursor=0;
     private warmCutoff=0;
+    private warmCategories:string[]=[];
     warm(options:AnalyticsOptions){
         // One bounded chunk per call. A fixed snapshot prevents moving live windows
         // from restarting a build. Standard periods are ready before navigation.
-        if(!this.warmCutoff)this.warmCutoff=Math.floor(options.toMs/60000)*60000;
+        if(!this.warmCutoff){this.warmCutoff=Math.floor(options.toMs/60000)*60000;this.warmCategories=[];}
         const toMs=this.warmCutoff,variants=[7,30,0].flatMap(days=>['all','twitch','youtube'].map(source=>({...options,source:source as NonNullable<AnalyticsOptions['source']>,fromMs:days?Math.max(0,toMs-days*86400000):0,toMs,summaryOnly:true,includeInsights:true})));
-        const current={...variants[this.warmCursor]!,category:options.category??''};
+        variants.push(...this.warmCategories.map(category=>({...options,source:'all' as const,fromMs:0,toMs,summaryOnly:true,includeInsights:true,category})));
+        const current={category:options.category??'',...variants[this.warmCursor]!};
         const prepared=this.prepare(current);if(prepared.preparing)return prepared;
         const report=this.report(current);
         if(report.preparing)return {preparing:true,ready:this.warmCursor,total:variants.length};
+        if(this.warmCursor===6)this.warmCategories=report.availableCategories.filter(c=>c.id).slice(0,7).map(c=>c.id);
         this.warmCursor++;
-        const preparing=this.warmCursor<variants.length;
+        const total=9+this.warmCategories.length,preparing=this.warmCursor<total;
         if(!preparing){this.warmCursor=0;this.warmCutoff=0;}
-        return {preparing,ready:preparing?this.warmCursor:variants.length,total:variants.length};
+        return {preparing,ready:preparing?this.warmCursor:total,total};
     }
     query(options:AnalyticsOptions):Report{
         return options.sessionId?audienceAnalytics(this.db,options):this.resolve(options,options.summaryOnly??false);
     }
     report(options:AnalyticsOptions):Report{return this.resolve(options,true);}
-    private resolve(options: AnalyticsOptions,historical:boolean):Report {
+    private resolve(options:AnalyticsOptions,historical:boolean,clockOnly?:false):Report;
+    private resolve(options:AnalyticsOptions,historical:boolean,clockOnly:true):ClockResponse;
+    private resolve(options: AnalyticsOptions,historical:boolean,clockOnly=false):Report|ClockResponse {
         this.checkCacheBudget();
         // Validate filters without loading audience facts on a completed-cache hit.
         if (!Number.isSafeInteger(options.fromMs) || options.fromMs < 0 || !Number.isSafeInteger(options.toMs) || options.toMs <= options.fromMs)
@@ -275,14 +286,15 @@ export class AnalyticsHistory {
         const sessions = this.sessions(options);
         const live = sessions.some(session => session.ended_at_ms === null);
         const lastEnd = sessions.reduce((end, session) => Math.max(end, session.ended_at_ms ?? options.toMs), options.fromMs);
-        const {audienceOffset,audienceSearch,audienceSort,audienceCoreOnly,clockDay,clockMinute,clockResolution,clockOffset,...baseOptions}=options;
-        void audienceOffset;void audienceSearch;void audienceSort;void audienceCoreOnly;void clockDay;void clockMinute;void clockResolution;void clockOffset;
+        const {audienceOffset,audienceSearch,audienceSort,audienceCoreOnly,clockDay,clockMinute,clockResolution,clockOffset,clockBatch,...baseOptions}=options;
+        void audienceOffset;void audienceSearch;void audienceSort;void audienceCoreOnly;void clockDay;void clockMinute;void clockResolution;void clockOffset;void clockBatch;
         const canonical = { ...baseOptions,source:options.source??'all',category:options.category??'', fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
         const fingerprint = createHash('sha256').update(JSON.stringify([historical, Object.fromEntries(Object.entries(canonical).sort(([a],[b])=>a.localeCompare(b))), this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.statement('SELECT * FROM person_preferences ORDER BY person_id').all(), this.statement('SELECT * FROM person_tags ORDER BY person_id,label').all(), this.followerRevision()])).digest('hex');
         const liveRevision=JSON.stringify(sessions.filter(s=>s.ended_at_ms===null).map(s=>[s.id,s.revision]));
         const retained=this.completed.get(fingerprint);
         const cached=retained&&(!live||retained.liveRevision===liveRevision)?retained:undefined;
         if(cached){
+            if(clockOnly)return this.clockResult({...cached.value,filters:{...cached.value.filters,fromMs:options.fromMs,toMs:options.toMs}},cached.workspace,options);
             this.completed.delete(fingerprint);this.completed.set(fingerprint,cached);
             const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as { payload_json: string; updated_at_ms: number } | undefined : undefined;
             return this.page({ ...structuredClone(cached.value), filters: { ...cached.value.filters, fromMs: options.fromMs, toMs: options.toMs }, youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, donationTiming: donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow', options.category) },cached.workspace,options);
@@ -316,10 +328,11 @@ export class AnalyticsHistory {
             throw error;
         }
         if (!next.done)
-            return { ...validation, ...next.value, stage: 'aggregate' };
+            return clockOnly?{filters:validation.filters,...next.value,stage:'aggregate'}:{ ...validation, ...next.value, stage: 'aggregate' };
         this.jobs.delete(fingerprint);
         try{
-            const value=this.page(next.value,job.workspace,options);
+            job.workspace.clockPages('all',0,30);
+            const value=clockOnly?this.clockResult(next.value,job.workspace,options):this.page(next.value,job.workspace,options);
             this.remember(fingerprint,next.value,job.workspace,job.liveRevision);
             return value;
         }catch(error){job.workspace.dispose();throw error;}

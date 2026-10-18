@@ -4,6 +4,7 @@ import type {StreamStore} from '../../../packages/core/src/store.js';
 export const storeOperations={
   channelOverview:"cached",
   analytics:"cached",
+  clockAudience:"cached",
   warmAnalytics:"maintenance",
   streamSample:"write",
   youtubeViewers:"write",

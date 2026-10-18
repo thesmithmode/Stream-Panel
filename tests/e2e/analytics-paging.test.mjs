@@ -21,12 +21,31 @@ test('large report pages, searches and clock visitor pages remain complete and r
   const clock=page.locator('.activity-clock');await clock.locator('svg g').filter({hasNot:page.locator('title:has-text("нет данных")')}).first().click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);
   await clock.getByRole('button',{name:'Следующие в интервале',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===25);
   await clock.getByRole('button',{name:'Предыдущие в интервале',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);
+  // All first pages for the half-hour day arrive before any column is clicked.
+  const batch=page.waitForResponse(r=>r.url().includes('/analytics/clock?')&&new URL(r.url()).searchParams.get('clockResolution')==='30');
+  await clock.getByLabel('Шаг графика').selectOption('30');await batch;
+  let clockRequests=0;const countRequests=request=>{if(request.url().includes('/analytics/clock?'))clockRequests++;};page.on('request',countRequests);
+  const bars=clock.locator('svg g').filter({hasNot:page.locator('title:has-text("нет данных")')});
+  for(let i=0;i<6;i++){await bars.nth(i%2).click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);}
+  assert.equal(clockRequests,0,'prepared column switches make no requests');page.off('request',countRequests);
   let fault=true;
-  await page.route('**/api/v1/analytics?*',route=>{if(fault&&new URL(route.request().url()).searchParams.has('clockMinute')){fault=false;return route.fulfill({status:400,json:{error:'CLOCK_UNAVAILABLE'}});}return route.continue();});
-  await clock.locator('svg g').filter({hasNot:page.locator('title:has-text("нет данных")')}).nth(1).click();await clock.getByRole('alert').filter({hasText:'CLOCK_UNAVAILABLE'}).waitFor();await page.unroute('**/api/v1/analytics?*');
+  await page.route('**/api/v1/analytics/clock?*',route=>{if(fault&&new URL(route.request().url()).searchParams.get('clockOffset')==='100'){fault=false;return route.fulfill({status:400,json:{error:'CLOCK_UNAVAILABLE'}});}return route.continue();});
+  await clock.getByRole('button',{name:'Следующие в интервале',exact:true}).click();await clock.getByRole('alert').filter({hasText:'CLOCK_UNAVAILABLE'}).waitFor();assert.equal(await clock.locator('.clock-plot').isVisible(),true);await page.unroute('**/api/v1/analytics/clock?*');
+  await clock.getByRole('button',{name:'Предыдущие в интервале',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);
   let preparing=true;
-  await page.route('**/api/v1/analytics?*',route=>{if(preparing&&new URL(route.request().url()).searchParams.has('clockMinute')){preparing=false;return route.fulfill({json:{preparing:true}});}return route.continue();});
-  await clock.locator('svg g').filter({hasNot:page.locator('title:has-text("нет данных")')}).first().click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);await page.unroute('**/api/v1/analytics?*');
+  await page.route('**/api/v1/analytics/clock?*',route=>{if(preparing&&new URL(route.request().url()).searchParams.get('clockOffset')==='100'){preparing=false;return route.fulfill({json:{preparing:true}});}return route.continue();});
+  await clock.getByRole('button',{name:'Следующие в интервале',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===25);await page.unroute('**/api/v1/analytics/clock?*');
+  // Auto-refresh updates values without hiding plots, replacing rows or resetting page two.
+  await clock.scrollIntoViewIfNeeded();const scroll=await page.evaluate(()=>scrollY);await page.evaluate(()=>{window.clockNode=document.querySelector('.clock-plot');window.visitorNode=document.querySelector('.time-audience tbody tr');});
+  let entered,release;const waiting=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);
+  await page.route('**/api/v1/analytics?*',async route=>{entered();await gate;return route.continue();});
+  await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));await waiting;
+  assert.equal(await clock.locator('.clock-plot').isVisible(),true);assert.equal(await clock.locator('.time-audience').isVisible(),true);
+  const refreshed=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/analytics');release();await refreshed;await page.unroute('**/api/v1/analytics?*');
+  await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');
+  assert.equal(await page.evaluate(()=>window.clockNode===document.querySelector('.clock-plot')),true);assert.equal(await page.evaluate(()=>window.visitorNode===document.querySelector('.time-audience tbody tr')),true);
+  assert.equal(await clock.locator('tbody tr').count(),25);assert.ok(Math.abs((await page.evaluate(()=>scrollY))-scroll)<5);
+  const minuteCells=await audience.locator('tbody tr td:nth-child(3)').allTextContents();assert.ok(minuteCells.every(text=>/^[\d\s\u00a0]+$/.test(text)),'minutes display whole numbers');
   for(const width of [1280,390,320]){await page.setViewportSize({width,height:900});await assertUiLayout(page);}
   if(process.env.STREAM_PANEL_QA_DIR){await mkdir(process.env.STREAM_PANEL_QA_DIR,{recursive:true});await clock.scrollIntoViewIfNeeded();await page.screenshot({path:join(process.env.STREAM_PANEL_QA_DIR,'analytics-paging-320.png')});}
   assert.deepEqual(errors,[]);assert.ok(page.url().startsWith(origin));

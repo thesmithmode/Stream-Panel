@@ -4,10 +4,10 @@ import type { StorePort } from './store-contract.js';
 import { object, string } from './provider-values.js';
 import { analyticsSettings } from './analytics-settings.js';
 import { randomUUID } from 'node:crypto';
-type Store = StorePort<'mergeSessions' | 'unmergeSessions' | 'analytics' | 'channelOverview' | 'deleteManualSession' | 'endSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'startSession' | 'streamMetadata' | 'summary'>;
+type Store = StorePort<'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteManualSession' | 'endSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'startSession' | 'streamMetadata' | 'summary'>;
 export function registerStreamsRoutes(app: FastifyInstance, db: Store, configuration: ConfigurationPort) {
     app.get("/api/v1/overview", () => db.call("channelOverview", configuration.value.excludedBotLogins));
-    app.get("/api/v1/analytics", async (request) => {
+    for(const path of ["/api/v1/analytics","/api/v1/analytics/clock"])app.get(path, async (request) => {
         const q = object(request.query);
         const sessionId = string(q.session), defaults = analyticsSettings(configuration.value.analyticsSettings);
         const source = string(q.source) || 'all', coreRule = string(q.coreRule) || defaults.coreRule;
@@ -15,10 +15,10 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
             throw new Error('INVALID_ANALYTICS_FILTER');
         if (coreRule !== 'either' && coreRule !== 'both' && coreRule !== 'frequency')
             throw new Error('INVALID_ANALYTICS_FILTER');
-        return db.call("analytics", {
+        return db.call(request.routeOptions.url==='/api/v1/analytics/clock'?"clockAudience":"analytics", {
             ...(sessionId ? { sessionId } : {}), ...(string(q.mode)==='summary'?{summaryOnly:true}:{}),...(string(q.insights)==='1'?{includeInsights:true}:{}), fromMs: sessionId ? 0 : Number(q.from), toMs: sessionId ? Date.now() : Math.min(Number(q.to), Date.now()), source, category: string(q.category),
             ...(q.audienceOffset===undefined?{}:{audienceOffset:Number(q.audienceOffset)}),...(q.audienceSearch===undefined?{}:{audienceSearch:string(q.audienceSearch)}),...(q.audienceSort===undefined?{}:{audienceSort:string(q.audienceSort)}),...(q.audienceCoreOnly===undefined?{}:{audienceCoreOnly:string(q.audienceCoreOnly)==='1'}),
-            ...(q.clockMinute===undefined?{}:{clockMinute:Number(q.clockMinute),clockDay:string(q.clockDay)||'all',clockResolution:Number(q.clockResolution??60),clockOffset:Number(q.clockOffset??0)}),
+            ...(q.clockMinute===undefined?{}:{clockMinute:Number(q.clockMinute),clockDay:string(q.clockDay)||'all',clockResolution:Number(q.clockResolution??60),clockOffset:Number(q.clockOffset??0),clockBatch:string(q.clockBatch)==='1'}),
             regularThresholdPercent: q.regularThresholdPercent === undefined ? defaults.regularThresholdPercent : Number(q.regularThresholdPercent), minSessions: q.minSessions === undefined ? defaults.minSessions : Number(q.minSessions), minMinutes: q.minMinutes === undefined ? defaults.minMinutes : Number(q.minMinutes), minMessages: q.minMessages === undefined ? defaults.minMessages : Number(q.minMessages),
             chatWindowMinutes: q.chatWindowMinutes === undefined ? defaults.chatWindowMinutes : Number(q.chatWindowMinutes), coreRule, timezone: string(q.timezone) || defaults.timezone,
             excludedLogins: configuration.value.excludedBotLogins, ownerId: configuration.value.twitch?.userId ?? "", youtubeAccount: configuration.value.youtube?.userId ?? configuration.value.youtubeAccountId ?? "",
