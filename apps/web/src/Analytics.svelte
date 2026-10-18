@@ -1,5 +1,4 @@
 <script lang="ts">
-  import {ConnectionError} from "./request";
   import { onMount, untrack } from "svelte";
   import { api, date, money } from "./api";
   import {analyticsView,loadAnalyticsView,saveAnalyticsView} from "./analytics-view";
@@ -51,6 +50,7 @@
     const timer=window.setTimeout(()=>{void reportPage({audienceOffset:offset,audienceSearch:term,audienceSort:sort,audienceCoreOnly:core?1:0},controller.signal).then(result=>{if(!controller.signal.aborted)pagedAudience=result;}).catch(e=>{if(!controller.signal.aborted)error=e.message;}).finally(()=>{if(!controller.signal.aborted)audienceBusy=false;});},150);
     return ()=>{controller.abort();window.clearTimeout(timer);};
   });
+  const reportPending=$derived(busy||!!reportError||!!(data?.filters&&(data.filters.category!==category||data.filters.source!==source||data.filters.timezone!==timezone)));
   const weekdays=["пн","вт","ср","чт","пт","сб","вс"];
   const hourCells=$derived(new Map((data?.hours??[]).map((h:any)=>[`${h.day}:${h.hour}`,h])) as Map<string,any>);
   const hourStreamCounts=$derived(new Map((data?.clockBuckets??[]).filter((b:any)=>b.resolution===60&&weekdays.includes(b.day)).map((b:any)=>[`${b.day}:${b.minute/60}`,b.streams])));
@@ -101,8 +101,8 @@
       let result=await api(`analytics?${q}`);
       while(result.preparing&&id===requestId){buildProgress=`${result.stage==='aggregate'?'Собираем отчёт':'Готовим историю'}: ${Math.round(result.ready/Math.max(1,result.total)*100)}%`;await new Promise(resolve=>setTimeout(resolve,result.stage==='aggregate'?100:250));if(id!==requestId)return;result=await api(`analytics?${q}`);}
       buildProgress='';
-      if(id===requestId){data=result;selected=null;streamPage=0;}
-    }catch(e){if(id===requestId){error=(e as Error).message;reportError=error;if(!(e instanceof ConnectionError))data=null;selected=null;}}
+      if(id===requestId){if(result.filters&&(result.filters.category!==category||result.filters.source!==source||result.filters.timezone!==timezone))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');data=result;selected=null;streamPage=0;}
+    }catch(e){if(id===requestId){error=(e as Error).message;reportError=error;selected=null;}}
     finally{if(id===requestId)busy=false;}
   }
   onMount(()=>{
@@ -112,7 +112,7 @@
   });
 </script>
 {#snippet categoryFilter(label:string)}
- <div class="chart-category" aria-busy={busy}><label>Категория<select aria-label={label} bind:value={category}><option value="">Все категории</option>{#each categoryOptions as c}<option value={c.id}>{c.name}</option>{/each}</select></label>{#if busy}<p class="small muted chart-refresh">Обновляем данные…</p>{:else if reportError}<p class="small chart-refresh" role="alert">{reportError} Показаны прежние данные.</p>{/if}</div>
+ <div class="chart-category" aria-busy={busy}><label>Категория<select aria-label={label} bind:value={category}><option value="">Все категории</option>{#each categoryOptions as c}<option value={c.id}>{c.name}</option>{/each}</select></label>{#if busy}<p class="small muted chart-refresh">Обновляем данные…</p>{:else if reportError}<p class="small chart-refresh">{reportError} Прежние данные скрыты.</p>{/if}</div>
 {/snippet}
 <section class="panel analytics-filter">
   <header><h2>Период и фильтры</h2><PeriodSelect value={period} label="Период аналитики" days={[7,30]} custom onchange={value=>{if(value==='custom')period='custom';else preset(value);}}/></header>
@@ -143,6 +143,7 @@
 </div>
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 {#if data}
+ <div class="analytics-results" class:report-pending={reportPending} aria-busy={reportPending}>
   <Insights report={data} loading={busy} {onPerson} {onStream}/>
   {#if view.hours}<section class="panel"><header><h2>Активность по дням и часам</h2><label>Метрика карты<select aria-label="Метрика карты" bind:value={view.heatMetric}><option value="viewers">Зрители (все)</option><option value="observed">Наблюдения Twitch</option><option value="estimated">Оценка активности YouTube</option><option value="messages">Сообщения</option><option value="donations">Число донатов</option><option value="amount">Сумма донатов</option></select></label>{#if view.heatMetric==='amount'}<label>Валюта карты<select aria-label="Валюта карты" bind:value={heatCurrency}>{#each [...new Set<string>((data.hours??[]).flatMap((h:any)=>Object.keys(h.donationTotals)))] as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select></label>{/if}<label>Расчёт карты<select aria-label="Расчёт карты" bind:value={heatCalculation}><option value="average">Среднее / на час эфира</option><option value="total">Накопленная сумма</option></select></label></header>
     {@render categoryFilter("Категория карты активности")}
@@ -188,7 +189,8 @@
       <Help id="analytics-intervals" label="О границах интервалов" text={`${data.aggregate?"Показаны интервалы выбранного дня, до 100 строк.":"Показаны первые 100 интервалов."} Границы означают сигналы API с минутной детализацией, не доказанный вход/выход видеозрителя.`}/>
     </div>
   </section>{/if}
+ </div>
 {/if}
 
-<style>.chart-refresh{margin:8px 0 0}.chart-category{padding:10px 16px 0}.chart-category label{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted)}.chart-category select{width:auto;max-width:100%;min-width:0;padding:6px 10px;font-size:12px;flex:1}.analytics-category-filter{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:10px 16px;margin-bottom:16px;background:var(--panel,#12161e);border:1px solid var(--border);border-radius:10px}.analytics-category-filter label{display:flex;align-items:center;gap:10px;font-size:12px}.analytics-category-filter select{max-width:240px;padding:7px 10px}.analytics-category-filter>span{flex:1;min-width:160px;font-size:11px}@media(max-width:600px){.analytics-filter .analytics-controls .analytics-date{grid-column:1/-1}.analytics-category-filter label{flex:1}.analytics-category-filter select{flex:1;min-width:0;max-width:100%}.analytics-category-filter>span{display:none}}.compact-audience{max-height:560px;overflow:auto}.compact-audience-table{width:100%;border-collapse:collapse;min-width:620px}.compact-audience-table td,.compact-audience-table th{padding:12px;text-align:left;border-bottom:1px solid var(--border);font-size:12px}.hour-table summary{padding:16px 20px;font-weight:600;cursor:pointer}.hour-table .table-wrap{max-height:440px;overflow:auto}.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}.analytics-help{padding:0 20px 12px;}header h2{display:flex;align-items:center;gap:8px;}
+<style>.report-pending :global(.hour-heatmap),.report-pending :global(.clock-plot),.report-pending :global(.clock-caption),.report-pending :global(.time-audience),.report-pending :global(.pattern-bars),.report-pending :global(.bars),.report-pending :global(.compact-audience),.report-pending :global(.comparison-bars),.report-pending :global(.growth-plot),.report-pending :global(.regular-summary),.report-pending :global(.composition-bar),.report-pending :global(.composition-row),.report-pending :global(.table-wrap),.report-pending :global(.donation-patterns header>span){visibility:hidden}.chart-refresh{margin:8px 0 0}.chart-category{padding:10px 16px 0}.chart-category label{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted)}.chart-category select{width:auto;max-width:100%;min-width:0;padding:6px 10px;font-size:12px;flex:1}.analytics-category-filter{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:10px 16px;margin-bottom:16px;background:var(--panel,#12161e);border:1px solid var(--border);border-radius:10px}.analytics-category-filter label{display:flex;align-items:center;gap:10px;font-size:12px}.analytics-category-filter select{max-width:240px;padding:7px 10px}.analytics-category-filter>span{flex:1;min-width:160px;font-size:11px}@media(max-width:600px){.analytics-filter .analytics-controls .analytics-date{grid-column:1/-1}.analytics-category-filter label{flex:1}.analytics-category-filter select{flex:1;min-width:0;max-width:100%}.analytics-category-filter>span{display:none}}.compact-audience{max-height:560px;overflow:auto}.compact-audience-table{width:100%;border-collapse:collapse;min-width:620px}.compact-audience-table td,.compact-audience-table th{padding:12px;text-align:left;border-bottom:1px solid var(--border);font-size:12px}.hour-table summary{padding:16px 20px;font-weight:600;cursor:pointer}.hour-table .table-wrap{max-height:440px;overflow:auto}.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}.analytics-help{padding:0 20px 12px;}header h2{display:flex;align-items:center;gap:8px;}
 </style>

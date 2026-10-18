@@ -1,4 +1,4 @@
-import {clockActivitySeries} from '../../dist/packages/core/src/clock-activity.js';
+import {clockActivitySeries,clockDonationSeries} from '../../dist/packages/core/src/clock-activity.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
@@ -80,7 +80,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    }
    for(const metric of ['viewers','twitchViewers','youtubeViewers','messages','twitchMessages','youtubeMessages','watchHours','twitchWatchHours','youtubeWatchHours','donations']){
     await activity.getByLabel('Метрика графика').selectOption(metric);
-    const expected=clockActivitySeries(analyticsData.activityClock,metric,60);
+    const expected=metric==='donations'?clockDonationSeries(analyticsData.activityClock,'RUB',60):clockActivitySeries(analyticsData.activityClock,metric,60);
     const labels=await activity.locator('svg g').evaluateAll(groups=>groups.map(g=>g.getAttribute('aria-label')));
     expected.forEach((b,i)=>assert.ok(labels[i].includes(b.value===null?'нет данных':b.value.toLocaleString('ru-RU',{maximumFractionDigits:2}))));
    }

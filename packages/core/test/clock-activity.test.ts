@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {clockActivity,clockActivitySeries,mergeClockActivity} from '../src/clock-activity.js';
+import {clockActivity,clockActivitySeries,mergeClockActivity,clockDonationSeries,clockAxis} from '../src/clock-activity.js';
 const minute=60000,base=Date.UTC(2026,9,12,7); // 10:00 Moscow, Monday
 const series=(rows:ReturnType<typeof clockActivity>,metric:'viewers'|'messages'='viewers',resolution=15,day='all')=>clockActivitySeries(rows,metric,resolution,day);
 test('clock overlays dates, weights partial airtime, excludes missing/partial samples and retains true zero',()=>{
@@ -54,4 +54,25 @@ test('donations are normalized by clipped airtime and zero is distinct from no b
  assert.equal(bucket.value,40);assert.equal(bucket.total,1);assert.equal(bucket.duration,1.5*minute);
  assert.equal(clockActivitySeries(rows,'donations',1).find(b=>b.minute===601)!.value,0);
  assert.equal(clockActivitySeries(rows,'donations',1)[0]!.value,null);
+});
+
+
+test('donation clock sums exact currency amounts and uses actual airtime instead of counts',()=>{
+ const a=clockActivity([{at:base,donations:1,donationAmounts:{RUB:'10000',USD:'200'}}],[{from:base,to:base+minute}],'Europe/Moscow');
+ const b=clockActivity([{at:base+86400000,donations:1,donationAmounts:{RUB:'20000',USD:'100'}}],[{from:base+86400000,to:base+86400000+minute/2}],'Europe/Moscow');
+ const before=JSON.stringify([a,b]),rows=mergeClockActivity([...a,...b]);
+ assert.equal(clockDonationSeries(rows,'RUB',60)[10]!.value,12000);
+ assert.equal(clockDonationSeries(rows,'USD',60)[10]!.value,120);
+ assert.equal(clockDonationSeries(rows,'EUR',60)[10]!.value,0);
+ assert.equal(clockDonationSeries(rows,'RUB',60)[0]!.value,null);
+ assert.ok(clockDonationSeries(rows,'RUB',60,'weekends').every(b=>b.value===null));
+ assert.equal(clockDonationSeries(rows,'RUB',99).length,24);
+ assert.equal(JSON.stringify([a,b]),before);
+ rows[0]!.donationAmounts!.RUB='0';assert.equal(a[0]!.donationAmounts!.RUB,'10000');
+});
+test('numeric axis spans zero through the peak with readable intermediate levels',()=>{
+ for(const peak of [0,.03,1,3,12,5000]){
+  const levels=clockAxis(peak);assert.equal(levels[0],0);assert.ok(levels.at(-1)!>=peak);assert.ok(levels.length>=3&&levels.length<=6);
+  assert.ok(levels.every((n,i)=>!i||n>levels[i-1]!));
+ }
 });
