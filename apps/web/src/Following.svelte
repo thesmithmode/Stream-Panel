@@ -26,7 +26,7 @@
    <p class="follow-state"><strong>{status(row.status)}</strong>{#if row.checkedAtMs!==null}<span class="small muted">Проверено {date(row.checkedAtMs)}</span>{/if}</p>
    {#if row.followedAtMs!==null}<p class="small">Последняя известная дата подписки: {date(row.followedAtMs)}</p>{/if}
    {#if sessionId}<p class="small">На момент стрима: {status(row.streamStatus)}</p>{/if}
-   {#if row.history.length}<details><summary>История изменений ({row.history.length})</summary><ul>{#each row.history as item}<li>{date(item.at)} · {status(item.status)}{#if item.status&&item.followedAtMs!==null}<span class="small muted"> · подписался {date(item.followedAtMs)}</span>{/if}</li>{/each}</ul></details>{/if}
+   {#if row.history.length}<details><summary>История изменений ({row.history.length})</summary><ul>{#each [...row.history].sort((a,b)=>b.at-a.at) as item}<li>{date(item.at)} · {status(item.status)}{#if item.status&&item.followedAtMs!==null}<span class="small muted"> · подписался {date(item.followedAtMs)}</span>{/if}</li>{/each}</ul></details>{/if}
   </article>{:else}<p class="muted">Нет связанных аккаунтов Twitch или YouTube.</p>{/each}
  {:else}
   <div class="follow-summary">

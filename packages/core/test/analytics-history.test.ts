@@ -312,6 +312,20 @@ test('background warm finishes standard periods before navigation, independent o
   let progress;do{progress=h.warm({...options,toMs});}while(progress.preparing);
   const aggregate=(h as any).aggregate;(h as any).aggregate=()=>{throw Error('hot report rebuilt');};
   for(const days of [7,30,0])for(const source of ['all','twitch','youtube'] as const){const r=h.report({includeInsights:true,summaryOnly:true,category:'',source,toMs,fromMs:days?toMs-days*86400000:0,...Object.fromEntries(Object.entries(options).filter(([k])=>!['fromMs','toMs'].includes(k)))});assert.equal(r.preparing,undefined);assert.ok(Array.isArray(r.insights));}
-  (h as any).aggregate=aggregate;h.close();
+  const category=h.report({...options,fromMs:0,toMs,category:'game',source:'all',summaryOnly:true,includeInsights:true});assert.equal(category.preparing,undefined);assert.equal(category.summary.messages,4);
+ (h as any).aggregate=aggregate;h.close();
+ }finally{s.close();}
+});
+
+test('clock endpoint returns only prepared visitor pages and corrections replace stale membership',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,3);const h=new AnalyticsHistory((s as any).db),opts={...options,summaryOnly:true,includeInsights:true},report=ready(h,opts),query={...opts,clockMinute:180,clockResolution:30,clockDay:'all',clockBatch:true};
+  let result=h.clockAudience(query);assert.equal(result.preparing,undefined);assert.equal(result.clockPages!.length,48);
+  assert.equal('timeline' in result,false);assert.equal('audience' in result,false);assert.deepEqual(result.clockPages!.find(p=>p.minute===180)!.page,h.query({...query,clockBatch:false}).clockVisitors);
+  const person=report.audience[0].id;s.renamePerson(person,'New name');
+  do{result=h.clockAudience(query);}while(result.preparing);
+  assert.equal(result.clockPages!.find(p=>p.minute===180)!.page.items[0]!.name,'New name');
+  assert.equal(h.clockAudience({...query,clockBatch:false,clockOffset:100}).clockVisitors!.items.length,0);
+  h.close();
  }finally{s.close();}
 });

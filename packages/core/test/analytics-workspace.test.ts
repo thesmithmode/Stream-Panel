@@ -20,3 +20,23 @@ test('low-disk workspace expansion fails without touching factual tables',()=>{
  const db=new Database(':memory:'),proxy=new Proxy(db,{get(target,key){if(key==='name')return '/proc/self';const v=Reflect.get(target,key,target);return typeof v==='function'?v.bind(target):v;}});
  const w=new AnalyticsWorkspace(proxy);assert.throws(()=>w.checkBudget(),/ANALYTICS_DISK_RESERVE/);w.dispose();const map=new DiskMap(db,'standalone_map');assert.deepEqual([...map.values()],[]);db.close();
 });
+
+test('clock batches match individual exact pages across gaps, weekdays, resolutions and page boundaries',()=>{
+ const db=new Database(':memory:'),w=new AnalyticsWorkspace<ReturnType<typeof person>>(db);
+ try{
+  for(let i=0;i<125;i++)w.people.set(String(i),person(String(i)));
+  const bucket=(day:string,minute:number,ids:string[])=>({day,minute,resolution:1,streams:1,airtimeMs:60000,personTimeMs:60000,averageAudience:1,people:ids.map(id=>({id,visits:1}))});
+  const ids=Array.from({length:125},(_,i)=>String(i));
+  w.addClock('same',[bucket('пн',0,ids),bucket('пн',2,ids),bucket('сб',0,ids)]);
+  w.addClock('other',[bucket('пн',29,['1']),bucket('пн',30,['2'])]);
+  for(const day of ['all','weekdays','weekends','пн','вс'])for(const resolution of [1,5,15,30,60]){
+   const pages=w.clockPages(day,0,resolution);assert.equal(pages.length,Math.min(48,1440/resolution));
+   for(const {minute,page} of pages)assert.deepEqual(page,w.clockPage(day,minute,resolution));
+   assert.strictEqual(w.clockPages(day,0,resolution),pages,'repeat uses prepared pages');
+  }
+  assert.equal(w.clockPages('all',0,30)[0]!.page.items.find(p=>p.id==='1')!.visits,2);
+  assert.equal(w.clockPages('all',0,30)[0]!.page.total,125);
+  assert.equal(w.clockPage('all',0,30,100).items.length,25);
+  assert.equal(w.clockPages('all',1439,1).at(-1)!.minute,1439);
+ }finally{w.dispose();db.close();}
+});

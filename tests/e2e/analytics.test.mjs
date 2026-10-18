@@ -51,11 +51,14 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
     return {from:String(new Date(localInput(span==='all'?0:Date.now()-span*86400000)).getTime()),to:String(new Date(localInput(Date.now())).getTime())};
    },days);
    await goto(page,origin);await page.getByLabel('Логин',{exact:true}).fill(profile);await page.getByLabel('Пароль',{exact:true}).fill(`${profile}-analytics-password`);await page.getByRole('button',{name:'Войти',exact:true}).click();
-   const analyticsResponse=await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});let analyticsData=await analyticsResponse.json();await page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).waitFor();await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
-   const report=page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).locator('..').locator('..');
-   for(const label of ['Дата','Просмотры','Минуты просмотра','Новые подписчики','Отписки','unknownMetric'])assert.equal(await report.getByRole('columnheader',{name:label,exact:true}).count(),1);
+   const analyticsResponse=await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});let analyticsData=await analyticsResponse.json();await page.getByRole('heading',{name:'YouTube · итоги канала',exact:true}).waitFor();await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
+   const report=page.getByRole('heading',{name:'YouTube · итоги канала',exact:true}).locator('..').locator('..');
+   await report.locator('summary').click();
+   for(const label of ['Дата','Просмотры','Минуты просмотра','Подписались','Отписались','unknownMetric'])assert.equal(await report.getByRole('columnheader',{name:label,exact:true}).count(),1);
    assert.equal(await report.getByRole('cell',{name:'2026-10-05',exact:true}).count(),1);
    const comparison=page.getByRole('heading',{name:'Сравнение стримов',exact:true}).locator('..').locator('..');
+   const newest=Math.max(...analyticsData.streamComparison.map(s=>s.startedAt));
+   assert.equal(await comparison.locator('tbody tr').first().locator('td').first().innerText(),new Date(newest).toLocaleString('ru-RU',{timeZone:'Europe/Moscow'}));
    assert.equal(await comparison.getByRole('cell',{name:'13.5 / 15',exact:true}).count(),3);
    assert.equal(await comparison.getByRole('cell',{name:'4.0 / 4',exact:true}).count(),3);
    assert.equal(await comparison.getByRole('columnheader',{name:'Чатеры: уник. / пик / ср.',exact:true}).count(),1);
@@ -96,7 +99,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    for(const metric of ['observed','estimated','messages','viewers']){await page.getByLabel('Метрика карты').selectOption(metric);const displayed=(await hourSection.locator('.analytics-table tbody tr').first().locator('td').nth(1).textContent()).trim(),value=metricValue(firstHour,metric);assert.equal(displayed,value===null?'нет данных':value.toFixed(1),`hour table should render ${metric} from API data`);}
    await page.getByLabel('Вид дней и часов').selectOption('map');assert.equal(await page.locator('.hour-heatmap').count(),1);
    for(const metric of ['observed','estimated','messages','viewers']){await page.getByLabel('Метрика карты').selectOption(metric);assert.ok(await page.locator('.hour-heatmap').count()>0);}
-   const sections=[['Отчёт YouTube','Агрегатный отчёт YouTube: все видео канала'],['График активности','Активность по часам'],['Сравнение категорий','Категории'],['Дни и часы','Активность по дням и часам'],['Сравнение стримов','Сравнение стримов'],['Возвращаемость участников','Возвращаемость участников']];
+   const sections=[['Отчёт YouTube','YouTube · итоги канала'],['График активности','Активность по часам'],['Сравнение категорий','Категории'],['Дни и часы','Активность по дням и часам'],['Сравнение стримов','Сравнение стримов'],['Возвращаемость участников','Возвращаемость участников']];
    for(const [label,heading] of sections){await page.getByLabel(label,{exact:true}).uncheck();assert.equal(await page.getByRole('heading',{name:heading,exact:true}).count(),0);await page.getByLabel(label,{exact:true}).check();}
    await page.getByLabel('График активности',{exact:true}).uncheck();
    await page.getByRole('button',{name:'Обзор',exact:true}).click();await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
@@ -149,7 +152,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    if(await page.locator('.analytics-thresholds').getAttribute('open')===null)await page.getByText('Настроить отображение',{exact:true}).click();
    await page.getByLabel('Часовой пояс сравнения').selectOption('UTC');await page.getByLabel('Категория динамики').selectOption('game');await advanceAutoFilter(autoFilter);assert.equal(await page.getByLabel('Категория Twitch').inputValue(),'game');assert.equal(await page.getByLabel('Категория суточного графика').inputValue(),'game');
    await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
-   assert.equal(await page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).count(),0);
+   assert.equal(await page.getByRole('heading',{name:'YouTube · итоги канала',exact:true}).count(),0);
    const resetCategory=watchAnalytics({source:'all',category:'',timezone:'UTC'});await page.getByRole('button',{name:'Сбросить категорию',exact:true}).click();await advanceAutoFilter(resetCategory);assert.equal(await page.getByLabel('Категория Twitch').inputValue(),'');
    const selectCategory=watchAnalytics({source:'all',category:'game',timezone:'UTC'});await page.getByLabel('Категория Twitch').selectOption('game');await advanceAutoFilter(selectCategory);
    const youtubeFilter=watchAnalytics({source:'youtube',category:'game',timezone:'UTC'});
@@ -186,8 +189,8 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    assert.equal(await page.getByRole('button',{name:'Демо',exact:true}).count(),0);
    await page.evaluate(()=>{Storage.prototype.getItem=()=>{throw new Error('storage unavailable');};Storage.prototype.setItem=()=>{throw new Error('storage unavailable');};});
    await page.getByRole('button',{name:'Обзор',exact:true}).click();await openAnalytics({source:'all',category:'',timezone:'Europe/Moscow'});await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
-   await page.getByRole('button',{name:'О данных отчёта YouTube',exact:true}).click();
-   assert.ok((await page.getByRole('dialog',{name:'О данных отчёта YouTube',exact:true}).textContent()).includes('Отчёт охватывает весь канал'));
+   await page.getByRole('button',{name:'Об итогах YouTube',exact:true}).click();
+   assert.ok((await page.getByRole('dialog',{name:'Об итогах YouTube',exact:true}).textContent()).includes('всех видео канала'));
    await page.keyboard.press('Escape');
    await page.locator('.compact-audience').getByRole('button',{name:`Regular ${profile}`,exact:true}).click();
    await page.getByRole('heading',{name:`Regular ${profile}`,exact:true}).waitFor();
