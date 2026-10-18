@@ -57,6 +57,8 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    for(const label of ['Дата','Просмотры','Минуты просмотра','Подписались','Отписались','unknownMetric'])assert.equal(await report.getByRole('columnheader',{name:label,exact:true}).count(),1);
    assert.equal(await report.getByRole('cell',{name:'2026-10-05',exact:true}).count(),1);
    const comparison=page.getByRole('heading',{name:'Сравнение стримов',exact:true}).locator('..').locator('..');
+   const newest=Math.max(...analyticsData.streamComparison.map(s=>s.startedAt));
+   assert.equal(await comparison.locator('tbody tr').first().locator('td').first().innerText(),new Date(newest).toLocaleString('ru-RU',{timeZone:'Europe/Moscow'}));
    assert.equal(await comparison.getByRole('cell',{name:'13.5 / 15',exact:true}).count(),3);
    assert.equal(await comparison.getByRole('cell',{name:'4.0 / 4',exact:true}).count(),3);
    assert.equal(await comparison.getByRole('columnheader',{name:'Чатеры: уник. / пик / ср.',exact:true}).count(),1);

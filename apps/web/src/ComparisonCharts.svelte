@@ -5,10 +5,10 @@
  import type {GrowthStream} from './audience-growth';
  interface ComparisonStream extends GrowthStream {title?:string;audience:number;returning:number}
  interface ComparisonCategory {name:string;minutes:number;sessions:number;messagesPerHour:number}
- let {categoryFilter,streams,categories,timezone,onStream}:{categoryFilter:Snippet<[string]>;streams:ComparisonStream[];categories:ComparisonCategory[];timezone:string;onStream:(id:string)=>void}=$props();
+ let {scope,categoryFilter,streams,categories,timezone,onStream}:{scope?:string;categoryFilter:Snippet<[string]>;streams:ComparisonStream[];categories:ComparisonCategory[];timezone:string;onStream:(id:string)=>void}=$props();
  let page=$state(0);
- $effect(()=>{void streams;page=0;});
- const displayed=$derived(streams.slice(page*100,(page+1)*100));
+ $effect(()=>{void scope;page=0;});
+ const displayed=$derived([...streams].sort((a,b)=>b.startedAt-a.startedAt).slice(page*100,(page+1)*100));
  const comparisons=$derived([
   {title:'Возвращаемость по эфирам',unit:'%',rows:displayed.map(s=>({label:date(s.startedAt).split(',')[0]!,value:s.audience?s.returning*100/s.audience:null,detail:`${s.returning} из ${s.audience} участников`}))},
   {title:'Активность чата по категориям',unit:'сообщ./ч',rows:categories.map(c=>({label:c.name,value:c.minutes?c.messagesPerHour:null,detail:`${c.sessions} эфиров · ${Math.round(c.minutes)} мин`}))}

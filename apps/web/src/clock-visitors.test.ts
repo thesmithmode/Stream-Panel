@@ -14,3 +14,11 @@ test('failed batches can retry, missing buckets are empty and close aborts in-fl
  const pending=new ClockVisitors(async(_,signal)=>{started(signal);return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason)));});
  const request=pending.page('all',30,0);await signal;pending.close();await assert.rejects(request);
 });
+test('cache eviction and oversized batches remain bounded without losing requested rows',async()=>{
+ let calls=0;const cache=new ClockVisitors(async q=>{calls++;return {clockPages:[{minute:Number(q.clockMinute),page}]};});
+ for(let i=0;i<33;i++)await cache.page(['all','weekdays','weekends'][i%3]!,1,Math.floor(i/3)*48);
+ assert.equal(calls,33);assert.deepEqual(await cache.page('all',1,0),page);assert.equal(calls,34);cache.close();
+ let largeCalls=0;const largePage={...page,items:[{id:'long',name:'x'.repeat(5*1024*1024),visits:1}]};
+ const large=new ClockVisitors(async()=>{largeCalls++;return {clockPages:[{minute:0,page:largePage}]};});
+ assert.equal((await large.page('all',30,0)).items[0]!.id,'long');await large.page('all',30,0);assert.equal(largeCalls,2,'oversized data is served without retaining it');large.close();
+});
