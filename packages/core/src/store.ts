@@ -1,6 +1,7 @@
 import {SessionGroups,logicalReadDatabase} from "./session-groups.js";
 import {AnalyticsHistory} from "./analytics-history.js";
 import {EventIngestion} from "./event-ingestion.js";
+import {RecentEvents} from './recent-events.js';
 export {priorModerationQuery} from "./event-ingestion.js";
 import {StreamSessions} from "./stream-sessions.js";
 import {IdentityLinks} from "./identity-links.js";
@@ -151,6 +152,8 @@ export class StreamStore {
     type?:string,
     source?:string,
   ) {return this.queries.events(sessionId?this.groups.root(sessionId):undefined,personId,fromMs,toMs,type,source);}
+  recentEvents(offset=0,limit=100) {return new RecentEvents(this.db).list(offset,limit);}
+  purgeRecentEvents() {return new RecentEvents(this.db).purge();}
   summary(
     sessionId?: string,
     excludedBotLogins: readonly string[] = [],
@@ -358,16 +361,25 @@ export class StreamStore {
         if (!m.id || !Number.isFinite(time)) continue;
         if (m.snippet.type === "messageDeletedEvent") {
           const deletedMessageId = m.snippet.messageDeletedDetails?.deletedMessageId;
-          if (typeof deletedMessageId === "string" && deletedMessageId.trim())
+          if (typeof deletedMessageId === "string" && deletedMessageId.trim()) {
             this.db.prepare("DELETE FROM youtube_messages WHERE account_id=? AND id=?").run(account, deletedMessageId);
+            new RecentEvents(this.db).removeYoutube(account,deletedMessageId);
+          }
         }
         if (m.snippet.type === "userBannedEvent") {
           const bannedChannelId = m.snippet.userBannedDetails?.bannedUserDetails?.channelId;
-          if (typeof bannedChannelId === "string" && bannedChannelId.trim())
+          if (typeof bannedChannelId === "string" && bannedChannelId.trim()) {
             this.db.prepare("DELETE FROM youtube_messages WHERE account_id=? AND author_id=?").run(account, bannedChannelId);
+            new RecentEvents(this.db).removeYoutube(account,undefined,bannedChannelId);
+          }
         }
-        if (insert.run(m.id, account, chat, m.authorDetails?.channelId ?? "", time, JSON.stringify(messageMetadata(m))).changes)
+        if (insert.run(m.id, account, chat, m.authorDetails?.channelId ?? "", time, JSON.stringify(messageMetadata(m))).changes) {
           this.ensureYoutubeIdentity(account,m.authorDetails,time);
+          const {displayMessage,textMessageDetails,...snippet}=m.snippet;
+          new RecentEvents(this.db).save({source:'youtube',accountId:account,externalId:m.id,type:m.snippet.type,
+            actor:m.authorDetails?.channelId?{externalId:m.authorDetails.channelId,displayName:m.authorDetails.displayName??m.authorDetails.channelId}:null,
+            occurredAtMs:time,receivedAtMs:Date.now(),payload:{...snippet,chatId:chat,text:displayMessage??textMessageDetails?.messageText??''}});
+        }
       }
     }).immediate();
   }
@@ -574,3 +586,4 @@ export class StreamStore {
     }
   }
 }
+
