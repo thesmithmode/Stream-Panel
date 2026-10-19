@@ -4,6 +4,7 @@ import {assertTimestamp,candidateKey,matchKey,daDonorExternalId,eventKey,type Ev
 import {chatMetadata,moderationMetadata} from './message-storage.js';
 import {DonationLedger} from './donations.js';
 import {ProviderStorage} from './provider-storage.js';
+import {RecentEvents} from './recent-events.js';
 import type {IdentityLinks} from './identity-links.js';
 import type {StreamSessions} from './stream-sessions.js';
 interface IdentityRow {id:string;person_id:string}
@@ -40,7 +41,7 @@ export class EventIngestion {
       throw new Error("MISSING_ACTOR_KEY");
     if(event.source==='twitch'&&!['chat.message','chat.message_delete','chat.clear','chat.clear_user_messages','channel.update','follow','subscription','subscription.gift','subscription.message','raid','bits'].includes(event.type))
       return {inserted:false,identityId:null,personId:null};
-    JSON.stringify(event.payload); // Validate the transport payload before any writes; content is never retained.
+    JSON.stringify(event.payload); // Validate before writes; permanent chat facts remain content-free.
     const payload = JSON.stringify(event.type === "chat.message" ? chatMetadata(event.payload) :
       ["chat.message_delete","chat.clear","chat.clear_user_messages"].includes(event.type) ? moderationMetadata(event.payload) : event.payload);
     return this.db.transaction(() => {
@@ -226,6 +227,7 @@ export class EventIngestion {
         const userId = String(event.payload.targetUserId ?? "");
         const atMs = event.occurredAtMs ?? event.receivedAtMs;
         const scope = this.moderationScope(event.accountId, atMs);
+        new RecentEvents(this.db).redact(event.accountId,event.type,messageId,userId,scope,atMs);
         // Flag only — never overwrite original message text.
         if (event.type === "chat.clear")
           this.db
@@ -289,6 +291,7 @@ export class EventIngestion {
           .prepare("UPDATE persons SET revision = revision + 1 WHERE id = ?")
           .run(identity.person_id);
       if(event.source==='donationalerts'&&event.type==='donation')new ProviderStorage(this.db).clearImported(event.accountId,event.externalId);
+      new RecentEvents(this.db).saveEvent(event);
       return {
         inserted: true,
         identityId: identity?.id ?? null,
@@ -323,3 +326,4 @@ export class EventIngestion {
   }
 
 }
+

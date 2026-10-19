@@ -8,6 +8,7 @@ import {FrontendProcess} from './frontend-process.js';
 import {existsSync} from 'node:fs';
 import {createServer} from 'node:net';
 import {startAnalyticsWarmer} from './analytics-warmer.js';
+import {startEventRetention} from './event-retention.js';
 import {activatePendingRestore} from './restore-service.js';
 
 const dir = process.env.STREAM_PANEL_DATA_DIR;
@@ -76,10 +77,11 @@ const backupTimer = setInterval(() => { if(!closing)void runBackup(); }, 60000);
 const retentionTimer=setInterval(()=>{void hosted.backup?.purgeLocal().catch(()=>console.error('Local backup cleanup failed'));},60*60*1000);
 const heartbeatTimer=setInterval(()=>{if(collectorsStarted&&!closing)for(const runtime of hosted.runtimes.values())void runtime.db.call("collectionLifecycle","heartbeat",Date.now()).catch(()=>console.error("Collector heartbeat failed"));},30000);
 const stopAnalyticsWarming=startAnalyticsWarmer(()=>hosted.runtimes.values(),()=>!closing&&collectorsStarted,()=>console.error('Historical analytics preparation failed'));
+const stopEventRetention=startEventRetention(()=>hosted.runtimes.values(),()=>!closing&&collectorsStarted,()=>console.error('Recent event cleanup failed'));
 const timer = setInterval(() => void startCollectors(), 2000);
 const shutdown = async (code=0) => {
   if (closing) return;
-  closing = true; clearInterval(timer); clearInterval(backupTimer);clearInterval(retentionTimer);clearInterval(heartbeatTimer);stopAnalyticsWarming();
+  closing = true; clearInterval(timer); clearInterval(backupTimer);clearInterval(retentionTimer);clearInterval(heartbeatTimer);stopAnalyticsWarming();stopEventRetention();
   const timeout = setTimeout(() => process.exit(1), 10000); timeout.unref();
   try { if(collectorsStarted)await Promise.allSettled([...hosted.runtimes.values()].map(runtime=>runtime.db.call("collectionLifecycle","stop",Date.now())));await frontend?.stop();await hosted.app.close(); clearTimeout(timeout); process.exit(code); }
   catch { process.exit(1); }
@@ -90,3 +92,4 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => vo
 
 // Readiness includes installed signal handlers, so immediate shutdown closes SQLite.
 console.log(`Stream Panel server listening on ${network.bindHost}:${port}`);
+

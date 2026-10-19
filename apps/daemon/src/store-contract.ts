@@ -60,6 +60,8 @@ export const storeOperations={
   donationAudit:"cached",
   donationCandidates:"cached",
   events:"cached",
+  recentEvents:"read",
+  purgeRecentEvents:"maintenance",
   summary:"cached",
   grid:"read",
   renamePerson:"write",
@@ -100,3 +102,4 @@ export function operationsWithPolicy(policy:'cached'|'read'|'write'|'maintenance
 export function invalidatesCachedReads(method:StoreMethod,args:readonly unknown[]):boolean{
   return storeOperations[method]==='write'&&method!=='close'&&!(method==='collectionLifecycle'&&args[0]==='heartbeat');
 }
+

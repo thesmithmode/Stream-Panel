@@ -4,8 +4,9 @@ import type { StorePort } from './store-contract.js';
 import { object, string } from './provider-values.js';
 import { analyticsSettings } from './analytics-settings.js';
 import { randomUUID } from 'node:crypto';
-type Store = StorePort<'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteManualSession' | 'endSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'startSession' | 'streamMetadata' | 'summary'>;
+type Store = StorePort<'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteManualSession' | 'endSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'startSession' | 'streamMetadata' | 'summary'>;
 export function registerStreamsRoutes(app: FastifyInstance, db: Store, configuration: ConfigurationPort) {
+    app.get('/api/v1/events/recent',request=>{const q=object(request.query);return db.call('recentEvents',Number(q.offset??0),Number(q.limit??100));});
     app.get("/api/v1/overview", () => db.call("channelOverview", configuration.value.excludedBotLogins));
     for(const path of ["/api/v1/analytics","/api/v1/analytics/clock"])app.get(path, async (request) => {
         const q = object(request.query);
@@ -60,3 +61,4 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
         return db.call("grid", string(q.session), string(q.person), Number(q.from), Number(q.to));
     });
 }
+
