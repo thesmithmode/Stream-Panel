@@ -134,6 +134,6 @@ test('incomplete legacy credentials fail safely during refresh without issuing a
   return Response.json({error:'invalid_client'},{status:400});
  };
  const yt=new YouTubeConnection(config,db,'https://panel.test/oauth/youtube/callback','ruslan',request,()=>now);
- try {await assert.rejects(yt.collectOnce(),/YOUTUBE_REQUEST_FAILED/);assert.equal(config.value.youtube?.access,'old');}
+ try {await assert.rejects(yt.collectOnce(),/YOUTUBE_CLIENT_REJECTED/);assert.equal(config.value.youtube?.access,'old');}
  finally {await yt.stop();}
 });

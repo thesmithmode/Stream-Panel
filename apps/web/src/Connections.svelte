@@ -32,6 +32,21 @@
   const daLive = $derived(
     ["connected", "degraded"].includes(status?.donationalerts?.state),
   );
+  const youtubeDetail = $derived(({
+    YOUTUBE_REFRESH_REJECTED: "Google отклонил токен продления. Войдите снова; сохранённый Client secret вводить заново не нужно. Если приложение Google в режиме Testing, его токены действуют 7 дней — переведите приложение в Production и повторите вход.",
+    YOUTUBE_CLIENT_REJECTED: "Google отклонил Client ID или Client secret. Проверьте настройки приложения Google.",
+    YOUTUBE_AUTH_REQUIRED: "Google отклонил доступ после обновления токена. Проверьте разрешения или повторите вход.",
+    YOUTUBE_ACCESS_OR_QUOTA: "Google ограничил доступ или квоту API. Панель повторит запрос автоматически.",
+    YOUTUBE_DAILY_BUDGET: "Достигнут дневной бюджет запросов YouTube. Повторный вход не требуется.",
+    YOUTUBE_REQUEST_FAILED: "Ошибка сервиса Google. Панель повторит запрос автоматически.",
+    YOUTUBE_CONNECTION_FAILED: "Временная ошибка соединения. Панель повторит запрос автоматически.",
+  } as Record<string, string>)[status.youtube?.detail] ?? status.youtube?.detail ?? "Подключите канал этого профиля");
+  async function youtubeLogin() {
+    const result = await api("youtube/connect", {clientId: youtubeClient || status.config.youtubeClientId, clientSecret: youtubeSecret});
+    youtubeSecret = "";
+    window.open(result.url, "_blank", "noopener,noreferrer");
+    message = "Завершите вход в Google в открытой вкладке.";
+  }
   async function run(action: () => Promise<void>) {
     busy = true;
     error = "";
@@ -254,17 +269,21 @@
   <section class="panel settings">
     <header><h2>YouTube</h2><IntegrationGuide provider="YouTube" redirect={status.config.youtubeRedirectUri??''}/><span class="state" class:online={status.youtube?.state === "connected"}>{statusLabel(status.youtube?.state ?? "disconnected")}</span></header>
     <div class="settings-body">
-      <p class="small muted">{status.youtube?.detail ?? "Подключите канал этого профиля"}</p>
-      {#if ["connected", "error"].includes(status.youtube?.state)}
+      <p class="small muted">{youtubeDetail}</p>
+      {#if ["connected", "connecting", "error"].includes(status.youtube?.state)}
+        {#if status.youtube?.state === "error"}
+          <details><summary>Настройки приложения Google</summary>
+            <label>YouTube Client ID<input bind:value={youtubeClient} autocomplete="off" /></label>
+            <label>Новый Client secret<input type="password" bind:value={youtubeSecret} autocomplete="new-password" placeholder={status.config.hasYoutubeSecret ? "Сохранён; можно оставить пустым" : "Client secret"} /></label>
+          </details><button class="primary" disabled={busy} onclick={() => run(youtubeLogin)}>Повторить вход в Google</button>{/if}
         <button class="outline" disabled={busy} onclick={() => run(async () => { if(!await confirmAction("Отключить YouTube?","Сбор новых данных остановится. История сохранится.","Отключить"))return;await api("youtube/disconnect", {}); })}>Отключить YouTube</button>
       {:else}
         <label>YouTube Client ID<input bind:value={youtubeClient} autocomplete="off" /></label>
-        <label>YouTube Client secret<input type="password" bind:value={youtubeSecret} autocomplete="new-password" placeholder={status.config.hasYoutubeSecret ? "Сохранён" : "Client secret"} /></label>
+        {#if status.config.hasYoutubeSecret}<p class="small muted">Client secret сохранён. Повторный ввод не требуется.</p>
+        <details><summary>Изменить Client secret</summary><label>YouTube Client secret<input type="password" bind:value={youtubeSecret} autocomplete="new-password" /></label></details>
+        {:else}<label>YouTube Client secret<input type="password" bind:value={youtubeSecret} autocomplete="new-password" /></label>{/if}
         <p class="small muted">Redirect: <code>{status.config.youtubeRedirectUri ?? ""}</code></p>
-        <button class="primary" disabled={busy} onclick={() => run(async () => {
-          const result = await api("youtube/connect", {clientId: youtubeClient, clientSecret: youtubeSecret}); youtubeSecret = "";
-          window.open(result.url, "_blank", "noopener,noreferrer"); message = "Завершите вход в Google в открытой вкладке.";
-        })}>Войти через YouTube</button>
+        <button class="primary" disabled={busy} onclick={() => run(youtubeLogin)}>Войти через YouTube</button>
       {/if}
     </div>
   </section>
