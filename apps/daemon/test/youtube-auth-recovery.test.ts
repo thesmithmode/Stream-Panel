@@ -85,3 +85,26 @@ test('cancelled and failed reconnect preserve existing tokens and client secret;
   assert.equal(JSON.stringify(config.value),before);
   await yt.stop();
 });
+
+test('Analytics API 401 uses the same recovery and disconnect during refresh cannot resurrect credentials',async()=>{
+  let refreshes=0,reportReads=0;
+  const config={value:{youtubeClientId:'id',youtubeClientSecret:'secret',youtube:{access:'old',refresh:'refresh',userId:'channel',scopes:[],expiresAt:now+3600000}},save:async()=>{}} as unknown as Configuration;
+  const db={call:async(method:string)=>method==='youtubeQuota'?true:method==='youtubeData'?{snapshots:{channel:{updatedAt:now},'cursor:followers':{updatedAt:now}}}:undefined} as unknown as StoreClient;
+  const yt=new YouTubeConnection(config,db,'https://panel.test/oauth/youtube/callback','ruslan',async(input,init)=>{
+    const url=new URL(String(input));
+    if(url.pathname==='/token'){refreshes++;return Response.json({access_token:'fresh',expires_in:3600});}
+    if(url.hostname==='youtubeanalytics.googleapis.com'){
+      reportReads++;if(new Headers(init?.headers).get('Authorization')==='Bearer old')return Response.json({},{status:401});
+      return Response.json({rows:[]});
+    }
+    return Response.json({items:[]});
+  },()=>now);
+  try{await yt.collectOnce();assert.equal(refreshes,1);assert.equal(reportReads,2);assert.equal(yt.status.state,'connected');}finally{await yt.stop();}
+  let release: (response:Response)=>void=()=>{}, entered:()=>void=()=>{};
+  const refreshing=new Promise<void>(resolve=>{entered=resolve;});
+  const disconnected=fixture(async(input)=>new URL(String(input)).pathname==='/token'?new Promise<Response>(resolve=>{release=resolve;entered();}):Response.json({},{status:401}));
+  const pending=disconnected.yt.collectOnce();
+  await refreshing;
+  await disconnected.yt.disconnect();release(Response.json({access_token:'must-not-save',expires_in:3600}));await pending;
+  assert.equal(disconnected.config.value.youtube,undefined);assert.equal(disconnected.yt.status.state,'disconnected');
+});
