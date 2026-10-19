@@ -1,7 +1,7 @@
 name: Stream collection diagnostics
 on:
   push:
-    branches: [main]
+    branches: [main, fix/youtube-auth]
   workflow_dispatch:
 permissions:
   contents: read
