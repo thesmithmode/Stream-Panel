@@ -1,3 +1,4 @@
+import {dateTimeFormatter} from './date-time-formatter.js';
 import {clockActivity} from './clock-activity.js';
 import {donationTiming} from './donation-statistics.js';
 import {timePatterns} from './time-patterns.js';
@@ -90,7 +91,7 @@ export function validateAnalyticsOptions(options:AnalyticsOptions,from=options.f
         throw new Error('INVALID_ANALYTICS_FILTER');
     let clock: Intl.DateTimeFormat;
     try {
-        clock = new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, weekday: 'short', hour: '2-digit', hourCycle: 'h23' });
+        clock = dateTimeFormatter('ru-RU', { timeZone: timezone, weekday: 'short', hour: '2-digit', hourCycle: 'h23' });
     }
     catch {
         throw new Error('INVALID_TIMEZONE');

@@ -24,7 +24,8 @@ function start(dir, port, extra = {}) {
   child.stdout.on("data", (b) => stdout += b); child.stderr.on("data", (b) => stderr += b);
   const exit = new Promise((r) => child.once("exit", (code, signal) => r({ code, signal, stdout, stderr })));
   const ready = async () => { const deadline = Date.now() + 15000; while (!stdout.includes("server listening")) { if (child.exitCode !== null) throw new Error(stderr); if (Date.now() > deadline) throw new Error("START_TIMEOUT"); await new Promise((r) => setTimeout(r, 10)); } };
-  return { child, exit, ready };
+  const diagnostics=async pattern=>{const deadline=Date.now()+7000;while(!pattern.test(stderr)){assert.equal(child.exitCode,null,'server exited before diagnostics');assert.ok(Date.now()<deadline,'background diagnostic did not arrive');await new Promise(resolve=>setTimeout(resolve,20));}};
+  return { child, exit, ready, diagnostics };
 }
 test("server entrypoint serves health, rejects a second listener, shuts down and reopens one SQLite", { timeout: 30000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), "sp-server-cli-")); const port = await freePort(); const children = [];
@@ -170,6 +171,6 @@ test('a derived analytics failure in one profile does not stop collection or ser
  const dir=await mkdtemp(join(tmpdir(),'sp-warm-isolation-')),path=join(dir,'data.sqlite'),port=await freePort();let c;
  try{const at=Date.now()-3600000,s=new StreamStore(path,'gulnaz'),id=s.startSession('owner','closed',at,'platform',at);s.endSession(id,at+60000);s.close();
  const damaged=new Database(path);damaged.exec('DROP TABLE p_gulnaz_analytics_stream_cache');damaged.close();
- c=start(dir,port);await c.ready();assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status,200);await new Promise(r=>setTimeout(r,100));c.child.kill('SIGTERM');const result=await c.exit;assert.equal(result.code,0);assert.match(result.stderr,/Historical analytics preparation failed/);
+ c=start(dir,port);await c.ready();assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status,200);await c.diagnostics(/Historical analytics preparation failed/);c.child.kill('SIGTERM');const result=await c.exit;assert.equal(result.code,0);assert.match(result.stderr,/Historical analytics preparation failed/);
  }finally{if(c){c.child.kill();await c.exit;}await rm(dir,{recursive:true,force:true});}
 });

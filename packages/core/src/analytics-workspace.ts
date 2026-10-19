@@ -8,9 +8,9 @@ import {matchesActivityDay,type TimeAudienceSummary} from './time-audience.js';
 
 /** File-backed scratch data, private to this connection and excluded from backups. */
 export class DiskMap<T> {
- constructor(private db:Database.Database,readonly table:string){
+ constructor(private db:Database.Database,readonly table:string,existing=false){
   db.function('sp_analytics_lower',{deterministic:true},value=>String(value).toLowerCase());
-  db.exec(`CREATE TEMP TABLE ${table}(id TEXT PRIMARY KEY,value TEXT NOT NULL,seen INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID`);
+  if(!existing)db.exec(`CREATE TEMP TABLE ${table}(id TEXT PRIMARY KEY,value TEXT NOT NULL,seen INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID`);
  }
  get(id:string):T|undefined{const row=this.db.prepare(`SELECT value FROM ${this.table} WHERE id=?`).get(id) as {value:string}|undefined;return row?JSON.parse(row.value) as T:undefined;}
  set(id:string,value:T){this.db.prepare(`INSERT INTO ${this.table}(id,value) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value`).run(id,JSON.stringify(value));}
@@ -43,12 +43,29 @@ export class AnalyticsWorkspace<P> {
  private disposed=false;
  private clockCache=new Map<string,{pages:ReturnType<AnalyticsWorkspace<P>['clockPages']>;bytes:number}>();
  private clockBytes=0;
- constructor(private db:Database.Database){
+ constructor(private db:Database.Database,private readonly savedKey?:string){
+  if(savedKey&&!/^[a-f0-9]{64}$/.test(savedKey))throw new Error('INVALID_ANALYTICS_CACHE_KEY');
   this.category=`${this.prefix}_categories`;this.clock=`${this.prefix}_clock`;
   this.insightPeople=new DiskMap<InsightPerson>(db,`${this.prefix}_insights`);
+  if(savedKey){
+   const name=`${this.prefix}_people`;
+   db.exec(`CREATE TEMP VIEW ${name} AS SELECT id,value,seen FROM analytics_report_people WHERE cache_key='${savedKey}';
+    CREATE TEMP VIEW ${this.clock} AS SELECT day,session,person,lo,hi FROM analytics_report_clock WHERE cache_key='${savedKey}'`);
+   this.people=new DiskMap<P>(db,name,true);return;
+  }
   this.people=db.transaction(()=>{const people=new DiskMap<P>(db,`${this.prefix}_people`);
   db.exec(`CREATE TEMP TABLE ${this.category}(category TEXT NOT NULL,person TEXT NOT NULL,PRIMARY KEY(category,person)) WITHOUT ROWID;
    CREATE TEMP TABLE ${this.clock}(day TEXT NOT NULL,session TEXT NOT NULL,person TEXT NOT NULL,lo INTEGER NOT NULL,hi INTEGER NOT NULL,PRIMARY KEY(day,session,person,lo)) WITHOUT ROWID`);return people;})();
+ }
+ /** Publish with the owning report in the same transaction. No JS copy of membership. */
+ save(key:string){
+  this.db.prepare(`INSERT INTO analytics_report_people SELECT ?,id,value,seen FROM ${this.people.table}`).run(key);
+  this.db.prepare(`INSERT INTO analytics_report_clock SELECT ?,day,session,person,lo,hi FROM ${this.clock}`).run(key);
+ }
+ storageBytes(){
+  const people=(this.db.prepare(`SELECT coalesce(sum(length(CAST(value AS BLOB))+length(id)+96),0) n FROM ${this.people.table}`).get() as {n:number}).n;
+  const clock=(this.db.prepare(`SELECT coalesce(sum(length(session)+length(person)+length(day)+128),0) n FROM ${this.clock}`).get() as {n:number}).n;
+  return people+clock;
  }
  categoryPerson(category:string,person:string){this.db.prepare(`INSERT OR IGNORE INTO ${this.category} VALUES(?,?)`).run(category,person);}
  categoryCounts(category:string){return this.db.prepare(`SELECT count(*) audience,coalesce(sum(json_extract(p.value,'$.core')),0) core FROM ${this.category} c JOIN ${this.people.table} p ON p.id=c.person WHERE c.category=?`).get(category) as {audience:number;core:number};}
@@ -108,5 +125,5 @@ export class AnalyticsWorkspace<P> {
   if(pages*Number(this.db.pragma('temp.page_size',{simple:true}))>512*1024*1024)throw new Error('ANALYTICS_WORKSPACE_LIMIT');
   if(this.db.name!==':memory:')for(const path of new Set([dirname(this.db.name),process.env.SQLITE_TMPDIR??tmpdir(),'/var/tmp'])){if(!existsSync(path))continue;const fs=statfsSync(path);if(fs.bavail*fs.bsize<1021024*1024)throw new Error('ANALYTICS_DISK_RESERVE');}
  }
- dispose(){if(!this.disposed){this.clockCache.clear();this.clockBytes=0;this.db.exec(`DROP TABLE ${this.insightPeople.table};DROP TABLE ${this.people.table};DROP TABLE ${this.category};DROP TABLE ${this.clock}`);this.disposed=true;}}
+ dispose(){if(!this.disposed){this.clockCache.clear();this.clockBytes=0;this.db.exec(this.savedKey?`DROP TABLE ${this.insightPeople.table};DROP VIEW ${this.people.table};DROP VIEW ${this.clock}`:`DROP TABLE ${this.insightPeople.table};DROP TABLE ${this.people.table};DROP TABLE ${this.category};DROP TABLE ${this.clock}`);this.disposed=true;}}
 }

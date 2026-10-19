@@ -66,13 +66,13 @@ test('derived analytics skip persistence at storage/size bounds and recover with
  }
  const h=new AnalyticsHistory(db);assert.equal(ready(h).summary.messages,4);
  const prepare=db.prepare.bind(db);let once=true;db.prepare=(sql:string)=>{if(once&&sql.startsWith('SELECT person_id,manual_core')){once=false;throw Error('TRANSIENT_TEST_FAILURE');}return prepare(sql);};
- const failing=new AnalyticsHistory(db);assert.throws(()=>failing.report(options),/TRANSIENT_TEST_FAILURE/);assert.equal(ready(failing).summary.messages,4);db.prepare=prepare;
+ const failing=new AnalyticsHistory(db,{maxReportBytes:0});assert.throws(()=>failing.report(options),/TRANSIENT_TEST_FAILURE/);assert.equal(ready(failing).summary.messages,4);db.prepare=prepare;
  assert.equal(s.summary().messages,4);
  }finally{s.close();}
 });
 
 test('cached clock/day statistics split midnight and preserve known zero viewers and silent presence',()=>{
- const s=new StreamStore(':memory:');try{
+  const s=new StreamStore(':memory:');try{
  const at=base+3*86400000+23*3600000+59*minute,id=s.startSession('owner','midnight',at,'platform',at);s.streamSample(id,at,'game','Game','',0);
  s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+minute-1,status:'complete',userIds:['silent']});s.recordPoll(id,'owner',{startedAtMs:at+minute,completedAtMs:at+2*minute,status:'complete',userIds:[]});s.endSession(id,at+2*minute);
  const db=(s as any).db,h=new AnalyticsHistory(db),query={...options,timezone:'UTC',minSessions:1,minMinutes:0,minMessages:0},r=ready(h,query);
@@ -290,7 +290,7 @@ test('live writes do not restart historical preparation, but invalidate the comp
 
 test('temporary-space pressure evicts only derived work and resource errors preserve all facts',t=>{
  const s=new StreamStore(':memory:');try{
-  fixture(s,60);const db=(s as any).db,h=new AnalyticsHistory(db),opts={...options,toMs:base+62*86400000,summaryOnly:true};
+  fixture(s,60);const db=(s as any).db,h=new AnalyticsHistory(db,{maxReportBytes:0}),opts={...options,toMs:base+62*86400000,summaryOnly:true};
   assert.equal(ready(h,opts).summary.messages,60);
   const original=AnalyticsWorkspace.prototype.checkBudget;let fail=false,fatal='';
   t.mock.method(AnalyticsWorkspace.prototype,'checkBudget',function(this:AnalyticsWorkspace<unknown>){if(fatal)throw Error(fatal);if(fail){fail=false;throw Error('ANALYTICS_WORKSPACE_LIMIT');}return original.call(this);});
@@ -306,14 +306,131 @@ test('temporary-space pressure evicts only derived work and resource errors pres
  }finally{s.close();}
 });
 
-test('background warm finishes standard periods before navigation, independent of option property order',()=>{
+test('background warm prepares the landing report without speculative period and platform variants',()=>{
  const s=new StreamStore(':memory:');try{
   fixture(s,4);const h=new AnalyticsHistory((s as any).db),toMs=Math.floor(options.toMs/60000)*60000;
   let progress;do{progress=h.warm({...options,toMs});}while(progress.preparing);
   const aggregate=(h as any).aggregate;(h as any).aggregate=()=>{throw Error('hot report rebuilt');};
-  for(const days of [7,30,0])for(const source of ['all','twitch','youtube'] as const){const r=h.report({includeInsights:true,summaryOnly:true,category:'',source,toMs,fromMs:days?toMs-days*86400000:0,...Object.fromEntries(Object.entries(options).filter(([k])=>!['fromMs','toMs'].includes(k)))});assert.equal(r.preparing,undefined);assert.ok(Array.isArray(r.insights));}
-  const category=h.report({...options,fromMs:0,toMs,category:'game',source:'all',summaryOnly:true,includeInsights:true});assert.equal(category.preparing,undefined);assert.equal(category.summary.messages,4);
+  const landing=h.report({includeInsights:true,summaryOnly:true,category:'',source:'all',...options,fromMs:0,toMs});assert.equal(landing.preparing,undefined);assert.equal(landing.summary.messages,4);
+  const slices=dbCount((s as any).db);assert.ok(slices<=4,'no speculative categories or platform copies');
  (h as any).aggregate=aggregate;h.close();
+ }finally{s.close();}
+});
+
+function dbCount(db:any){return db.prepare('SELECT count(*) n FROM analytics_stream_cache').get().n;}
+
+test('live collection is not precomputed and stream completion refreshes the landing report',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,1);const db=(s as any).db,h=new AnalyticsHistory(db);let r;do{r=h.warm(options);}while(r.preparing);
+  const at=base+86400000,id=s.startSession('owner','live',at,'platform',at);s.streamSample(id,at,'game','Game','',20);
+  const aggregate=(h as any).aggregate;(h as any).aggregate=()=>{throw Error('collector competed with background');};assert.equal(h.warm(options).preparing,false);
+  (h as any).aggregate=aggregate;s.endSession(id,at+minute);do{r=h.warm(options);}while(r.preparing);
+  assert.equal(ready(h,{...options,fromMs:0,source:'all',category:'',summaryOnly:true,includeInsights:true}).summary.streams,2);h.close();
+ }finally{s.close();}
+});
+
+test('rolling boundaries keep exact partial-stream metrics and reuse all unaffected slices',()=>{
+ const s=new StreamStore(':memory:');try{
+  const now=base+7*86400000,at=base-3600000,id=s.startSession('owner','boundary',at,'platform',at);
+  for(let n=0;n<4;n++)s.streamSample(id,at+n*3600000,'game','Game','',10+n);s.endSession(id,at+4*3600000);
+  const recent=s.startSession('owner','recent',base+86400000,'platform',base+86400000);s.streamSample(recent,base+86400000,'game','Game','',20);s.endSession(recent,base+86400000+minute);
+  const db=(s as any).db,h=new AnalyticsHistory(db),opts={...options,fromMs:now-7*86400000,toMs:now,summaryOnly:true};ready(h,opts);
+  const build=(h as any).build.bind(h),built:string[]=[];(h as any).build=(opts:any,session:any)=>{built.push(session.id);return build(opts,session);};
+  const shifted={...opts,fromMs:opts.fromMs+minute,toMs:opts.toMs+minute},result=ready(h,shifted),raw=audienceAnalytics(db,shifted);
+  assert.deepEqual(built,[id]);assert.deepEqual(result.summary,raw.summary);assert.deepEqual(result.hours,raw.hours);assert.deepEqual(result.streamComparison,raw.streamComparison);h.close();
+ }finally{s.close();}
+});
+
+test('idle warming never rebuilds rolling boundaries inside old four-hour streams',()=>{
+ const s=new StreamStore(':memory:');try{
+  const now=base+40*86400000+3600000;
+  for(const days of [7,30,35]){
+   const at=now-days*86400000-3600000,id=s.startSession('owner',String(days),at,'platform',at);
+   s.streamSample(id,at,'game','Game','',10);s.endSession(id,at+4*3600000);
+  }
+  const h=new AnalyticsHistory((s as any).db);let result;do{result=h.warm({...options,toMs:now});}while(result.preparing);
+  const snapshots=(s as any).db.prepare('SELECT * FROM analytics_reports').all();
+  (h as any).aggregate=()=>{throw Error('idle aggregation');};(h as any).build=()=>{throw Error('idle stream rebuild');};
+  for(let minute=1;minute<=1440;minute++)assert.equal(h.warm({...options,toMs:now+minute*60000}).preparing,false);
+  assert.deepEqual((s as any).db.prepare('SELECT * FROM analytics_reports').all(),snapshots);
+  h.close();
+ }finally{s.close();}
+});
+
+test('persisted reports retain all audience and clock pages after connection-local workspaces close',()=>{
+ const s=new StreamStore(':memory:');try{
+  const id=s.startSession('owner','persisted',base,'platform',base),ids=Array.from({length:125},(_,i)=>`viewer${String(i).padStart(3,'0')}`);
+  s.streamSample(id,base,'game','Game','',125);s.recordPoll(id,'owner',{startedAtMs:base,completedAtMs:base+minute,status:'complete',userIds:ids,userNames:Object.fromEntries(ids.map(id=>[id,id]))});s.endSession(id,base+2*minute);
+  const db=(s as any).db,opts={...options,summaryOnly:true,includeInsights:true},h=new AnalyticsHistory(db),first=ready(h,opts);
+  const second=ready(h,{...opts,audienceOffset:100}),clock=h.clockAudience({...opts,clockMinute:180,clockResolution:30,clockDay:'all',clockBatch:true});h.close();
+  const reopened=new AnalyticsHistory(db);(reopened as any).aggregate=()=>{throw Error('persisted report rebuilt');};
+  assert.deepEqual(reopened.report(opts),first);assert.deepEqual(reopened.report({...opts,audienceOffset:100}),second);
+  assert.deepEqual(reopened.clockAudience({...opts,clockMinute:180,clockResolution:30,clockDay:'all',clockBatch:true}),clock);
+  assert.equal(db.prepare("SELECT count(*) n FROM sqlite_temp_master WHERE type IN('table','view') AND name LIKE 'sp_analytics_%'").get().n,0);
+  reopened.close();
+ }finally{s.close();}
+});
+
+test('a corrected stream rebuilds only its derived slice and replaces the durable report',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,4);const db=(s as any).db,opts={...options,summaryOnly:true},h=new AnalyticsHistory(db);ready(h,opts);h.close();
+  const session=String(s.sessions().at(-1)!.id);s.streamSample(session,base,'game','Game','',20);
+  const changed=new AnalyticsHistory(db),build=(changed as any).build.bind(changed),built:string[]=[];
+  (changed as any).build=(opts:any,session:any)=>{built.push(session.id);return build(opts,session);};
+  const report=ready(changed,opts);assert.deepEqual(built,[session]);assert.deepEqual(report.summary,audienceAnalytics(db,opts).summary);
+  assert.equal(db.prepare('SELECT count(*) n FROM analytics_reports').get().n,1);changed.close();
+ }finally{s.close();}
+});
+
+test('late collection gaps invalidate persisted insight evidence without rebuilding stream facts',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,4);const db=(s as any).db,opts={...options,summaryOnly:true,includeInsights:true},h=new AnalyticsHistory(db);ready(h,opts);h.close();
+  s.gap('twitch','late correction',base,base+minute);
+  const corrected=new AnalyticsHistory(db),aggregate=(corrected as any).aggregate.bind(corrected);let rebuilt=0;
+  (corrected as any).aggregate=(...args:any[])=>{rebuilt++;return aggregate(...args);};(corrected as any).build=()=>{throw Error('unchanged stream facts rebuilt');};
+  assert.equal(ready(corrected,opts).summary.messages,4);assert.equal(rebuilt,1);corrected.close();
+ }finally{s.close();}
+});
+
+test('reopened reports refresh independent channel snapshots and offline donations without rebuilding attendance',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,1);const db=(s as any).db,h=new AnalyticsHistory(db),opts={...options,summaryOnly:true,youtubeAccount:'yt-owner'};
+  const first=ready(h,opts);ready(h,{...opts,source:'twitch'});h.close();
+  s.youtubeSnapshot('yt-owner','report',{rows:[[99]]},options.toMs);
+  s.createDonation({personId:first.audience[0]!.id,amount:'2',currency:'RUB',occurredAtMs:options.toMs-1000,message:'Offline',sourceName:'Cash'},options.toMs-1000);
+  const reopened=new AnalyticsHistory(db);(reopened as any).aggregate=()=>{throw Error('unchanged attendance rebuilt');};
+  const all=reopened.report(opts);assert.deepEqual(all.youtubeReport?.data.rows,[[99]]);assert.deepEqual(all.donationTiming.totals,{RUB:'200'});
+  assert.equal(reopened.report({...opts,source:'twitch'}).youtubeReport,null);
+  assert.equal(reopened.clockAudience(opts).clockVisitors!.total,0);
+  assert.ok(reopened.clockAudience({...opts,clockBatch:true}).clockPages!.some(p=>p.minute===180&&p.page.total===1));reopened.close();
+ }finally{s.close();}
+});
+
+test('damaged report or stream cache rebuilds from intact source facts without losing audience membership',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,2);const db=(s as any).db,opts={...options,summaryOnly:true},h=new AnalyticsHistory(db),first=ready(h,opts);h.close();
+  db.prepare('UPDATE analytics_reports SET payload=?').run(Buffer.from('damaged report'));
+  const second=new AnalyticsHistory(db);assert.deepEqual(ready(second,opts).summary,first.summary);second.close();
+  db.prepare('DELETE FROM analytics_reports').run();db.prepare('UPDATE analytics_stream_cache SET payload=?').run(Buffer.from('damaged stream'));
+  const third=new AnalyticsHistory(db);assert.deepEqual(ready(third,opts).summary,first.summary);assert.equal(s.eventCount(),2);assert.deepEqual(db.pragma('foreign_key_check'),[]);third.close();
+ }finally{s.close();}
+});
+
+test('cold clock drilldown advances bounded preparation and never returns the full audience payload',t=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,20);const h=new AnalyticsHistory((s as any).db),opts={...options,toMs:base+21*86400000,summaryOnly:true,includeInsights:true,clockBatch:true,clockMinute:180,clockResolution:30,clockDay:'all'};
+  let cpu=0;t.mock.method(performance,'now',()=>cpu+=25);let result=h.clockAudience(opts),pending=0;
+  assert.equal(result.preparing,true);
+  while(result.preparing){assert.equal('audience' in result,false);assert.equal('timeline' in result,false);assert.ok(++pending<100);result=h.clockAudience(opts);}
+  assert.ok(result.clockPages!.some(p=>p.minute===180&&p.page.total===1));h.close();
+ }finally{s.close();}
+});
+
+test('empty history remains readable when both memory and persistent report budgets are exhausted',()=>{
+ const s=new StreamStore(':memory:');try{
+  const h=new AnalyticsHistory((s as any).db,{maxCompletedBytes:1,maxReportBytes:0}),opts={fromMs:0,toMs:1};
+  for(let n=0;n<2;n++){assert.equal(ready(h,opts).summary.streams,0);assert.deepEqual(h.clockAudience(opts).clockVisitors!.items,[]);assert.equal(h.clockAudience({...opts,clockBatch:true}).clockPages!.length,24);}
+  h.close();
  }finally{s.close();}
 });
 

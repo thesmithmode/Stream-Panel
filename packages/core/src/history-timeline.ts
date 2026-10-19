@@ -1,3 +1,4 @@
+import {dateTimeFormatter} from './date-time-formatter.js';
 import type { audienceAnalytics } from './analytics.js';
 import { localDateWindow } from './time-audience.js';
 type Report = ReturnType<typeof audienceAnalytics>;
@@ -19,7 +20,7 @@ export class HistoryTimeline {
     constructor(private timezone: string, private people: Pick<ReadonlyMap<string, {
         core: boolean;
         follower: boolean | null;
-    }>,'get'>) { this.formatter = new Intl.DateTimeFormat('sv-SE', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }); }
+    }>,'get'>) { this.formatter = dateTimeFormatter('sv-SE', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }); }
     private day(at: number) { const label = this.formatter.format(at); let start = this.dates.get(label); if (start === undefined) {
         start = localDateWindow(label, this.timezone).from;
         this.dates.set(label, start);
