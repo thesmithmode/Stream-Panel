@@ -8,6 +8,15 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {StreamStore} from '../../../packages/core/src/store.js';
 import {prepareChatStorage} from '../src/chat-cleanup.js';
+test('an additive projection migration does not compact or rewrite source storage',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-projection-migration-')),path=join(dir,'data.sqlite');
+ try{
+  const store=new StreamStore(path,'ruslan');store.startSession('owner','retained',1,'platform',1);store.close();
+  const db=new Database(path);db.prepare("UPDATE sp_profile_schema SET version=21 WHERE profile='ruslan'").run();db.close();
+  const before=await readFile(path);assert.equal(await prepareChatStorage(path),undefined);assert.deepEqual(await readFile(path),before);
+  const reopened=new StreamStore(path,'ruslan');assert.equal(reopened.sessions().length,1);reopened.close();
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
 
 test('old chat content is scrubbed and compacted for both profiles without changing counts, identities or donations',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-chat-cleanup-')),path=join(dir,'data.sqlite'),at=1791954000000;

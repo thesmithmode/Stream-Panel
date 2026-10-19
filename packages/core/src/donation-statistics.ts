@@ -1,3 +1,4 @@
+import {dateTimeFormatter} from './date-time-formatter.js';
 import type Database from 'better-sqlite3';
 import {assertTimestamp} from './domain.js';
 export function registerDonationSum(db:Database.Database){
@@ -9,7 +10,7 @@ export function donationWindow(from?:number,to?:number){
  const clauses:string[]=[],args:number[]=[];if(from!==undefined&&from>0){clauses.push('e.occurred_at_ms>=?');args.push(from);}if(to!==undefined){clauses.push(from===undefined||from===0?'(e.occurred_at_ms<? OR e.occurred_at_ms IS NULL)':'e.occurred_at_ms<?');args.push(to);}return {sql:clauses.join(' AND ')||'1',args};
 }
 export function donationTiming(db:Database.Database,from:number,to:number,timezone:string,category=''){
- const window=donationWindow(from,to),clock=new Intl.DateTimeFormat('ru-RU',{timeZone:timezone,weekday:'short',hour:'2-digit',hourCycle:'h23'});
+ const window=donationWindow(from,to),clock=dateTimeFormatter('ru-RU',{timeZone:timezone,weekday:'short',hour:'2-digit',hourCycle:'h23'});
  // Match the category at the donation's exact timestamp, before minute aggregation.
  // YouTube shares its logical broadcast and Twitch category changes.
  const categorySql=category?` AND EXISTS(SELECT 1 FROM sessions s WHERE s.started_at_ms<=e.occurred_at_ms AND (s.ended_at_ms IS NULL OR e.occurred_at_ms<s.ended_at_ms) AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND (SELECT ss.category_id FROM stream_samples ss WHERE ss.session_id=s.id AND ss.observed_at_ms<=e.occurred_at_ms AND (ss.twitch_viewers IS NOT NULL OR ss.category_id<>'' OR ss.category_name<>'') ORDER BY ss.observed_at_ms DESC LIMIT 1)=? AND (NOT EXISTS(SELECT 1 FROM platform_streams ps WHERE ps.session_id=s.id) OR EXISTS(SELECT 1 FROM platform_streams ps WHERE ps.session_id=s.id AND ps.started_at_ms<=e.occurred_at_ms AND (ps.ended_at_ms IS NULL OR e.occurred_at_ms<ps.ended_at_ms))))`:'';

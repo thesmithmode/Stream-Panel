@@ -1,6 +1,8 @@
+import {dateTimeFormatter} from './date-time-formatter.js';
 import {streamInsights,InsightAccumulator,type InsightCard} from './insights.js';
 import {mergeClockActivity, type ClockActivity} from './clock-activity.js';
 import {AnalyticsWorkspace} from './analytics-workspace.js';
+import {AnalyticsReportCache} from './analytics-report-cache.js';
 import { HistoryTimeline } from "./history-timeline.js";
 import type Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
@@ -54,6 +56,7 @@ const sumMoney = (target: Record<string, string>, input: Record<string, string>)
     target[currency] = (BigInt(target[currency] ?? '0') + BigInt(amount)).toString(); };
 /** Incremental, derived closed-stream reports. Facts and public event IDs are untouched. */
 export class AnalyticsHistory {
+    private readonly reportCache:AnalyticsReportCache<Report>;
     private statements = new Map<string, Database.Statement>();
     private statement(sql: string) {
         let statement = this.statements.get(sql);
@@ -84,7 +87,9 @@ export class AnalyticsHistory {
         maxBytes?: number;
         maxTotalBytes?: number;
         maxCompletedBytes?: number;
+        maxReportBytes?: number;
     } = {}) {
+        this.reportCache=new AnalyticsReportCache(db,cachePolicy.maxReportBytes);
         if(db.pragma('temp_store',{simple:true})!==1)db.pragma('temp_store=FILE');
         db.pragma('temp.cache_size=-2048');
     }
@@ -146,7 +151,7 @@ export class AnalyticsHistory {
         // Each cached report represents one logical stream; attendance is deduplicated
         // within that report before counts from different streams are added.
         const clockBuckets: ClockBucket[] = [];
-        const clock = new Intl.DateTimeFormat('ru-RU', { timeZone: options.timezone ?? 'Europe/Moscow', weekday: 'short' }), presentDays = new Set<string>();
+        const clock = dateTimeFormatter('ru-RU', { timeZone: options.timezone ?? 'Europe/Moscow', weekday: 'short' }), presentDays = new Set<string>();
         for (const span of report.activityWindows) {
             presentDays.add(clock.format(span.to - 1));
             for (let at = span.from; at < span.to; at = Math.min(span.to, (Math.floor(at / 3600000) + 1) * 3600000))
@@ -253,25 +258,22 @@ export class AnalyticsHistory {
         const report=this.build(options,session);this.save(options,session,global,report);
         if(session.ended_at_ms===null){while(this.liveStreams.size>=12)this.liveStreams.delete(this.liveStreams.keys().next().value!);this.liveStreams.set(key,{revision,report});}return report;
     }
-    private warmCursor=0;
-    private warmCutoff=0;
-    private warmCategories:string[]=[];
+    private warmedRevision='';
     warm(options:AnalyticsOptions){
-        // One bounded chunk per call. A fixed snapshot prevents moving live windows
-        // from restarting a build. Standard periods are ready before navigation.
-        if(!this.warmCutoff){this.warmCutoff=Math.floor(options.toMs/60000)*60000;this.warmCategories=[];}
-        const toMs=this.warmCutoff,variants=[7,30,0].flatMap(days=>['all','twitch','youtube'].map(source=>({...options,source:source as NonNullable<AnalyticsOptions['source']>,fromMs:days?Math.max(0,toMs-days*86400000):0,toMs,summaryOnly:true,includeInsights:true})));
-        variants.push(...this.warmCategories.map(category=>({...options,source:'all' as const,fromMs:0,toMs,summaryOnly:true,includeInsights:true,category})));
-        const current={category:options.category??'',...variants[this.warmCursor]!};
-        const prepared=this.prepare(current);if(prepared.preparing)return prepared;
+        // Bake the landing report, not a Cartesian product of moving windows.
+        // Live facts already have collector priority; finalize after the stream ends.
+        const current:AnalyticsOptions={...options,source:'all',category:'',fromMs:0,summaryOnly:true,includeInsights:true};
+        const sessions=this.sessions(current);
+        if(sessions.some(s=>s.ended_at_ms===null))return {preparing:false,ready:0,total:0};
+        const {fromMs,toMs,...settings}=current;void fromMs;void toMs;
+        const revision=JSON.stringify([settings,this.globalRevision(),sessions,this.annotationsRevision(),this.followerRevision()]);
+        if(revision===this.warmedRevision)return {preparing:false,ready:1,total:1};
         const report=this.report(current);
-        if(report.preparing)return {preparing:true,ready:this.warmCursor,total:variants.length};
-        if(this.warmCursor===6)this.warmCategories=report.availableCategories.filter(c=>c.id).slice(0,7).map(c=>c.id);
-        this.warmCursor++;
-        const total=9+this.warmCategories.length,preparing=this.warmCursor<total;
-        if(!preparing){this.warmCursor=0;this.warmCutoff=0;}
-        return {preparing,ready:preparing?this.warmCursor:total,total};
+        if(report.preparing)return {preparing:true,ready:report.ready??0,total:report.total??1};
+        this.warmedRevision=revision;
+        return {preparing:false,ready:1,total:1};
     }
+    private annotationsRevision(){return [this.statement('SELECT * FROM person_preferences ORDER BY person_id').all(),this.statement('SELECT * FROM person_tags ORDER BY person_id,label').all(),this.statement("SELECT id,source,started_at_ms,ended_at_ms FROM collection_gaps WHERE source IN('twitch','youtube') ORDER BY id").all()];}
     query(options:AnalyticsOptions):Report{
         return options.sessionId?audienceAnalytics(this.db,options):this.resolve(options,options.summaryOnly??false);
     }
@@ -290,7 +292,7 @@ export class AnalyticsHistory {
         const {audienceOffset,audienceSearch,audienceSort,audienceCoreOnly,clockDay,clockMinute,clockResolution,clockOffset,clockBatch,...baseOptions}=options;
         void audienceOffset;void audienceSearch;void audienceSort;void audienceCoreOnly;void clockDay;void clockMinute;void clockResolution;void clockOffset;void clockBatch;
         const canonical = { ...baseOptions,source:options.source??'all',category:options.category??'', fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
-        const fingerprint = createHash('sha256').update(JSON.stringify([historical, Object.fromEntries(Object.entries(canonical).sort(([a],[b])=>a.localeCompare(b))), this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.statement('SELECT * FROM person_preferences ORDER BY person_id').all(), this.statement('SELECT * FROM person_tags ORDER BY person_id,label').all(), this.followerRevision()])).digest('hex');
+        const fingerprint = createHash('sha256').update(JSON.stringify([2,historical, Object.fromEntries(Object.entries(canonical).sort(([a],[b])=>a.localeCompare(b))), this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.annotationsRevision(), this.followerRevision()])).digest('hex');
         const liveRevision=JSON.stringify(sessions.filter(s=>s.ended_at_ms===null).map(s=>[s.id,s.revision]));
         const retained=this.completed.get(fingerprint);
         const cached=retained&&(!live||retained.liveRevision===liveRevision)?retained:undefined;
@@ -299,6 +301,16 @@ export class AnalyticsHistory {
             this.completed.delete(fingerprint);this.completed.set(fingerprint,cached);
             const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as { payload_json: string; updated_at_ms: number } | undefined : undefined;
             return this.page({ ...structuredClone(cached.value), filters: { ...cached.value.filters, fromMs: options.fromMs, toMs: options.toMs }, youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, donationTiming: donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow', options.category) },cached.workspace,options);
+        }
+        const saved=!live&&historical?this.reportCache.get(fingerprint):undefined;
+        if(saved){
+            const workspace=new AnalyticsWorkspace<Person>(this.db,fingerprint);
+            try{
+                const value={...saved,filters:{...saved.filters,fromMs:options.fromMs,toMs:options.toMs}};
+                if(clockOnly)return this.clockResult(value,workspace,options);
+                const youtube=options.source!=='twitch'&&options.youtubeAccount?this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {payload_json:string;updated_at_ms:number}|undefined:undefined;
+                return this.page({...value,youtubeReport:youtube?{data:JSON.parse(youtube.payload_json),updatedAt:youtube.updated_at_ms}:null,donationTiming:donationTiming(this.db,options.fromMs,options.toMs,options.timezone??'Europe/Moscow',options.category)},workspace,options);
+            }finally{workspace.dispose();}
         }
         if(!historical&&sessions.length<=200){
             try{
@@ -333,8 +345,13 @@ export class AnalyticsHistory {
         this.jobs.delete(fingerprint);
         next.value.clockRevision=fingerprint;
         try{
-            job.workspace.clockPages('all',0,30);
             const value=clockOnly?this.clockResult(next.value,job.workspace,options):this.page(next.value,job.workspace,options);
+            if(!live&&historical&&(this.cachePolicy.availableBytes?.()??Infinity)>=1024*1024*1024){
+                const {fromMs,toMs,...scopeOptions}=canonical;
+                const period=options.fromMs===0?'all':[7,30].find(days=>options.toMs-options.fromMs===days*86400000)??[fromMs,toMs];
+                const scope=createHash('sha256').update(JSON.stringify([Object.fromEntries(Object.entries(scopeOptions).sort(([a],[b])=>a.localeCompare(b))),period])).digest('hex');
+                this.reportCache.save(fingerprint,scope,next.value,job.workspace);
+            }
             this.remember(fingerprint,next.value,job.workspace,job.liveRevision);
             return value;
         }catch(error){job.workspace.dispose();throw error;}
