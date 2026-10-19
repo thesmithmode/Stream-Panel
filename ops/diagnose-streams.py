@@ -50,3 +50,25 @@ try{
 }finally{db.close();}
 '''
 subprocess.run(['/opt/stream-panel/current/bin/node','--input-type=module','-e',node_program,str(path)],cwd='/opt/stream-panel/current',check=True,timeout=30)
+
+# Credential presence and Google access-token health only; no secrets leave the host.
+import time
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+for profile in ('ruslan','gulnaz'):
+    secret_path=Path(config.get('STREAM_PANEL_DATA_DIR','/var/lib/stream-panel'))/'profiles'/profile/'secrets.json'
+    saved=json.loads(secret_path.read_text()) if secret_path.exists() else {}
+    token=saved.get('youtube') or {}
+    result={'profile':profile,'clientId':bool(saved.get('youtubeClientId')),'clientSecret':bool(saved.get('youtubeClientSecret')),'access':bool(token.get('access')),'refresh':bool(token.get('refresh')),'expired':token.get('expiresAt',0)<time.time()*1000}
+    if token.get('access'):
+        try:
+            with urlopen(Request('https://www.googleapis.com/youtube/v3/channels?part=id&mine=true',headers={'Authorization':'Bearer '+token['access']}),timeout=15) as response:
+                result['googleStatus']=response.status
+        except HTTPError as error:
+            result['googleStatus']=error.code
+            try:
+                payload=json.loads(error.read())
+                result['reasons']=[e.get('reason') for e in payload.get('error',{}).get('errors',[]) if e.get('reason') in ('authError','quotaExceeded','dailyLimitExceeded','insufficientPermissions','accessNotConfigured')]
+            except Exception: pass
+        except Exception: result['googleStatus']='network_error'
+    print('youtube_auth='+json.dumps(result))
