@@ -108,3 +108,21 @@ test('Analytics API 401 uses the same recovery and disconnect during refresh can
   await disconnected.yt.disconnect();release(Response.json({access_token:'must-not-save',expires_in:3600}));await pending;
   assert.equal(disconnected.config.value.youtube,undefined);assert.equal(disconnected.yt.status.state,'disconnected');
 });
+
+
+test('a newer OAuth attempt invalidates an older in-flight callback without stopping collection',async()=>{
+  let release:(response:Response)=>void=()=>{},entered:()=>void=()=>{};
+  const gate=new Promise<void>(resolve=>{entered=resolve;});
+  const {yt,config}=fixture(async(input)=>{
+    assert.equal(new URL(String(input)).pathname,'/token');entered();
+    return new Promise<Response>(resolve=>{release=resolve;});
+  });
+  const original=JSON.stringify(config.value);
+  const first=new URL((await yt.beginAuth('old-client','old-secret')).url).searchParams.get('state')!;
+  const finishing=yt.finishAuth('old-code',first);await gate;
+  await yt.beginAuth('new-client','new-secret');
+  release(Response.json({access_token:'stale',refresh_token:'stale',expires_in:3600,scope:'https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly'}));
+  await finishing;
+  assert.equal(JSON.stringify(config.value),original);
+  assert.equal(yt.status.state,'authorizing');await yt.stop();
+});

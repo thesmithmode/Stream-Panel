@@ -9,6 +9,7 @@ export class YouTubeConnection {
   status = { state: "disconnected", account: "", detail: "" };
   private pending: { state: string; verifier: string; expires: number; clientId: string; secret: string } | undefined;
   private generation = 0;
+  private authAttempt = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running: Promise<void> | undefined;
   private requests = new Set<AbortController>();
@@ -64,6 +65,7 @@ export class YouTubeConnection {
     if (!clientId || clientId.length > 256 || secret.length > 256) throw new Error("INVALID_YOUTUBE_CLIENT");
     if (!secret && !this.config.value.youtubeClientSecret) throw new Error("MISSING_YOUTUBE_SECRET");
     if (!secret && this.config.value.youtubeClientId && clientId !== this.config.value.youtubeClientId) throw new Error("MISSING_YOUTUBE_SECRET");
+    this.authAttempt++;
     const state = randomBytes(32).toString("hex"), verifier = randomBytes(32).toString("base64url");
     this.pending = { state, verifier, expires: this.now() + 600000, clientId, secret: secret || this.config.value.youtubeClientSecret! };
     this.status = { state: "authorizing", account: "", detail: "Завершите вход в Google" };
@@ -74,20 +76,20 @@ export class YouTubeConnection {
     const pending = this.pending;
     this.pending = undefined;
     if (!pending || !code || this.now() > pending.expires || state.length !== pending.state.length || !timingSafeEqual(Buffer.from(state), Buffer.from(pending.state))) throw new Error("INVALID_YOUTUBE_STATE");
-    const generation = this.generation;
+    const generation = this.generation, attempt = this.authAttempt;
     const data = await this.token({ grant_type: "authorization_code", code, redirect_uri: this.redirect, code_verifier: pending.verifier }, pending.clientId, pending.secret);
-    if (generation !== this.generation) return;
+    if (generation !== this.generation || attempt !== this.authAttempt) return;
     const granted = string(data.scope).split(" ");
     if (!scopes.every(s => granted.includes(s)) || !string(data.access_token) || !string(data.refresh_token)) throw new Error("YOUTUBE_SCOPES_REQUIRED");
     const tokens: Tokens = { access: string(data.access_token), refresh: string(data.refresh_token), expiresAt: this.now() + Number(data.expires_in) * 1000, userId: "", scopes: granted };
     if (!Number.isFinite(tokens.expiresAt) || tokens.expiresAt <= this.now()) throw new Error("YOUTUBE_INVALID_TOKEN");
     const channels = await this.api("channels", { part: "snippet,statistics,brandingSettings,contentDetails,topicDetails", mine: "true", maxResults: "50" }, tokens);
-    if (generation !== this.generation) return;
+    if (generation !== this.generation || attempt !== this.authAttempt) return;
     const items = Array.isArray(channels.items) ? channels.items : [];
     if (items.length !== 1 || channels.nextPageToken || !string(object(items[0]).id)) throw new Error("YOUTUBE_SELECT_ONE_CHANNEL");
     tokens.userId = string(object(items[0]).id);
     await this.stop();
-    if (this.generation !== generation + 1) return;
+    if (this.generation !== generation + 1 || this.authAttempt !== attempt + 1) return;
     this.config.value.youtubeClientId = pending.clientId;
     this.config.value.youtubeClientSecret = pending.secret;
     this.config.value.youtube = tokens;
@@ -279,7 +281,7 @@ export class YouTubeConnection {
     await tick();
   }
   async stop() {
-    this.generation++; this.pending = undefined;
+    this.generation++; this.authAttempt++; this.pending = undefined;
     clearTimeout(this.timer); this.timer = undefined;
     for (const controller of this.requests) controller.abort();
     await this.running; this.running = undefined;
