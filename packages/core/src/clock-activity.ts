@@ -1,3 +1,4 @@
+import {dateTimeFormatter} from './date-time-formatter.js';
 import {matchesActivityDay} from './time-audience.js';
 export const clockMetrics=['viewers','twitchViewers','youtubeViewers','messages','twitchMessages','youtubeMessages','donations'] as const;
 export type ClockMetric=typeof clockMetrics[number];
@@ -7,7 +8,7 @@ export interface ClockActivity {day:string;minute:number;totals:number[];duratio
 /** Preserve numerators and exposure so merging streams never averages averages. */
 export function clockActivity(points:Signal[],windows:{from:number;to:number}[],timezone:string):ClockActivity[]{
  const rows=new Map<string,ClockActivity>();
- const clock=new Intl.DateTimeFormat('ru-RU',{timeZone:timezone,weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+ const clock=dateTimeFormatter('ru-RU',{timeZone:timezone,weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
  for(const point of points){
   if(point.isBreak)continue;
   const duration=windows.reduce((n,w)=>n+Math.max(0,Math.min(point.at+60000,w.to)-Math.max(point.at,w.from)),0);

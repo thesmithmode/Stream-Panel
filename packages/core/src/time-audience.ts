@@ -1,3 +1,4 @@
+import {dateTimeFormatter} from './date-time-formatter.ts';
 export interface Window {from:number;to:number;session:string}
 export interface TimePerson {id:string;name:string;sources?:string[];source?:string;intervals:Window[];messageMinutes?:{session:string;at:number}[];core?:boolean;follower?:boolean|null}
 export interface TimeBucket {
@@ -32,7 +33,7 @@ export function timeAudience(windows:Window[],people:TimePerson[],timezone='Euro
  const buckets=new Map<number,TimeBucket>();
  for(let minute=hour===null?0:hour*60;minute<(hour===null?1440:(hour+1)*60);minute+=step)
   buckets.set(minute,{minute,streams:new Set(),people:new Map(),airtimeMs:0,personTimeMs:0,averageAudience:null});
- const formatter=new Intl.DateTimeFormat('ru-RU',{timeZone:timezone,weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+ const formatter=dateTimeFormatter('ru-RU',{timeZone:timezone,weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
  const clocks=new Map<number,{day:string;minute:number}>();
  function clock(at:number){
   const key=Math.floor(at/60000);let value=clocks.get(key);
@@ -71,7 +72,7 @@ export function localDateWindow(day:string,timezone:string):{from:number;to:numb
  if(!/^\d{4}-\d{2}-\d{2}$/.test(day))throw new Error('INVALID_DATE');
  const [year,month,date]=day.split('-').map(Number) as [number,number,number];
  const calendar=Date.UTC(year,month-1,date);if(new Date(calendar).toISOString().slice(0,10)!==day)throw new Error('INVALID_DATE');
- const clock=new Intl.DateTimeFormat('en-GB',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+ const clock=dateTimeFormatter('en-GB',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
  const midnight=(target:number)=>{let at=target;for(let i=0;i<3;i++){const parts=Object.fromEntries(clock.formatToParts(at).map(p=>[p.type,p.value]));const asUTC=Date.UTC(Number(parts.year),Number(parts.month)-1,Number(parts.day),Number(parts.hour),Number(parts.minute));const next=target-(asUTC-at);if(next===at)return at;at=next;}return at;};
  return {from:midnight(calendar),to:midnight(calendar+86400000)};
 }

@@ -526,5 +526,15 @@ CREATE VIEW IF NOT EXISTS logical_analytics_stream_revisions AS SELECT r.session
 PRAGMA user_version=21;
 `;
 
-export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21] as const;
+/** Disposable projections only; all source tables and identifiers remain untouched. */
+export const schemaV22=`
+CREATE TABLE IF NOT EXISTS analytics_reports(cache_key TEXT PRIMARY KEY,scope_key TEXT NOT NULL,payload BLOB NOT NULL,bytes INTEGER NOT NULL,updated_at_ms INTEGER NOT NULL) STRICT;
+CREATE INDEX IF NOT EXISTS analytics_reports_retention ON analytics_reports(updated_at_ms,cache_key);
+CREATE INDEX IF NOT EXISTS analytics_reports_scope ON analytics_reports(scope_key);
+CREATE TABLE IF NOT EXISTS analytics_report_people(cache_key TEXT NOT NULL REFERENCES analytics_reports(cache_key) ON DELETE CASCADE,id TEXT NOT NULL,value TEXT NOT NULL,seen INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(cache_key,id)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS analytics_report_clock(cache_key TEXT NOT NULL REFERENCES analytics_reports(cache_key) ON DELETE CASCADE,day TEXT NOT NULL,session TEXT NOT NULL,person TEXT NOT NULL,lo INTEGER NOT NULL,hi INTEGER NOT NULL,PRIMARY KEY(cache_key,day,session,person,lo)) WITHOUT ROWID;
+PRAGMA user_version=22;
+`;
+
+export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22] as const;
 export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;

@@ -1,7 +1,9 @@
-import {CURRENT_SCHEMA_VERSION} from "../../../packages/core/src/schema.js";
 import Database from 'better-sqlite3';
 import {stat,statfs} from 'node:fs/promises';
 import {StreamStore} from '../../../packages/core/src/store.js';
+// v20 was the last migration removing stored source bytes. Adding projections
+// must not VACUUM the factual database on every future schema upgrade.
+const LAST_COMPACTING_SCHEMA=20;
 
 /** Startup-only cleanup, before collectors and account connections open the database. */
 export async function prepareChatStorage(path:string) {
@@ -15,8 +17,8 @@ export async function prepareChatStorage(path:string) {
   size=Number(db.pragma('page_size',{simple:true}))*Number(db.pragma('page_count',{simple:true}));
   if(db.prepare("SELECT 1 FROM sqlite_master WHERE name='sp_profile_schema' AND type='table'").get())
    versions=db.prepare('SELECT profile,version FROM sp_profile_schema').all() as typeof versions;
-  standalone=!!db.prepare("SELECT 1 FROM sqlite_master WHERE name='events' AND type='table'").get() && Number(db.pragma('user_version',{simple:true}))<CURRENT_SCHEMA_VERSION;
-  const oldProfiles=versions.filter(row=>row.version>0&&row.version<CURRENT_SCHEMA_VERSION);
+  standalone=!!db.prepare("SELECT 1 FROM sqlite_master WHERE name='events' AND type='table'").get() && Number(db.pragma('user_version',{simple:true}))<LAST_COMPACTING_SCHEMA;
+  const oldProfiles=versions.filter(row=>row.version>0&&row.version<LAST_COMPACTING_SCHEMA);
   if(db.prepare("SELECT 1 FROM sqlite_master WHERE name='sp_pending_maintenance' AND type='table'").get())
    pending=!!db.prepare("SELECT 1 FROM sp_pending_maintenance WHERE name IN ('chat-content-v15','raw-storage-v16','storage-v17','storage-v18')").get();
   if(!standalone&&!oldProfiles.length&&!pending)return;

@@ -1,13 +1,19 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {startAnalyticsWarmer} from '../src/analytics-warmer.js';
 const settle=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
+test('collection and user requests take priority over background preparation',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});let calls=0,pending=1;
+ const runtime={configuration:{value:{excludedBotLogins:[]}},db:{queueStatus:()=>({pending}),call:async()=>{calls++;return {preparing:false};}}};
+ const stop=startAnalyticsWarmer(()=>[runtime] as any,()=>true,()=>{});
+ try{await settle();assert.equal(calls,0);t.mock.timers.tick(249);await settle();assert.equal(calls,0);pending=0;t.mock.timers.tick(1);await settle();assert.equal(calls,1);}finally{stop();t.mock.timers.reset();}
+});
 test('warming catches up serially, backs off when ready and stops without scheduling more work',async t=>{
  t.mock.timers.enable({apis:['setTimeout']});let calls=0,failures=0,enabled=false;
  const runtime={configuration:{value:{excludedBotLogins:[],youtubeAccountId:'yt'}},db:{call:async()=>({preparing:++calls===1})}} as any;
  const stop=startAnalyticsWarmer(()=>[runtime],()=>enabled,()=>failures++);
  try{
   assert.equal(calls,0);enabled=true;t.mock.timers.tick(60000);await settle();assert.equal(calls,1);
-  t.mock.timers.tick(49);await settle();assert.equal(calls,1);t.mock.timers.tick(1);await settle();assert.equal(calls,2);
+  t.mock.timers.tick(249);await settle();assert.equal(calls,1);t.mock.timers.tick(1);await settle();assert.equal(calls,2);
   t.mock.timers.tick(59999);await settle();assert.equal(calls,2);t.mock.timers.tick(1);await settle();assert.equal(calls,3);assert.equal(failures,0);
   stop();t.mock.timers.tick(60000);await settle();assert.equal(calls,3);
  }finally{stop();t.mock.timers.reset();}

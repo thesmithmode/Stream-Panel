@@ -1,3 +1,4 @@
+import {dateTimeFormatter} from './date-time-formatter.js';
 import type {audienceAnalytics} from './analytics.js';
 
 export type InsightGroup='schedule'|'people'|'content'|'support'|'stream';
@@ -32,7 +33,7 @@ export class InsightAccumulator {
  private clock:Intl.DateTimeFormat;
  private clocks=new Map<number,{day:string;hour:number;date:string}>();
  constructor(private people:PeopleMap,readonly timezone='Europe/Moscow',private focus=''){
-  this.clock=new Intl.DateTimeFormat('ru-RU',{timeZone:timezone,weekday:'short',hour:'2-digit',year:'numeric',month:'2-digit',day:'2-digit',hourCycle:'h23'});
+  this.clock=dateTimeFormatter('ru-RU',{timeZone:timezone,weekday:'short',hour:'2-digit',year:'numeric',month:'2-digit',day:'2-digit',hourCycle:'h23'});
  }
  private local(at:number){const key=Math.floor(at/60000),cached=this.clocks.get(key);if(cached)return cached;const p=Object.fromEntries(this.clock.formatToParts(at).map(p=>[p.type,p.value]));const value={day:p.weekday!,hour:Number(p.hour),date:`${p.year}-${p.month}-${p.day}`};this.clocks.set(key,value);return value;}
  add(report:Report,chatComplete:boolean,tips:{personId:string;at:number}[]=[]){
@@ -165,7 +166,7 @@ export class InsightAccumulator {
 /** Facts confined to one broadcast. No historical report is consulted. */
 export function streamInsights(report:Report,timezone='Europe/Moscow'):InsightCard[]{
  const stream=report.streamComparison[0];if(!stream)return [];
- const cards:InsightCard[]=[],clock=new Intl.DateTimeFormat('ru-RU',{timeZone:timezone,hour:'2-digit',minute:'2-digit'});
+ const cards:InsightCard[]=[],clock=dateTimeFormatter('ru-RU',{timeZone:timezone,hour:'2-digit',minute:'2-digit'});
  const add=(kind:string,title:string,detail:string,basis:string,at:number,score=70)=>cards.push({id:`${stream.id}:${kind}:${at}`,kind,group:'stream',title,detail,basis,action:'',score,sampleSize:1,evidence:[{sessionId:stream.id,at,label:stream.title||'Эфир'}]});
  const timeline=report.timeline.filter(p=>!p.isBreak),windows=new Map<number,typeof timeline>();
  for(const point of timeline){const at=Math.floor(point.at/900000)*900000,row=windows.get(at)??[];row.push(point);windows.set(at,row);}
