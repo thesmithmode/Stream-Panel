@@ -61,10 +61,10 @@
 
  </details>
 </section>{/if}
-{#if viewerPartial}<p class="small muted">Неполные данные площадок: ≥ — сумма известных зрителей; неизвестные значения не считаются нулями.</p>{/if}
+{#if viewerPartial}<p class="small muted">Неполные данные площадок: сумма известных зрителей; неизвестные значения не считаются нулями.</p>{/if}
 <section class="metrics stream-metrics">
- <div class="metric"><div><span>Средние зрители</span><strong>{viewers?.mean!=null?`${viewerPartial?'≥ ':''}${decimal(viewers.mean)}`:audienceBusy?'…':'Нет замеров'}</strong></div></div>
- <div class="metric"><div><span>Максимум зрителей</span><strong>{viewers?.peak!=null?`${viewerPartial?'≥ ':''}${viewers.peak}`:(audienceBusy?'…':'Нет замеров')}</strong></div></div>
+ <div class="metric"><div><span>Средние зрители</span><strong>{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'Нет замеров'}</strong></div></div>
+ <div class="metric"><div><span>Максимум зрителей</span><strong>{viewers?.peak!=null?viewers.peak:(audienceBusy?'…':'Нет замеров')}</strong></div></div>
  <div class="metric"><div><span>Сообщения</span><strong>{summary.messages.toLocaleString('ru-RU')}</strong></div></div>
  <div class="metric"><div><span>Донаты</span><strong>{Object.keys(summary.totals).length?Object.entries(summary.totals).map(([c,a])=>money(a,c)).join(' · '):'0'}</strong></div></div>
 </section>
