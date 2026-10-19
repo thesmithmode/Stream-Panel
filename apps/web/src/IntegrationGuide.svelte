@@ -22,6 +22,7 @@
     <li>Создайте проект в <a href="https://console.cloud.google.com/apis/dashboard" target="_blank" rel="noreferrer">Google Cloud Console</a>. Включите YouTube Data API v3 и YouTube Analytics API.</li>
     <li>Настройте экран OAuth consent. В режиме Testing добавьте свой аккаунт в Test users; этот режим может требовать повторного подключения.</li>
     <li>Создайте OAuth Client ID типа Web application. В Authorized redirect URIs добавьте: <code>{redirect}</code></li>
+    <li>В Google Auth Platform → Audience переведите приложение в Production: в Testing токен продления истекает через 7 дней.</li>
     <li>Скопируйте Client ID и Client secret. Нажмите «Войти через YouTube», выберите аккаунт нужного канала и разрешите чтение канала и аналитики.</li>
     <li>Дождитесь статуса «подключено». Сообщения начнут собираться при активном эфире с включённым чатом.</li>
    {/if}
