@@ -275,8 +275,11 @@
           <details><summary>Настройки приложения Google</summary>
             <label>YouTube Client ID<input bind:value={youtubeClient} autocomplete="off" /></label>
             <label>Новый Client secret<input type="password" bind:value={youtubeSecret} autocomplete="new-password" placeholder={status.config.hasYoutubeSecret ? "Сохранён; можно оставить пустым" : "Client secret"} /></label>
-          </details><button class="primary" disabled={busy} onclick={() => run(youtubeLogin)}>Повторить вход в Google</button>{/if}
+          </details>{/if}
+        <div class="actions">
+        {#if status.youtube?.state === "error"}<button class="primary" disabled={busy} onclick={() => run(youtubeLogin)}>Повторить вход в Google</button>{/if}
         <button class="outline" disabled={busy} onclick={() => run(async () => { if(!await confirmAction("Отключить YouTube?","Сбор новых данных остановится. История сохранится.","Отключить"))return;await api("youtube/disconnect", {}); })}>Отключить YouTube</button>
+        </div>
       {:else}
         <label>YouTube Client ID<input bind:value={youtubeClient} autocomplete="off" /></label>
         {#if status.config.hasYoutubeSecret}<p class="small muted">Client secret сохранён. Повторный ввод не требуется.</p>

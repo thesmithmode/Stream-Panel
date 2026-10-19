@@ -17,7 +17,7 @@ test('YouTube reconnect reuses saved credentials without disconnecting on deskto
       await context.route('https://accounts.google.com/**',route=>route.fulfill({contentType:'text/html',body:'Google fixture'}));
       await goto(page,a.bootstrap());
       await page.getByRole('navigation').getByRole('button',{name:'Интеграции',exact:true}).click();
-      const panel=page.locator('section.settings').filter({has:page.getByRole('heading',{name:'YouTube',exact:true})});
+      const panel=page.locator('section.settings:not(.wide)').filter({has:page.getByRole('heading',{name:'YouTube',exact:true})});
       await panel.getByText(/Google отклонил токен продления/).waitFor();
       assert.equal(await panel.locator('input[type=password]:visible').count(),0);
       const popupPromise=page.waitForEvent('popup');
