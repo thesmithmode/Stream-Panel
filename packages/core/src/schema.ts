@@ -536,5 +536,15 @@ CREATE TABLE IF NOT EXISTS analytics_report_clock(cache_key TEXT NOT NULL REFERE
 PRAGMA user_version=22;
 `;
 
-export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22] as const;
+/** Temporary 48-hour content archive; deliberately has no analytics revision triggers. */
+export const schemaV23=`
+CREATE TABLE IF NOT EXISTS recent_events(id TEXT PRIMARY KEY,source TEXT NOT NULL,account_id TEXT NOT NULL,external_id TEXT NOT NULL,type TEXT NOT NULL,actor_id TEXT,actor_name TEXT,at_ms INTEGER NOT NULL,received_at_ms INTEGER NOT NULL,payload_json TEXT NOT NULL) STRICT;
+CREATE INDEX IF NOT EXISTS recent_events_time ON recent_events(at_ms,id);
+CREATE INDEX IF NOT EXISTS recent_events_actor ON recent_events(source,account_id,actor_id);
+CREATE INDEX IF NOT EXISTS recent_events_external ON recent_events(source,account_id,external_id);
+PRAGMA user_version=23;
+`;
+
+export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23] as const;
 export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;
+
