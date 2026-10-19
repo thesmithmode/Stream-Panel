@@ -1,0 +1,33 @@
+"""Read-only incident diagnostics. Output counts and times only, never identities or secrets."""
+import json, sqlite3, subprocess
+from pathlib import Path
+config={}
+for line in Path('/etc/stream-panel/server.env').read_text().splitlines():
+    if '=' in line:
+        key,value=line.split('=',1);config[key]=value.strip().strip('"').strip("'")
+path=Path(config.get('STREAM_PANEL_DATA_DIR','/var/lib/stream-panel'))/'data.sqlite'
+db=sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)
+db.row_factory=sqlite3.Row
+db.execute('PRAGMA query_only=ON')
+print('integrity='+str(db.execute('PRAGMA quick_check').fetchone()[0]))
+print('foreign_key_errors='+str(len(db.execute('PRAGMA foreign_key_check').fetchall())))
+for profile in ('ruslan','gulnaz'):
+    p='p_'+profile+'_'
+    rows=db.execute(f'''SELECT s.id,s.started_at_ms,s.ended_at_ms,
+    (SELECT count(*) FROM {p}stream_samples x WHERE x.session_id=s.id) AS samples,
+    (SELECT count(*) FROM {p}stream_samples x WHERE x.session_id=s.id AND x.twitch_viewers IS NOT NULL) AS twitch_samples,
+    (SELECT count(*) FROM {p}stream_samples x WHERE x.session_id=s.id AND x.youtube_viewers IS NOT NULL) AS youtube_samples,
+    (SELECT count(*) FROM {p}presence_polls x WHERE x.session_id=s.id) AS polls
+    FROM {p}sessions s ORDER BY started_at_ms DESC LIMIT 3''').fetchall()
+    print(json.dumps({'profile':profile,'recent':[{k:r[k] for k in r.keys() if k!='id'} for r in rows]}))
+    for row in rows[:1]:
+        print('sample_ranges='+json.dumps([dict(r) for r in db.execute(f'SELECT min(observed_at_ms) AS first,max(observed_at_ms) AS last,max(twitch_viewers) AS twitch_peak,max(youtube_viewers) AS youtube_peak FROM {p}stream_samples WHERE session_id=?',(row['id'],))]))
+        print('platforms='+json.dumps([dict(r) for r in db.execute(f'SELECT platform,started_at_ms,ended_at_ms,last_observed_at_ms FROM {p}platform_streams WHERE session_id=?',(row['id'],))]))
+    print('schema='+json.dumps([dict(r) for r in db.execute('SELECT profile,version FROM sp_profile_schema WHERE profile=?',(profile,))]))
+db.close()
+# Extract only known errors, rather than printing arbitrary provider/user payloads.
+import re
+logs=subprocess.run(['journalctl','-u','stream-panel','--since','-12 hours','-n','20000','--no-pager','-o','cat'],capture_output=True,text=True,timeout=20).stdout
+patterns=['SQLITE_[A-Z_]+','INVALID_STREAM_SAMPLE','INVALID_YOUTUBE_SESSION','UNKNOWN_OPERATION','STORAGE_FULL','DB_WORKER_[A-Z_]+','no such (?:table|column): [a-zA-Z0-9_.]+','[A-Za-z_]+ has [0-9]+ columns but [0-9]+ values were supplied','(?:dist|node_modules)/[a-zA-Z0-9_./-]+\\.(?:js|mjs|cjs):[0-9]+(?::[0-9]+)?']
+print('errors='+json.dumps({p:sorted(set(re.findall(p,logs))) for p in patterns}))
+print('release='+Path('/opt/stream-panel/current').resolve().name)
