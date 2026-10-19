@@ -1,3 +1,4 @@
+import {clockActivity} from './clock-activity.js';
 import {donationTiming} from './donation-statistics.js';
 import {timePatterns} from './time-patterns.js';
 import type Database from 'better-sqlite3';
@@ -11,6 +12,18 @@ export interface AnalyticsOptions {
     source?: 'all' | 'twitch' | 'youtube';
     category?: string;
     sessionId?: string;
+    summaryOnly?: boolean;
+    includeInsights?: boolean;
+    insightSessionId?: string;
+    audienceOffset?:number;
+    audienceSearch?:string;
+    audienceSort?:string;
+    audienceCoreOnly?:boolean;
+    clockDay?:string;
+    clockMinute?:number;
+    clockResolution?:number;
+    clockOffset?:number;
+    clockBatch?:boolean;
     minSessions?: number;
     regularThresholdPercent?: number;
     minMinutes?: number;
@@ -63,10 +76,13 @@ function groupBySession<T extends {session_id:string}>(rows:T[]):Map<string,T[]>
     for(const row of rows){const group=groups.get(row.session_id);if(group)group.push(row);else groups.set(row.session_id,[row]);}
     return groups;
 }
-export function audienceAnalytics(db: Database.Database, options: AnalyticsOptions) {
-    const recording=options.sessionId?db.prepare('SELECT started_at_ms,ended_at_ms FROM sessions WHERE id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id)').get(options.sessionId) as {started_at_ms:number;ended_at_ms:number|null}|undefined:undefined;
-    if(options.sessionId&&!recording)throw new Error('SESSION_NOT_FOUND');
-    const from=recording?Math.max(options.fromMs,recording.started_at_ms):options.fromMs,to=recording?Math.min(options.toMs,recording.ended_at_ms??options.toMs):options.toMs;
+export function validateAnalyticsOptions(options:AnalyticsOptions,from=options.fromMs,to=options.toMs){
+    if([options.audienceOffset,options.clockOffset].some(n=>n!==undefined&&(!Number.isSafeInteger(n)||n<0)) ||
+       (options.audienceSearch!==undefined&&(typeof options.audienceSearch!=='string'||options.audienceSearch.length>256)) ||
+       (options.audienceSort!==undefined&&!['core','sessions','observedMinutes','estimatedChatMinutes','messages','attendanceRatio'].includes(options.audienceSort)) ||
+       (options.clockDay!==undefined&&!['all','weekdays','weekends','пн','вт','ср','чт','пт','сб','вс'].includes(options.clockDay)) ||
+       (options.clockResolution!==undefined&&![1,5,15,30,60].includes(options.clockResolution)) ||
+       (options.clockMinute!==undefined&&(!Number.isInteger(options.clockMinute)||options.clockMinute<0||options.clockMinute>=1440||options.clockMinute%(options.clockResolution??60)!==0)))throw new Error('INVALID_ANALYTICS_FILTER');
     const source = options.source ?? 'all', category = options.category ?? '', timezone = options.timezone ?? 'Europe/Moscow';
     const regularThresholdPercent=options.regularThresholdPercent??80;
     const minSessions = options.minSessions ?? 3, minMinutes = options.minMinutes ?? 30, minMessages = options.minMessages ?? 5, window = options.chatWindowMinutes ?? 5, rule = options.coreRule ?? 'either';
@@ -79,6 +95,13 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     catch {
         throw new Error('INVALID_TIMEZONE');
     }
+    return {source,category,timezone,regularThresholdPercent,minSessions,minMinutes,minMessages,window,rule,clock};
+}
+export function audienceAnalytics(db: Database.Database, options: AnalyticsOptions) {
+    const recording=options.sessionId?db.prepare('SELECT started_at_ms,ended_at_ms FROM sessions WHERE id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id)').get(options.sessionId) as {started_at_ms:number;ended_at_ms:number|null}|undefined:undefined;
+    if(options.sessionId&&!recording)throw new Error('SESSION_NOT_FOUND');
+    const from=recording?Math.max(options.fromMs,recording.started_at_ms):options.fromMs,to=recording?Math.min(options.toMs,recording.ended_at_ms??options.toMs):options.toMs;
+    const {source,category,timezone,regularThresholdPercent,minSessions,minMinutes,minMessages,window,rule,clock}=validateAnalyticsOptions(options,from,to);
     const excluded = botExclusionSet(options.excludedLogins ?? []), botJson = JSON.stringify([...excluded]);
     const sessions = db.prepare('SELECT * FROM sessions WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id) AND started_at_ms<? AND coalesce(ended_at_ms,?)>? AND (? IS NULL OR id=?) ORDER BY started_at_ms LIMIT 1001').all(to, to, from, options.sessionId??null,options.sessionId??null) as any[];
     if (sessions.length > 1000)
@@ -401,13 +424,14 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         observedKnownMinutes: number;
         viewersTotal: number;
         viewerSamples: number;
+        knownViewersTotal:number;knownViewerSamples:number;viewerPartialMinutes:number;
         donationTotals:Record<string,string>;donationCount:number;
     }>();
     for (const point of timeline.values()) {
         const parts = clock.formatToParts(point.at), day = parts.find(x => x.type === 'weekday')!.value, hour = Number(parts.find(x => x.type === 'hour')!.value), key = `${day}:${hour}`;
         let cell = hourly.get(key);
         if (!cell) {
-            cell = { day, hour, observed: 0, estimated: 0, messages: 0, sampleMinutes: 0, observedKnownMinutes: 0, viewersTotal: 0, viewerSamples: 0,donationTotals:{},donationCount:0 };
+            cell = { day, hour, observed: 0, estimated: 0, messages: 0, sampleMinutes: 0, observedKnownMinutes: 0, viewersTotal: 0, viewerSamples: 0,knownViewersTotal:0,knownViewerSamples:0,viewerPartialMinutes:0,donationTotals:{},donationCount:0 };
             hourly.set(key, cell);
         }
         const elapsed=elapsedMinutes.get(point.at)??0;
@@ -417,6 +441,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         cell.donationCount+=minuteDonationCounts.get(point.at)??0;
         cell.messages += point.messages;
         cell.sampleMinutes+=elapsed;
+        if(point.viewers!==null){cell.knownViewersTotal+=point.viewers*elapsed;cell.knownViewerSamples+=elapsed;if(point.viewersPartial)cell.viewerPartialMinutes+=elapsed;}
         if(point.viewers !== null&&!point.viewersPartial) {cell.viewersTotal+=point.viewers*elapsed;cell.viewerSamples+=elapsed;}
         if (point.presenceKnown)
             cell.observedKnownMinutes+=elapsed;
@@ -443,6 +468,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         const metrics=streamMetrics((selectedBySession.get(s.id)??[]),(samplesBySession.get(s.id)??[]),streamAuthors.get(s.id)??new Map());
         const aggregate=streamMetrics((selectedBySession.get(s.id)??[]),[...new Set((selectedBySession.get(s.id)??[]).flatMap(segment=>Array.from({length:Math.ceil(segment.to/60000)-Math.floor(segment.from/60000)},(_,i)=>(Math.floor(segment.from/60000)+i)*60000)))].map(at=>timeline.get(at)!).filter(Boolean).map(p=>({observed_at_ms:p.at,twitch_viewers:p.viewersPartial?null:p.viewers,youtube_viewers:0})),new Map());
         metrics.viewers.all=aggregate.viewers.all;
+        metrics.viewers.known=streamMetrics(selectedBySession.get(s.id)??[],(samplesBySession.get(s.id)??[]).map(p=>({...p,twitch_viewers:source==='youtube'?null:p.twitch_viewers,youtube_viewers:source==='twitch'?null:p.youtube_viewers})),new Map(),(platformsBySession.get(s.id)??[]).filter(p=>source==='all'||p.platform===source).map(p=>({platform:p.platform,from:p.started_at_ms,to:p.ended_at_ms??to}))).viewers.known;
         let participantMs=0,peakParticipants=0;
         const participantsByMinute=new Map<number,Set<string>>();
         for(const visitor of visitors)for(const span of unionSpans(visitor.intervals.filter(span=>span.session===s.id).map(span=>({...span,kind:'observed' as const})))){
@@ -453,5 +479,5 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     });
     const report=source!=='twitch'&&options.youtubeAccount ? db.prepare("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {payload_json:string;updated_at_ms:number}|undefined : undefined;
     const youtubeReport=report ? {data:JSON.parse(report.payload_json),updatedAt:report.updated_at_ms} : null;
-    return { donationTiming:donationTiming(db,from,to,timezone),activityWindows:selected, patterns,composition,breaks, youtubeReport, streamComparison, availableCategories: [...new Map(segments.filter(s=>s.categoryId&&s.name!=='Категория неизвестна').map(s => [s.categoryId, { id: s.categoryId, name: s.name }])).values()], filters: { fromMs: from, toMs: to, source, category, minSessions, minMinutes, minMessages, regularThresholdPercent, coreRule: rule, chatWindowMinutes: window, timezone }, summary: { entities: audience.length, attendees: attendees.length, regulars, regularShare: audience.length?regulars/audience.length:null, core: audience.filter(e => e.core).length, streams: new Set(selected.map(x => x.session)).size, chatters:audience.filter(e=>e.messages>0).length, messages: audience.reduce((sum, e) => sum + e.messages, 0) }, audience, categories: [...categories.values()].filter(c=>c.id&&c.name!=='Категория неизвестна').map(c => ({ ...c, donationCount:categoryDonationCounts.get(c.id)??0,donationTotals:categoryDonations.get(c.id)??{},donationsPerHourMinor:currencyRates(categoryDonations.get(c.id)??{},Math.round(c.minutes*60000)),sessions: c.sessions.size, audience: c.audience.size, core: c.core.size, messagesPerHour: c.minutes ? c.messages * 60 / c.minutes : 0, observedPerMinute: c.minutes ? c.observedMinutes / c.minutes : 0, observedPerKnownMinute: c.observedKnownMinutes ? c.observedMinutes / c.observedKnownMinutes : null, coverageRatio: c.minutes ? c.observedKnownMinutes/c.minutes : null })), timeline: [...timeline.values()].sort((a, b) => a.at - b.at), hours: [...hourly.values()].map(cell=>({...cell,donationsPerHourMinor:currencyRates(cell.donationTotals,Math.round(cell.sampleMinutes*60000))})).sort((a, b) => ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(a.day) - ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(b.day) || a.hour - b.hour), sessions, excluded: [...excluded] };
+    return { activityClock:clockActivity([...timeline.values()].map(point=>({...point,donations:minuteDonationCounts.get(point.at)??0,donationAmounts:minuteDonations.get(point.at)??{}})),selected,timezone), donationTiming:donationTiming(db,from,to,timezone,category),activityWindows:selected, patterns,composition,breaks, youtubeReport, streamComparison, availableCategories: [...new Map(segments.filter(s=>s.categoryId&&s.name!=='Категория неизвестна').map(s => [s.categoryId, { id: s.categoryId, name: s.name }])).values()], filters: { fromMs: from, toMs: to, source, category, minSessions, minMinutes, minMessages, regularThresholdPercent, coreRule: rule, chatWindowMinutes: window, timezone }, summary: { entities: audience.length, attendees: attendees.length, regulars, regularShare: audience.length?regulars/audience.length:null, core: audience.filter(e => e.core).length, streams: new Set(selected.map(x => x.session)).size, chatters:audience.filter(e=>e.messages>0).length, messages: audience.reduce((sum, e) => sum + e.messages, 0) }, audience, categories: [...categories.values()].filter(c=>c.id&&c.name!=='Категория неизвестна').map(c => ({ ...c, donationCount:categoryDonationCounts.get(c.id)??0,donationTotals:categoryDonations.get(c.id)??{},donationsPerHourMinor:currencyRates(categoryDonations.get(c.id)??{},Math.round(c.minutes*60000)),sessions: c.sessions.size, audience: c.audience.size, core: c.core.size, messagesPerHour: c.minutes ? c.messages * 60 / c.minutes : 0, observedPerMinute: c.minutes ? c.observedMinutes / c.minutes : 0, observedPerKnownMinute: c.observedKnownMinutes ? c.observedMinutes / c.observedKnownMinutes : null, coverageRatio: c.minutes ? c.observedKnownMinutes/c.minutes : null })), timeline: [...timeline.values()].sort((a, b) => a.at - b.at), hours: [...hourly.values()].map(cell=>({...cell,donationsPerHourMinor:currencyRates(cell.donationTotals,Math.round(cell.sampleMinutes*60000))})).sort((a, b) => ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(a.day) - ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(b.day) || a.hour - b.hour), sessions, excluded: [...excluded] };
 }

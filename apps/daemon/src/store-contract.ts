@@ -4,6 +4,7 @@ import type {StreamStore} from '../../../packages/core/src/store.js';
 export const storeOperations={
   channelOverview:"cached",
   analytics:"cached",
+  clockAudience:"cached",
   warmAnalytics:"maintenance",
   streamSample:"write",
   youtubeViewers:"write",
@@ -25,6 +26,8 @@ export const storeOperations={
   removePendingDonation:"maintenance",
   ingestLiveDonation:"write",
   sessions:"cached",
+  mergeSessions:"write",
+  unmergeSessions:"write",
   platformStreams:"read",
   platformMissing:"write",
   attachPlatformStream:"write",
@@ -71,7 +74,7 @@ export const storeOperations={
   backup:"maintenance",
   close:"write",
   candidatePersons:"cached",
-  insights:"read",
+  insights:"cached",
   personsTop:"cached",
   personStats:"cached",
   personActivity:"cached",
@@ -91,4 +94,9 @@ export function isStoreMethod(value:string):value is StoreMethod {
 }
 export function operationsWithPolicy(policy:'cached'|'read'|'write'|'maintenance'):Set<string> {
   return new Set(Object.entries(storeOperations).filter(([,value])=>value===policy).map(([name])=>name));
+}
+
+/** Operational heartbeats and maintenance do not change analytical facts. */
+export function invalidatesCachedReads(method:StoreMethod,args:readonly unknown[]):boolean{
+  return storeOperations[method]==='write'&&method!=='close'&&!(method==='collectionLifecycle'&&args[0]==='heartbeat');
 }

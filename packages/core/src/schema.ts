@@ -446,5 +446,85 @@ PRAGMA user_version=19;
 `;
 
 /** One ordered registry drives upgrades and profile SQL identifiers. Append new versions here. */
-export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19] as const;
+/** Exact membership facts use permanent numeric keys; the UUID interface stays stable. */
+export const schemaV20 = `
+CREATE TABLE presence_poll_keys (key INTEGER PRIMARY KEY AUTOINCREMENT,poll_id TEXT NOT NULL UNIQUE REFERENCES presence_polls(id)) STRICT;
+CREATE TABLE presence_identity_keys (key INTEGER PRIMARY KEY AUTOINCREMENT,identity_id TEXT NOT NULL UNIQUE REFERENCES identities(id)) STRICT;
+INSERT INTO presence_poll_keys(poll_id) SELECT id FROM presence_polls ORDER BY rowid;
+INSERT INTO presence_identity_keys(identity_id) SELECT id FROM identities ORDER BY rowid;
+CREATE TABLE presence_members_compact (
+ poll_key INTEGER NOT NULL REFERENCES presence_poll_keys(key) ON DELETE RESTRICT,
+ identity_key INTEGER NOT NULL REFERENCES presence_identity_keys(key) ON DELETE RESTRICT,
+ PRIMARY KEY(poll_key,identity_key)
+) WITHOUT ROWID;
+CREATE INDEX presence_members_compact_identity ON presence_members_compact(identity_key,poll_key);
+INSERT INTO presence_members_compact SELECT p.key,i.key FROM presence_members m JOIN presence_poll_keys p ON p.poll_id=m.poll_id JOIN presence_identity_keys i ON i.identity_id=m.identity_id;
+-- Equal counts plus inclusion prove exact equality because both relations are unique.
+CREATE TABLE presence_transfer_check (valid INTEGER NOT NULL CHECK(valid=1)) STRICT;
+INSERT INTO presence_transfer_check SELECT
+ (SELECT count(*) FROM presence_members)=(SELECT count(*) FROM presence_members_compact)
+ AND NOT EXISTS(SELECT m.poll_id,m.identity_id FROM presence_members m EXCEPT SELECT p.poll_id,i.identity_id FROM presence_members_compact c JOIN presence_poll_keys p ON p.key=c.poll_key JOIN presence_identity_keys i ON i.key=c.identity_key);
+DROP TABLE presence_transfer_check;
+DROP TABLE presence_members;
+CREATE VIEW presence_members AS SELECT p.poll_id,i.identity_id FROM presence_members_compact c JOIN presence_poll_keys p ON p.key=c.poll_key JOIN presence_identity_keys i ON i.key=c.identity_key;
+CREATE TRIGGER presence_poll_keys_insert AFTER INSERT ON presence_polls BEGIN INSERT INTO presence_poll_keys(poll_id) VALUES(NEW.id); END;
+CREATE TRIGGER presence_identity_keys_insert AFTER INSERT ON identities BEGIN INSERT INTO presence_identity_keys(identity_id) VALUES(NEW.id); END;
+CREATE TRIGGER presence_poll_keys_delete BEFORE DELETE ON presence_polls BEGIN DELETE FROM presence_poll_keys WHERE poll_id=OLD.id; END;
+CREATE TRIGGER presence_identity_keys_delete BEFORE DELETE ON identities BEGIN DELETE FROM presence_identity_keys WHERE identity_id=OLD.id; END;
+CREATE TRIGGER presence_members_insert INSTEAD OF INSERT ON presence_members BEGIN
+ INSERT INTO presence_members_compact VALUES((SELECT key FROM presence_poll_keys WHERE poll_id=NEW.poll_id),(SELECT key FROM presence_identity_keys WHERE identity_id=NEW.identity_id));
+END;
+CREATE TRIGGER presence_members_delete INSTEAD OF DELETE ON presence_members BEGIN
+ DELETE FROM presence_members_compact WHERE poll_key=(SELECT key FROM presence_poll_keys WHERE poll_id=OLD.poll_id) AND identity_key=(SELECT key FROM presence_identity_keys WHERE identity_id=OLD.identity_id);
+END;
+CREATE TRIGGER presence_members_update INSTEAD OF UPDATE ON presence_members BEGIN
+ UPDATE presence_members_compact SET poll_key=(SELECT key FROM presence_poll_keys WHERE poll_id=NEW.poll_id),identity_key=(SELECT key FROM presence_identity_keys WHERE identity_id=NEW.identity_id) WHERE poll_key=(SELECT key FROM presence_poll_keys WHERE poll_id=OLD.poll_id) AND identity_key=(SELECT key FROM presence_identity_keys WHERE identity_id=OLD.identity_id);
+END;
+CREATE TRIGGER analytics_presence_compact_insert AFTER INSERT ON presence_members_compact BEGIN
+ UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT p.session_id FROM presence_polls p JOIN presence_poll_keys k ON k.poll_id=p.id WHERE k.key=NEW.poll_key);
+END;
+CREATE TRIGGER analytics_presence_compact_delete AFTER DELETE ON presence_members_compact BEGIN
+ UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT p.session_id FROM presence_polls p JOIN presence_poll_keys k ON k.poll_id=p.id WHERE k.key=OLD.poll_key);
+END;
+CREATE TRIGGER analytics_presence_compact_update AFTER UPDATE ON presence_members_compact BEGIN
+ UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN(SELECT p.session_id FROM presence_polls p JOIN presence_poll_keys k ON k.poll_id=p.id WHERE k.key IN(OLD.poll_key,NEW.poll_key));
+END;
+PRAGMA user_version=20;
+`;
+
+/** Grouping is a read-side projection: original facts and foreign keys are unchanged. */
+export const schemaV21 = `
+CREATE TABLE IF NOT EXISTS session_groups(member_id TEXT PRIMARY KEY REFERENCES sessions(id),group_id TEXT NOT NULL REFERENCES sessions(id)) STRICT;
+CREATE INDEX IF NOT EXISTS session_groups_root ON session_groups(group_id,member_id);
+CREATE TRIGGER IF NOT EXISTS session_groups_insert AFTER INSERT ON session_groups BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS session_groups_update AFTER UPDATE ON session_groups BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE TRIGGER IF NOT EXISTS session_groups_delete AFTER DELETE ON session_groups BEGIN UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1; END;
+CREATE VIEW IF NOT EXISTS logical_sessions AS
+ SELECT s.id,s.account_id,s.stream_id,s.kind,s.started_at_ms,s.recording_started_at_ms,
+ CASE WHEN EXISTS(SELECT 1 FROM session_groups g JOIN sessions x ON x.id=g.member_id WHERE g.group_id=s.id AND x.ended_at_ms IS NULL) THEN NULL
+ ELSE coalesce((SELECT max(x.ended_at_ms) FROM session_groups g JOIN sessions x ON x.id=g.member_id WHERE g.group_id=s.id),s.ended_at_ms) END AS ended_at_ms,
+ coalesce((SELECT x.end_quality FROM session_groups g JOIN sessions x ON x.id=g.member_id WHERE g.group_id=s.id ORDER BY x.ended_at_ms IS NULL DESC,x.ended_at_ms DESC,x.id LIMIT 1),s.end_quality) AS end_quality
+ FROM sessions s WHERE NOT EXISTS(SELECT 1 FROM session_groups g WHERE g.member_id=s.id AND g.group_id<>s.id);
+CREATE VIEW IF NOT EXISTS logical_event_sessions AS
+ SELECT p.session_id,p.event_id FROM event_sessions p WHERE NOT EXISTS(SELECT 1 FROM session_groups g WHERE g.member_id=p.session_id)
+ UNION ALL SELECT g.group_id AS session_id,p.event_id FROM session_groups g JOIN event_sessions p ON p.session_id=g.member_id;
+CREATE VIEW IF NOT EXISTS logical_presence_polls AS
+ SELECT p.session_id,p.id,p.account_id,p.started_at_ms,p.completed_at_ms,p.status FROM presence_polls p WHERE NOT EXISTS(SELECT 1 FROM session_groups g WHERE g.member_id=p.session_id)
+ UNION ALL SELECT g.group_id AS session_id,p.id,p.account_id,p.started_at_ms,p.completed_at_ms,p.status FROM session_groups g JOIN presence_polls p ON p.session_id=g.member_id;
+CREATE VIEW IF NOT EXISTS logical_platform_streams AS
+ SELECT p.session_id,p.platform,p.account_id,p.external_id,p.started_at_ms,p.ended_at_ms,p.last_observed_at_ms,p.offline_checks,p.first_missing_at_ms,p.url,p.title FROM platform_streams p WHERE NOT EXISTS(SELECT 1 FROM session_groups g WHERE g.member_id=p.session_id)
+ UNION ALL SELECT g.group_id AS session_id,p.platform,p.account_id,p.external_id,p.started_at_ms,p.ended_at_ms,p.last_observed_at_ms,p.offline_checks,p.first_missing_at_ms,p.url,p.title FROM session_groups g JOIN platform_streams p ON p.session_id=g.member_id;
+CREATE VIEW IF NOT EXISTS logical_stream_samples AS
+ SELECT p.session_id,p.observed_at_ms,p.category_id,p.category_name,p.title,p.twitch_viewers,p.youtube_viewers FROM stream_samples p WHERE NOT EXISTS(SELECT 1 FROM session_groups g WHERE g.member_id=p.session_id)
+ UNION ALL SELECT g.group_id AS session_id,p.observed_at_ms,p.category_id,p.category_name,p.title,p.twitch_viewers,p.youtube_viewers FROM session_groups g JOIN stream_samples p ON p.session_id=g.member_id;
+CREATE VIEW IF NOT EXISTS logical_follower_observations AS
+ SELECT p.session_id,p.id,p.source,p.account_id,p.key,p.observed_at_ms,p.payload_json FROM follower_observations p WHERE NOT EXISTS(SELECT 1 FROM session_groups g WHERE g.member_id=p.session_id)
+ UNION ALL SELECT g.group_id AS session_id,p.id,p.source,p.account_id,p.key,p.observed_at_ms,p.payload_json FROM session_groups g JOIN follower_observations p ON p.session_id=g.member_id;
+CREATE VIEW IF NOT EXISTS logical_analytics_stream_revisions AS SELECT r.session_id,
+ coalesce((SELECT sum(v.revision) FROM session_groups g JOIN analytics_stream_revisions v ON v.session_id=g.member_id WHERE g.group_id=r.session_id),r.revision) AS revision
+ FROM analytics_stream_revisions r;
+PRAGMA user_version=21;
+`;
+
+export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21] as const;
 export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;

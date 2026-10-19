@@ -23,3 +23,7 @@ test('combined viewer counts require only active providers and retain unknown ac
  const noProvider=streamMetrics(segments,samples,new Map(),[]);assert.equal(noProvider.viewers.all.mean,null);assert.equal(noProvider.viewers.all.peak,null);
  const yt=streamMetrics([{from:0,to:minute}],[{observed_at_ms:0,twitch_viewers:null,youtube_viewers:7}],new Map(),[{platform:'youtube',from:0,to:minute}]);assert.equal(yt.viewers.all.mean,7);
 });
+test('several segments of one provider in a minute represent that provider only once',()=>{
+ const data=streamMetrics([{from:0,to:2*minute}],[{observed_at_ms:minute,twitch_viewers:5,youtube_viewers:null}],new Map(),[{platform:'twitch',from:0,to:minute+30000},{platform:'twitch',from:minute,to:2*minute}]);
+ assert.equal(data.viewers.all.peak,5);assert.equal(data.viewers.all.mean,5);
+});

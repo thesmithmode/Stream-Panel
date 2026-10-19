@@ -1,7 +1,8 @@
 <script lang="ts">
+ import type {Snippet} from 'svelte';
  import Help from './Help.svelte';
  import {money} from './api';
- let {data}:{data:any}=$props();
+ let {categoryFilter,data}:{categoryFilter:Snippet<[string]>;data:any}=$props();
  let dimension=$state('weekday'),metric=$state('viewers'),calculation=$state('average'),currency=$state('RUB');
  const days=['пн','вт','ср','чт','пт','сб','вс'];
  const currencies=$derived([...new Set<string>((data.hours??[]).flatMap((h:any)=>Object.keys(h.donationTotals)))]);
@@ -9,7 +10,7 @@
  const rows=$derived((dimension==='weekday'?days:Array.from({length:24},(_,i)=>i)).map(key=>({label:dimension==='weekday'?String(key):`${key}:00`,cell:(dimension==='weekday'?data.patterns.byWeekday:data.patterns.byHour).find((c:any)=>dimension==='weekday'?c.day===key:c.hour===key)})));
  function value(c:any):number|null{
   if(!c||!c.sampleMinutes)return null;
-  if(metric==='viewers')return calculation==='average'?c.viewerMean:c.viewerSamples?c.viewersTotal:null;
+  if(metric==='viewers'){const samples=c.knownViewerSamples??c.viewerSamples,total=c.knownViewersTotal??c.viewersTotal;return samples?(calculation==='average'?total/samples:total):null;}
   if(metric==='observed')return calculation==='average'?c.observedMean:c.observedKnownMinutes?c.observed:null;
   if(metric==='estimated')return calculation==='average'?c.estimatedMean:c.estimated;
   if(metric==='messages')return calculation==='average'?c.messagesPerHour:c.messages;
@@ -23,18 +24,18 @@
  const total=$derived(groups.reduce((n,g)=>n+g.count,0));
 
 </script>
-<section class="panel time-patterns"><header><h2>Когда стримить</h2><Help id="time-pattern-help" label="Как считаются средние" text="Средние взвешены по длительности с данными. Часы без эфиров не считаются нулями. Накопленная сумма складывает всю активность выбранного периода."/></header>
+<section class="panel time-patterns"><header><h2>Когда стримить</h2><Help id="time-pattern-help" label="Как считаются средние" text="Средние взвешены по длительности с данными. Часы без эфиров не считаются нулями. Накопленная сумма складывает всю активность выбранного периода."/></header>{@render categoryFilter("Категория времени эфиров")}
  <div class="pattern-controls">
   <label>Сравнение времени<select aria-label="Сравнение времени" bind:value={dimension}><option value="weekday">Дни недели</option><option value="hour">Время суток</option></select></label>
   <label>Показатель времени<select aria-label="Показатель времени" bind:value={metric}><option value="viewers">Зрители</option><option value="messages">Сообщения</option><option value="observed">Участники Twitch</option><option value="estimated">Активность YouTube · оценка</option><option value="donations">Число донатов</option><option value="amount">Сумма донатов</option></select></label>
   <label>Расчёт времени<select aria-label="Расчёт времени" bind:value={calculation}><option value="average">Среднее / на час эфира</option><option value="total">Накопленная сумма</option></select></label>
   {#if metric==='amount'}<label>Валюта времени<select aria-label="Валюта времени" bind:value={currency}>{#each currencies as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select></label>{/if}
  </div>
- <p class="small muted pattern-note">{units}</p>
- <div class="pattern-bars" aria-label="Сравнение дней и часов">{#each rows as row}<div class="pattern-row"><span>{row.label}</span><div class="pattern-track" class:no-data={value(row.cell)===null}><i style:width={`${(value(row.cell)??0)/maximum*100}%`}></i></div><strong>{format(value(row.cell))}</strong><small>{row.cell?`${Math.round(row.cell.sampleMinutes)} мин эфира`:''}</small></div>{/each}</div>
+ <p class="small muted pattern-note">{units}{metric==='viewers'&&rows.some(row=>row.cell?.viewerPartialMinutes)?' · ≥ — неполные данные площадок':''}</p>
+ <div class="pattern-bars" aria-label="Сравнение дней и часов">{#each rows as row}<div class="pattern-row"><span>{row.label}</span><div class="pattern-track" class:no-data={value(row.cell)===null}><i style:width={`${(value(row.cell)??0)/maximum*100}%`}></i></div><strong>{metric==='viewers'&&row.cell?.viewerPartialMinutes?'≥ ':''}{format(value(row.cell))}</strong><small>{row.cell?`${Math.round(row.cell.sampleMinutes)} мин эфира`:''}</small></div>{/each}</div>
 </section>
 <div class="discovery-grid">
- <section class="panel audience-composition"><header><h2>Состав аудитории</h2><Help id="composition-help" label="О составе аудитории" text={`Известные участники: Twitch ${data.composition.twitch}, YouTube ${data.composition.youtube}, связаны на обеих площадках ${data.composition.both}. Человек учитывается один раз. Статус подписки — на последнюю проверку. Анонимные зрители в счётчиках не раскрывают аккаунт. Неизвестный статус не означает отсутствие подписки.`}/></header><div class="settings-body">
+ <section class="panel audience-composition"><header><h2>Состав аудитории</h2><Help id="composition-help" label="О составе аудитории" text={`Известные участники: Twitch ${data.composition.twitch}, YouTube ${data.composition.youtube}, связаны на обеих площадках ${data.composition.both}. Человек учитывается один раз. Статус подписки — на последнюю проверку. Анонимные зрители в счётчиках не раскрывают аккаунт. Неизвестный статус не означает отсутствие подписки.`}/></header>{@render categoryFilter("Категория состава аудитории")}<div class="settings-body">
   <div class="composition-bar" aria-label="Доли состава аудитории">{#each groups as g}<span style:width={`${total?g.count/total*100:0}%`} style:background={g.color}></span>{/each}</div>
   {#each groups as g}<p class="composition-row"><span><i style:background={g.color}></i>{g.label}</span><strong>{g.count}{total?` · ${Math.round(g.count/total*100)}%`:''}</strong></p>{/each}
  </div></section>

@@ -20,7 +20,7 @@ test('stream subscriptions show platform totals, exact follow dates and independ
   };
   await wideLast('.stream-metrics > .metric');
   const evidenceStream=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(evidenceStream){await mkdir(evidenceStream,{recursive:true});await page.screenshot({path:join(evidenceStream,'stream-tiles-mobile.png'),fullPage:true});}
-  const following=page.getByRole('region',{name:'Подписки на канал'});await following.getByText('Новых подписок за стрим:',{exact:false}).waitFor();assert.ok((await following.textContent()).includes('Unlinked subscriber'));assert.ok((await following.textContent()).includes('частично'));
+  const following=page.getByRole('region',{name:'Подписчики за стрим'});await following.getByText('Unlinked subscriber',{exact:true}).waitFor();assert.equal(await following.getByText('Известных новых подписок',{exact:true}).count(),0);assert.equal(await following.getByText('Частные подписки скрыты',{exact:false}).count(),0);
   assert.equal(await following.locator('.meter').count(),0);await following.getByRole('button',{name:'О подписках на канал',exact:true}).click();await page.getByRole('dialog',{name:'О подписках на канал'}).waitFor();await page.keyboard.press('Escape');
   await following.getByRole('button',{name:'Follow Viewer',exact:true}).click();await page.getByRole('heading',{name:'Follow Viewer',exact:true}).waitFor();
   await wideLast('.person-detail .kpi-strip > .kpi');

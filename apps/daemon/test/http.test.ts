@@ -295,7 +295,7 @@ test("person stats, tops and insights endpoints return shaped aggregates", async
     );
     const insights = await get(`/api/v1/insights?session=${session}`);
     assert.equal(insights.statusCode, 200);
-    assert.ok(Array.isArray(insights.json()));
+    assert.ok(Array.isArray(insights.json().insights));
     assert.equal((await get("/api/v1/insights")).statusCode, 200);
     const summary = await get(`/api/v1/summary?session=${session}`);
     assert.equal(summary.statusCode, 200);

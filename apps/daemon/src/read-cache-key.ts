@@ -12,7 +12,7 @@ export function readCacheKey(method:string,args:unknown[],now=Date.now()):string
   return value;
  };
  const key=[...args];
- if(method==='analytics'&&args[0]&&typeof args[0]==='object'){
+ if((method==='analytics'||method==='clockAudience')&&args[0]&&typeof args[0]==='object'){
   const options=args[0] as Record<string,unknown>;
   key[0]={...options,toMs:moving(options.toMs)};
  }

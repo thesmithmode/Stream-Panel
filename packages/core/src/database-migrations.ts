@@ -12,6 +12,8 @@ export function migrateDatabase(db:Database.Database):void {
     throw new Error('UNSUPPORTED_SCHEMA_VERSION');
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = FULL');
+  db.pragma('temp_store=FILE');
+  db.pragma('temp.cache_size=-2048');
   db.pragma('secure_delete = ON');
   db.pragma('wal_autocheckpoint = 1000');
   db.pragma('journal_size_limit = 67108864');

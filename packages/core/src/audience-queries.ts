@@ -382,7 +382,7 @@ export class AudienceQueries {
         this.db
           .prepare(
             `SELECT m.poll_id FROM identities i
-      CROSS JOIN presence_members m INDEXED BY presence_members_identity
+      JOIN presence_members m ON m.identity_id=i.id
       CROSS JOIN presence_polls p
       WHERE i.person_id=? AND m.identity_id=i.id AND p.id=m.poll_id
       AND p.session_id=? AND p.started_at_ms<? AND p.completed_at_ms>=?`,
@@ -561,11 +561,11 @@ export class AudienceQueries {
     if (excluded) return {messageCount:0,estimatedChatMinutes:0,sessionIds:new Set<string>(),firstSeenMs:null};
     const now = Date.now();
     const rows = this.db.prepare(`SELECT m.id,m.published_at_ms FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE m.published_at_ms>=${fromMs} AND y.person_id=? AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(personId) as {id:string;published_at_ms:number}[];
-    const matched = this.db.prepare(`SELECT DISTINCT m.id,m.published_at_ms,s.id AS session_id,s.started_at_ms,coalesce(s.ended_at_ms,?) AS ended_at_ms
+    const matched = this.db.prepare(`SELECT DISTINCT m.id,m.published_at_ms,s.id AS session_id,s.started_at_ms,min(coalesce(s.ended_at_ms,?),coalesce(ps.ended_at_ms,?)) AS ended_at_ms
       FROM youtube_identities y JOIN youtube_messages m ON m.account_id=y.account_id AND m.author_id=y.external_id
       JOIN platform_streams ps ON ps.platform='youtube' AND ps.account_id=m.account_id AND m.published_at_ms>=ps.started_at_ms AND (ps.ended_at_ms IS NULL OR m.published_at_ms<ps.ended_at_ms)
       JOIN sessions s ON s.id=ps.session_id
-      WHERE m.published_at_ms>=${fromMs} AND y.person_id=? AND (? IS NULL OR s.id=?) AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(now,personId,sessionId??null,sessionId??null) as {id:string;published_at_ms:number;session_id:string;started_at_ms:number;ended_at_ms:number}[];
+      WHERE m.published_at_ms>=${fromMs} AND y.person_id=? AND (? IS NULL OR s.id=?) AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(now,now,personId,sessionId??null,sessionId??null) as {id:string;published_at_ms:number;session_id:string;started_at_ms:number;ended_at_ms:number}[];
     const spans = unionSpans(matched.map(row=>({session:row.session_id,kind:'chat_proxy' as const,from:Math.max(fromMs,row.started_at_ms,row.published_at_ms),to:Math.min(row.ended_at_ms,row.published_at_ms+chatWindowMinutes*60000)})));
     return {messageCount:sessionId?new Set(matched.map(row=>row.id)).size:rows.length,
       estimatedChatMinutes:spans.reduce((total,span)=>total+(span.to-span.from)/60000,0),
@@ -830,219 +830,6 @@ export class AudienceQueries {
         observedMinutes,
       };
     });
-  }
-
-  insights(
-    sessionId?: string,
-    excludedBotLogins: readonly string[] = [],
-  ): Record<string, unknown>[] {
-    const botJson = this.botJson(excludedBotLogins);
-    const cards: Record<string, unknown>[] = [];
-    const sessions = this.db
-      .prepare(
-        "SELECT id, started_at_ms, ended_at_ms FROM sessions ORDER BY started_at_ms DESC LIMIT 50",
-      )
-      .all() as {
-      id: string;
-      started_at_ms: number;
-      ended_at_ms: number | null;
-    }[];
-    const focus =
-      sessionId !== undefined
-        ? sessions.find((s) => s.id === sessionId)
-        : sessions[0];
-    if (!focus) return cards;
-
-    const window = this.sessionMinuteWindow(focus.id);
-    const sid = focus.id;
-    const inSession =
-      "e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?)";
-
-    // Regulars: observed in >= 3 sessions with avg >= 5 observed minutes
-    const personIds = this.db
-      .prepare(
-        `SELECT DISTINCT i.person_id AS id, p.display_name
-         FROM identities i
-         JOIN persons p ON p.id = i.person_id
-         WHERE ${this.notBotClause("i")}`,
-      )
-      .all(botJson) as { id: string; display_name: string }[];
-    for (const person of personIds) {
-      let hitSessions = 0;
-      let minuteSum = 0;
-      for (const session of sessions) {
-        const fromMs = Math.floor(session.started_at_ms / 60_000) * 60_000;
-        const endMs = session.ended_at_ms ?? Date.now();
-        let toMs = Math.ceil(endMs / 60_000) * 60_000;
-        if (toMs - fromMs > 31 * 86_400_000 || toMs <= fromMs) continue;
-        const obs = this.observedMinutesForPerson(
-          session.id,
-          person.id,
-          fromMs,
-          toMs,
-        );
-        if (obs.observedMinutes >= 5) {
-          hitSessions += 1;
-          minuteSum += obs.observedMinutes;
-        }
-      }
-      if (hitSessions >= 3) {
-        cards.push({
-          kind: "regular",
-          title: "Постоянный участник",
-          detail: `${person.display_name}: ≥5 наблюдаемых минут в ${hitSessions} сессиях`,
-          personId: person.id,
-          sessionId: sid,
-          metrics: {
-            sessions: hitSessions,
-            avgObservedMinutes: Math.round((minuteSum / hitSessions) * 10) / 10,
-          },
-        });
-      }
-    }
-
-    // Per-person message + observed for focus session
-    const msgRows = this.db
-      .prepare(
-        `SELECT i.person_id AS id, max(p.display_name) AS display_name, count(*) AS messages
-         FROM effective_events e
-         JOIN identities i ON i.id = e.identity_id
-         JOIN persons p ON p.id = i.person_id
-         WHERE ${inSession} AND e.type = 'chat.message'
-           AND (
-             json_extract(e.payload_json, '$.originChannelId') IS NULL
-             OR json_extract(e.payload_json, '$.originChannelId') = e.account_id
-           )
-           AND ${this.notBotClause("i")}
-         GROUP BY i.person_id`,
-      )
-      .all(sid, botJson) as { id: string; display_name: string; messages: number }[];
-    const msgMap = new Map(msgRows.map((r) => [r.id, r]));
-    const presentIds = this.db
-      .prepare(
-        `SELECT DISTINCT i.person_id AS id, p.display_name
-         FROM presence_members m
-         JOIN presence_polls poll ON poll.id = m.poll_id
-         JOIN identities i ON i.id = m.identity_id
-         JOIN persons p ON p.id = i.person_id
-         WHERE poll.session_id = ? AND poll.status = 'complete'
-           AND ${this.notBotClause("i")}`,
-      )
-      .all(sid, botJson) as { id: string; display_name: string }[];
-
-    for (const row of msgRows) {
-      if (row.messages < 5) continue;
-      const obs = this.observedMinutesForPerson(
-        sid,
-        row.id,
-        window.fromMs,
-        window.toMs,
-      );
-      if (obs.observedMinutes === 0) {
-        cards.push({
-          kind: "chatty_absent",
-          title: "Пишет, но не наблюдался",
-          detail: `${row.display_name}: ${row.messages} сообщ., 0 наблюдаемых минут`,
-          personId: row.id,
-          sessionId: sid,
-          metrics: { messages: row.messages, observedMinutes: 0 },
-        });
-      }
-    }
-
-    for (const row of presentIds) {
-      const obs = this.observedMinutesForPerson(
-        sid,
-        row.id,
-        window.fromMs,
-        window.toMs,
-      );
-      const messages = msgMap.get(row.id)?.messages ?? 0;
-      if (obs.observedMinutes >= 10 && messages === 0) {
-        cards.push({
-          kind: "silent_presence",
-          title: "Тихое присутствие",
-          detail: `${row.display_name}: ${obs.observedMinutes} наблюдаемых минут без сообщений`,
-          personId: row.id,
-          sessionId: sid,
-          metrics: { messages: 0, observedMinutes: obs.observedMinutes },
-        });
-      }
-    }
-
-    // Donor without Twitch link
-    const donors = this.db
-      .prepare(
-        `SELECT p.id, p.display_name,
-           EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND i.source='twitch') AS has_twitch,
-           EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND i.source='donationalerts') AS has_da
-         FROM persons p
-         WHERE EXISTS(
-           SELECT 1 FROM effective_events e
-           JOIN identities i ON i.id = e.identity_id
-           WHERE i.person_id = p.id AND e.type = 'donation' AND ${inSession} AND ${this.notBotClause("i")}
-         )`,
-      )
-      .all(sid, botJson) as {
-      id: string;
-      display_name: string;
-      has_twitch: number;
-      has_da: number;
-    }[];
-    for (const d of donors) {
-      if (d.has_da && !d.has_twitch) {
-        cards.push({
-          kind: "donor_no_twitch",
-          title: "Донат без Twitch",
-          detail: `${d.display_name}: есть DonationAlerts, нет связанного Twitch`,
-          personId: d.id,
-          sessionId: sid,
-          metrics: {},
-        });
-      }
-    }
-
-    const sessionPeople = [...new Map([...msgRows,...presentIds].map(p=>[p.id,p])).values()];
-    // Returning after long gap (>= 14 days since prior activity)
-    const fourteen = 14 * 86_400_000;
-    for (const person of sessionPeople) {
-      const priorLast = this.db
-        .prepare(
-          `SELECT max(ts) AS last_ms FROM (
-             SELECT coalesce(e.occurred_at_ms, e.received_at_ms) AS ts
-             FROM effective_events e JOIN identities i ON i.id = e.identity_id
-             WHERE i.person_id = ? AND e.id NOT IN (
-               SELECT event_id FROM event_sessions WHERE session_id = ?
-             )
-             UNION ALL
-             SELECT poll.completed_at_ms AS ts
-             FROM presence_polls poll
-             JOIN presence_members m ON m.poll_id = poll.id
-             JOIN identities i ON i.id = m.identity_id
-             WHERE i.person_id = ? AND poll.session_id != ? AND poll.status='complete'
-           )`,
-        )
-        .get(person.id, sid, person.id, sid) as { last_ms: number | null };
-      if (
-        priorLast.last_ms !== null &&
-        focus.started_at_ms - priorLast.last_ms >= fourteen
-      ) {
-        const days = Math.round(
-          (focus.started_at_ms - priorLast.last_ms) / 86_400_000,
-        );
-        cards.push({
-          kind: "returning_after_gap",
-          title: "Вернулся после паузы",
-          detail: `${person.display_name}: ~${days} дн. с прошлой активности`,
-          personId: person.id,
-          sessionId: sid,
-          metrics: { gapMs: focus.started_at_ms - priorLast.last_ms, days },
-        });
-      }
-    }
-
-    // Cap cards to keep UI light
-    return cards.slice(0, 40);
   }
 
 }

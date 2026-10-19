@@ -26,6 +26,8 @@ test('legacy import keeps every table, WAL events and credentials, leaves source
  old.prepare('INSERT INTO event_sessions VALUES (?,?)').run('e',session);
  old.prepare('INSERT INTO presence_polls VALUES (?,?,?,?,?,?)').run('poll',session,'channel',1000,1001,'complete');
  old.exec("INSERT INTO presence_members VALUES ('poll','i')");
+ // Deleted, unreferenced keys must never be allocated again after import.
+ old.exec("INSERT INTO persons VALUES('temporary','Temporary',0);INSERT INTO identities VALUES('temporary','twitch','channel','temporary','Temporary','temporary','temporary','temporary');DELETE FROM presence_identity_keys WHERE identity_id='temporary';INSERT INTO presence_identity_keys(key,identity_id) VALUES(10000,'temporary');DELETE FROM identities WHERE id='temporary';DELETE FROM persons WHERE id='temporary'");
  old.prepare('INSERT INTO stream_samples VALUES (?,?,?,?,?,?,?)').run(session,1001,'123','Game','Title',10,5);
  const secrets={version:1,twitchClientId:'same-client',twitch:{access:'fixture-access',refresh:'fixture-refresh'},daClientId:'same-da',daClientSecret:'fixture-secret'};
  await writeFile(join(source,'secrets.json'),JSON.stringify(secrets));
@@ -36,6 +38,7 @@ test('legacy import keeps every table, WAL events and credentials, leaves source
  assert.deepEqual(migrated.prepare('SELECT payload_json FROM p_ruslan_provider_snapshots').all(),[{payload_json:'{"followers":[],"complete":true,"total":null}'}]);assert.equal(migrated.prepare("SELECT name FROM sqlite_master WHERE name='provider_snapshots'").get(),undefined);
  try{
  for(const table of Object.keys(result.tables))assert.deepEqual(migrated.prepare(`SELECT * FROM p_ruslan_${table}`).all(),old.prepare(`SELECT * FROM ${table}`).all());
+ assert.ok((migrated.prepare("SELECT seq FROM sqlite_sequence WHERE name='p_ruslan_presence_identity_keys'").get() as any).seq>=10000);
  assert.equal((migrated.prepare('SELECT display_name FROM p_ruslan_persons').get() as any).display_name,'Viewer');assert.equal(migrated.prepare('SELECT * FROM p_ruslan_sessions').all().length,1);assert.equal(migrated.prepare("SELECT name FROM sqlite_master WHERE name='persons'").all().length,0);assert.equal(migrated.pragma('integrity_check',{simple:true}),'ok');assert.equal((migrated.pragma('foreign_key_check') as unknown[]).length,0);}finally{migrated.close();}
  assert.deepEqual(JSON.parse(await readFile(join(dest,'profiles/ruslan/secrets.json'),'utf8')),secrets);
  assert.equal(old.prepare('SELECT * FROM persons').all().length,1);assert.equal((await stat(join(dest,'profiles/ruslan/secrets.json'))).mode&0o777,0o600);
@@ -118,4 +121,12 @@ test('current schema import preserves notes, deleted donation audit, stream cate
   } finally {imported.close();}
   await assert.rejects(migrateLegacy(source,dest),/DESTINATION_EXISTS/);
  } finally {await rm(root,{recursive:true,force:true});}
+});
+
+
+test('an empty imported identity-key table retains its allocation high-water mark',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'sp-import-keys-')),source=join(root,'old'),dest=join(root,'new');await mkdir(source);
+ const s=new StreamStore(join(source,'data.sqlite'));s.close();const db=new Database(join(source,'data.sqlite'));
+ db.exec("INSERT INTO persons VALUES('temporary','Temporary',0);INSERT INTO identities VALUES('temporary','twitch','owner','temporary','Temporary','temporary','temporary','temporary');DELETE FROM identities WHERE id='temporary';DELETE FROM persons WHERE id='temporary'");db.close();
+ try{await migrateLegacy(source,dest);const imported=new StreamStore(join(dest,'data.sqlite'),'ruslan');try{const session=imported.startSession('owner','live',60000,'platform',60000);imported.recordPoll(session,'owner',{startedAtMs:60000,completedAtMs:61000,status:'complete',userIds:['new']});const d=(imported as any).db;assert.ok(d.prepare('SELECT key FROM presence_identity_keys').get().key>1);}finally{imported.close();}}finally{await rm(root,{recursive:true,force:true});}
 });

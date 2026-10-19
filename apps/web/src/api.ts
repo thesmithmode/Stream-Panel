@@ -60,6 +60,7 @@ export interface Person {
   sources: string;
 }
 export interface Session {
+  memberIds?:string[];
   id: string;
   kind: string;
   account_id: string;
@@ -68,7 +69,7 @@ export interface Session {
   event_count: number;
   messageCount?:number;
   end_quality: string;
-  durationMs?:number;viewerMean?:number|null;viewerPeak?:number|null;donationTotals?:Record<string,string>;donationCount?:number;
+  durationMs?:number;viewerMean?:number|null;viewerPeak?:number|null;viewerKnownMean?:number|null;viewerKnownPeak?:number|null;viewerPartial?:boolean;donationTotals?:Record<string,string>;donationCount?:number;
   platforms?: Array<"twitch" | "youtube">;
   primaryTitle?: string | null;
   breaks?:Array<{from:number;to:number}>;
@@ -130,11 +131,4 @@ export interface PersonTop {
   donationTotals: Record<string, string>;
   observedMinutes: number;
 }
-export interface InsightCard {
-  kind: string;
-  title: string;
-  detail: string;
-  personId: string | null;
-  sessionId: string | null;
-  metrics: Record<string, unknown>;
-}
+export type {InsightCard} from '../../../packages/core/src/insights';

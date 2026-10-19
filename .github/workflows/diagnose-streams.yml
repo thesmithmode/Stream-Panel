@@ -1,7 +1,7 @@
 name: Stream collection diagnostics
 on:
   push:
-    branches: [dev]
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read

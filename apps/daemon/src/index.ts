@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {FrontendProcess} from './frontend-process.js';
 import {existsSync} from 'node:fs';
 import {createServer} from 'node:net';
-import {analyticsSettings} from './analytics-settings.js';
+import {startAnalyticsWarmer} from './analytics-warmer.js';
 import {activatePendingRestore} from './restore-service.js';
 
 const dir = process.env.STREAM_PANEL_DATA_DIR;
@@ -75,19 +75,11 @@ void runBackup();
 const backupTimer = setInterval(() => { if(!closing)void runBackup(); }, 60000);
 const retentionTimer=setInterval(()=>{void hosted.backup?.purgeLocal().catch(()=>console.error('Local backup cleanup failed'));},60*60*1000);
 const heartbeatTimer=setInterval(()=>{if(collectorsStarted&&!closing)for(const runtime of hosted.runtimes.values())void runtime.db.call("collectionLifecycle","heartbeat",Date.now()).catch(()=>console.error("Collector heartbeat failed"));},30000);
-const warmAnalytics=()=>{
- if(closing||!collectorsStarted)return;
- for(const runtime of hosted.runtimes.values())void(async()=>{
-  const cfg=runtime.configuration.value;
-  await runtime.db.call('warmAnalytics',{...analyticsSettings(cfg.analyticsSettings),fromMs:0,toMs:Date.now(),excludedLogins:cfg.excludedBotLogins,ownerId:cfg.twitch?.userId??'',youtubeAccount:cfg.youtube?.userId??cfg.youtubeAccountId??''});
- })().catch(()=>console.error('Historical analytics preparation failed'));
-};
-const analyticsTimer=setInterval(warmAnalytics,60000);
-warmAnalytics();
+const stopAnalyticsWarming=startAnalyticsWarmer(()=>hosted.runtimes.values(),()=>!closing&&collectorsStarted,()=>console.error('Historical analytics preparation failed'));
 const timer = setInterval(() => void startCollectors(), 2000);
 const shutdown = async (code=0) => {
   if (closing) return;
-  closing = true; clearInterval(timer); clearInterval(backupTimer);clearInterval(retentionTimer);clearInterval(heartbeatTimer);clearInterval(analyticsTimer);
+  closing = true; clearInterval(timer); clearInterval(backupTimer);clearInterval(retentionTimer);clearInterval(heartbeatTimer);stopAnalyticsWarming();
   const timeout = setTimeout(() => process.exit(1), 10000); timeout.unref();
   try { if(collectorsStarted)await Promise.allSettled([...hosted.runtimes.values()].map(runtime=>runtime.db.call("collectionLifecycle","stop",Date.now())));await frontend?.stop();await hosted.app.close(); clearTimeout(timeout); process.exit(code); }
   catch { process.exit(1); }

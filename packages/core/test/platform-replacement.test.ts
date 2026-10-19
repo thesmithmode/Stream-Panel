@@ -84,7 +84,7 @@ test('stale new-stream response has no effect and the same external ID never rep
   assert.equal(old.last_observed_at_ms,1600);
   const newId=store.observePlatformStream('twitch','account','new-stream',1200,1700,'https://twitch.tv/channel','Confirmed');
   assert.ok(newId);
-  assert.notEqual(newId,oldId);
-  assert.equal(store.sessions().length,2);
+  assert.equal(newId,oldId);
+  assert.equal(store.sessions().length,1);
  } finally {store.close();await rm(dir,{recursive:true,force:true});}
 });
