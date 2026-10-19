@@ -156,11 +156,11 @@ export class StreamSessions {
       const windows=windowsFromLinks(links.map(p=>({started_at_ms:p.from,ended_at_ms:p.to})),Number(row.started_at_ms),Number(row.ended_at_ms??Date.now()));
       const merged=new Map<number,{observed_at_ms:number;twitch_viewers:number|null;youtube_viewers:number|null}>();
       for(const sample of samplesBySession.get(String(row.id))??[]){const at=Math.floor(sample.observed_at_ms/60000)*60000,value=merged.get(at)??{observed_at_ms:at,twitch_viewers:null,youtube_viewers:null};if(sample.twitch_viewers!==null)value.twitch_viewers=sample.twitch_viewers;if(sample.youtube_viewers!==null)value.youtube_viewers=sample.youtube_viewers;merged.set(at,value);}
-      const viewers=streamMetrics(windows,[...merged.values()],new Map(),links).viewers.all;
+      const metrics=streamMetrics(windows,[...merged.values()],new Map(),links).viewers;const viewers=metrics.all;
       const donations:Record<string,string>={};let donationCount=0;
       for(const tip of tipsBySession.get(String(row.id))??[]){donationCount++;if(tip.currency&&tip.amount&&/^\d+$/.test(tip.amount))donations[tip.currency]=(BigInt(donations[tip.currency]??'0')+BigInt(tip.amount)).toString();}
       return ({
-      ...row,memberIds:members.length?members:[String(row.id)],messageCount:messagesBySession.get(String(row.id))??0, durationMs:windows.reduce((sum,w)=>sum+w.to-w.from,0),viewerMean:viewers.mean,viewerPeak:viewers.peak,donationTotals:donations,donationCount,
+      ...row,memberIds:members.length?members:[String(row.id)],messageCount:messagesBySession.get(String(row.id))??0, durationMs:windows.reduce((sum,w)=>sum+w.to-w.from,0),viewerMean:viewers.mean,viewerPeak:viewers.peak,viewerKnownMean:metrics.known.mean,viewerKnownPeak:metrics.known.peak,viewerPartial:metrics.known.partialMinutes>0,donationTotals:donations,donationCount,
       breaks:sessionBreaks(windows),
       platforms: JSON.parse(platforms_json as string) as string[],
       confirmedUrls: (JSON.parse(urls_json as string) as {platform:"twitch"|"youtube";url:string}[])

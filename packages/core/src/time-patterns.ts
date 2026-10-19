@@ -1,5 +1,5 @@
 import {currencyRates} from './rates.js';
-export interface TimeCell {day:string;hour:number;observed:number;estimated:number;messages:number;sampleMinutes:number;observedKnownMinutes:number;viewersTotal:number;viewerSamples:number;donationTotals:Record<string,string>;donationCount:number}
+export interface TimeCell {day:string;hour:number;observed:number;estimated:number;messages:number;sampleMinutes:number;observedKnownMinutes:number;viewersTotal:number;viewerSamples:number;knownViewersTotal?:number;knownViewerSamples?:number;viewerPartialMinutes?:number;donationTotals:Record<string,string>;donationCount:number}
 const empty=():TimeCell=>({day:'',hour:0,observed:0,estimated:0,messages:0,sampleMinutes:0,observedKnownMinutes:0,viewersTotal:0,viewerSamples:0,donationTotals:{},donationCount:0});
 /** Pool numerators and exposure before dividing; empty time slots stay absent. */
 export function timePatterns(cells:TimeCell[]){
@@ -8,6 +8,7 @@ export function timePatterns(cells:TimeCell[]){
   const key=target===days?cell.day:cell.hour;
   const map=target as Map<string|number,TimeCell>,row=map.get(key)??{...empty(),day:cell.day,hour:cell.hour};
   for(const field of ['observed','estimated','messages','sampleMinutes','observedKnownMinutes','viewersTotal','viewerSamples','donationCount'] as const)row[field]+=cell[field];
+  for(const field of ['knownViewersTotal','knownViewerSamples','viewerPartialMinutes'] as const)row[field]=(row[field]??0)+(cell[field]??(field==='knownViewersTotal'?cell.viewersTotal:field==='knownViewerSamples'?cell.viewerSamples:0));
   for(const [currency,amount] of Object.entries(cell.donationTotals))row.donationTotals[currency]=(BigInt(row.donationTotals[currency]??'0')+BigInt(amount)).toString();
   map.set(key,row);
  }

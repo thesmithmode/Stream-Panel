@@ -3,7 +3,7 @@ export const clockMetrics=['viewers','twitchViewers','youtubeViewers','messages'
 export type ClockMetric=typeof clockMetrics[number];
 export type ClockViewMetric=ClockMetric|'watchHours'|'twitchWatchHours'|'youtubeWatchHours';
 type Signal={donationAmounts?:Record<string,string>;at:number;isBreak?:boolean;viewersPartial?:boolean}&Partial<Record<ClockMetric,number|null>>;
-export interface ClockActivity {day:string;minute:number;totals:number[];durations:number[];donationAmounts?:Record<string,string>}
+export interface ClockActivity {day:string;minute:number;totals:number[];durations:number[];donationAmounts?:Record<string,string>;knownViewerTotal?:number;knownViewerDuration?:number;partialViewerDuration?:number}
 /** Preserve numerators and exposure so merging streams never averages averages. */
 export function clockActivity(points:Signal[],windows:{from:number;to:number}[],timezone:string):ClockActivity[]{
  const rows=new Map<string,ClockActivity>();
@@ -14,21 +14,22 @@ export function clockActivity(points:Signal[],windows:{from:number;to:number}[],
   if(!duration)continue;
   const parts=clock.formatToParts(point.at),day=parts.find(p=>p.type==='weekday')!.value,minute=Number(parts.find(p=>p.type==='hour')!.value)*60+Number(parts.find(p=>p.type==='minute')!.value),key=`${day}:${minute}`;
   let row=rows.get(key);if(!row){row={day,minute,totals:Array(clockMetrics.length).fill(0),durations:Array(clockMetrics.length).fill(0)};rows.set(key,row);}
+  if(point.viewers!=null){row.knownViewerTotal=(row.knownViewerTotal??0)+point.viewers*duration;row.knownViewerDuration=(row.knownViewerDuration??0)+duration;if(point.viewersPartial)row.partialViewerDuration=(row.partialViewerDuration??0)+duration;}
   if(point.donationAmounts)for(const [currency,amount] of Object.entries(point.donationAmounts)){row.donationAmounts??={};row.donationAmounts[currency]=(BigInt(row.donationAmounts[currency]??'0')+BigInt(amount)).toString();}
   clockMetrics.forEach((metric,i)=>{const value=metric==='donations'?(point.donations??0):point[metric];if(value==null||(metric==='viewers'&&point.viewersPartial))return;row!.totals[i]!+=metric.endsWith('Messages')||metric==='messages'||metric==='donations'?value:value*duration;row!.durations[i]!+=duration;});
  }
  return [...rows.values()];
 }
 export function mergeClockActivity(rows:ClockActivity[],merged=new Map<string,ClockActivity>()):ClockActivity[]{
- for(const row of rows){const key=`${row.day}:${row.minute}`,prior=merged.get(key);if(prior){row.totals.forEach((n,i)=>prior.totals[i]=(prior.totals[i]??0)+n);row.durations.forEach((n,i)=>prior.durations[i]=(prior.durations[i]??0)+n);if(row.donationAmounts){prior.donationAmounts??={};for(const [currency,amount] of Object.entries(row.donationAmounts))prior.donationAmounts[currency]=(BigInt(prior.donationAmounts[currency]??'0')+BigInt(amount)).toString();}}else merged.set(key,{...row,totals:[...row.totals],durations:[...row.durations],...(row.donationAmounts?{donationAmounts:{...row.donationAmounts}}:{})});}
+ for(const row of rows){const key=`${row.day}:${row.minute}`,prior=merged.get(key);if(prior){for(const field of ['knownViewerTotal','knownViewerDuration','partialViewerDuration'] as const)prior[field]=(prior[field]??(field==='knownViewerTotal'?prior.totals[0]??0:field==='knownViewerDuration'?prior.durations[0]??0:0))+(row[field]??(field==='knownViewerTotal'?row.totals[0]??0:field==='knownViewerDuration'?row.durations[0]??0:0));row.totals.forEach((n,i)=>prior.totals[i]=(prior.totals[i]??0)+n);row.durations.forEach((n,i)=>prior.durations[i]=(prior.durations[i]??0)+n);if(row.donationAmounts){prior.donationAmounts??={};for(const [currency,amount] of Object.entries(row.donationAmounts))prior.donationAmounts[currency]=(BigInt(prior.donationAmounts[currency]??'0')+BigInt(amount)).toString();}}else merged.set(key,{...row,totals:[...row.totals],durations:[...row.durations],...(row.donationAmounts?{donationAmounts:{...row.donationAmounts}}:{})});}
  return [...merged.values()];
 }
-export function clockActivitySeries(rows:ClockActivity[],metric:ClockViewMetric,resolution:number,day='all'){
+export function clockActivitySeries(rows:ClockActivity[],metric:ClockViewMetric,resolution:number,day='all',includePartial=false){
  const watchMetrics:Partial<Record<ClockViewMetric,ClockMetric>>={watchHours:'viewers',twitchWatchHours:'twitchViewers',youtubeWatchHours:'youtubeViewers'};
  const watchMetric=watchMetrics[metric];
  const step=[1,5,15,30,60].includes(resolution)?resolution:60,index=clockMetrics.indexOf(watchMetric??metric as ClockMetric),messages=metric==='messages'||metric.endsWith('Messages')||metric==='donations';
- const buckets=Array.from({length:1440/step},(_,i)=>({minute:i*step,total:0,duration:0}));
- for(const row of rows){if(!matchesActivityDay(day,row.day))continue;const bucket=buckets[Math.floor(row.minute/step)]!;bucket.total+=row.totals[index]??0;bucket.duration+=row.durations[index]??0;}
+ const buckets=Array.from({length:1440/step},(_,i)=>({minute:i*step,total:0,duration:0,partial:false}));
+ for(const row of rows){if(!matchesActivityDay(day,row.day))continue;const bucket=buckets[Math.floor(row.minute/step)]!;const known=includePartial&&(watchMetric??metric)==='viewers';bucket.total+=known?(row.knownViewerTotal??row.totals[index]??0):row.totals[index]??0;bucket.duration+=known?(row.knownViewerDuration??row.durations[index]??0):row.durations[index]??0;bucket.partial ||= known&&(row.partialViewerDuration??0)>0;}
  return buckets.map(b=>({...b,value:b.duration?(watchMetric?b.total/3600000:b.total/b.duration*(messages?3600000:1)):null}));
 }
 

@@ -76,3 +76,16 @@ test('numeric axis spans zero through the peak with readable intermediate levels
   assert.ok(levels.every((n,i)=>!i||n>levels[i-1]!));
  }
 });
+
+test('partial display pools only known minutes with a lower-bound marker and preserves exact statistics',()=>{
+ const partial=clockActivity([{at:base,viewers:8,twitchViewers:8,youtubeViewers:null,viewersPartial:true},{at:base+minute,viewers:null}],[{from:base,to:base+2*minute}],'Europe/Moscow');
+ const full=clockActivity([{at:base+7*86400000,viewers:2,twitchViewers:2,youtubeViewers:0}],[{from:base+7*86400000,to:base+7*86400000+minute/2}],'Europe/Moscow');
+ const before=JSON.stringify([partial,full]),merged=mergeClockActivity([...partial,...full]);
+ const result=clockActivitySeries(merged,'viewers',60,'пн',true)[10]!;
+ assert.equal(result.value,6);assert.equal(result.duration,1.5*minute);assert.equal(result.partial,true);
+ assert.equal(clockActivitySeries(merged,'viewers',60,'пн')[10]!.value,2);
+ assert.equal(clockActivitySeries(merged,'watchHours',60,'пн',true)[10]!.value,9/60);
+ assert.equal(clockActivitySeries(merged,'youtubeViewers',60,'пн',true)[10]!.value,0);
+ assert.equal(clockActivitySeries(merged,'viewers',60,'вт',true)[10]!.value,null);
+ assert.equal(JSON.stringify([partial,full]),before);
+});

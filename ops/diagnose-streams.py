@@ -31,3 +31,22 @@ logs=subprocess.run(['journalctl','-u','stream-panel','--since','-12 hours','-n'
 patterns=['SQLITE_[A-Z_]+','INVALID_STREAM_SAMPLE','INVALID_YOUTUBE_SESSION','UNKNOWN_OPERATION','STORAGE_FULL','DB_WORKER_[A-Z_]+','no such (?:table|column): [a-zA-Z0-9_.]+','[A-Za-z_]+ has [0-9]+ columns but [0-9]+ values were supplied','(?:dist|node_modules)/[a-zA-Z0-9_./-]+\\.(?:js|mjs|cjs):[0-9]+(?::[0-9]+)?']
 print('errors='+json.dumps({p:sorted(set(re.findall(p,logs))) for p in patterns}))
 print('release='+Path('/opt/stream-panel/current').resolve().name)
+# Verify the deployed calculation against real samples, using a read-only handle.
+node_program=r'''
+import Database from 'better-sqlite3';
+import {streamMetrics} from './dist/packages/core/src/stream-metrics.js';
+import {windowsFromLinks} from './dist/packages/core/src/session-windows.js';
+const db=new Database(process.argv[1],{readonly:true,fileMustExist:true});
+try{
+ for(const profile of ['ruslan','gulnaz']){
+  const p='p_'+profile+'_',s=db.prepare(`SELECT id,started_at_ms,ended_at_ms FROM ${p}sessions ORDER BY started_at_ms DESC LIMIT 1`).get();
+  if(!s)continue;
+  const links=db.prepare(`SELECT platform,started_at_ms AS "from",coalesce(ended_at_ms,?) AS "to" FROM ${p}platform_streams WHERE session_id=?`).all(Date.now(),s.id);
+  const samples=db.prepare(`SELECT observed_at_ms,twitch_viewers,youtube_viewers FROM ${p}stream_samples WHERE session_id=? ORDER BY observed_at_ms`).all(s.id);
+  const windows=windowsFromLinks(links.map(l=>({started_at_ms:l.from,ended_at_ms:l.to})),s.started_at_ms,s.ended_at_ms??Date.now());
+  const metrics=streamMetrics(windows,samples,new Map(),links).viewers;
+  console.log('deployed_viewers='+JSON.stringify({profile,known:metrics.known??null,twitch:metrics.twitch,youtube:metrics.youtube}));
+ }
+}finally{db.close();}
+'''
+subprocess.run(['/opt/stream-panel/current/bin/node','--input-type=module','-e',node_program,str(path)],cwd='/opt/stream-panel/current',check=True,timeout=30)

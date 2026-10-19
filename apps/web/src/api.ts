@@ -69,7 +69,7 @@ export interface Session {
   event_count: number;
   messageCount?:number;
   end_quality: string;
-  durationMs?:number;viewerMean?:number|null;viewerPeak?:number|null;donationTotals?:Record<string,string>;donationCount?:number;
+  durationMs?:number;viewerMean?:number|null;viewerPeak?:number|null;viewerKnownMean?:number|null;viewerKnownPeak?:number|null;viewerPartial?:boolean;donationTotals?:Record<string,string>;donationCount?:number;
   platforms?: Array<"twitch" | "youtube">;
   primaryTitle?: string | null;
   breaks?:Array<{from:number;to:number}>;

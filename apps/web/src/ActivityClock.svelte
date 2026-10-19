@@ -14,7 +14,7 @@
  const attendance=$derived(summary.length?summary.filter(b=>b.day===day&&b.resolution===step):timeAudience(windows,people,timezone,step,day).map(b=>({...b,streams:b.streams.size,people:[]})));
  const currencies=$derived([...new Set(rows.flatMap(row=>Object.keys(row.donationAmounts??{})))].sort());
  const activeCurrency=$derived(currencies.includes(currency)?currency:currencies[0]??'RUB');
- const buckets=$derived((metric==='activeAudience'?Array.from({length:1440/step},(_,i)=>{const minute=i*step,b=attendance.find(b=>b.minute===minute);return {minute,value:b?.averageAudience??null,duration:b?.airtimeMs??0,total:b?.personTimeMs??0};}):metric==='donations'?clockDonationSeries(rows,activeCurrency,step,day):clockActivitySeries(rows,metric,step,day)));
+ const buckets=$derived((metric==='activeAudience'?Array.from({length:1440/step},(_,i)=>{const minute=i*step,b=attendance.find(b=>b.minute===minute);return {minute,value:b?.averageAudience??null,duration:b?.airtimeMs??0,total:b?.personTimeMs??0};}):metric==='donations'?clockDonationSeries(rows,activeCurrency,step,day):clockActivitySeries(rows,metric,step,day,true)));
  const start=0,span=1440,ticks=[0,360,720,1080,1440],timeGrid=[180,360,540,720,900,1080,1260];
  const levels=$derived(clockAxis(Math.max(0,...buckets.map(b=>b.value??0))));
  const maximum=$derived(levels.at(-1)!);
@@ -23,11 +23,12 @@
  const watchHours=$derived(metric.endsWith('WatchHours')||metric==='watchHours');
  const unit=$derived(watchHours?' зритель·ч':metric==='donations'?` ${activeCurrency}/ч`:metric.endsWith('Messages')||metric==='messages'?' сообщ./ч':metric==='activeAudience'?' активных участников':' зрителей');
  const label=(value:number|null)=>value===null?'нет данных':value.toLocaleString('ru-RU',{maximumFractionDigits:2});
- const description=(b:typeof buckets[number])=>`${clockLabel(b.minute)}–${clockLabel(b.minute+step)}: ${label(b.value)}${b.value===null?'':unit} · ${label(b.duration/60000)} мин с данными`;
+ const partialViewers=$derived(buckets.some(b=>'partial' in b&&b.partial));
+ const description=(b:typeof buckets[number])=>`${clockLabel(b.minute)}–${clockLabel(b.minute+step)}: ${'partial' in b&&b.partial?'≥ ':''}${label(b.value)}${b.value===null?'':unit} · ${label(b.duration/60000)} мин с данными`;
  $effect(()=>{void metric;void step;void day;void scope;void activeCurrency;selected=null;});
 </script>
 <section class="panel activity-clock">
- <header><h2>Активность по часам</h2><Help id="activity-clock-help" label="О суточном графике" text="Все дни выбранного периода совмещены на шкале 00:00–24:00 в часовом поясе аналитики. Зрители — среднее по времени с известными замерами; сообщения — число на час эфира. Время без эфиров и пропущенные замеры не считаются нулями. Для общей аудитории используются только полные замеры площадок. Сумма зрителей площадок не означает уникальных людей. Активные участники — известные люди по наблюдениям Twitch и сигналам чата; это отдельная метрика. Нажмите столбец, чтобы увидеть людей и их явку за тот же интервал. Часы просмотра — накопленная сумма: онлайн × фактическое время известных замеров; она зависит от количества эфиров. Донаты — сумма в выбранной валюте на час эфира, только во время записанных эфиров. Нажмите столбец для точного значения."/></header>{@render categoryFilter("Категория суточного графика")}
+ <header><h2>Активность по часам</h2><Help id="activity-clock-help" label="О суточном графике" text="Все дни выбранного периода совмещены на шкале 00:00–24:00 в часовом поясе аналитики. Зрители — среднее по времени с известными замерами; сообщения — число на час эфира. Время без эфиров и пропущенные замеры не считаются нулями. При неполных данных площадок показана сумма известных зрителей с отметкой ≥; неизвестные значения не считаются нулями. Сумма зрителей площадок не означает уникальных людей. Активные участники — известные люди по наблюдениям Twitch и сигналам чата; это отдельная метрика. Нажмите столбец, чтобы увидеть людей и их явку за тот же интервал. Часы просмотра — накопленная сумма: онлайн × фактическое время известных замеров; она зависит от количества эфиров. Донаты — сумма в выбранной валюте на час эфира, только во время записанных эфиров. Нажмите столбец для точного значения."/></header>{@render categoryFilter("Категория суточного графика")}
  <div class="clock-controls">
   <PeriodSelect value={period} label="Период суточного графика" days={[7,30]} custom={period==='custom'} onchange={onperiod}/>
   <label>Метрика графика<select bind:value={metric}>{#each choices as choice}<option value={choice.value}>{choice.label}</option>{/each}</select></label>
@@ -36,6 +37,7 @@
   {#if metric==='donations'}<label>Валюта донатов графика<select bind:value={currency}>{#each currencies as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select></label>{/if}
  </div>
  <p class="small muted clock-caption">{watchHours?'Часы просмотра за выбранный период · накопленная сумма':metric==='donations'?`Сумма донатов на час эфира · ${activeCurrency}`:metric.endsWith('Messages')||metric==='messages'?'Сообщения на час эфира':metric==='activeAudience'?'Средняя активная аудитория за время эфира':'Среднее число зрителей во время эфира'} · {timezone}</p>
+ {#if partialViewers}<p class="clock-caption small muted">Неполные данные площадок: ≥ — сумма известных зрителей.</p>{/if}
  <div class="clock-plot" bind:clientWidth={availableWidth}><svg viewBox={`0 0 ${plotWidth} 250`} role="group" aria-label={`Активность с ${clockLabel(start)} до ${clockLabel(start+span)}`}>
   {#each levels as value}
    {@const y=200-value/maximum*170}

@@ -424,13 +424,14 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         observedKnownMinutes: number;
         viewersTotal: number;
         viewerSamples: number;
+        knownViewersTotal:number;knownViewerSamples:number;viewerPartialMinutes:number;
         donationTotals:Record<string,string>;donationCount:number;
     }>();
     for (const point of timeline.values()) {
         const parts = clock.formatToParts(point.at), day = parts.find(x => x.type === 'weekday')!.value, hour = Number(parts.find(x => x.type === 'hour')!.value), key = `${day}:${hour}`;
         let cell = hourly.get(key);
         if (!cell) {
-            cell = { day, hour, observed: 0, estimated: 0, messages: 0, sampleMinutes: 0, observedKnownMinutes: 0, viewersTotal: 0, viewerSamples: 0,donationTotals:{},donationCount:0 };
+            cell = { day, hour, observed: 0, estimated: 0, messages: 0, sampleMinutes: 0, observedKnownMinutes: 0, viewersTotal: 0, viewerSamples: 0,knownViewersTotal:0,knownViewerSamples:0,viewerPartialMinutes:0,donationTotals:{},donationCount:0 };
             hourly.set(key, cell);
         }
         const elapsed=elapsedMinutes.get(point.at)??0;
@@ -440,6 +441,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         cell.donationCount+=minuteDonationCounts.get(point.at)??0;
         cell.messages += point.messages;
         cell.sampleMinutes+=elapsed;
+        if(point.viewers!==null){cell.knownViewersTotal+=point.viewers*elapsed;cell.knownViewerSamples+=elapsed;if(point.viewersPartial)cell.viewerPartialMinutes+=elapsed;}
         if(point.viewers !== null&&!point.viewersPartial) {cell.viewersTotal+=point.viewers*elapsed;cell.viewerSamples+=elapsed;}
         if (point.presenceKnown)
             cell.observedKnownMinutes+=elapsed;
@@ -466,6 +468,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         const metrics=streamMetrics((selectedBySession.get(s.id)??[]),(samplesBySession.get(s.id)??[]),streamAuthors.get(s.id)??new Map());
         const aggregate=streamMetrics((selectedBySession.get(s.id)??[]),[...new Set((selectedBySession.get(s.id)??[]).flatMap(segment=>Array.from({length:Math.ceil(segment.to/60000)-Math.floor(segment.from/60000)},(_,i)=>(Math.floor(segment.from/60000)+i)*60000)))].map(at=>timeline.get(at)!).filter(Boolean).map(p=>({observed_at_ms:p.at,twitch_viewers:p.viewersPartial?null:p.viewers,youtube_viewers:0})),new Map());
         metrics.viewers.all=aggregate.viewers.all;
+        metrics.viewers.known=streamMetrics(selectedBySession.get(s.id)??[],(samplesBySession.get(s.id)??[]).map(p=>({...p,twitch_viewers:source==='youtube'?null:p.twitch_viewers,youtube_viewers:source==='twitch'?null:p.youtube_viewers})),new Map(),(platformsBySession.get(s.id)??[]).filter(p=>source==='all'||p.platform===source).map(p=>({platform:p.platform,from:p.started_at_ms,to:p.ended_at_ms??to}))).viewers.known;
         let participantMs=0,peakParticipants=0;
         const participantsByMinute=new Map<number,Set<string>>();
         for(const visitor of visitors)for(const span of unionSpans(visitor.intervals.filter(span=>span.session===s.id).map(span=>({...span,kind:'observed' as const})))){
