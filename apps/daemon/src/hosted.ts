@@ -10,7 +10,7 @@ import { BACKUP_STREAM_MAX_SIZE } from "./backup-stream.js";
 import { stageRestore, commitRestore, receiveRestore } from "./restore-service.js";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AccountStore, profiles, canAccessProfile, publicUser, type Profile } from "./auth.js";
+import { AccountStore, profiles, canAccessProfile, publicUser, type Profile, type UserSession } from "./auth.js";
 import { BackupService } from "./backup.js";
 import { createApplication } from "./server.js";
 import {
@@ -104,10 +104,16 @@ export async function createHostedApplication(
     reply.setCookie("sp_session", result.token, { httpOnly: true, secure: origin.protocol === "https:", sameSite: "lax", path: "/", maxAge: 86400 });
     return { csrf: result.csrf, user: publicUser(result.user) };
   });
+  const statusView=(value:Record<string,unknown>,user:UserSession,profile:Profile)=>({...value,...(user.profile==='ruslan'?{backup:{...(backup?.status??{state:'disabled'}),restoreAvailable:!!backup&&!!onRestore}}:{}),user:publicUser(user,profile)});
   app.get("/api/v1/auth/me", async (request, reply) => {
     const user = accounts.session(request.headers.cookie);
     if (!user) return reply.code(401).send({ error: "LOGIN_REQUIRED" });
-    return { csrf: user.csrf, user: publicUser(user) };
+    if((request.query as {status?:string}).status!=='1')return {csrf:user.csrf,user:publicUser(user)};
+    const requested=selectedProfile(request,user.profile),profile=canAccessProfile(user.profile,requested)?requested:user.profile;
+    const headers={...request.headers,'x-stream-panel-profile':profile};delete headers['content-length'];
+    const result=await runtimes.get(profile)!.app.inject({method:'GET',url:'/api/v1/status',headers});
+    if(result.statusCode!==200)return reply.code(result.statusCode).type('application/json').send(result.body);
+    return {csrf:user.csrf,user:publicUser(user),status:statusView(result.json(),user,profile)};
   });
   app.post("/api/v1/auth/logout", async (request, reply) => {
     const user = accounts.session(request.headers.cookie);
@@ -174,7 +180,7 @@ export async function createHostedApplication(
       const responseHeaders = { ...result.headers };
       delete responseHeaders["content-length"];
       const payload = request.url.split("?")[0] === "/api/v1/status" && result.statusCode === 200
-        ? JSON.stringify({ ...result.json(), ...(user.profile === "ruslan" ? {backup: {...(backup?.status ?? {state:"disabled"}),restoreAvailable:!!backup&&!!onRestore}} : {}), user: publicUser(user, profile) }) : result.body;
+        ? JSON.stringify(statusView(result.json(),user,profile)) : result.body;
       reply.code(result.statusCode).headers(responseHeaders).send(payload);
     } finally { release(); if (queue) queue.waiting--; }
   };
