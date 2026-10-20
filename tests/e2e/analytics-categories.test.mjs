@@ -58,7 +58,7 @@ test('every chart category selector refreshes donations, time patterns and clock
   const oldAborted=page.waitForEvent('requestfailed',{predicate:r=>new URL(r.url()).searchParams.get('category')==='game'});
   await page.getByLabel('Категория донатов',{exact:true}).selectOption('game');await oldWaiting;
   await page.getByLabel('Категория донатов',{exact:true}).selectOption('talk');
-  await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();assert.match((await oldAborted).failure().errorText,/abort|cancel|ERR_FAILED/i);releaseOld();await page.unroute('**/api/v1/analytics?*');
+  await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();releaseOld();assert.match((await oldAborted).failure().errorText,/abort|cancel|ERR_FAILED/i);await page.unroute('**/api/v1/analytics?*');
   await page.route('**/api/v1/analytics?*',route=>new URL(route.request().url()).searchParams.get('category')==='509658'?route.fulfill({json:unfiltered}):route.continue());
   await page.getByLabel('Категория донатов',{exact:true}).selectOption('509658');
   await page.locator('.donation-patterns .chart-refresh').filter({hasText:'Сервер вернул данные для других фильтров'}).waitFor();assert.equal(await page.locator('.activity-clock .clock-plot').isVisible(),false);
