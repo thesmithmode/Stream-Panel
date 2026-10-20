@@ -36,14 +36,14 @@
     return ()=>{cancelled=true;window.clearTimeout(timer);requestId++;reportController?.abort();};
   });
   $effect(()=>{const saved=JSON.stringify(view);void saved;if(mounted)saveAnalyticsView(()=>localStorage,profile,view);});
-  let audienceOffset=$state(0),pagedAudience=$state<any>(null),audienceBusy=$state(false);
+  let audienceOffset=$state(0),pagedAudience=$state<any>(null),audienceBusy=$state(false),loadedAudienceQuery=$state('');
   $effect(()=>{void reportScope;pagedAudience=null;});
   const visible=$derived(data?.audiencePage?(pagedAudience?.audience??data.audience):(data?.audience??[]).filter((e:any)=>(!view.coreOnly||e.core)&&e.name.toLowerCase().includes(search.toLowerCase())).sort((a:any,b:any)=>view.sort==="sessions"?(b.sessionCount??b.sessionIds.length)-(a.sessionCount??a.sessionIds.length):(b[view.sort]??0)-(a[view.sort]??0)));
   async function reportPage(extra:Record<string,string|number>,signal?:AbortSignal,endpoint='analytics',filters=data?.filters){
     if(!filters)throw new Error('Отчёт ещё не загружен');
     const q=new URLSearchParams(Object.entries({...filters,from:filters.fromMs,to:filters.toMs,mode:'summary',insights:'1',...extra}).map(([key,value])=>[key,String(value)]));
     let result=await api(`${endpoint}?${q}`,undefined,signal);
-    while(result.preparing&&!signal?.aborted){await new Promise(resolve=>setTimeout(resolve,100));result=await api(`${endpoint}?${q}`,undefined,signal);}
+    while(result.preparing&&!signal?.aborted){result=await api(`${endpoint}?${q}`,undefined,signal);}
     return result;
   }
   const visitorLoader=$derived.by(()=>{const filters=data?.filters;return (params:Record<string,string|number>,signal:AbortSignal)=>reportPage(params,signal,'analytics/clock',filters);});
@@ -51,9 +51,11 @@
   $effect(()=>{
     const current=data,offset=audienceOffset,term=search,sort=view.sort,core=view.coreOnly;
     audienceBusy=false;
-    if(!current?.audiencePage)return;
+    if(!current?.audiencePage||loadedScope!==reportScope)return;
+    const query=JSON.stringify([reportScope,offset,term,sort,core]);
+    if(query===loadedAudienceQuery)return;
     const controller=new AbortController();audienceBusy=true;
-    const timer=window.setTimeout(()=>{void reportPage({audienceOffset:offset,audienceSearch:term,audienceSort:sort,audienceCoreOnly:core?1:0},controller.signal).then(result=>{if(!controller.signal.aborted)pagedAudience=result;}).catch(e=>{if(!controller.signal.aborted)error=e.message;}).finally(()=>{if(!controller.signal.aborted)audienceBusy=false;});},150);
+    const timer=window.setTimeout(()=>{void reportPage({audienceOffset:offset,audienceSearch:term,audienceSort:sort,audienceCoreOnly:core?1:0},controller.signal,'analytics/audience').then(result=>{if(!controller.signal.aborted){pagedAudience=result;loadedAudienceQuery=query;}}).catch(e=>{if(!controller.signal.aborted)error=e.message;}).finally(()=>{if(!controller.signal.aborted)audienceBusy=false;});},150);
     return ()=>{controller.abort();window.clearTimeout(timer);};
   });
   const reportPending=$derived(!!data&&loadedScope!==reportScope);
@@ -105,11 +107,16 @@
     const fromMs=new Date(from).getTime(),toMs=new Date(to).getTime();
     try{
       try {localStorage.setItem(`sp-analytics-${profile}`,JSON.stringify({timezone}));}catch{/* optional local preferences */}
-      const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,timezone,mode:'summary',insights:'1'});
+      // Small reports are filtered locally; retain the complete first page so clearing
+      // search or core-only after an auto-refresh cannot hide participants.
+      const offset=0,term='',sort=view.sort,core=false;
+      const audienceQuery=JSON.stringify([scope,offset,term,sort,core]);
+      const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,timezone,mode:'summary',insights:'1',audienceOffset:String(offset),audienceSearch:term,audienceSort:sort,audienceCoreOnly:core?'1':'0'});
       let result=await api(`analytics?${q}`,undefined,controller.signal);
-      while(result.preparing&&id===requestId){buildProgress=`${result.stage==='aggregate'?'Собираем отчёт':'Готовим историю'}: ${Math.round(result.ready/Math.max(1,result.total)*100)}%`;await new Promise(resolve=>setTimeout(resolve,result.stage==='aggregate'?100:250));if(id!==requestId)return;result=await api(`analytics?${q}`,undefined,controller.signal);}
+      while(result.preparing&&id===requestId){buildProgress=`${result.stage==='aggregate'?'Собираем отчёт':'Готовим историю'}: ${Math.round(result.ready/Math.max(1,result.total)*100)}%`;if(id!==requestId)return;result=await api(`analytics?${q}`,undefined,controller.signal);}
       buildProgress='';
-      if(id===requestId){const previousScope=loadedScope;if(result.filters&&(result.filters.category!==category||result.filters.source!==source||result.filters.timezone!==timezone))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');loadedScope=scope;
+      if(id===requestId){const previousScope=loadedScope;if(result.filters&&(result.filters.category!==category||result.filters.source!==source||result.filters.timezone!==timezone))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');loadedScope=scope;loadedAudienceQuery=audienceQuery;
+        if(JSON.stringify([scope,audienceOffset,search,view.sort,view.coreOnly])===audienceQuery)pagedAudience=null;
         if(JSON.stringify(data)!==JSON.stringify(result))data=Object.fromEntries(Object.entries(result).map(([key,value])=>[key,JSON.stringify(data?.[key])===JSON.stringify(value)?data[key]:value]));
         if(scope!==previousScope){selected=null;streamPage=0;}}
     }catch(e){if(id===requestId){error=(e as Error).message;reportError=error;}}

@@ -8,7 +8,7 @@ type Store = StorePort<'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'a
 export function registerStreamsRoutes(app: FastifyInstance, db: Store, configuration: ConfigurationPort) {
     app.get('/api/v1/events/recent',request=>{const q=object(request.query);return db.call('recentEvents',Number(q.offset??0),Number(q.limit??100),{...(string(q.session)?{session:string(q.session)}:{}),...(string(q.person)?{person:string(q.person)}:{}),messagesOnly:string(q.messages)==='1'});});
     app.get("/api/v1/overview", () => db.call("channelOverview", configuration.value.excludedBotLogins));
-    for(const path of ["/api/v1/analytics","/api/v1/analytics/clock"])app.get(path, async (request) => {
+    for(const path of ["/api/v1/analytics","/api/v1/analytics/clock","/api/v1/analytics/audience"])app.get(path, async (request) => {
         const q = object(request.query);
         const sessionId = string(q.session), defaults = analyticsSettings(configuration.value.analyticsSettings);
         const source = string(q.source) || 'all', coreRule = string(q.coreRule) || defaults.coreRule;
@@ -16,7 +16,7 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
             throw new Error('INVALID_ANALYTICS_FILTER');
         if (coreRule !== 'either' && coreRule !== 'both' && coreRule !== 'frequency')
             throw new Error('INVALID_ANALYTICS_FILTER');
-        return db.call(request.routeOptions.url==='/api/v1/analytics/clock'?"clockAudience":"analytics", {
+        const result=await db.call(request.routeOptions.url==='/api/v1/analytics/clock'?"clockAudience":"analytics", {
             ...(sessionId ? { sessionId } : {}), ...(string(q.mode)==='summary'?{summaryOnly:true}:{}),...(string(q.insights)==='1'?{includeInsights:true}:{}), fromMs: sessionId ? 0 : Number(q.from), toMs: sessionId ? Date.now() : Math.min(Number(q.to), Date.now()), source, category: string(q.category),
             ...(q.audienceOffset===undefined?{}:{audienceOffset:Number(q.audienceOffset)}),...(q.audienceSearch===undefined?{}:{audienceSearch:string(q.audienceSearch)}),...(q.audienceSort===undefined?{}:{audienceSort:string(q.audienceSort)}),...(q.audienceCoreOnly===undefined?{}:{audienceCoreOnly:string(q.audienceCoreOnly)==='1'}),
             ...(q.clockMinute===undefined?{}:{clockMinute:Number(q.clockMinute),clockDay:string(q.clockDay)||'all',clockResolution:Number(q.clockResolution??60),clockOffset:Number(q.clockOffset??0),clockBatch:string(q.clockBatch)==='1'}),
@@ -24,6 +24,9 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
             chatWindowMinutes: q.chatWindowMinutes === undefined ? defaults.chatWindowMinutes : Number(q.chatWindowMinutes), coreRule, timezone: string(q.timezone) || defaults.timezone,
             excludedLogins: configuration.value.excludedBotLogins, ownerId: configuration.value.twitch?.userId ?? "", youtubeAccount: configuration.value.youtube?.userId ?? configuration.value.youtubeAccountId ?? "",
         });
+        if(request.routeOptions.url==='/api/v1/analytics/audience'&&'audience' in result&&!result.preparing)
+            return {filters:result.filters,audience:result.audience,audiencePage:result.audiencePage};
+        return result;
     });
     app.get("/api/v1/sessions", async (request) => db.call("sessions", string(object(request.query).session) || undefined, Number(object(request.query).offset ?? 0), Number(object(request.query).limit ?? 100), configuration.value.excludedBotLogins));
     app.get("/api/v1/sessions/:id/followers", async (request) => db.call("followingAnalytics", string(object(request.params).id)));

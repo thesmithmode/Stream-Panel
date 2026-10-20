@@ -519,3 +519,28 @@ test('closed stream reports survive changing request times and restart, while re
   const live=s.startSession('owner','live',options.toMs,'platform',options.toMs);const liveOpts={...opts,sessionId:live,toMs:options.toMs+minute};h.query(liveOpts);const liveReads=facts;h.query(liveOpts);assert.ok(facts>liveReads,'live streams do not reuse closed-stream projections');
  }finally{s.close();}
 });
+
+test('incremental polling reads its validation snapshot once and restarts after a factual correction',t=>{
+ const s=new StreamStore(':memory:');
+ try{
+  fixture(s,3);const db=(s as any).db,h=new AnalyticsHistory(db),query={...options,fromMs:base+minute/2};
+  let validations=0;const prepare=db.prepare.bind(db);
+  t.mock.method(db,'prepare',(sql:string)=>{
+   const statement=prepare(sql);
+   if(sql.startsWith('SELECT * FROM sessions WHERE NOT EXISTS')){
+    const all=statement.all.bind(statement);
+    statement.all=(...args:unknown[])=>{if(args[2]===query.toMs-1)validations++;return all(...args);};
+   }
+   return statement;
+  });
+  let cpu=0;t.mock.method(performance,'now',()=>cpu+=300);
+  assert.equal(h.report(query).preparing,true);
+  assert.equal(h.report(query).preparing,true);
+  assert.equal(validations,1,'progress polling must not rescan the last minute and all identities');
+  s.ingest({source:'twitch',accountId:'owner',externalId:'late-during-preparation',type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:base+minute,receivedAtMs:query.toMs,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{count:1}});
+  const result=ready(h,query),raw=audienceAnalytics(db,query);
+  assert.equal(validations,2,'a correction needs a fresh revision and validation snapshot');
+  assert.deepEqual(result.summary,raw.summary);assert.deepEqual(result.hours,raw.hours);assert.deepEqual(result.streamComparison,raw.streamComparison);
+  h.close();
+ }finally{s.close();}
+});

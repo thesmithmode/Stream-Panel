@@ -179,8 +179,9 @@
         }
         // Establish account permissions before using a persisted or URL-selected profile.
         // Older standalone collectors may lack this route; retain their status flow.
-        try {const identity=await api<any>("auth/me");user=identity.user;restoreRoute();} catch(e) {if((e as Error).message!=="NOT_FOUND"&&(e as Error).message!=="HTTP_404")throw e;}
-        const authProfile=profile,auth=await api<any>("status");
+        let initialStatus:any;
+        try {const identity=await api<any>("auth/me?status=1");user=identity.user;restoreRoute();if(identity.status?.profile===profile)initialStatus=identity.status;} catch(e) {if((e as Error).message!=="NOT_FOUND"&&(e as Error).message!=="HTTP_404")throw e;}
+        const authProfile=profile,auth=initialStatus??await api<any>("status");
         setCsrf(auth.csrf);user=auth.user??user;restoreRoute();
         await refresh(false,profile===authProfile?auth:undefined);
         if (!alive) return;

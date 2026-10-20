@@ -1,3 +1,4 @@
+import {registerAnalyticsCompression} from './analytics-compression.js';
 import {registerRouteSchemas} from './route-schemas.js';
 import {registerPeopleRoutes} from './people-routes.js';
 import {registerDonationsRoutes} from './donations-routes.js';
@@ -69,6 +70,7 @@ export async function createApplication(
     bodyLimit: 32768,
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
   });
+  if(!options.session)registerAnalyticsCompression(app);
   await app.register(cookie);
   app.setErrorHandler((error, _request, reply) => {
     const code = error instanceof Error ? error.message : "INTERNAL_ERROR";
