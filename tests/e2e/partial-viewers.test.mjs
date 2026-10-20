@@ -32,7 +32,7 @@ test('partial provider counters remain visible and labelled in stream cards, ove
   await page.waitForFunction(()=>document.querySelector('.hour-heatmap button[aria-label^="пн 9:00"]')?.getAttribute('aria-label')?.includes('6'));assert.match(await cell.getAttribute('aria-label'),/6[.,]0/);await cell.click();
   const clock=page.locator('.activity-clock');await clock.getByLabel('Шаг графика').selectOption('60');
   const bucket=clock.getByRole('button',{name:/09:00–10:00: 6/});await bucket.click();
-  assert.match(await clock.locator('[role="status"]').textContent(),/6/);
+  assert.match(await clock.locator('.clock-caption[role="status"]').textContent(),/6/);
   await clock.getByLabel('Метрика графика').selectOption('youtubeViewers');
   assert.equal(await clock.getByRole('button',{name:/09:00–10:00: нет данных/}).count(),1);
   await clock.getByLabel('Метрика графика').selectOption('twitchViewers');
