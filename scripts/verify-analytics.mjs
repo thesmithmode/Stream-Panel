@@ -1,0 +1,29 @@
+// Measure the deployed calculations on a consistent private copy. Never migrate,
+// bake or benchmark in the collectors' live database connection.
+import Database from 'better-sqlite3';
+import {mkdtemp,readFile,rm,chmod} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {StreamStore} from '../dist/packages/core/src/store.js';
+import {analyticsSettings} from '../dist/apps/daemon/src/analytics-settings.js';
+const dir=process.env.STREAM_PANEL_DATA_DIR;
+if(!dir)throw Error('DATA_DIRECTORY_REQUIRED');
+const staging=await mkdtemp(join(tmpdir(),'sp-analytics-check-'));
+await chmod(staging,0o700);
+const source=new Database(join(dir,'data.sqlite'),{readonly:true,fileMustExist:true});
+try{
+ await source.backup(join(staging,'data.sqlite'));
+ for(const profile of ['ruslan','gulnaz']){
+  const cfg=JSON.parse(await readFile(join(dir,'profiles',profile,'secrets.json'),'utf8'));
+  const store=new StreamStore(join(staging,'data.sqlite'),profile);
+  try{
+   const options={...analyticsSettings(cfg.analyticsSettings),fromMs:0,toMs:Math.floor(Date.now()/60000)*60000,source:'all',category:'',summaryOnly:true,includeInsights:true,excludedLogins:cfg.excludedBotLogins??[],ownerId:cfg.twitch?.userId??'',youtubeAccount:cfg.youtube?.userId??cfg.youtubeAccountId??''};
+   const read=()=>{let report,requests=0;const start=performance.now();do{report=store.analytics(options);if(++requests>10000)throw Error('ANALYTICS_DID_NOT_FINISH');}while(report.preparing);return {report,requests,ms:Math.round(performance.now()-start)};};
+   const first=read(),active=store.sessions().some(s=>s.ended_at_ms===null),start=performance.now();
+   if(!active){let rounds=0;while(store.warmAnalytics(options,true).preparing)if(++rounds>10000)throw Error('WARM_DID_NOT_FINISH');}
+   const warmMs=Math.round(performance.now()-start),repeat=read();
+   if(JSON.stringify(first.report.summary)!==JSON.stringify(repeat.report.summary))throw Error('WARM_CHANGED_SUMMARY');
+   console.log(JSON.stringify({analyticsProbe:true,profile,active,firstReadyMs:first.ms,firstRequests:first.requests,warmMs,hotReadyMs:repeat.ms,hotRequests:repeat.requests,streams:repeat.report.summary.streams,responseBytes:Buffer.byteLength(JSON.stringify(repeat.report))}));
+  }finally{store.close();}
+ }
+}finally{source.close();await rm(staging,{recursive:true,force:true});}

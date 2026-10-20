@@ -74,6 +74,13 @@ test('entry limits apply even when snapshots are small enough for the byte budge
  try{assert.throws(()=>new AnalyticsWorkspace(db,'invalid'),/INVALID_ANALYTICS_CACHE_KEY/);for(let n=0;n<35;n++)cache.save(key(n),key(n),{n},w);assert.equal(db.prepare('SELECT count(*) n FROM analytics_reports').get().n,32);assert.equal(cache.get(key(0)),undefined);assert.deepEqual(cache.get(key(34)),{n:34});}
  finally{w.dispose();s.close();}
 });
+test('background publication never evicts an existing landing or user report at the budget limit',()=>{
+ const s=new StreamStore(':memory:'),db=(s as any).db,w=new AnalyticsWorkspace(db),cache=new AnalyticsReportCache(db);
+ try{for(let n=0;n<32;n++)assert.equal(cache.save(key(n),key(n),{n},w),true);
+  assert.equal(cache.save(key(100),key(100),{n:100},w,false),false);assert.deepEqual(cache.get(key(0)),{n:0});
+  assert.equal(cache.save(key(101),key(0),{n:101},w,false),true);assert.equal(cache.get(key(0)),undefined);assert.deepEqual(cache.get(key(101)),{n:101});
+ }finally{w.dispose();s.close();}
+});
 
 test('real analytical responses survive a full file close and restart without aggregation',()=>{
  const dir=mkdtempSync(join(tmpdir(),'analytics-restart-')),path=join(dir,'data.sqlite');let s:StreamStore|undefined;

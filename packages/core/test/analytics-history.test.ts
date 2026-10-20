@@ -15,6 +15,26 @@ function fixture(s:StreamStore,n=4,youtube=false){for(let i=0;i<n;i++){
 }}
 const options={fromMs:base,toMs:base+10*86400000,timezone:'Europe/Moscow',ownerId:'owner',minSessions:2,minMessages:2,minMinutes:1};
 function ready(h:AnalyticsHistory,opts:Parameters<AnalyticsHistory['report']>[0]=options){let r:any;for(let i=0;i<100;i++){r=h.report(opts);if(!r.preparing)return r;}throw Error('preparation did not finish');}
+test('idle category baking prepares actual category reports and never rebuilds them on a later clock tick',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,3);const h=(s as any).history as AnalyticsHistory;let progress;do{progress=s.warmAnalytics(options,true);}while(progress.preparing);
+  (h as any).aggregate=()=>{throw Error('category was not baked');};(h as any).build=()=>{throw Error('unchanged stream was rebuilt');};
+  const report=s.analytics({...options,fromMs:0,source:'all',category:'game',summaryOnly:true,includeInsights:true});assert.equal(report.summary.messages,3);assert.equal(report.preparing,undefined);
+  assert.equal(s.warmAnalytics({...options,toMs:options.toMs+60000},true).preparing,false);
+ }finally{s.close();}
+});
+test('renaming a participant rebuilds only their streams and keeps unrelated baked slices',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,1);const at=base+86400000,id=s.startSession('owner','other',at,'platform',at);s.streamSample(id,at,'game','Game','',3);s.endSession(id,at+minute);
+  const h=(s as any).history as AnalyticsHistory,first=ready(h),person=first.audience[0].id,db=(s as any).db;
+  const global=db.prepare('SELECT revision FROM analytics_global_revision').get().revision;
+  const rows=db.prepare('SELECT session_id,revision FROM analytics_stream_cache ORDER BY session_id').all();s.renamePerson(person,'Changed');
+  assert.equal(db.prepare('SELECT revision FROM analytics_global_revision').get().revision,global);
+  const build=(h as any).build.bind(h),built:string[]=[];(h as any).build=(opts:any,session:any)=>{built.push(session.id);return build(opts,session);};
+  const report=ready(h);assert.equal(report.audience[0].name,'Changed');assert.equal(built.length,1);assert.notEqual(built[0],id);
+  assert.ok(db.prepare('SELECT 1 FROM analytics_stream_cache WHERE session_id=? AND revision=?').get(id,rows.find((r:any)=>r.session_id===id).revision));
+ }finally{s.close();}
+});
 test('incremental reports agree with raw facts, clocks and cohorts; late data and renamed identities invalidate cached streams',()=>{
  const s=new StreamStore(':memory:');try{
  fixture(s);s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:base}],true,options.toMs);

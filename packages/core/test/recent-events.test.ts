@@ -9,6 +9,25 @@ import {RecentEvents,EVENT_RETENTION_MS,EVENT_CLEANUP_BATCH} from '../src/recent
 import type {EventInput} from '../src/domain.js';
 
 const message=(id:string,at=Date.now()-1000):EventInput=>({source:'twitch',accountId:'owner',externalId:id,type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'Привет 👋',raw:{huge:'transport envelope'}}});
+test('filtered archive follows current person links and logical stream groups without mixing accounts or concurrent YouTube chats',()=>{
+ const s=new StreamStore(':memory:');try{
+  const at=Date.now()-600000,a=s.startSession('owner','a',at,'platform',at);
+  s.attachPlatformStream(a,'youtube','yt','video-a',at,at,null,'A');s.ingest(message('a',at+1000));s.endSession(a,at+60000);
+  const b=s.startSession('owner','b',at+120000,'platform',at+120000);s.ingest({...message('b',at+121000),actor:{externalId:'other',displayName:'Other'}});s.endSession(b,at+180000);
+  const people=s.persons(),viewer=String(people.find(p=>p.display_name==='Viewer')!.id),other=String(people.find(p=>p.display_name==='Other')!.id);
+  assert.deepEqual(s.recentEvents(0,100,{session:a}).map(r=>r.external_id),['a']);
+  assert.deepEqual(s.recentEvents(0,100,{person:viewer,messagesOnly:true}).map(r=>r.external_id),['a']);
+  const merged=s.merge(viewer,other,s.personRevision(viewer),s.personRevision(other),at+200000);
+  assert.equal(s.recentEvents(0,100,{person:other,messagesOnly:true}).length,2);s.undoMerge(merged,at+210000);
+  assert.equal(s.recentEvents(0,100,{person:other,messagesOnly:true}).length,1);
+  s.mergeSessions([a,b]);assert.equal(s.recentEvents(0,100,{session:b}).length,2);s.unmergeSessions(a);assert.equal(s.recentEvents(0,100,{session:b}).length,1);
+  const c=s.startSession('concurrent','c',at,'platform',at);s.attachPlatformStream(c,'youtube','yt','video-b',at,at,null,'B');s.endSession(c,at+60000);
+  const yt=(id:string)=>[{id,snippet:{type:'textMessageEvent',publishedAt:new Date(at+1000).toISOString(),displayMessage:id},authorDetails:{channelId:'yt-viewer',displayName:'YouTube'}}];
+  s.youtubeMessages('yt','chat-a',yt('ya'),'video-a');s.youtubeMessages('yt','chat-b',yt('yb'),'video-b');s.youtubeMessages('yt','legacy',yt('ambiguous'));
+  const rows=s.recentEvents(0,100,{session:a});assert.ok(rows.some(r=>r.external_id==='ya'));assert.ok(!rows.some(r=>['yb','ambiguous'].includes(r.external_id)));
+  assert.equal(s.recentEvents(0,100,{session:'missing'}).length,0);assert.throws(()=>s.recentEvents(0,100,{person:'x'.repeat(257)}),/INVALID_RECENT_EVENTS_FILTER/);
+ }finally{s.close();}
+});
 test('recent content is deduplicated and expiry never removes permanent facts or revisions',()=>{
  const s=new StreamStore(':memory:');
  try{
