@@ -1,7 +1,7 @@
 import {SessionGroups,logicalReadDatabase} from "./session-groups.js";
 import {AnalyticsHistory} from "./analytics-history.js";
 import {EventIngestion} from "./event-ingestion.js";
-import {RecentEvents} from './recent-events.js';
+import {RecentEvents,type RecentFilter} from './recent-events.js';
 export {priorModerationQuery} from "./event-ingestion.js";
 import {StreamSessions} from "./stream-sessions.js";
 import {IdentityLinks} from "./identity-links.js";
@@ -152,7 +152,7 @@ export class StreamStore {
     type?:string,
     source?:string,
   ) {return this.queries.events(sessionId?this.groups.root(sessionId):undefined,personId,fromMs,toMs,type,source);}
-  recentEvents(offset=0,limit=100) {return new RecentEvents(this.db).list(offset,limit);}
+  recentEvents(offset=0,limit=100,filter:RecentFilter={}) {return new RecentEvents(this.db).list(offset,limit,Date.now(),{...filter,...(filter.session?{session:this.groups.root(filter.session)}:{})});}
   purgeRecentEvents() {return new RecentEvents(this.db).purge();}
   summary(
     sessionId?: string,
@@ -306,7 +306,7 @@ export class StreamStore {
   }
 
   clockAudience(options:AnalyticsOptions){return this.history.clockAudience(options);}
-  warmAnalytics(options:AnalyticsOptions){return this.history.warm(options);}
+  warmAnalytics(options:AnalyticsOptions,bakeCategories=false){return this.history.warm(options,bakeCategories);}
 
   youtubeQuota(day: string, profile: string, cost = 1): boolean {
     if (!/^\d{2}\/\d{2}\/\d{4}$/.test(day) || !profile || !Number.isInteger(cost) || cost < 1 || cost > 4000) throw new Error("INVALID_QUOTA");
@@ -351,7 +351,7 @@ export class StreamStore {
     return this.reads.prepare(`SELECT observed_at_ms AS at,category_id AS categoryId,category_name AS categoryName,title
       FROM stream_samples WHERE session_id=? AND (twitch_viewers IS NOT NULL OR category_id<>'' OR title<>'') ORDER BY observed_at_ms`).all(sessionId);
   }
-  youtubeMessages(account: string, chat: string, messages: any[]): void {
+  youtubeMessages(account: string, chat: string, messages: any[],videoId?:string): void {
     if (!account || !chat || messages.length > 2000) throw new Error("INVALID_YOUTUBE_MESSAGES");
     this.db.transaction(() => {
 
@@ -378,7 +378,7 @@ export class StreamStore {
           const {displayMessage,textMessageDetails,...snippet}=m.snippet;
           new RecentEvents(this.db).save({source:'youtube',accountId:account,externalId:m.id,type:m.snippet.type,
             actor:m.authorDetails?.channelId?{externalId:m.authorDetails.channelId,displayName:m.authorDetails.displayName??m.authorDetails.channelId}:null,
-            occurredAtMs:time,receivedAtMs:Date.now(),payload:{...snippet,chatId:chat,text:displayMessage??textMessageDetails?.messageText??''}});
+            occurredAtMs:time,receivedAtMs:Date.now(),payload:{...snippet,chatId:chat,...(videoId?{videoId}:{}),text:displayMessage??textMessageDetails?.messageText??''}});
         }
       }
     }).immediate();

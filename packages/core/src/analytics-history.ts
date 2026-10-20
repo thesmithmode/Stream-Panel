@@ -259,17 +259,28 @@ export class AnalyticsHistory {
         if(session.ended_at_ms===null){while(this.liveStreams.size>=12)this.liveStreams.delete(this.liveStreams.keys().next().value!);this.liveStreams.set(key,{revision,report});}return report;
     }
     private warmedRevision='';
-    warm(options:AnalyticsOptions){
+    private background=false;
+    private warmReport(options:AnalyticsOptions){this.background=true;try{return this.report(options);}finally{this.background=false;}}
+    warm(options:AnalyticsOptions,bakeCategories=false){
         // Bake the landing report, not a Cartesian product of moving windows.
         // Live facts already have collector priority; finalize after the stream ends.
         const current:AnalyticsOptions={...options,source:'all',category:'',fromMs:0,summaryOnly:true,includeInsights:true};
         const sessions=this.sessions(current);
         if(sessions.some(s=>s.ended_at_ms===null))return {preparing:false,ready:0,total:0};
         const {fromMs,toMs,...settings}=current;void fromMs;void toMs;
-        const revision=JSON.stringify([settings,this.globalRevision(),sessions,this.annotationsRevision(),this.followerRevision()]);
+        const revision=JSON.stringify([settings,bakeCategories,this.globalRevision(),sessions,this.annotationsRevision(),this.followerRevision()]);
         if(revision===this.warmedRevision)return {preparing:false,ready:1,total:1};
-        const report=this.report(current);
+        const report=this.warmReport(current);
         if(report.preparing)return {preparing:true,ready:report.ready??0,total:report.total??1};
+        if(bakeCategories){
+            // Only actual categories, all history, at most six: no platform/period
+            // Cartesian product and no moving rolling-window rebuilds while idle.
+            const categories=this.statement("SELECT category_id AS id FROM stream_samples WHERE category_id<>'' AND category_name<>'' GROUP BY category_id ORDER BY count(*) DESC,category_id LIMIT 6").all() as {id:string}[];
+            for(const category of categories){
+                const value=this.warmReport({...current,category:category.id});
+                if(value.preparing)return {preparing:true,ready:value.ready??0,total:value.total??1};
+            }
+        }
         this.warmedRevision=revision;
         return {preparing:false,ready:1,total:1};
     }
@@ -350,7 +361,7 @@ export class AnalyticsHistory {
                 const {fromMs,toMs,...scopeOptions}=canonical;
                 const period=options.fromMs===0?'all':[7,30].find(days=>options.toMs-options.fromMs===days*86400000)??[fromMs,toMs];
                 const scope=createHash('sha256').update(JSON.stringify([Object.fromEntries(Object.entries(scopeOptions).sort(([a],[b])=>a.localeCompare(b))),period])).digest('hex');
-                this.reportCache.save(fingerprint,scope,next.value,job.workspace);
+                this.reportCache.save(fingerprint,scope,next.value,job.workspace,!this.background);
             }
             this.remember(fingerprint,next.value,job.workspace,job.liveRevision);
             return value;
@@ -370,7 +381,7 @@ export class AnalyticsHistory {
             let report = this.cached(options, session, this.globalRevision());
             if (!report) {
                 report = this.build(options, session);
-                this.save(options, session, this.globalRevision(), report);
+                this.save(options, session, this.globalRevision(), report,!this.background);
             }
             return report;
         };

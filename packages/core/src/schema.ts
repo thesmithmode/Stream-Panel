@@ -545,6 +545,31 @@ CREATE INDEX IF NOT EXISTS recent_events_external ON recent_events(source,accoun
 PRAGMA user_version=23;
 `;
 
-export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23] as const;
+// Name and bot-match changes affect only streams containing that person.
+// Identity membership changes retain conservative global invalidation.
+const renameStreams=(person:string)=>`UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN (
+ SELECT es.session_id FROM event_sessions es JOIN events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE i.person_id=${person}
+ UNION SELECT p.session_id FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id WHERE i.person_id=${person}
+ UNION SELECT p.session_id FROM platform_streams p JOIN youtube_messages m ON p.platform='youtube' AND m.account_id=p.account_id AND m.published_at_ms>=p.started_at_ms AND m.published_at_ms<coalesce(p.ended_at_ms,9223372036854775807) JOIN youtube_identities i ON i.account_id=m.account_id AND i.external_id=m.author_id WHERE i.person_id=${person});`;
+export const schemaV24=`
+DROP TRIGGER IF EXISTS analytics_persons_rename;
+CREATE TRIGGER analytics_persons_rename AFTER UPDATE ON persons WHEN OLD.display_name IS NOT NEW.display_name BEGIN ${renameStreams('NEW.id')} END;
+DROP TRIGGER IF EXISTS analytics_identities_rename;
+CREATE TRIGGER analytics_identities_rename AFTER UPDATE ON identities WHEN OLD.person_id IS NOT NEW.person_id OR OLD.display_name IS NOT NEW.display_name OR OLD.match_key IS NOT NEW.match_key BEGIN
+ UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1 AND OLD.person_id IS NOT NEW.person_id;
+ ${renameStreams('NEW.person_id')}
+END;
+DROP TRIGGER IF EXISTS analytics_youtube_identities_rename;
+CREATE TRIGGER analytics_youtube_identities_rename AFTER UPDATE ON youtube_identities WHEN OLD.is_owner IS NOT NEW.is_owner OR OLD.person_id IS NOT NEW.person_id OR OLD.display_name IS NOT NEW.display_name OR OLD.match_key IS NOT NEW.match_key BEGIN
+ UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1 AND OLD.person_id IS NOT NEW.person_id;
+ ${renameStreams('NEW.person_id')}
+END;
+${(['identity_aliases','youtube_identity_aliases'] as const).flatMap(table=>['insert','update','delete'].map(operation=>{
+ const prefix=table==='identity_aliases'?'analytics_identity_aliases':'analytics_youtube_identity_aliases',identities=table==='identity_aliases'?'identities':'youtube_identities',row=operation==='delete'?'OLD':'NEW';
+ return `DROP TRIGGER IF EXISTS ${prefix}_${operation};CREATE TRIGGER ${prefix}_${operation} AFTER ${operation.toUpperCase()} ON ${table}${operation==='update'?` WHEN OLD.${table==='identity_aliases'?'candidate_key':'match_key'} IS NOT NEW.${table==='identity_aliases'?'candidate_key':'match_key'}`:''} BEGIN ${renameStreams(`(SELECT person_id FROM ${identities} WHERE id=${row}.identity_id)`)} END;`;
+})).join('\n')}
+PRAGMA user_version=24;
+`;
+export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24] as const;
 export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;
 

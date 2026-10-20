@@ -222,7 +222,7 @@ export class YouTubeConnection {
       const cursor = string(previous.snapshots[`cursor:${chat}`]?.data);
       const response = await this.api("liveChat/messages", { part: "id,snippet,authorDetails", liveChatId: chat, maxResults: "2000", ...(cursor ? { pageToken: cursor } : {}) }, tokens);
       if (!valid()) return 300000;
-      await this.db.call("youtubeMessages", tokens.userId, chat, Array.isArray(response.items) ? response.items : []);
+      await this.db.call("youtubeMessages", tokens.userId, chat, Array.isArray(response.items) ? response.items : [],broadcast.id);
       if (!valid()) return 300000;
       await this.db.call("youtubeSnapshot", tokens.userId, `cursor:${chat}`, string(response.nextPageToken), this.now());
       if (!valid()) return 300000;

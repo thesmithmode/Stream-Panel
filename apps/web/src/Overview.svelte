@@ -2,6 +2,7 @@
   import {untrack} from 'svelte';
   import {ConnectionError} from "./request";
   import StreamDonations from "./StreamDonations.svelte";
+  import RecentEvents from './RecentEvents.svelte';
   import Insights from "./Insights.svelte";
   import Following from "./Following.svelte";
   import Help from "./Help.svelte";
@@ -35,6 +36,7 @@
   const viewers=$derived(viewerMetrics?.known?.partialMinutes?viewerMetrics.known:viewerMetrics?.all);
   const viewerPartial=$derived((viewerMetrics?.known?.partialMinutes??0)>0);
   let resolution=$state(1);
+  let showEvents=$state(false);
   const decimal=(n:number)=>n.toLocaleString('ru-RU',{maximumFractionDigits:1});
   let metadata=$state<Array<{at:number;title:string;categoryName:string}>>([]);
   let audienceRequest=0,lastAudienceSession='';
@@ -69,6 +71,7 @@
  <div class="metric"><div><span>Донаты</span><strong>{Object.keys(summary.totals).length?Object.entries(summary.totals).map(([c,a])=>money(a,c)).join(' · '):'0'}</strong></div></div>
 </section>
 {#if sessionFilter}<StreamDonations sessionId={sessionFilter} {onPerson} {changed} />{/if}
+{#if sessionFilter}<section class="panel"><header><h2>События стрима · 48 ч</h2><button class="outline small" aria-expanded={showEvents} onclick={()=>showEvents=!showEvents}>{showEvents?'Скрыть события':'Показать события'}</button></header>{#if showEvents}<div class="settings-body"><RecentEvents sessionId={sessionFilter}/></div>{/if}</section>{/if}
 <Insights sessionId={sessionFilter} refreshToken={summary} {onPerson} {onStream} />
 <section class="panel series-panel">
   <header><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Поэтому 10 зрителей и 4 ника в чате возможны одновременно. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2><div class="chart-controls"><select aria-label="Показатель графика стрима" bind:value={audienceMetric}>{#each chartMetrics as choice}<option value={choice.value}>{choice.label}</option>{/each}</select><select aria-label="Детализация графика" bind:value={resolution}><option value={1}>1м</option><option value={5}>5м</option><option value={15}>15м</option></select></div></header>
