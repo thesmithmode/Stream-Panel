@@ -1,3 +1,4 @@
+import {registerAnalyticsCompression} from './analytics-compression.js';
 import {prepareChatStorage} from "./chat-cleanup.js";
 import Fastify, { type FastifyRequest, type FastifyReply } from "fastify";
 import cookie from "@fastify/cookie";
@@ -44,6 +45,7 @@ export async function createHostedApplication(
   const runtimes = new Map<Profile, Awaited<ReturnType<typeof createApplication>>>();
   const app = Fastify({ logger: false, bodyLimit: 32768, trustProxy: [...network.trustedProxies],
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
+  registerAnalyticsCompression(app);
   await app.register(cookie);
   app.addContentTypeParser('application/octet-stream', (_request,payload,done)=>done(null,payload));
   // Provider configuration changes for one profile are serialized. Different
