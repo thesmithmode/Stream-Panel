@@ -47,12 +47,18 @@ export function followingAnalytics(db:Database.Database,id:string){
  const signups=new Map<string,{source:string;account:string;externalId:string;name:string;at:number;personId:string|null}>();
  const add=(source:string,account:string,f:Follower)=>{
   if(f.followedAtMs===null||!windows.some(w=>f.followedAtMs!>=w.from&&f.followedAtMs!<=w.to))return;
-  const person=source==='youtube'?db.prepare('SELECT person_id AS id FROM youtube_identities WHERE account_id=? AND external_id=?').get(account,f.id):db.prepare('SELECT person_id AS id FROM identities WHERE source=? AND account_id=? AND external_id=?').get(source,account,f.id);
-  signups.set(`${source}:${account}:${f.id}:${Math.floor(f.followedAtMs/1000)}`,{source,account,externalId:f.id,name:f.name,at:f.followedAtMs,personId:(person as {id:string}|undefined)?.id??null});
+  signups.set(`${source}:${account}:${f.id}:${Math.floor(f.followedAtMs/1000)}`,{source,account,externalId:f.id,name:f.name,at:f.followedAtMs,personId:null});
  };
  for(const p of polls)for(const f of (JSON.parse(p.payload_json) as Snapshot).followers)add(p.source,p.account,f);
  const events=db.prepare("SELECT e.source,e.account_id AS account,i.external_id AS id,i.display_name AS name,e.occurred_at_ms AS at FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE e.type='follow' AND e.occurred_at_ms BETWEEN ? AND ?").all(stream.start,end) as {source:string;account:string;id:string;name:string;at:number}[];
  for(const e of events)add(e.source,e.account,{id:e.id,name:e.name,followedAtMs:e.at});
+ // Resolve all identities in one indexed join, even when many snapshots repeat a follower.
+ const requested=JSON.stringify([...signups.values()].map(f=>({source:f.source,account:f.account,id:f.externalId})));
+ const linked=db.prepare(`WITH requested AS (SELECT DISTINCT json_extract(value,'$.source') source,json_extract(value,'$.account') account,json_extract(value,'$.id') external_id FROM json_each(?))
+ SELECT r.source,r.account,r.external_id AS externalId,i.person_id AS personId FROM requested r JOIN identities i ON i.source=r.source AND i.account_id=r.account AND i.external_id=r.external_id WHERE r.source<>'youtube'
+ UNION ALL SELECT r.source,r.account,r.external_id AS externalId,i.person_id AS personId FROM requested r JOIN youtube_identities i ON i.account_id=r.account AND i.external_id=r.external_id WHERE r.source='youtube'`).all(requested) as {source:string;account:string;externalId:string;personId:string}[];
+ const people=new Map(linked.map(i=>[JSON.stringify([i.source,i.account,i.externalId]),i.personId]));
+ for(const f of signups.values())f.personId=people.get(JSON.stringify([f.source,f.account,f.externalId]))??null;
  const newFollowers=[...signups.values()].sort((a,b)=>b.at-a.at||Number(b.personId!==null)-Number(a.personId!==null)||a.externalId.localeCompare(b.externalId));
  const observations=polls.filter(p=>p.at>=stream.start&&p.at<=end).map(p=>{const data=JSON.parse(p.payload_json) as Snapshot;return {at:p.at,source:p.source,account:p.account,total:p.source==='youtube'?data.total:data.total??(data.complete?data.followers.length:null),visibleCount:data.followers.length,complete:data.complete};});
  const accounts=new Map<string,{source:string;account:string}>();

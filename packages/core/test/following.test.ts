@@ -1,4 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
+import {followingAnalytics} from '../src/following.js';
 import {StreamStore} from '../src/store.js';
 const at=Date.UTC(2026,9,10,12),m=60000;
 function event(s:StreamStore,id:string,type:'follow'|'chat.message',time:number,received=time){return s.ingest({source:'twitch',accountId:'owner',externalId:id,type,actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:time,receivedAtMs:received,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hi'}}).personId!;}
@@ -74,5 +75,17 @@ test('stream follower summary distinguishes known identities, net count and stal
  const summary=s.followingAnalytics(id),tw=summary.platforms.find(p=>p.source==='twitch')!,yt=summary.platforms.find(p=>p.source==='youtube')!;
  assert.equal(tw.knownNew,0);assert.equal(tw.change,2);assert.equal(tw.fromAt,at);assert.equal(tw.toAt,at+10*m);assert.equal(yt.knownNew,1);assert.equal(yt.change,null);assert.equal(yt.fromAt,null);
  const next=s.startSession('owner','next-summary',at+20*m,'platform',at+20*m);s.followingSnapshot('twitch','owner',[],true,at+21*m,60);s.endSession(next,at+22*m);assert.equal(s.followingAnalytics(next).platforms.find(p=>p.source==='twitch')!.change,null);
+ }finally{s.close();}
+});
+
+test('stream follower linking uses a fixed number of queries as the signup list grows',()=>{
+ const s=new StreamStore(':memory:');try{
+  const id=s.observePlatformStream('twitch','owner','bulk',at,at,null,'Stream')!,person=event(s,'known','chat.message',at);
+  const db=(s as any).reads;let queries=0;
+  const tracked=new Proxy(db,{get(target,property){if(property==='prepare')return(sql:string)=>{queries++;return target.prepare(sql);};const value=Reflect.get(target,property,target);return typeof value==='function'?value.bind(target):value;}});
+  const followers=(n:number)=>Array.from({length:n},(_,i)=>({id:i?'unknown-'+i:'viewer',name:'Follower '+i,followedAtMs:at+m}));
+  s.followingSnapshot('twitch','owner',followers(2),true,at+2*m);followingAnalytics(tracked,id);const small=queries;
+  s.followingSnapshot('twitch','owner',followers(200),true,at+3*m);queries=0;const bulk=followingAnalytics(tracked,id);
+  assert.equal(queries,small);assert.equal(bulk.newFollowers.length,200);assert.equal(bulk.newFollowers.find(f=>f.externalId==='viewer')!.personId,person);assert.equal(bulk.newFollowers.find(f=>f.externalId==='unknown-199')!.personId,null);
  }finally{s.close();}
 });
