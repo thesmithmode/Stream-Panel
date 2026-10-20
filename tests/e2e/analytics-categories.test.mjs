@@ -28,10 +28,19 @@ test('every chart category selector refreshes donations, time patterns and clock
   assert.equal(await page.locator('.donation-patterns .bars').isVisible(),false);
   release();await page.locator('.donation-patterns header').getByText('0 донатов',{exact:true}).waitFor();await page.unroute('**/api/v1/analytics?*');
   let unfiltered;
+  // A cold category can first return progress with placeholder totals. Wait for
+  // the completed report, just as the UI does, before checking its numbers.
+  let progressSent=false;
+  await page.route('**/api/v1/analytics?*',async route=>{
+   if(!progressSent&&new URL(route.request().url()).searchParams.get('category')==='game'){
+    progressSent=true;const response=await route.fetch(),data=await response.json();
+    await route.fulfill({response,json:{...data,preparing:true,ready:0,total:1,donationTiming:{...data.donationTiming,count:0}}});
+   }else await route.continue();
+  });
   const selects=['Категория донатов','Категория времени эфиров','Категория карты активности','Категория суточного графика','Категория состава аудитории','Категория: Возвращаемость по эфирам','Категория: Активность чата по категориям','Категория динамики'];
   for(const selector of selects){
    for(const [category,count,mean] of [['game',1,'2'],['talk',2,'8'],['',3,'5'],['509658',0,null]]){
-    const response=page.waitForResponse(r=>{const u=new URL(r.url());return u.pathname==='/api/v1/analytics'&&u.searchParams.get('category')===category&&r.status()===200;});
+    const response=page.waitForResponse(async r=>{const u=new URL(r.url());return u.pathname==='/api/v1/analytics'&&u.searchParams.get('category')===category&&r.status()===200&&!(await r.json()).preparing;});
     await page.getByLabel(selector,{exact:true}).selectOption(category);const data=await (await response).json();
     assert.equal(data.filters.category,category);assert.equal(data.donationTiming.count,count);if(category==='')unfiltered=data;
     await page.locator('.donation-patterns header').getByText(`${count} донатов`,{exact:true}).waitFor();
@@ -42,6 +51,7 @@ test('every chart category selector refreshes donations, time patterns and clock
     for(const other of selects)assert.equal(await page.getByLabel(other,{exact:true}).inputValue(),category);
    }
   }
+  assert.equal(progressSent,true);await page.unroute('**/api/v1/analytics?*');
   let releaseOld,startedOld;
   const oldWaiting=new Promise(resolve=>startedOld=resolve),oldGate=new Promise(resolve=>releaseOld=resolve);
   await page.route('**/api/v1/analytics?*',async route=>{if(new URL(route.request().url()).searchParams.get('category')==='game'){startedOld();await oldGate;}await route.continue();});

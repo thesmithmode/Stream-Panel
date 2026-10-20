@@ -1231,7 +1231,7 @@ main{align-self:start;}
 
 /* The phone layout owns its spacing; desktop cell padding must not leak into cards. */
 @media(max-width:720px){
- .sessions-page tr[data-session-id]{gap:10px 16px;padding:14px;align-content:start;}
+ .sessions-page tr[data-session-id]{gap:6px 16px;padding:14px;align-content:start;}
  .sessions-page tr[data-session-id]>td{width:auto;min-width:0;padding:0;border:0;}
  .sessions-page tr.session-group>th{display:block;width:100%;padding:10px 14px;border-bottom:1px solid var(--border);}
  .sessions-page .stream-selection{display:flex;margin:0 0 4px;}
