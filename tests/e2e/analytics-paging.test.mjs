@@ -10,14 +10,20 @@ test('large report pages, searches and clock visitor pages remain complete and r
  for(let n=0;n<2;n++){const at=base+n*3600000,sid=await db.call('startSession','owner',String(n),at,'platform',at);await db.call('streamSample',sid,at,'game','Game','',125);await db.call('recordPoll',sid,'owner',{startedAtMs:at,completedAtMs:at+59999,status:'complete',userIds:ids,userNames:Object.fromEntries(ids.map(id=>[id,id]))});await db.call('endSession',sid,at+120000);}
  await h.app.listen({host:'127.0.0.1',port});const browser=await launchBrowser(),context=await browser.newContext(),page=await context.newPage(),errors=[];
  page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(8000);
+ const reportRequests=[],audienceResponses=[];
+ page.on('request',r=>{if(new URL(r.url()).pathname==='/api/v1/analytics')reportRequests.push(r.url());});
+ page.on('response',r=>{if(new URL(r.url()).pathname==='/api/v1/analytics/audience')audienceResponses.push(r.json());});
  try{
   await goto(page,origin);assert.ok(await page.title());await page.getByLabel('Логин',{exact:true}).fill('fixture');await page.getByLabel('Пароль',{exact:true}).fill('fixture-paging-password');await page.getByRole('button',{name:'Войти',exact:true}).click();await page.getByRole('button',{name:'Аналитика',exact:true}).click();
   const audience=page.getByRole('heading',{name:'Возвращаемость участников',exact:true}).locator('../..');
   await audience.getByRole('button',{name:'Следующие участники',exact:true}).waitFor();await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===100);
+  const initialReports=reportRequests.length;
   await audience.getByRole('button',{name:'Следующие участники',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===25);
   await audience.getByRole('button',{name:'Предыдущие участники',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===100);
   await page.getByLabel('Поиск участника').fill('viewer124');await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===1);assert.equal(await audience.getByRole('button',{name:'viewer124',exact:true}).count(),1);
   await audience.getByLabel('Сортировка').selectOption('messages');await page.getByLabel('Только ядро',{exact:true}).check();await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===0);await page.getByLabel('Только ядро',{exact:true}).uncheck();await page.getByLabel('Поиск участника').fill('');await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===100);
+  assert.equal(reportRequests.length,initialReports,'audience paging and search must not download the full report again');
+  assert.ok(audienceResponses.length>0);for(const response of await Promise.all(audienceResponses)){if(!response.preparing){assert.ok(Array.isArray(response.audience));assert.equal(response.clockBuckets,undefined);assert.equal(response.activityClock,undefined);assert.equal(response.streamComparison,undefined);}}
   const clock=page.locator('.activity-clock');await clock.locator('svg g').filter({hasNot:page.locator('title:has-text("нет данных")')}).first().click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);
   await clock.getByRole('button',{name:'Следующие в интервале',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===25);
   await clock.getByRole('button',{name:'Предыдущие в интервале',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);
