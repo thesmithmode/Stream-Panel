@@ -59,12 +59,14 @@ test('optimized follower queries match the previous complete results with 1660 c
 });
 test('latest follower lookup orders by actual checks, retains tie breaks, and ignores unchecked or unrelated snapshots',()=>{
  const s=new StreamStore(':memory:');try{
-  const {db}=fixture(s,5);
+  const {db,session,person}=fixture(s,5);
+  db.prepare("INSERT INTO provider_snapshots VALUES ('orphan-shape','twitch','owner','followers',?,NULL,?)").run(base+100*m,JSON.stringify({followers:['not-a-follower'],complete:true,total:1}));
+  const reads=logicalReadDatabase(db);assert.deepEqual(personFollowing(reads,person,session),personFollowing(legacyReader(reads),person,session),'unchecked payloads are not observation history');
   const payload=JSON.stringify({followers:[],complete:true,total:7});
   db.prepare("INSERT INTO provider_snapshots VALUES ('unchecked','twitch','unchecked','followers',?,NULL,?)").run(base+100*m,payload);
   db.prepare("INSERT INTO provider_snapshots VALUES ('pending','donationalerts','owner','donation_unparsed',?,NULL,'{}')").run(base+100*m);
   db.prepare("INSERT INTO follower_checks VALUES ('pending-check','pending',?,NULL)").run(base+101*m);
-  const versions=db.prepare("SELECT id FROM provider_snapshots WHERE source='twitch' AND account_id='owner' ORDER BY id").all() as {id:string}[];
+  const versions=db.prepare("SELECT id FROM provider_snapshots WHERE source='twitch' AND account_id='owner' AND id<>'orphan-shape' ORDER BY id").all() as {id:string}[];
   db.prepare('INSERT INTO follower_checks VALUES (?,?,?,NULL)').run('aaa',versions[0]!.id,base+200*m);
   db.prepare('INSERT INTO follower_checks VALUES (?,?,?,NULL)').run('zzz',versions[1]!.id,base+200*m);
   const latest=db.prepare(latestFollowerChecksSql).all() as {source:string;account_id:string;snapshot_id:string;id:string}[];

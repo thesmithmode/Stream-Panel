@@ -13,7 +13,9 @@ const state=(poll:Poll|undefined,id:string,source:string)=>{
 const personFollowerDatesSql = `SELECT p.id AS snapshot_id,
  json_extract(f.value,'$.followedAtMs') AS at,json_type(f.value,'$.followedAtMs') AS date_type
  FROM provider_snapshots p,json_each(p.payload_json,'$.followers') f
- WHERE p.source=? AND p.account_id=? AND p.key='followers' AND json_extract(f.value,'$.id')=?`;
+ WHERE p.source=? AND p.account_id=? AND p.key='followers'
+  AND EXISTS(SELECT 1 FROM follower_checks checked WHERE checked.snapshot_id=p.id)
+  AND json_extract(f.value,'$.id')=?`;
 export function personFollowing(db:Database.Database,person:string,session:string=''):FollowState[]{
  const identities=db.prepare(`SELECT source,account_id AS account,external_id AS externalId,display_name AS name FROM identities WHERE person_id=? AND source='twitch'
  UNION ALL SELECT 'youtube',account_id,external_id,display_name FROM youtube_identities WHERE person_id=?`).all(person,person) as {source:string;account:string;externalId:string;name:string}[];
@@ -41,6 +43,7 @@ export function personFollowing(db:Database.Database,person:string,session:strin
     json_extract(f.value,'$.followedAtMs') AS followedAtMs
    FROM provider_snapshots p LEFT JOIN json_each(p.payload_json,'$.followers') f ON json_extract(f.value,'$.id')=?
    WHERE p.source=? AND p.account_id=? AND p.key='followers'
+    AND EXISTS(SELECT 1 FROM follower_checks checked WHERE checked.snapshot_id=p.id)
   ), states AS (
    SELECT c.id,c.observed_at_ms AS at,s.status,s.followedAtMs
    FROM snapshots s JOIN follower_checks c ON c.snapshot_id=s.snapshot_id
