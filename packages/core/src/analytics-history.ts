@@ -1,3 +1,4 @@
+import {latestFollowerChecksSql,latestFollowerSnapshotsSql} from './follower-queries.js';
 import {dateTimeFormatter} from './date-time-formatter.js';
 import {streamInsights,InsightAccumulator,type InsightCard} from './insights.js';
 import {mergeClockActivity, type ClockActivity} from './clock-activity.js';
@@ -137,15 +138,7 @@ export class AnalyticsHistory {
     private followerRevision(){
         // A repeated check of the same payload must not rebuild unchanged history.
         // Seek the latest check for each distinct payload instead of scanning all checks.
-        return this.statement(`WITH versions AS (
-          SELECT p.source,p.account_id,p.id,
-           (SELECT c.observed_at_ms FROM follower_checks c WHERE c.snapshot_id=p.id ORDER BY c.observed_at_ms DESC,c.id DESC LIMIT 1) AS at,
-           (SELECT c.id FROM follower_checks c WHERE c.snapshot_id=p.id ORDER BY c.observed_at_ms DESC,c.id DESC LIMIT 1) AS check_id
-          FROM provider_snapshots p WHERE p.key='followers'
-        ), ranked AS (
-          SELECT source,account_id,id,row_number() OVER(PARTITION BY source,account_id ORDER BY at DESC,check_id DESC) AS rank
-          FROM versions WHERE at IS NOT NULL
-        ) SELECT source,account_id,id FROM ranked WHERE rank=1 ORDER BY source,account_id`).all();
+        return this.statement(`SELECT source,account_id,snapshot_id AS id FROM (${latestFollowerChecksSql}) ORDER BY source,account_id`).all();
     }
     private build(options: AnalyticsOptions, session: Session): Report {
         const report = audienceAnalytics(this.db, { ...options, sessionId: session.id });
@@ -528,7 +521,7 @@ export class AnalyticsHistory {
             person.detailAvailable=true;people.set(person.id,person);
             if(performance.now()-sliceStart>250){yield {preparing:true,ready:processed,total:sessions.length*2};sliceStart=performance.now();}
         }
-        const current = this.statement("SELECT p.source,p.account_id,p.payload_json FROM follower_observations p WHERE p.id=(SELECT q.id FROM follower_observations q WHERE q.source=p.source AND q.account_id=p.account_id ORDER BY q.observed_at_ms DESC,q.id DESC LIMIT 1)").all() as {
+        const current = this.statement(latestFollowerSnapshotsSql).all() as {
             source: string;
             account_id: string;
             payload_json: string;
