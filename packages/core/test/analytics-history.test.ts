@@ -466,3 +466,23 @@ test('clock endpoint returns only prepared visitor pages and corrections replace
   h.close();
  }finally{s.close();}
 });
+
+
+test('small rolling reports defer clock membership and keep exact clipped metrics and lazy attendance',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,4);const h=(s as any).history as AnalyticsHistory;
+  const original=AnalyticsWorkspace.prototype.clockPage;let membershipReads=0;
+  AnalyticsWorkspace.prototype.clockPage=function(...args:Parameters<typeof original>){membershipReads++;return original.apply(this,args);};
+  try{
+   for(const offset of [minute,minute+12345,2*minute]){
+    const opts={...options,fromMs:base+offset,summaryOnly:true};const report=ready(h,opts),raw=audienceAnalytics((s as any).db,opts);
+    assert.equal(membershipReads,0,'opening a report must not query every clock interval');
+    assert.deepEqual(report.summary,raw.summary);assert.deepEqual(report.hours,raw.hours);assert.deepEqual(report.streamComparison,raw.streamComparison);
+    assert.ok(report.clockBuckets.every((b:any)=>b.peopleDeferred&&b.people.length===0));
+   }
+   const opts={...options,summaryOnly:true},r=ready(h,opts),bucket=r.clockBuckets.find((b:any)=>b.day==='all'&&b.resolution===60&&b.peopleDeferred);
+   const result=h.clockAudience({...opts,clockDay:bucket.day,clockResolution:bucket.resolution,clockMinute:bucket.minute});
+   assert.equal(result.clockVisitors!.total,1);assert.equal(result.clockVisitors!.items[0]!.visits,4);assert.equal(membershipReads,1);
+  }finally{AnalyticsWorkspace.prototype.clockPage=original;}
+ }finally{s.close();}
+});

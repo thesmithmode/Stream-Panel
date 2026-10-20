@@ -122,6 +122,7 @@ export async function createApplication(
     return `${origin}/#key=${nonce}`;
   };
   app.addHook("onRequest", async (request, reply) => {
+    if(request.url.split('?')[0]!.endsWith('.map'))return reply.code(404).send({error:'NOT_FOUND'});
     if (
       !(options.origin ? [new URL(origin).host] : [`127.0.0.1:${port}`, `localhost:${port}`]).includes(
         request.headers.host ?? "",
