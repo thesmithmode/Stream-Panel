@@ -6,7 +6,7 @@ import { analyticsSettings } from './analytics-settings.js';
 import { randomUUID } from 'node:crypto';
 type Store = StorePort<'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteManualSession' | 'endSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'startSession' | 'streamMetadata' | 'summary'>;
 export function registerStreamsRoutes(app: FastifyInstance, db: Store, configuration: ConfigurationPort) {
-    app.get('/api/v1/events/recent',request=>{const q=object(request.query);return db.call('recentEvents',Number(q.offset??0),Number(q.limit??100));});
+    app.get('/api/v1/events/recent',request=>{const q=object(request.query);return db.call('recentEvents',Number(q.offset??0),Number(q.limit??100),{...(string(q.session)?{session:string(q.session)}:{}),...(string(q.person)?{person:string(q.person)}:{}),messagesOnly:string(q.messages)==='1'});});
     app.get("/api/v1/overview", () => db.call("channelOverview", configuration.value.excludedBotLogins));
     for(const path of ["/api/v1/analytics","/api/v1/analytics/clock"])app.get(path, async (request) => {
         const q = object(request.query);

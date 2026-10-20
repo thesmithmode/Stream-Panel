@@ -31,7 +31,8 @@
     if(!mounted)return;
     busy=true;error="";
     let cancelled=false;
-    const timer=window.setTimeout(()=>{if(!cancelled)untrack(()=>void refresh());},250);
+    const delay=untrack(()=>data===null?0:150);
+    const timer=window.setTimeout(()=>{if(!cancelled)untrack(()=>void refresh());},delay);
     return ()=>{cancelled=true;window.clearTimeout(timer);requestId++;};
   });
   $effect(()=>{const saved=JSON.stringify(view);void saved;if(mounted)saveAnalyticsView(()=>localStorage,profile,view);});

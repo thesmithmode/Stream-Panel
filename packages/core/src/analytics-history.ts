@@ -259,17 +259,26 @@ export class AnalyticsHistory {
         if(session.ended_at_ms===null){while(this.liveStreams.size>=12)this.liveStreams.delete(this.liveStreams.keys().next().value!);this.liveStreams.set(key,{revision,report});}return report;
     }
     private warmedRevision='';
-    warm(options:AnalyticsOptions){
+    warm(options:AnalyticsOptions,bakeCategories=false){
         // Bake the landing report, not a Cartesian product of moving windows.
         // Live facts already have collector priority; finalize after the stream ends.
         const current:AnalyticsOptions={...options,source:'all',category:'',fromMs:0,summaryOnly:true,includeInsights:true};
         const sessions=this.sessions(current);
         if(sessions.some(s=>s.ended_at_ms===null))return {preparing:false,ready:0,total:0};
         const {fromMs,toMs,...settings}=current;void fromMs;void toMs;
-        const revision=JSON.stringify([settings,this.globalRevision(),sessions,this.annotationsRevision(),this.followerRevision()]);
+        const revision=JSON.stringify([settings,bakeCategories,this.globalRevision(),sessions,this.annotationsRevision(),this.followerRevision()]);
         if(revision===this.warmedRevision)return {preparing:false,ready:1,total:1};
         const report=this.report(current);
         if(report.preparing)return {preparing:true,ready:report.ready??0,total:report.total??1};
+        if(bakeCategories){
+            // Only actual categories, all history, at most six: no platform/period
+            // Cartesian product and no moving rolling-window rebuilds while idle.
+            const categories=this.statement("SELECT category_id AS id FROM stream_samples WHERE category_id<>'' AND category_name<>'' GROUP BY category_id ORDER BY count(*) DESC,category_id LIMIT 6").all() as {id:string}[];
+            for(const category of categories){
+                const value=this.report({...current,category:category.id});
+                if(value.preparing)return {preparing:true,ready:value.ready??0,total:value.total??1};
+            }
+        }
         this.warmedRevision=revision;
         return {preparing:false,ready:1,total:1};
     }

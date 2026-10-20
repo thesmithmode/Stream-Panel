@@ -5,6 +5,7 @@ export const EVENT_RETENTION_MS=48*60*60*1000;
 export const EVENT_CLEANUP_BATCH=500;
 type RecentInput=Omit<EventInput,'source'|'sourceTime'|'timeQuality'|'transport'>&{source:EventInput['source']|'youtube'};
 type RecentRow={id:string;source:string;account_id:string;external_id:string;type:string;actor_id:string|null;actor_name:string|null;at_ms:number;received_at_ms:number;payload_json:string};
+export type RecentFilter={session?:string;person?:string;messagesOnly?:boolean};
 
 /** Disposable content only. Permanent facts, deduplication and report revisions are independent. */
 export class RecentEvents {
@@ -31,9 +32,19 @@ export class RecentEvents {
   if(messageId)this.db.prepare("DELETE FROM recent_events WHERE source='youtube' AND account_id=? AND external_id=?").run(account,messageId);
   if(authorId)this.db.prepare("DELETE FROM recent_events WHERE source='youtube' AND account_id=? AND actor_id=?").run(account,authorId);
  }
- list(offset=0,limit=100,now=Date.now()) {
+ list(offset=0,limit=100,now=Date.now(),filter:RecentFilter={}) {
   if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>200)throw new Error('INVALID_RECENT_EVENTS_PAGE');
-  return (this.db.prepare('SELECT * FROM recent_events WHERE at_ms>? AND at_ms<=? ORDER BY at_ms DESC,id DESC LIMIT ? OFFSET ?').all(now-EVENT_RETENTION_MS,now,limit,offset) as RecentRow[]).map(({payload_json,...row})=>({...row,payload:JSON.parse(payload_json) as Record<string,unknown>}));
+  for(const id of [filter.session,filter.person])if(id!==undefined&&(typeof id!=='string'||!id||id.length>256))throw new Error('INVALID_RECENT_EVENTS_FILTER');
+  const where=['r.at_ms>?','r.at_ms<=?'],args:unknown[]=[now-EVENT_RETENTION_MS,now];
+  if(filter.messagesOnly)where.push("r.type IN('chat.message','textMessageEvent','superChatEvent','superStickerEvent')");
+  if(filter.person){
+   where.push(`EXISTS(SELECT 1 FROM (SELECT source,account_id,external_id,person_id FROM identities UNION ALL SELECT 'youtube',account_id,external_id,person_id FROM youtube_identities) i WHERE i.source=r.source AND i.account_id=r.account_id AND i.external_id=r.actor_id AND i.person_id=?)`);args.push(filter.person);
+  }
+  if(filter.session){
+   where.push(`((r.source<>'youtube' AND EXISTS(SELECT 1 FROM events e JOIN logical_event_sessions es ON es.event_id=e.id WHERE e.source=r.source AND e.account_id=r.account_id AND e.type=r.type AND e.external_id=r.external_id AND es.session_id=?)) OR (r.source='youtube' AND EXISTS(SELECT 1 FROM logical_platform_streams p WHERE p.platform='youtube' AND p.session_id=? AND p.account_id=r.account_id AND r.at_ms>=p.started_at_ms AND r.at_ms<coalesce(p.ended_at_ms,?) AND (json_extract(r.payload_json,'$.videoId')=p.external_id OR (json_extract(r.payload_json,'$.videoId') IS NULL AND 1=(SELECT count(*) FROM logical_platform_streams q WHERE q.platform='youtube' AND q.account_id=r.account_id AND r.at_ms>=q.started_at_ms AND r.at_ms<coalesce(q.ended_at_ms,?)))))))`);
+   args.push(filter.session,filter.session,now,now);
+  }
+  return (this.db.prepare(`SELECT r.* FROM recent_events r WHERE ${where.join(' AND ')} ORDER BY r.at_ms DESC,r.id DESC LIMIT ? OFFSET ?`).all(...args,limit,offset) as RecentRow[]).map(({payload_json,...row})=>({...row,payload:JSON.parse(payload_json) as Record<string,unknown>}));
  }
  purge(now=Date.now()):number {
   assertTimestamp(now);

@@ -17,6 +17,7 @@
   import {confirmAction} from "./confirmation.svelte";
   import Help from "./Help.svelte";
   import PersonNotes from "./PersonNotes.svelte";
+  import RecentEvents from './RecentEvents.svelte';
   import PersonDonations from "./PersonDonations.svelte";
   import Following from "./Following.svelte";
   import PersonMetadata from "./PersonMetadata.svelte";
@@ -303,7 +304,7 @@
           {/if}
 
         </div>{/if}
-      <div class="person-tabs" role="tablist" aria-label="Разделы человека">{#each [["overview","Обзор"],["activity","Активность"],["donations","Донаты"],["notes","Заметки и метки"],["accounts","Редактировать аккаунты" ]] as const as [key,label]}<button role="tab" aria-selected={detailTab===key} class:active={detailTab===key} onclick={()=>{detailTab=key;if(key==='accounts')void loadAudit().catch(e=>error=e.message);}}>{label}</button>{/each}</div>
+      <div class="person-tabs" role="tablist" aria-label="Разделы человека">{#each [["overview","Обзор"],["activity","Активность"],["messages","Сообщения · 48 ч"],["donations","Донаты"],["notes","Заметки и метки"],["accounts","Редактировать аккаунты" ]] as const as [key,label]}<button role="tab" aria-selected={detailTab===key} class:active={detailTab===key} onclick={()=>{detailTab=key;if(key==='accounts')void loadAudit().catch(e=>error=e.message);}}>{label}</button>{/each}</div>
       <div class="settings-body person-scroll">
       {#if detailTab==='overview'}
         <h3>Связанные аккаунты</h3>
@@ -311,6 +312,8 @@
         <div class="actions"><button class="outline small" onclick={()=>{detailTab='donations';showDonorLinks=true;}}>Привязать донаты</button></div>
         <PersonActivity personId={detail.id} />
         <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} sessionId="" onPerson={(id)=>void select(id)} />{/if}</details>
+      {:else if detailTab==='messages'}
+       <RecentEvents personId={detail.id} messagesOnly />
       {:else if detailTab==='accounts'}
         <label
           >Имя группы
