@@ -54,11 +54,11 @@ test('every chart category selector refreshes donations, time patterns and clock
   assert.equal(progressSent,true);await page.unroute('**/api/v1/analytics?*');
   let releaseOld,startedOld;
   const oldWaiting=new Promise(resolve=>startedOld=resolve),oldGate=new Promise(resolve=>releaseOld=resolve);
-  await page.route('**/api/v1/analytics?*',async route=>{if(new URL(route.request().url()).searchParams.get('category')==='game'){startedOld();await oldGate;}await route.continue();});
-  const oldResponse=page.waitForResponse(r=>new URL(r.url()).searchParams.get('category')==='game'&&r.status()===200);
+  await page.route('**/api/v1/analytics?*',async route=>{if(new URL(route.request().url()).searchParams.get('category')==='game'){startedOld();await oldGate;}await route.continue().catch(error=>{if(!route.request().failure())throw error;});});
+  const oldAborted=page.waitForEvent('requestfailed',{predicate:r=>new URL(r.url()).searchParams.get('category')==='game'});
   await page.getByLabel('Категория донатов',{exact:true}).selectOption('game');await oldWaiting;
   await page.getByLabel('Категория донатов',{exact:true}).selectOption('talk');
-  await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();releaseOld();await oldResponse;await page.unroute('**/api/v1/analytics?*');
+  await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();assert.match((await oldAborted).failure().errorText,/abort|cancel|ERR_FAILED/i);releaseOld();await page.unroute('**/api/v1/analytics?*');
   await page.route('**/api/v1/analytics?*',route=>new URL(route.request().url()).searchParams.get('category')==='509658'?route.fulfill({json:unfiltered}):route.continue());
   await page.getByLabel('Категория донатов',{exact:true}).selectOption('509658');
   await page.locator('.donation-patterns .chart-refresh').filter({hasText:'Сервер вернул данные для других фильтров'}).waitFor();assert.equal(await page.locator('.activity-clock .clock-plot').isVisible(),false);
