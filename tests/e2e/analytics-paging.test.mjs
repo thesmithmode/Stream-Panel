@@ -21,7 +21,7 @@ test('large report pages, searches and clock visitor pages remain complete and r
   const clock=page.locator('.activity-clock');await clock.locator('svg g').filter({hasNot:page.locator('title:has-text("нет данных")')}).first().click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);
   await clock.getByRole('button',{name:'Следующие в интервале',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===25);
   await clock.getByRole('button',{name:'Предыдущие в интервале',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);
-  // All first pages for the half-hour day arrive before any column is clicked.
+  // An already selected interval loads its new resolution; nearby clicks share the batch.
   const batch=page.waitForResponse(r=>r.url().includes('/analytics/clock?')&&new URL(r.url()).searchParams.get('clockResolution')==='30');
   await clock.getByLabel('Шаг графика').selectOption('30');await batch;
   let clockRequests=0;const countRequests=request=>{if(request.url().includes('/analytics/clock?'))clockRequests++;};page.on('request',countRequests);
