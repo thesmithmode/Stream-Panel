@@ -77,6 +77,7 @@ export class AnalyticsHistory {
         touchedAt: number;
         workspace:AnalyticsWorkspace<Person>;
         liveRevision:string;
+        validation:Report;
     }>();
     private pruneJobs(now=Date.now()) {
         for (const [key, job] of this.jobs)
@@ -347,19 +348,20 @@ export class AnalyticsHistory {
                 return value;
             }catch(error){if(!(error instanceof Error)||error.message!=='ANALYTICS_RANGE_TOO_LARGE')throw error;}
         }
-        const validation=audienceAnalytics(this.db,{...options,fromMs:options.toMs-1,toMs:options.toMs});
         const now = Date.now();
         this.pruneJobs(now);
         let job = this.jobs.get(fingerprint);
         if (!job) {
             // Each browser/filter keeps its own progress, with a bounded LRU budget.
             while (this.jobs.size >= 4) {const key=this.jobs.keys().next().value!;this.jobs.get(key)!.workspace.dispose();this.jobs.delete(key);}
+            const validation=audienceAnalytics(this.db,{...options,fromMs:options.toMs-1,toMs:options.toMs});
             const workspace=new AnalyticsWorkspace<Person>(this.db);
-            job = { iterator: this.aggregate(options, sessions, validation,workspace), touchedAt: now,workspace,liveRevision };
+            job = { iterator: this.aggregate(options, sessions, validation,workspace), touchedAt: now,workspace,liveRevision,validation };
         }
         this.jobs.delete(fingerprint);
         this.jobs.set(fingerprint, job);
         job.touchedAt = now;
+        const validation=job.validation;
         let next: IteratorResult<Progress, Report>;
         try {
             next = job.iterator.next();
