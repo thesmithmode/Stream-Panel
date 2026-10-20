@@ -287,7 +287,23 @@ export class AnalyticsHistory {
     }
     private annotationsRevision(){return [this.statement('SELECT * FROM person_preferences ORDER BY person_id').all(),this.statement('SELECT * FROM person_tags ORDER BY person_id,label').all(),this.statement("SELECT id,source,started_at_ms,ended_at_ms FROM collection_gaps WHERE source IN('twitch','youtube') ORDER BY id").all()];}
     query(options:AnalyticsOptions):Report{
-        return options.sessionId?audienceAnalytics(this.db,options):this.resolve(options,options.summaryOnly??false);
+        return options.sessionId?this.sessionReport(options):this.resolve(options,options.summaryOnly??false);
+    }
+    private sessionReport(options:AnalyticsOptions):Report{
+        const session=this.statement(`SELECT s.id,s.started_at_ms,s.ended_at_ms,coalesce(r.revision,0) AS revision FROM sessions s LEFT JOIN analytics_stream_revisions r ON r.session_id=s.id WHERE s.id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)`).get(options.sessionId) as Session|undefined;
+        if(!session||session.ended_at_ms===null)return audienceAnalytics(this.db,options);
+        const canonical={...options,fromMs:Math.max(options.fromMs,session.started_at_ms),toMs:Math.min(options.toMs,session.ended_at_ms)};
+        validateAnalyticsOptions(canonical);
+        const snapshot=options.source!=='twitch'&&options.youtubeAccount?this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount):null;
+        const scope='session:'+createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.entries(canonical).sort(([a],[b])=>a.localeCompare(b))))).digest('hex');
+        const key=createHash('sha256').update(JSON.stringify([scope,session.revision,this.globalRevision(),this.annotationsRevision(),this.followerRevision(),snapshot])).digest('hex');
+        const retained=this.completed.get(key);
+        if(retained){this.completed.delete(key);this.completed.set(key,retained);return structuredClone(retained.value);}
+        const saved=this.reportCache.get(key);
+        const value=saved??audienceAnalytics(this.db,canonical);
+        if(!saved)this.reportCache.save(key,scope,value);
+        this.remember(key,value);
+        return value;
     }
     report(options:AnalyticsOptions):Report{return this.resolve(options,true);}
     private resolve(options:AnalyticsOptions,historical:boolean,clockOnly?:false):Report;

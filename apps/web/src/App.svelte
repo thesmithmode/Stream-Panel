@@ -106,7 +106,7 @@
     ["connections", "Интеграции"],
     ["settings", "Настройки"],
   ] as const;
-  async function refresh(fresh=false) {
+  async function refresh(fresh=false,initialStatus?:any) {
     const current=epoch;
     if(refreshTask?.epoch===current){
       if(!fresh)return refreshTask.task;
@@ -117,7 +117,7 @@
     const controller=new AbortController();
     const deadline=setTimeout(()=>controller.abort(new ConnectionError()),12000);
     const task=(async()=>{
-      const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter).map(async([key,path])=>[key,await api(key==='sessions'&&tab==='sessions'&&sessionPage>0?`sessions?offset=${sessionPage*100}`:path,undefined,controller.signal)])));
+      const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter).map(async([key,path])=>[key,key==='status'&&initialStatus?initialStatus:await api(key==='sessions'&&tab==='sessions'&&sessionPage>0?`sessions?offset=${sessionPage*100}`:path,undefined,controller.signal)])));
       if(current!==epoch)return;
       status=values.status;{setCsrf(status.csrf);user=status.user??user;outdated=isOutdatedRelease(status.release);}
       sessions=values.sessions??sessions;selectedSessions=selectedSessions.filter(id=>sessions.some(s=>s.id===id));summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';window.dispatchEvent(new Event('sp:data-refresh'));
@@ -180,9 +180,9 @@
         // Establish account permissions before using a persisted or URL-selected profile.
         // Older standalone collectors may lack this route; retain their status flow.
         try {const identity=await api<any>("auth/me");user=identity.user;restoreRoute();} catch(e) {if((e as Error).message!=="NOT_FOUND"&&(e as Error).message!=="HTTP_404")throw e;}
-        const auth=await api<any>("status");
+        const authProfile=profile,auth=await api<any>("status");
         setCsrf(auth.csrf);user=auth.user??user;restoreRoute();
-        await refresh();
+        await refresh(false,profile===authProfile?auth:undefined);
         if (!alive) return;
         authorized=true;saveRoute(true);
       } catch(e){reportFailure(e);

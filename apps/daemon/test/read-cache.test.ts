@@ -62,6 +62,11 @@ test('Redis cache handles hits, corrupt values, deadlines and bounded local evic
   mode='bad-gzip';assert.equal(await cache.read('bad-compression',async()=>11,policy),11);mode='normal';
   await tick();const retained=values.size;await cache.read('compression-limit',async()=>'x'.repeat(16_000_001),policy);await tick();assert.equal(values.size,retained);
   mode='timeout';const start=Date.now();assert.equal(await cache.read('deadline',async()=>9),9);assert.ok(Date.now()-start<500);assert.equal(await cache.read('after-timeout',async()=>10),10);
+  mode='normal';t.mock.timers.enable({apis:['Date'],now:Date.now()+5001});
+  await cache.read('reconnect',async()=>1);await tick();await tick();
+  let recoveredLoads=0;await cache.read('recovered',async()=>++recoveredLoads);await tick();
+  for(let n=0;n<129;n++)await cache.read(`recovered-evict-${n}`,async()=>n);
+  assert.equal(await cache.read('recovered',async()=>++recoveredLoads),1,'Redis reconnects after a read deadline');assert.equal(recoveredLoads,1);t.mock.timers.reset();
   await tick();assert.ok([...values.values()].every(value=>value.length<2_000_000));
  }finally{cache.close();for(const socket of sockets)socket.destroy();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });
@@ -92,3 +97,13 @@ test('analytics retention is revision-scoped while preparation responses are nev
  let preparing=0;for(let i=0;i<2;i++)await cache.read('building',async()=>({preparing:true,ready:++preparing}),policy);assert.equal(preparing,2);
  }finally{cache.close();t.mock.timers.reset();}
 });
+
+ test('large reports remain locally cached with compression and invalidate on writes without Redis',async()=>{
+ const cache=new ReadCache(''),policy={ttlMs:86400000,compressed:true};let loads=0;
+ try{const load=async()=>{loads++;return {rows:Array.from({length:30000},(_,i)=>({id:i,text:'content'.repeat(12)}))};};
+  const first=await cache.read('report',load,policy);first.rows[0]!.text='changed';
+  const second=await cache.read('report',load,policy);assert.equal(loads,1);assert.equal(second.rows[0]!.text,'content'.repeat(12));
+  const inspect=cache as unknown as {localBytes:number};assert.ok(inspect.localBytes<2_000_000);
+  cache.invalidate();await cache.read('report',load,policy);assert.equal(loads,2);
+ }finally{cache.close();}
+ });
