@@ -107,13 +107,16 @@
     const fromMs=new Date(from).getTime(),toMs=new Date(to).getTime();
     try{
       try {localStorage.setItem(`sp-analytics-${profile}`,JSON.stringify({timezone}));}catch{/* optional local preferences */}
-      const offset=audienceOffset,term=search,sort=view.sort,core=view.coreOnly;
+      // Small reports are filtered locally; retain the complete first page so clearing
+      // search or core-only after an auto-refresh cannot hide participants.
+      const offset=0,term='',sort=view.sort,core=false;
       const audienceQuery=JSON.stringify([scope,offset,term,sort,core]);
       const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,timezone,mode:'summary',insights:'1',audienceOffset:String(offset),audienceSearch:term,audienceSort:sort,audienceCoreOnly:core?'1':'0'});
       let result=await api(`analytics?${q}`,undefined,controller.signal);
       while(result.preparing&&id===requestId){buildProgress=`${result.stage==='aggregate'?'Собираем отчёт':'Готовим историю'}: ${Math.round(result.ready/Math.max(1,result.total)*100)}%`;if(id!==requestId)return;result=await api(`analytics?${q}`,undefined,controller.signal);}
       buildProgress='';
-      if(id===requestId){const previousScope=loadedScope;if(result.filters&&(result.filters.category!==category||result.filters.source!==source||result.filters.timezone!==timezone))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');loadedScope=scope;loadedAudienceQuery=audienceQuery;pagedAudience=null;
+      if(id===requestId){const previousScope=loadedScope;if(result.filters&&(result.filters.category!==category||result.filters.source!==source||result.filters.timezone!==timezone))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');loadedScope=scope;loadedAudienceQuery=audienceQuery;
+        if(JSON.stringify([scope,audienceOffset,search,view.sort,view.coreOnly])===audienceQuery)pagedAudience=null;
         if(JSON.stringify(data)!==JSON.stringify(result))data=Object.fromEntries(Object.entries(result).map(([key,value])=>[key,JSON.stringify(data?.[key])===JSON.stringify(value)?data[key]:value]));
         if(scope!==previousScope){selected=null;streamPage=0;}}
     }catch(e){if(id===requestId){error=(e as Error).message;reportError=error;}}
