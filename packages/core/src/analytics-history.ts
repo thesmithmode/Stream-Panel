@@ -301,7 +301,7 @@ export class AnalyticsHistory {
         if(retained){this.completed.delete(key);this.completed.set(key,retained);return structuredClone(retained.value);}
         const saved=this.reportCache.get(key);
         const value=saved??audienceAnalytics(this.db,canonical);
-        if(!saved)this.reportCache.save(key,scope,value);
+        if(!saved&&(this.cachePolicy.availableBytes?.()??Infinity)>=1024*1024*1024)this.reportCache.save(key,scope,value);
         this.remember(key,value);
         return value;
     }

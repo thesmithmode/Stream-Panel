@@ -56,6 +56,7 @@ test('Redis cache handles hits, corrupt values, deadlines and bounded local evic
   mode='normal';assert.equal((await cache.read('large',async()=> 'x'.repeat(2_000_001))).length,2_000_001);
   const policy={ttlMs:86400000,compressed:true},large='z'.repeat(2_100_000);let analyticsLoads=0;
   assert.equal(await cache.read('compressed',async()=>{analyticsLoads++;return large;},policy),large);await tick();
+  for(let n=0;n<129;n++)await cache.read(`compressed-evict-${n}`,async()=>n);
   t.mock.timers.enable({apis:['Date'],now:Date.now()});t.mock.timers.tick(READ_CACHE_TTL_MS+1);
   assert.equal(await cache.read('compressed',async()=>{analyticsLoads++;return large;},policy),large);assert.equal(analyticsLoads,1,'Redis retains large compressed reports after the normal read TTL');
   t.mock.timers.reset();cache.invalidate();await cache.read('compressed',async()=>{analyticsLoads++;return large;},policy);assert.equal(analyticsLoads,2);
