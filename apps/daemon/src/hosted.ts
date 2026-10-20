@@ -181,7 +181,7 @@ export async function createHostedApplication(
       delete responseHeaders["content-length"];
       const payload = request.url.split("?")[0] === "/api/v1/status" && result.statusCode === 200
         ? JSON.stringify(statusView(result.json(),user,profile)) : result.body;
-      reply.code(result.statusCode).headers(responseHeaders).send(payload);
+      return reply.code(result.statusCode).headers(responseHeaders).send(payload);
     } finally { release(); if (queue) queue.waiting--; }
   };
   const canReadBackups=(request:FastifyRequest,reply:FastifyReply)=>{
