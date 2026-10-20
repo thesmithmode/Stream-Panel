@@ -14,10 +14,10 @@ export class AnalyticsReportCache<T>{
   try{return JSON.parse(gunzipSync(row.payload,{maxOutputLength:16*1024*1024}).toString()) as T;}
   catch{this.db.prepare('DELETE FROM analytics_reports WHERE cache_key=?').run(key);return;}
  }
- save<P>(key:string,scope:string,value:T,workspace:AnalyticsWorkspace<P>,allowEviction=true):boolean{
+ save<P>(key:string,scope:string,value:T,workspace?:AnalyticsWorkspace<P>,allowEviction=true):boolean{
   const json=JSON.stringify(value);
   if(Buffer.byteLength(json)>16*1024*1024)return false;
-  const payload=gzipSync(json),bytes=payload.length+workspace.storageBytes();
+  const payload=gzipSync(json),bytes=payload.length+(workspace?.storageBytes()??0);
   if(bytes>this.limit)return false;
   if(this.db.name!==':memory:'){const fs=statfsSync(dirname(this.db.name));if(fs.bavail*fs.bsize<1024*1024*1024+bytes)return false;}
   try{return this.db.transaction(()=>{
@@ -33,7 +33,7 @@ export class AnalyticsReportCache<T>{
     this.db.prepare('DELETE FROM analytics_reports WHERE cache_key=?').run(row.cache_key);retained-=row.bytes;count--;
    }
    this.db.prepare('INSERT INTO analytics_reports VALUES(?,?,?,?,?)').run(key,scope,payload,bytes,Date.now());
-   workspace.save(key);
+   workspace?.save(key);
    return true;
   }).immediate();}catch(error){
    if(['SQLITE_FULL','SQLITE_BUSY','SQLITE_LOCKED','SQLITE_READONLY'].includes(String((error as {code?:unknown})?.code)))return false;

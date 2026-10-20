@@ -500,3 +500,22 @@ test('background category catch-up advances once per call and never revisits com
   assert.deepEqual(seen.slice(2),['','game','other']);
  }finally{s.close();}
 });
+
+test('closed stream reports survive changing request times and restart, while revisions and filters stay exact',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,1);const db=(s as any).db,sid=s.sessions()[0]!.id as string;let facts=0;
+  const tracked=new Proxy(db,{get(target,property){if(property==='prepare')return(sql:string)=>{if(/FROM presence_polls|FROM effective_events|FROM events e/i.test(sql))facts++;return target.prepare(sql);};const value=Reflect.get(target,property,target);return typeof value==='function'?value.bind(target):value;}});
+  const h=new AnalyticsHistory(tracked),opts={...options,sessionId:sid};
+  const first=h.query(opts);assert.deepEqual(first,audienceAnalytics(db,opts));const reads=facts;
+  first.audience[0]!.name='mutated';assert.equal(h.query({...opts,toMs:opts.toMs+60000}).audience[0]!.name,'Viewer');assert.equal(facts,reads);
+  const restarted=new AnalyticsHistory(tracked);assert.deepEqual(restarted.query(opts),audienceAnalytics(db,opts));assert.equal(facts,reads,'restart uses the persisted projection');
+  const partial={...opts,fromMs:base+minute};assert.deepEqual(h.query(partial),audienceAnalytics(db,partial));
+  s.renamePerson(first.audience[0]!.id,'Renamed');assert.equal(h.query(opts).audience[0]!.name,'Renamed');
+  s.ingest({source:'twitch',accountId:'owner',externalId:'late-session',type:'chat.message',actor:{externalId:'viewer',displayName:'Renamed'},occurredAtMs:base+minute,receivedAtMs:options.toMs,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'late'}});
+  assert.deepEqual(h.query(opts),audienceAnalytics(db,opts));assert.equal(h.query(opts).summary.messages,2);
+  s.setPersonMetadata(first.audience[0]!.id,['tag'],false,s.personRevision(first.audience[0]!.id));assert.deepEqual(h.query(opts),audienceAnalytics(db,opts));
+  s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Renamed',followedAtMs:base}],true,opts.toMs);assert.deepEqual(h.query(opts),audienceAnalytics(db,opts));
+  assert.throws(()=>h.query({...opts,toMs:base}),/INVALID_ANALYTICS_FILTER/);
+  const live=s.startSession('owner','live',options.toMs,'platform',options.toMs);const liveOpts={...opts,sessionId:live,toMs:options.toMs+minute};h.query(liveOpts);const liveReads=facts;h.query(liveOpts);assert.ok(facts>liveReads,'live streams do not reuse closed-stream projections');
+ }finally{s.close();}
+});
