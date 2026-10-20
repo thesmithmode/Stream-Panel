@@ -100,6 +100,8 @@ export function operationsWithPolicy(policy:'cached'|'read'|'write'|'maintenance
 
 /** Operational heartbeats and maintenance do not change analytical facts. */
 export function invalidatesCachedReads(method:StoreMethod,args:readonly unknown[]):boolean{
+  if(method==='youtubeSnapshot'&&typeof args[1]==='string'&&args[1].startsWith('cursor:'))return false;
+  if(method==='youtubeMessages'&&Array.isArray(args[2])&&args[2].length===0)return false;
   return storeOperations[method]==='write'&&method!=='close'&&!(method==='collectionLifecycle'&&args[0]==='heartbeat');
 }
 

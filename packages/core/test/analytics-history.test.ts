@@ -486,3 +486,17 @@ test('small rolling reports defer clock membership and keep exact clipped metric
   }finally{AnalyticsWorkspace.prototype.clockPage=original;}
  }finally{s.close();}
 });
+
+test('background category catch-up advances once per call and never revisits completed reports',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,3);const h=(s as any).history as AnalyticsHistory,seen:string[]=[];
+  const report=(h as any).warmReport.bind(h);(h as any).warmReport=(opts:any)=>{seen.push(opts.category);return report(opts);};
+  assert.equal(h.warm(options,true).preparing,true);assert.deepEqual(seen,['']);
+  assert.equal(h.warm({...options,toMs:options.toMs+60000},true).preparing,false);assert.deepEqual(seen,['','game']);
+  for(let i=0;i<10;i++)assert.equal(h.warm({...options,toMs:options.toMs+(i+2)*60000},true).preparing,false);
+  assert.deepEqual(seen,['','game']);
+  s.streamSample(String(s.sessions()[0]!.id),base,'other','Other','',2);
+  let progress;do{progress=h.warm(options,true);}while(progress.preparing);
+  assert.deepEqual(seen.slice(2),['','game','other']);
+ }finally{s.close();}
+});

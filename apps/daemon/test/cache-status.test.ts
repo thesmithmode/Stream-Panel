@@ -9,7 +9,15 @@ test('status and collector reads preserve valid cached analytics while mutations
   await db.call('collectionLifecycle','heartbeat',Date.now());
   await db.call('youtubeQuota','10/15/2026','ruslan');
   await db.call('warmAnalytics',{fromMs:0,toMs:Date.now()});
+  await db.call('youtubeMessages','owner','chat',[]);
+  await db.call('youtubeSnapshot','owner','cursor:chat','next-page',Date.now());
+  assert.equal((await db.call('youtubeData','owner')).snapshots['cursor:chat']!.data,'next-page');
   assert.equal(internals.cache.version,operational,'maintenance must not discard ready reports');
+  await db.call('youtubeSnapshot','owner','report',{rows:[[5]]},Date.now());
+  assert.ok(internals.cache.version>operational,'actual report changes must invalidate cached responses');
+  const reportRevision=internals.cache.version;
+  await db.call('youtubeMessages','owner','chat',[{id:'message',snippet:{type:'textMessageEvent',publishedAt:new Date().toISOString(),displayMessage:'Real message'},authorDetails:{channelId:'viewer',displayName:'Viewer'}}]);
+  assert.ok(internals.cache.version>reportRevision,'real messages must invalidate cached metrics');
   await db.call('createPerson','New');assert.ok(internals.cache.version>before);
  }finally{await db.stop();}
 });
