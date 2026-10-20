@@ -24,7 +24,7 @@
   let buildProgress=$state(""),detailData=$state<any>(null),detailBusy=$state(false),streamPage=$state(0);
   const reportScope=$derived(JSON.stringify([profile,period,period==='custom'?from:'',period==='custom'?to:'',source,category,timezone]));
   let loadedScope=$state('');
-  let requestId=0, mounted=$state(false);
+  let requestId=0, mounted=$state(false),reportController:AbortController|undefined;
   $effect(()=>{
     const filters=[mounted,from,to,source,category,timezone].join("|");
     void filters;
@@ -33,7 +33,7 @@
     let cancelled=false;
     const delay=untrack(()=>data===null?0:150);
     const timer=window.setTimeout(()=>{if(!cancelled)untrack(()=>void refresh());},delay);
-    return ()=>{cancelled=true;window.clearTimeout(timer);requestId++;};
+    return ()=>{cancelled=true;window.clearTimeout(timer);requestId++;reportController?.abort();};
   });
   $effect(()=>{const saved=JSON.stringify(view);void saved;if(mounted)saveAnalyticsView(()=>localStorage,profile,view);});
   let audienceOffset=$state(0),pagedAudience=$state<any>(null),audienceBusy=$state(false);
@@ -101,12 +101,13 @@
   function preset(days:number|'all'){period=days;liveEnd=true;const now=Date.now();from=localInput(days==='all'?0:now-days*86400000);to=localInput(now);}
   async function refresh(){
     const scope=reportScope,id=++requestId;busy=true;error="";reportError="";
+    reportController?.abort();const controller=new AbortController();reportController=controller;
     const fromMs=new Date(from).getTime(),toMs=new Date(to).getTime();
     try{
       try {localStorage.setItem(`sp-analytics-${profile}`,JSON.stringify({timezone}));}catch{/* optional local preferences */}
       const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,timezone,mode:'summary',insights:'1'});
-      let result=await api(`analytics?${q}`);
-      while(result.preparing&&id===requestId){buildProgress=`${result.stage==='aggregate'?'Собираем отчёт':'Готовим историю'}: ${Math.round(result.ready/Math.max(1,result.total)*100)}%`;await new Promise(resolve=>setTimeout(resolve,result.stage==='aggregate'?100:250));if(id!==requestId)return;result=await api(`analytics?${q}`);}
+      let result=await api(`analytics?${q}`,undefined,controller.signal);
+      while(result.preparing&&id===requestId){buildProgress=`${result.stage==='aggregate'?'Собираем отчёт':'Готовим историю'}: ${Math.round(result.ready/Math.max(1,result.total)*100)}%`;await new Promise(resolve=>setTimeout(resolve,result.stage==='aggregate'?100:250));if(id!==requestId)return;result=await api(`analytics?${q}`,undefined,controller.signal);}
       buildProgress='';
       if(id===requestId){const previousScope=loadedScope;if(result.filters&&(result.filters.category!==category||result.filters.source!==source||result.filters.timezone!==timezone))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');loadedScope=scope;
         if(JSON.stringify(data)!==JSON.stringify(result))data=Object.fromEntries(Object.entries(result).map(([key,value])=>[key,JSON.stringify(data?.[key])===JSON.stringify(value)?data[key]:value]));
@@ -117,7 +118,7 @@
   onMount(()=>{
     try{const saved=JSON.parse(localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved?.timezone)timezone=saved.timezone;}catch{/* private browser may deny storage */}
     view=loadAnalyticsView(()=>localStorage,profile);
-    mounted=true;const update=()=>{if(!document.hidden&&navigator.onLine&&!busy){if(liveEnd){const now=Date.now();if(typeof period==='number')from=localInput(now-period*86400000);const next=localInput(now);if(next===to)void refresh();else to=next;}else void refresh();}};window.addEventListener('sp:data-refresh',update);return ()=>{requestId++;window.removeEventListener('sp:data-refresh',update);};
+    mounted=true;const update=()=>{if(!document.hidden&&navigator.onLine&&!busy){if(liveEnd){const now=Date.now();if(typeof period==='number')from=localInput(now-period*86400000);const next=localInput(now);if(next===to)void refresh();else to=next;}else void refresh();}};window.addEventListener('sp:data-refresh',update);return ()=>{requestId++;reportController?.abort();window.removeEventListener('sp:data-refresh',update);};
   });
 </script>
 {#snippet categoryFilter(label:string)}
@@ -159,7 +160,7 @@
     {#if view.hourView!=="table"}{#if view.heatMetric==='viewers'&&partialViewers}<p class="small muted" style="padding:0 16px">Неполные данные площадок: показана сумма известных зрителей. Неизвестные значения не считаются нулями.</p>{/if}<div class="hour-heatmap" aria-label="Карта активности по дням и часам">
       <div class="heatmap-labels"><span></span>{#each Array.from({length:24},(_,i)=>i) as hour}<span>{hour}</span>{/each}</div>
       {#each weekdays as weekday}<div class="heatmap-row"><strong>{weekday}</strong>{#each Array.from({length:24},(_,i)=>i) as hour}<button aria-label={hourTitle(weekday,hour)} title={hourTitle(weekday,hour)} onclick={()=>selectedHour={day:weekday,hour}} style:background={heatValue(hourCells.get(`${weekday}:${hour}`))!==null?`rgba(95,196,170,${.15+.85*(heatValue(hourCells.get(`${weekday}:${hour}`))??0)/hourMax})`:"#3b4350"}></button>{/each}</div>{/each}
-    </div>{/if}{#if selectedHour}<p class="analytics-help small" role="status">{hourTitle(selectedHour.day,selectedHour.hour)}</p>{/if}<div class="analytics-help"><Help id="analytics-hours" label="О карте активности" text="Яркость соответствует выбранной метрике. Наблюдения Twitch усредняются по минутам с полными опросами; оценка YouTube и сообщения — по записанным минутам эфира. Серый — нет данных."/></div></section>{/if}
+    </div>{/if}{#if selectedHour}<p class="analytics-help small" role="status">{hourTitle(selectedHour.day,selectedHour.hour)}</p>{/if}<div class="analytics-help"><Help id="analytics-hours" label="О карте активности" text="Шкала яркости общая для всей карты: одинаковые значения во всех днях и часах имеют одинаковый цвет. Максимум определяется выбранными периодом, категорией и метрикой. Наблюдения Twitch усредняются по минутам с полными опросами; оценка YouTube и сообщения — по записанным минутам эфира. Серый — нет данных."/></div></section>{/if}
 
   {#if view.trend}<ActivityClock scope={reportScope} visitorRevision={data.clockRevision} {categoryFilter} rows={data.activityClock??[]} windows={data.activityWindows??[]} people={data.audience??[]} summary={data.clockBuckets??[]} loadVisitors={visitorLoader} {onPerson} bind:metric={view.metric} bind:resolution={view.resolution} {timezone} {period} onperiod={value=>{if(value!=='custom')preset(value);}}/>{/if}
 

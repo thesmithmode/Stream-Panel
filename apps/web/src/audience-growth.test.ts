@@ -19,3 +19,10 @@ test('legacy snapshots without stream identifiers remain renderable and do not i
  const rows=audienceGrowth([{startedAt:1,viewers:{all:{mean:null}}},{startedAt:1,viewers:{all:{mean:4}}}],'all');
  assert.equal(rows.length,2);assert.equal(rows[0]!.id,undefined);assert.equal(rows[1]!.value,4);
 });
+
+test('a missing stream explains the seven-stream gap and trend returns only after seven measured broadcasts',()=>{
+ const input=Array.from({length:15},(_,i)=>({id:String(i),startedAt:i,viewers:{all:{mean:i===6?null:4.4}}}));
+ const rows=audienceGrowth(input,'all');assert.equal(rows[5]!.trendWindow,6);assert.equal(rows[5]!.trendMissing,0);
+ assert.equal(rows[8]!.trendMissing,1);assert.equal(rows[8]!.trendWindow,7);assert.equal(rows[8]!.trend,null);
+ assert.equal(rows[12]!.trend,null);assert.equal(rows[13]!.trendMissing,0);assert.ok(Math.abs(rows[13]!.trend!-4.4)<1e-10);
+});

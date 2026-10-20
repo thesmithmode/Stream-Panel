@@ -259,6 +259,7 @@ export class AnalyticsHistory {
         if(session.ended_at_ms===null){while(this.liveStreams.size>=12)this.liveStreams.delete(this.liveStreams.keys().next().value!);this.liveStreams.set(key,{revision,report});}return report;
     }
     private warmedRevision='';
+    private warming:{revision:string;categories:string[];index:number}|undefined;
     private background=false;
     private warmReport(options:AnalyticsOptions){this.background=true;try{return this.report(options);}finally{this.background=false;}}
     warm(options:AnalyticsOptions,bakeCategories=false){
@@ -266,22 +267,22 @@ export class AnalyticsHistory {
         // Live facts already have collector priority; finalize after the stream ends.
         const current:AnalyticsOptions={...options,source:'all',category:'',fromMs:0,summaryOnly:true,includeInsights:true};
         const sessions=this.sessions(current);
-        if(sessions.some(s=>s.ended_at_ms===null))return {preparing:false,ready:0,total:0};
+        if(sessions.some(s=>s.ended_at_ms===null)){this.warming=undefined;return {preparing:false,ready:0,total:0};}
         const {fromMs,toMs,...settings}=current;void fromMs;void toMs;
         const revision=JSON.stringify([settings,bakeCategories,this.globalRevision(),sessions,this.annotationsRevision(),this.followerRevision()]);
         if(revision===this.warmedRevision)return {preparing:false,ready:1,total:1};
-        const report=this.warmReport(current);
-        if(report.preparing)return {preparing:true,ready:report.ready??0,total:report.total??1};
-        if(bakeCategories){
-            // Only actual categories, all history, at most six: no platform/period
-            // Cartesian product and no moving rolling-window rebuilds while idle.
-            const categories=this.statement("SELECT category_id AS id FROM stream_samples WHERE category_id<>'' AND category_name<>'' GROUP BY category_id ORDER BY count(*) DESC,category_id LIMIT 6").all() as {id:string}[];
-            for(const category of categories){
-                const value=this.warmReport({...current,category:category.id});
-                if(value.preparing)return {preparing:true,ready:value.ready??0,total:value.total??1};
-            }
+        if(this.warming?.revision!==revision){
+            const categories=bakeCategories?this.statement("SELECT category_id AS id FROM stream_samples WHERE category_id<>'' AND category_name<>'' GROUP BY category_id ORDER BY count(*) DESC,category_id LIMIT 6").all() as {id:string}[]:[];
+            this.warming={revision,categories:['',...categories.map(c=>c.id)],index:0};
         }
+        const job=this.warming,report=this.warmReport({...current,category:job.categories[job.index]!});
+        if(report.preparing)return {preparing:true,ready:report.ready??0,total:report.total??1};
+        // Advance only the unfinished report; do not reread/clone all completed
+        // categories on every background slice. Yield between ready reports too.
+        job.index++;
+        if(job.index<job.categories.length)return {preparing:true,ready:job.index,total:job.categories.length};
         this.warmedRevision=revision;
+        this.warming=undefined;
         return {preparing:false,ready:1,total:1};
     }
     private annotationsRevision(){return [this.statement('SELECT * FROM person_preferences ORDER BY person_id').all(),this.statement('SELECT * FROM person_tags ORDER BY person_id,label').all(),this.statement("SELECT id,source,started_at_ms,ended_at_ms FROM collection_gaps WHERE source IN('twitch','youtube') ORDER BY id").all()];}
