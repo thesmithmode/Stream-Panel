@@ -13,7 +13,6 @@
  });
  let cache=$state<ClockVisitors|null>(null);
  $effect(()=>{void summary;void people;void scope;void revision;const loader=untrack(()=>loadVisitors);const next=loader?new ClockVisitors(loader):null;cache=next;return ()=>next?.close();});
- $effect(()=>{void cache?.prefetch(day,resolution).catch(()=>{});});
  $effect(()=>{void selected;void day;void resolution;void scope;visitorPage=null;});
  let visitorOffset=$state(0),visitorPage=$state<any>(null),visitorBusy=$state(false),visitorError=$state('');
  $effect(()=>{void selected;void day;void resolution;void scope;visitorOffset=0;});

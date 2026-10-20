@@ -303,7 +303,7 @@ export class AnalyticsHistory {
         const {audienceOffset,audienceSearch,audienceSort,audienceCoreOnly,clockDay,clockMinute,clockResolution,clockOffset,clockBatch,...baseOptions}=options;
         void audienceOffset;void audienceSearch;void audienceSort;void audienceCoreOnly;void clockDay;void clockMinute;void clockResolution;void clockOffset;void clockBatch;
         const canonical = { ...baseOptions,source:options.source??'all',category:options.category??'', fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
-        const fingerprint = createHash('sha256').update(JSON.stringify([2,historical, Object.fromEntries(Object.entries(canonical).sort(([a],[b])=>a.localeCompare(b))), this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.annotationsRevision(), this.followerRevision()])).digest('hex');
+        const fingerprint = createHash('sha256').update(JSON.stringify([3,historical, Object.fromEntries(Object.entries(canonical).sort(([a],[b])=>a.localeCompare(b))), this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.annotationsRevision(), this.followerRevision()])).digest('hex');
         const liveRevision=JSON.stringify(sessions.filter(s=>s.ended_at_ms===null).map(s=>[s.id,s.revision]));
         const retained=this.completed.get(fingerprint);
         const cached=retained&&(!live||retained.liveRevision===liveRevision)?retained:undefined;
@@ -570,8 +570,9 @@ export class AnalyticsHistory {
         const audience=people.page().items;
         const outputCategories=[...categoryRows.values()].map(row=>({...row,...workspace.categoryCounts(row.id),donationsPerHourMinor:currencyRates(row.donationTotals,Math.round(row.minutes*60000)),messagesPerHour:row.minutes?row.messages*60/row.minutes:0,observedPerMinute:row.minutes?row.observedMinutes/row.minutes:0,observedPerKnownMinute:row.observedKnownMinutes?row.observedMinutes/row.observedKnownMinutes:null,coverageRatio:row.minutes?row.observedKnownMinutes/row.minutes:null}));
         for(const row of clockRows.values()){
-            if(people.size<=100)row.people=workspace.clockPage(row.day,row.minute,row.resolution).items.map(({id,visits})=>({id,visits}));
-            else row.peopleDeferred=true;
+            // Exact membership is retained in the workspace, not duplicated into
+            // every resolution/day bucket. Resolve only the selected interval.
+            row.peopleDeferred=true;
             row.averageAudience=row.airtimeMs?row.personTimeMs/row.airtimeMs:null;
         }
         const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {

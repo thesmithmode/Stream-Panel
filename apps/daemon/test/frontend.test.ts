@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer,request} from 'node:http';
+import {gunzipSync} from 'node:zlib';
 const callHttp=(url:string,options:RequestInit={})=>new Promise<Response>((resolve,reject)=>{
  const req=request(url,{method:options.method??'GET',headers:options.headers as Record<string,string>},async res=>{const parts:Buffer[]=[];for await(const chunk of res)parts.push(Buffer.from(chunk));resolve(new Response(Buffer.concat(parts),{status:res.statusCode??500,headers:res.headers as Record<string,string>}));});req.on('error',reject);req.end(options.body);
 });
@@ -57,4 +58,27 @@ test('killing the frontend restarts only its process and keeps the stream writab
 test('an occupied frontend port fails safely without leaving a retry process',{timeout:10000},async()=>{
  const server=createServer(),port=await listen(server),front=new FrontendProcess('/tmp',port+1,port,'https://panel.test',{bindHost:'127.0.0.1',trustedProxies:[]});
  try{await assert.rejects(front.start(),/FRONTEND_START_FAILED/);}finally{await front.stop();await close(server);}
+});
+
+
+test('delivery compresses JSON and immutable assets without caching private data or altering streams',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'sp-delivery-')),body=JSON.stringify({messages:Array(200).fill('Тестовое сообщение')}),blob=Buffer.from('private-backup');
+ const backend=createServer((_req,res)=>{
+  if(_req.url==='/api/backup'){res.writeHead(200,{'content-type':'application/octet-stream','cache-control':'no-store'});res.end(blob);return;}
+  res.writeHead(200,{'content-type':'application/json; charset=utf-8','content-length':Buffer.byteLength(body),'cache-control':'no-store','set-cookie':'private=value; HttpOnly','etag':'"private"'});res.end(body);
+ });
+ const backendPort=await listen(backend);let front:ReturnType<typeof createFrontend>|undefined;
+ try{
+  await mkdir(join(root,'assets'));await writeFile(join(root,'index.html'),'<title>panel</title>');await writeFile(join(root,'assets','index-12345678.js'),body);await writeFile(join(root,'assets','index-12345678.js.map'),'private sources');await writeFile(join(root,'assets','small.js'),'ok');
+  front=createFrontend(root,backendPort,'https://panel.test',{bindHost:'127.0.0.1',trustedProxies:[]});const port=await listen(front);
+  const call=(path:string,encoding?:string,method='GET')=>callHttp(`http://127.0.0.1:${port}${path}`,{method,headers:{host:'panel.test',...(encoding?{'accept-encoding':encoding}:{})}});
+  const zipped=await call('/api/report','br, gzip');assert.equal(zipped.headers.get('content-encoding'),'gzip');assert.equal(zipped.headers.get('cache-control'),'no-store');assert.match(zipped.headers.get('set-cookie')!,/private=value/);assert.equal(zipped.headers.get('content-length'),null);assert.equal(zipped.headers.get('etag'),null);assert.match(zipped.headers.get('vary')!,/Accept-Encoding/);const encoded=Buffer.from(await zipped.arrayBuffer());assert.ok(encoded.length<Buffer.byteLength(body)/10);assert.equal(gunzipSync(encoded).toString(),body);
+  for(const encoding of [undefined,'gzip;q=0, *;q=1','br','gzip;q=invalid']){const plain=await call('/api/report',encoding);assert.equal(plain.headers.get('content-encoding'),null);assert.equal(await plain.text(),body);}
+  assert.equal(gunzipSync(Buffer.from(await (await call('/api/report','*;q=0.5')).arrayBuffer())).toString(),body);
+  const backup=await call('/api/backup','gzip');assert.equal(backup.headers.get('content-encoding'),null);assert.deepEqual(Buffer.from(await backup.arrayBuffer()),blob);
+  const asset=await call('/assets/index-12345678.js','gzip');assert.match(asset.headers.get('cache-control')!,/max-age=31536000, immutable/);assert.equal(gunzipSync(Buffer.from(await asset.arrayBuffer())).toString(),body);
+  const head=await call('/assets/index-12345678.js','gzip','HEAD');assert.equal(head.headers.get('content-encoding'),'gzip');assert.equal((await head.arrayBuffer()).byteLength,0);
+  assert.equal((await call('/assets/small.js','gzip')).headers.get('content-encoding'),null);
+  assert.equal((await call('/')).headers.get('cache-control'),'no-store');assert.equal((await call('/assets/index-12345678.js.map')).status,404);assert.equal((await call('/assets/index-12345678.js.map?x=1')).status,404);
+ }finally{if(front)await close(front);await close(backend);await rm(root,{recursive:true,force:true});}
 });
