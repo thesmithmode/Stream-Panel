@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SectionTabs from "./SectionTabs.svelte";
   import {latestRequest} from './latest-request';
   import {platformClass} from './period';
   import DonorLinks from "./DonorLinks.svelte";
@@ -12,7 +13,7 @@
   } from "./api";
   import { formatDuration } from "./duration";
   import PersonActivity from "./PersonActivity.svelte";
-  import {untrack} from "svelte";
+  import {tick,untrack} from "svelte";
   import Icon from "./Icon.svelte";
   import {confirmAction} from "./confirmation.svelte";
   import Help from "./Help.svelte";
@@ -63,7 +64,7 @@
   });
   const availablePeople = $derived([...new Map([...people,...pageRows].map(person=>[person.id,person])).values()]);
   let selectedSession = '';
-  const visible = $derived(
+  const rows = $derived(
     sortBy === "default"
       ? pageRows
       : tops.map(
@@ -82,6 +83,14 @@
             }) as Person,
         ),
   );
+  const visible=$derived(sortBy==='default'?rows:rows.filter(person=>person.display_name.toLocaleLowerCase('ru-RU').includes(search.trim().toLocaleLowerCase('ru-RU'))));
+  const personTabs=[["overview","Обзор"],["activity","Активность"],["messages","Сообщения"],["donations","Донаты"],["notes","Заметки"],["accounts","Аккаунты"]] as const;
+  let directoryScroll=0;
+  function clearSelection(){selectedId='';detail=null;stats=null;detailLoading=false;showFollowing=false;}
+  async function backToDirectory(){clearSelection();onSelect('');await tick();window.scrollTo({top:directoryScroll});}
+  async function openPerson(id:string){directoryScroll=window.scrollY;await select(id);if(matchMedia('(max-width:900px)').matches)window.scrollTo({top:0});}
+  function sourcesLabel(sources:string|null){return (sources?.split(',')??[]).map(source=>({twitch:'Twitch',youtube:'YouTube',donationalerts:'DonationAlerts'}[source.trim()]??source.trim())).join(' · ');}
+  $effect(()=>{if(detailTab==='accounts'&&detail)untrack(()=>void loadAudit().catch(e=>error=e.message));});
   $effect(()=>{search;period;sortBy;peopleOffset=0;});
   $effect(() => {
     const term=search.trim(), offset=peopleOffset, currentPeriod=period;void rankRefresh;
@@ -130,7 +139,7 @@
   }
   async function select(id: string) {
     if(selectedId!==id)onSelect(id);
-    if(selectedId!==id){detailTab="overview";showDonorLinks=false;}
+    if(selectedId!==id){detailTab="overview";showDonorLinks=false;showFollowing=false;}
     selectedId = id;
     selectedSession = period;
     error = "";
@@ -184,7 +193,7 @@
   }
   $effect(() => {
     const id=initialId,session=period;
-    if (id) untrack(()=>{if(selectedId!==id||selectedSession!==session)void select(id);});
+    untrack(()=>{if(id){if(selectedId!==id||selectedSession!==session)void select(id);}else if(selectedId)clearSelection();});
   });
   import { onMount } from "svelte";
   onMount(() => {
@@ -194,12 +203,8 @@
   });
 </script>
 
-<div class="people-grid">
-  <section class="panel">
-    <header>
-      <h2>Люди</h2>
-
-    </header>
+<div class="people-grid" class:has-selection={!!selectedId}>
+  <section class="panel people-directory" aria-label="Список людей">
     <div class="tops-tabs" role="tablist" aria-label="Сортировка людей">
       {#each [
         ["default", "Все"],
@@ -229,7 +234,6 @@
         aria-label="Поиск человека"
         placeholder="Найти по имени…"
         bind:value={search}
-        disabled={sortBy !== "default"}
       />
     </div>
     <div class="people-list">
@@ -244,11 +248,11 @@
         class:chosen={selectedId === person.id}
         class="person-row"
         aria-label={person.display_name}
-        onclick={() => select(person.id)}
+        onclick={() => openPerson(person.id)}
         ><span class="avatar"
           >{person.display_name.slice(0, 1).toUpperCase()}</span
         ><span
-          ><strong class={platformClass(person.sources)}>{person.display_name}</strong><small>{person.sources}</small
+          ><strong class={platformClass(person.sources)}>{person.display_name}</strong><small>{sourcesLabel(person.sources)}</small
           ></span
         >{#if sortBy!=='default'}<span class="count">{rankLabels.get(person.id)}</span>{/if}</button
       >{/each}
@@ -260,6 +264,7 @@
     </div>{/if}
   </section>
   <section class="panel person-detail">
+    <button class="text-button people-back" onclick={backToDirectory}><Icon name="back" size={18}/>К списку людей</button>
     {#if detailLoading}<div class="empty" role="status">Загружаем карточку…</div>{:else if !detail}<div class="empty">
         <Icon name="people" size={48} />
         <h3>Выберите человека</h3>
@@ -268,6 +273,10 @@
         <h2 class={platformClass(detail.identities.map((i:any)=>i.source))}>{detail.display_name}</h2>
 
       </header>
+
+      <div class="person-tab-wrap"><SectionTabs items={personTabs} bind:value={detailTab} label="Разделы человека" panelId="person-tabpanel"/></div>
+      <div class="settings-body person-scroll" id="person-tabpanel" role="tabpanel" aria-label={personTabs.find(([key])=>key===detailTab)?.[1]}>
+      {#if detailTab==='overview'}
       {#if stats}<div class="kpi-strip" aria-label="Показатели человека">
           <div class="kpi">
             <span>Сообщения</span><strong
@@ -304,13 +313,9 @@
           {/if}
 
         </div>{/if}
-      <div class="person-tabs" role="tablist" aria-label="Разделы человека">{#each [["overview","Обзор"],["activity","Активность"],["messages","Сообщения · 48 ч"],["donations","Донаты"],["notes","Заметки и метки"],["accounts","Редактировать аккаунты" ]] as const as [key,label]}<button role="tab" aria-selected={detailTab===key} class:active={detailTab===key} onclick={()=>{detailTab=key;if(key==='accounts')void loadAudit().catch(e=>error=e.message);}}>{label}</button>{/each}</div>
-      <div class="settings-body person-scroll">
-      {#if detailTab==='overview'}
         <h3>Связанные аккаунты</h3>
         <div class="account-summary">{#each detail.identities as identity}<span><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong></span>{/each}</div>
         <div class="actions"><button class="outline small" onclick={()=>{detailTab='donations';showDonorLinks=true;}}>Привязать донаты</button></div>
-        <PersonActivity personId={detail.id} />
         <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} sessionId="" onPerson={(id)=>void select(id)} />{/if}</details>
       {:else if detailTab==='messages'}
        <RecentEvents personId={detail.id} messagesOnly />
@@ -415,6 +420,33 @@
 </div>
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 
-<style>.donor-filters{display:flex;gap:12px;flex-wrap:wrap;padding:12px 16px}.donor-filters label{display:grid;gap:6px;font-size:12px}.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}
-.people-grid{height:calc(100dvh - 180px);min-height:360px;}.people-grid>section{min-height:0;display:flex;flex-direction:column;overflow:hidden;margin-bottom:0;}.people-list{min-height:0;flex:1;max-height:none;}.person-scroll{min-height:0;overflow-y:auto;flex:1;}.person-tabs{display:flex;gap:.4rem;padding:.6rem 1rem;border-bottom:1px solid var(--border);flex-wrap:wrap;}.person-tabs button{background:transparent;border:0;padding:.5rem .7rem;}.person-tabs button.active{background:#292438;color:var(--accent);}.person-detail .kpi-strip{padding:12px 16px;gap:12px;}.person-detail .kpi span{font-size:11px;}.person-detail .kpi strong{font-size:18px;color:#fff;}.account-summary{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;}.account-summary>span{display:grid;gap:4px;}@media(max-width:760px){.people-grid{height:auto;min-height:0;}.people-grid>section{overflow:visible;}.people-list{max-height:260px;}.person-scroll{overflow:visible;}}
+<style>
+ .donor-filters{display:flex;gap:12px;flex-wrap:wrap;padding:8px 12px}.donor-filters label{display:grid;gap:6px;font-size:12px}.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}
+ .people-grid{display:grid;grid-template-columns:280px minmax(0,1fr);align-items:start;gap:16px;height:calc(100dvh - 170px);min-height:360px;}
+ .people-grid>section{min-height:0;max-height:100%;display:flex;flex-direction:column;overflow:hidden;margin-bottom:0;}
+ .people-directory{padding-top:8px;}.people-list{min-height:0;flex:1;max-height:none;}
+ .person-scroll{min-height:0;overflow-y:auto;flex:1;padding:14px;}
+ .people-back{display:none;}
+ .person-detail>.empty{min-height:160px;padding:20px;}
+ .person-detail>header{padding:14px;border:0;}
+ .person-detail .kpi-strip{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:0;margin-bottom:16px;gap:12px;}
+ .person-detail .kpi{background:none;border:0;padding:0;min-height:48px;}
+ .person-detail .kpi span{font-size:12px;}.person-detail .kpi strong{font-size:20px;color:#fff;}
+ .account-summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}.account-summary>span{display:grid;gap:4px;}
+ .person-tab-wrap{padding:0 14px;}
+ .person-tab-wrap :global(.section-tabs){display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 12px;margin:0;}
+ .person-tab-wrap :global(.section-tabs button){white-space:normal;font-size:12px;line-height:1.3;padding:8px 0;min-height:44px;}
+ @media(min-width:1200px){
+  .person-tab-wrap :global(.section-tabs){grid-template-columns:repeat(6,minmax(0,1fr));}
+  .person-detail .kpi-strip{grid-template-columns:repeat(3,minmax(0,1fr));}
+ }
+ @media(max-width:900px){
+  .people-grid{display:block;height:auto;min-height:0;}
+  .people-grid>section{overflow:visible;}
+  .people-grid:not(.has-selection)>.person-detail,.people-grid.has-selection>.people-directory{display:none;}
+  .people-list{max-height:none;overflow:visible;}
+  .people-back{display:flex;align-items:center;gap:6px;min-height:44px;margin:0 12px;}
+  .person-detail>header{padding-top:4px;}
+  .person-scroll{overflow:visible;}
+ }
 </style>

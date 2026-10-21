@@ -34,3 +34,9 @@ export function donorRanking(db:Database.Database,sessionId:string|undefined,bot
  const rankCurrency=groups.some(g=>g.currency===currency)?currency:groups[0]?.currency??currency;
  return [...people.values()].sort((a,b)=>{const x=BigInt(a.donationTotals[rankCurrency]??'0'),y=BigInt(b.donationTotals[rankCurrency]??'0');return x===y?a.display_name.localeCompare(b.display_name):x>y?-1:1;}).slice(0,limit);
 }
+/** Exact per-currency totals for a half-open window; unknown dates stay all-time only. */
+export function donationTotals(db:Database.Database,from:number,to:number,botJson:string){
+ const window=donationWindow(from,to);
+ const rows=db.prepare(`SELECT json_extract(e.payload_json,'$.currency') AS currency,sum_donation_minor(json_extract(e.payload_json,'$.amountMinor')) AS amount FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE e.type='donation' AND ${window.sql} AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?))) AND json_extract(e.payload_json,'$.currency') IS NOT NULL AND json_extract(e.payload_json,'$.amountMinor') IS NOT NULL GROUP BY currency`).all(...window.args,botJson) as {currency:string;amount:string}[];
+ return Object.fromEntries(rows.map(row=>[row.currency,row.amount]));
+}

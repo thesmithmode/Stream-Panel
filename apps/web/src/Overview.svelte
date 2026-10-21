@@ -64,6 +64,7 @@
 </script>
 {#if session}<section class="stream-facts">
  <div class="stream-title-row"><h1>{session.primaryTitle||'Стрим'}</h1><ActionMenu variant="metadata-menu" label="История названий и категорий">{#snippet children()}
+ {#if viewerPartial}<p class="small muted">Показана сумма известных зрителей площадок. Пропущенные замеры не считаются нулём.</p>{/if}
  {#each session.breaks??[] as pause}<p class="small">Перерыв: {streamRange(pause.from,pause.to)} МСК</p>{/each}
  {#each [...metadata].sort((a,b)=>b.at-a.at) as row}<p class="small">{streamTime(row.at)}{row.categoryName&&row.categoryName!=="Категория неизвестна"?` · ${row.categoryName}`:''} · {row.title||'Без названия'}</p>{:else}<p class="small muted">Нет сохранённых метаданных.</p>{/each}
  {/snippet}</ActionMenu></div>
@@ -71,7 +72,7 @@
  <p class="stream-meta">{[...new Set(metadata.map(row=>row.categoryName).filter(name=>name&&name!=="Категория неизвестна"))].join(' · ')}{metadata.some(row=>row.categoryName)?' · ':''}{session.platforms?.map(p=>p==='twitch'?'Twitch':'YouTube').join(' + ')}</p>
 </section>{/if}
 <section class="stream-kpis" aria-label="Итоги эфира">
- <div><span>Средние зрители</span><strong><span class="kpi-number">{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'—'}</span>{#if viewerPartial}<Help trigger="частично" id="stream-partial" label="Неполные данные зрителей" text="Показана сумма известных зрителей площадок. Пропущенные замеры не считаются нулём."/>{/if}</strong></div>
+ <div><span>Средние зрители</span><strong><span class="kpi-number">{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'—'}</span></strong></div>
  <div><span>Пик зрителей</span><strong>{viewers?.peak!=null?viewers.peak:(audienceBusy?'…':'—')}</strong></div>
  <div><span>Донаты</span><strong>{Object.keys(summary.totals).length?Object.entries(summary.totals).map(([c,a])=>money(a,c)).join(' · '):'—'}</strong></div>
  <div><span>Сообщения</span><strong>{summary.messages.toLocaleString('ru-RU')}</strong></div>

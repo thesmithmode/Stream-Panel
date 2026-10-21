@@ -12,7 +12,7 @@
   const layout=$derived(chartLayout(visiblePoints[0]?.at??0,(visiblePoints.at(-1)?.at??0)+60000,availableWidth,resolution));
   const buckets=$derived(chartSeries(visiblePoints,metric,layout.resolution));
   const maximum=$derived(Math.max(1,...buckets.map(p=>p.value)));
-  const start=$derived(buckets[0]?.at??0),end=$derived((buckets.at(-1)?.at??0)+(buckets[0]?.width??60000));
+  const start=$derived(visiblePoints[0]?.at??0),end=$derived((visiblePoints.at(-1)?.at??0)+60000);
   const ticks=$derived(timelineTicks(start,end));
   const plotWidth=$derived(layout.plotWidth);
   const timeFormatter=$derived(new Intl.DateTimeFormat('ru-RU',{timeZone:timezone,hour:'2-digit',minute:'2-digit'}));
@@ -39,30 +39,33 @@
     {#if split}<div class="legend chart-legend"><span><i class="regular-swatch"></i>Ядро аудитории</span><span><i class="follower-swatch"></i>Подписчики</span><span><i class="other-swatch"></i>{isMessageMetric(metric)?'Залётные':'Остальные участники'}</span>{#if hasUnknown}<span><i class="unknown-swatch"></i>Статус подписки неизвестен</span>{/if}</div>{/if}
 
     <div class="trend-plot"><svg viewBox={`0 0 ${plotWidth} 245`} style="width:100%;display:block" role="group" aria-label="График активности по выбранному периоду">
-      <line x1="32" y1="190" x2={plotWidth-10} y2="190" stroke="currentColor" opacity=".25" />
+      <defs><clipPath id={`${id}-plot`}><rect x="32" y="25" width={plotWidth-56} height="165"/></clipPath></defs>
+      <line x1="32" y1="190" x2={plotWidth-24} y2="190" stroke="currentColor" opacity=".25" />
       <text x="5" y="24" fill="currentColor" font-size="12">{Math.round(maximum)}</text><text x="8" y="190" fill="currentColor" font-size="12">0</text>
+      <g clip-path={`url(#${id}-plot)`}>
       {#each buckets as p}
         {@const barHeight=height(p.value)}
         {@const regularHeight=p.value>0?barHeight*p.regularValue/p.value:0}
         {@const followerHeight=split&&p.value>0?barHeight*p.followerValue/p.value:0}
         {@const unknownHeight=split&&p.value>0?barHeight*(p.unknownValue??0)/p.value:0}
         <g class="chart-bar" role="button" tabindex="0" aria-label={titles.get(p.at)} onclick={()=>onselect?.(p)} onkeydown={(event)=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();onselect?.(p);}}}>
-          <rect class="total-segment" x={32+(p.at-start)/(end-start)*(plotWidth-50)} y={p.known?190-barHeight:185} width={Math.max(.2,p.width/(end-start)*(plotWidth-50)*.9)} height={p.known?barHeight:5} class:unknown={!p.known} class:estimated={metric==='estimated'}><title>{titles.get(p.at)}</title></rect>
-          {#if split&&p.known&&regularHeight>0}<rect class="regular-segment" x={32+(p.at-start)/(end-start)*(plotWidth-50)} y={190-regularHeight} width={Math.max(.2,p.width/(end-start)*(plotWidth-50)*.9)} height={regularHeight}><title>{titles.get(p.at)}</title></rect>{/if}
-          {#if split&&p.known&&followerHeight>0}<rect class="follower-segment" x={32+(p.at-start)/(end-start)*(plotWidth-50)} y={190-regularHeight-followerHeight} width={Math.max(.2,p.width/(end-start)*(plotWidth-50)*.9)} height={followerHeight}><title>{titles.get(p.at)}</title></rect>{/if}
-          {#if split&&p.known&&unknownHeight>0}<rect class="unknown-segment" x={32+(p.at-start)/(end-start)*(plotWidth-50)} y={190-regularHeight-followerHeight-unknownHeight} width={Math.max(.2,p.width/(end-start)*(plotWidth-50)*.9)} height={unknownHeight}><title>{titles.get(p.at)}</title></rect>{/if}
-          <rect x={32+(p.at-start)/(end-start)*(plotWidth-50)} y="25" width={Math.max(1,p.width/(end-start)*(plotWidth-50))} height="165" fill="transparent" style="pointer-events:all;fill:transparent"><title>{titles.get(p.at)}</title></rect>
+          <rect class="total-segment" x={32+(p.at-start)/(end-start)*(plotWidth-56)} y={p.known?190-barHeight:185} width={Math.max(.2,p.width/(end-start)*(plotWidth-56)*.9)} height={p.known?barHeight:5} class:unknown={!p.known} class:estimated={metric==='estimated'}><title>{titles.get(p.at)}</title></rect>
+          {#if split&&p.known&&regularHeight>0}<rect class="regular-segment" x={32+(p.at-start)/(end-start)*(plotWidth-56)} y={190-regularHeight} width={Math.max(.2,p.width/(end-start)*(plotWidth-56)*.9)} height={regularHeight}><title>{titles.get(p.at)}</title></rect>{/if}
+          {#if split&&p.known&&followerHeight>0}<rect class="follower-segment" x={32+(p.at-start)/(end-start)*(plotWidth-56)} y={190-regularHeight-followerHeight} width={Math.max(.2,p.width/(end-start)*(plotWidth-56)*.9)} height={followerHeight}><title>{titles.get(p.at)}</title></rect>{/if}
+          {#if split&&p.known&&unknownHeight>0}<rect class="unknown-segment" x={32+(p.at-start)/(end-start)*(plotWidth-56)} y={190-regularHeight-followerHeight-unknownHeight} width={Math.max(.2,p.width/(end-start)*(plotWidth-56)*.9)} height={unknownHeight}><title>{titles.get(p.at)}</title></rect>{/if}
+          <rect x={32+(p.at-start)/(end-start)*(plotWidth-56)} y="25" width={Math.max(1,p.width/(end-start)*(plotWidth-56))} height="165" fill="transparent" style="pointer-events:all;fill:transparent"><title>{titles.get(p.at)}</title></rect>
         </g>
       {/each}
+      </g>
       {#each ticks as at,i}
-        {@const x=32+(at-start)/(end-start)*(plotWidth-50)}
+        {@const x=32+(at-start)/(end-start)*(plotWidth-56)}
         <line x1={x} y1="190" x2={x} y2="197" stroke="currentColor" opacity=".4" />
-        {#if i%layout.labelEvery===0}<text x={Math.max(38,Math.min(x,plotWidth-38))} y="213" text-anchor="middle" fill="currentColor" font-size="12">{timeLabel(at)}</text>
-        {#if crossesDay}<text x={Math.max(38,Math.min(x,plotWidth-38))} y="231" text-anchor="middle" fill="currentColor" font-size="10">{dateFormatter.format(at)}</text>{/if}{/if}
+        {#if i%layout.labelEvery===0}<text x={x} y="213" text-anchor="middle" fill="currentColor" font-size="12">{timeLabel(at)}</text>
+        {#if crossesDay}<text x={x} y="231" text-anchor="middle" fill="currentColor" font-size="10">{dateFormatter.format(at)}</text>{/if}{/if}
       {/each}
     </svg></div>
     {#if pages.length>1}<div class="chart-pages"><button class="outline small" disabled={pageOffset+1>=pages.length} onclick={()=>pageOffset++}>Раньше</button><span>{new Date(start).toLocaleDateString('ru-RU',{timeZone:timezone})} · {timeLabel(start)}–{timeLabel(end)}</span><button class="outline small" disabled={pageOffset===0} onclick={()=>pageOffset--}>Позже</button></div>{/if}
-    <div class="chart-caption"><span>Столбец: {Math.round((buckets[0]?.width??60000)/60000)} мин · {timezone}</span><Help id={`${id}-help`} label="Как читать график" text="Площадки не раскрывают состав всех зрителей. Разделение на группы доступно для сообщений. Нажмите столбец для детализации. Шкала — каждые 15 минут; для периодов длиннее суток шаг укрупняется. Интервал столбца выбирается: 1, 5 или 15 минут; длинный период листается блоками; внутри выбранного столбца можно выбрать отдельную минуту. Для зрителей высота — среднее по известным замерам, для сообщений — сумма. Ядро имеет приоритет над подпиской; залётные — авторы с подтверждённым отсутствием подписки, неизвестный статус показан отдельно. Зрители (все) — сумма средних замеров Twitch и YouTube; неполные замеры отмечены в детализации. Жёлтый сегмент — ядро аудитории. Серые отметки — нет данных."/></div>
+    <div class="chart-caption"><Help id={`${id}-help`} label="Как читать график" text={`Столбец: ${Math.round((buckets[0]?.width??60000)/60000)} мин · ${timezone}. Площадки не раскрывают состав всех зрителей. Разделение на группы доступно для сообщений. Нажмите столбец для детализации. Шкала — каждые 15 минут; для периодов длиннее суток шаг укрупняется. Интервал столбца выбирается: 1, 5 или 15 минут; длинный период листается блоками; внутри выбранного столбца можно выбрать отдельную минуту. Для зрителей высота — среднее по известным замерам, для сообщений — сумма. Ядро имеет приоритет над подпиской; залётные — авторы с подтверждённым отсутствием подписки, неизвестный статус показан отдельно. Зрители (все) — сумма средних замеров Twitch и YouTube; неполные замеры отмечены в детализации. Жёлтый сегмент — ядро аудитории. Серые отметки — нет данных.`}/></div>
   {/if}
 </div>
 

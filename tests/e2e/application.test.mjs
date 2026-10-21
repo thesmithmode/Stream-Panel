@@ -83,7 +83,7 @@ test(
         .filter({ hasText: "Тестовый зритель" })
         .first()
         .click();
-      await page.getByRole("tab",{name:"Редактировать аккаунты",exact:true}).click();
+      await page.getByRole("tab",{name:"Аккаунты",exact:true}).click();
       await page.getByLabel("Целевой человек").selectOption(da.id);
       await page
         .getByRole("button", { name: "Объединить", exact: true })
@@ -102,7 +102,7 @@ test(
         .filter({ hasText: "Тестовый зритель" })
         .first()
         .click();
-      await page.getByRole("tab",{name:"Редактировать аккаунты",exact:true}).click();
+      await page.getByRole("tab",{name:"Аккаунты",exact:true}).click();
       await page.locator(".identity-row input").first().check();
       await page.getByLabel("Имя новой группы").fill("Выделенная группа");
       await page
