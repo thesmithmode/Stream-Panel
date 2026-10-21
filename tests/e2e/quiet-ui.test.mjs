@@ -26,3 +26,28 @@ test('quiet navigation preserves secondary functions, keyboard tabs, filters and
   await navigate(page,'Стримы');await page.route('**/api/v1/overview',route=>route.fulfill({status:400,json:{error:'UNAVAILABLE'}}));await page.reload();await page.locator('.donation-total').getByText('Недоступно',{exact:true}).waitFor();await page.unroute('**/api/v1/overview');await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));await page.locator('.donation-total').getByText('250,00 RUB',{exact:true}).waitFor();assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await a.close();}
 });
+
+test('overflow sheets do not stretch cards; disclosure controls remain aligned when expanded',{timeout:60000},async()=>{
+ const a=await application();let browser;
+ try{
+  const id=await seed(a),now=Date.now();await a.db.call('streamSample',id,now-600000,'dota','Dota 2','Агент Габена 219 вышел на охоту',8);await a.db.call('endSession',id,now);
+  browser=await launchBrowser();const page=await browser.newPage();page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await goto(page,a.bootstrap());const card=page.locator(`[data-session-id="${id}"]`);
+  for(const width of [320,390,768,1440,1920]){
+   await page.setViewportSize({width,height:900});await card.waitFor();const height=(await card.boundingBox()).height;
+   const trigger=card.locator('.stream-actions summary');await trigger.click();const menu=card.getByRole('dialog',{name:'Детали эфира',exact:true});await menu.waitFor();await assertUiLayout(page);
+   assert.equal((await card.boundingBox()).height,height);assert.equal(await trigger.getAttribute('aria-haspopup'),'dialog');
+   await page.keyboard.press('Escape');await menu.waitFor({state:'hidden'});assert.equal(await trigger.evaluate(e=>e===document.activeElement),true);
+   await trigger.click();await menu.waitFor();await menu.getByRole('button',{name:'Закрыть',exact:true}).click();await menu.waitFor({state:'hidden'});
+  }
+  await card.locator('.stream-open').click();await page.locator('.series-panel svg').waitFor();
+  for(const width of [320,390,768,1440,1920]){
+   await page.setViewportSize({width,height:900});const settings=page.getByLabel('Настроить график эфира');await settings.scrollIntoViewIfNeeded();const before=await settings.boundingBox();await settings.click();await page.getByLabel('Показатель графика стрима').waitFor();const after=await settings.boundingBox();assert.equal(after.x,before.x);assert.equal(after.width,before.width);assert.equal(after.height,before.height);
+   await page.getByLabel('Показатель графика стрима').selectOption('messages');await page.getByLabel('Детализация графика',{exact:true}).selectOption('5');await assertUiLayout(page);await settings.click();
+   const insights=page.getByRole('button',{name:'Инсайты',exact:true});await insights.click();assert.equal(await insights.getAttribute('aria-expanded'),'true');await insights.click();assert.equal(await insights.getAttribute('aria-expanded'),'false');
+   await page.locator('.section-disclosure>summary').filter({hasText:/^Подписчики$/}).click();await page.getByRole('region',{name:'Подписчики за стрим',exact:true}).getByText('Новых подписок не зафиксировано.',{exact:true}).waitFor();assert.equal(await page.getByRole('heading',{name:'Подписчики за стрим',exact:true}).count(),0);await page.locator('.section-disclosure>summary').filter({hasText:/^Подписчики$/}).click();
+  }
+  await page.locator('.metadata-menu>summary').click();const metadata=page.getByRole('dialog',{name:'История названий и категорий',exact:true});await metadata.waitFor();await metadata.getByText(/Dota 2/).waitFor();await assertUiLayout(page);await page.keyboard.press('Escape');
+  assert.deepEqual(errors,[]);await saveCoverage(page);
+ }finally{await browser?.close();await a.close();}
+});

@@ -6,6 +6,14 @@ Permanent GitHub branch: `checkpoint/ui-before-redesign-2026-10-21`.
 The redesign changes the web interface and its browser tests, not database schemas,
 collectors, report calculations, APIs, authentication or stored facts.
 
+## Before the consistency polish
+
+The first responsive UI release remains available at
+`7233e5050c0b90103b3f404dec89e30081d5a96c`, branch
+`checkpoint/ui-before-polish-2026-10-21`. The follow-up changes disclosure controls,
+overflow sheets, spacing and partial-data labels only. To undo this follow-up,
+revert its release merge on current main using the same process below.
+
 ## Roll back the UI
 
 Revert the redesign merge/squash commit on a branch from the **current main**,

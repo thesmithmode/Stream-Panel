@@ -18,7 +18,7 @@ test('insights use complete historical audience beyond the first page; period, c
   }
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:850}}),errors=[];page.setDefaultTimeout(15000);page.on('pageerror',e=>errors.push(e.message));
   await goto(page,a.bootstrap());await page.getByRole('button',{name:'Аналитика',exact:true}).click();
-  const section=page.getByRole('region',{name:'Инсайты',exact:true});await section.getByRole('button',{name:'Показать инсайты'}).click();
+  const section=page.getByRole('region',{name:'Инсайты',exact:true});await section.getByRole('button',{name:'Инсайты'}).click();
   await section.locator('.insight-card').first().waitFor();assert.equal(await section.locator('.insight-card').count(),1);await section.getByText('Молчаливое ядро · 45 участников',{exact:true}).waitFor();await section.locator('.grouped>summary').click();assert.equal(await section.locator('.person-finding').count(),12);
   await section.getByRole('button',{name:/Ещё участники/}).click();assert.equal(await section.locator('.person-finding').count(),24);
   await section.locator('.person-finding>summary').first().click();await section.locator('.evidence>summary').first().click();await section.getByText('Полные опросы Twitch',{exact:false}).first().waitFor();
