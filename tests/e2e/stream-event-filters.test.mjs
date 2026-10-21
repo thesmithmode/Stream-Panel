@@ -10,9 +10,10 @@ test('stream charts retain exact message counts while the event feed contains no
   await app.db.call('youtubeMessages','ytowner','chat',[{id:'ytmsg',snippet:{type:'textMessageEvent',publishedAt:new Date(at+120000).toISOString(),displayMessage:'YouTube message content'},authorDetails:{channelId:'ytviewer',displayName:'YouTube viewer'}}]);
   await app.db.call('endSession',id,at+180000);
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});await goto(page,app.bootstrap());
-  await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`tr[data-session-id="${id}"]`).getByRole('button',{name:'Открыть',exact:true}).click();
-  const feed=page.locator('.stream-feed'),messages=page.locator('.stream-metrics .metric').filter({hasText:'Сообщения'}).locator('strong');
+  await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`[data-session-id="${id}"]`).locator('.stream-open').click();
+  const feed=page.locator('.stream-feed'),messages=page.locator('.stream-kpis > div').filter({hasText:'Сообщения'}).locator('strong');
   await messages.getByText('2',{exact:true}).waitFor();assert.equal(await feed.count(),0);
+  await page.getByLabel('Настроить график эфира').click();
   for(const metric of ['messages','twitchMessages','youtubeMessages','viewers','twitchViewers','youtubeViewers']){
    await page.getByLabel('Показатель графика стрима').selectOption(metric);
    assert.equal(await feed.getByText('Twitch message content',{exact:true}).count(),0);assert.equal(await feed.getByText('YouTube message content',{exact:true}).count(),0);

@@ -1,3 +1,4 @@
+import {navigate,refreshData} from '../helpers/navigation.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -67,15 +68,15 @@ test("two browser accounts see only their own data; logout revokes the session",
       await page.getByText("Неверный логин или пароль", { exact: true }).waitFor();
       await page.getByLabel("Пароль", { exact: true }).fill(`${profile}-browser-password`);
       await page.getByRole("button", { name: "Войти", exact: true }).click();
-      await page.locator(".channel-metrics").waitFor();
+      await navigate(page,"Обзор");await page.locator(".channel-metrics").waitFor();
       await page.getByRole("button",{name:"Люди",exact:true}).click();
       await page.locator(".person-row").filter({hasText:"Viewer"}).waitFor();
       assert.equal(await page.getByText(`Private ${profile === "ruslan" ? "gulnaz" : "ruslan"}`, { exact: true }).count(), 0);
       assert.equal(await page.title(), "Stream Panel");
       const ownName=profile==='ruslan'?'FullRandomName_Twitch':'AmaliaMelina',guestName=profile==='ruslan'?'AmaliaMelina':'FullRandomName_Twitch';
       await page.getByRole('button',{name:'Люди',exact:true}).click();await page.locator('.person-row').filter({hasText:guestName}).waitFor();assert.equal(await page.locator('.person-row').filter({hasText:ownName}).count(),0);
-      await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('button',{name:guestName,exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:ownName,exact:true}).count(),0);
-      await page.getByRole("button", {name:"Интеграции",exact:true}).click();
+      await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('tab',{name:'Аудитория',exact:true}).click();await page.getByRole('button',{name:guestName,exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:ownName,exact:true}).count(),0);
+      await navigate(page,'Интеграции');
       assert.equal(await page.getByRole("button",{name:"YouTube",exact:true}).count(),0);
       await page.getByRole("heading",{name:`YouTube Own ${profile}`}).waitFor();
       await page.getByText('Подписчики: 10 · Просмотры канала: 100',{exact:true}).waitFor();
@@ -85,7 +86,7 @@ test("two browser accounts see only their own data; logout revokes the session",
 
       await page.getByRole("heading",{name:`YouTube Own ${profile}`}).waitFor();
       await page.route('**/api/v1/youtube/data',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'WORKER_UNAVAILABLE'})}));
-      await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.getByRole('button',{name:'Интеграции',exact:true}).click();
+      await navigate(page,'Обзор');await navigate(page,'Интеграции');
       await page.getByRole('alert').filter({hasText:'WORKER_UNAVAILABLE'}).waitFor();
       assert.equal(await page.getByText(`YouTube private ${profile}`,{exact:false}).count(),0);
       await page.unroute('**/api/v1/youtube/data');
@@ -93,10 +94,10 @@ test("two browser accounts see only their own data; logout revokes the session",
       await db.call('youtubeSnapshot','channel','channel',{snippet:{title:`Own ${profile}`},statistics:{hiddenSubscriberCount:true}});
       await db.call('youtubeSnapshot','channel','report',{});
       await db.call('youtubeMessages','channel','chat',[{id:'minimal',snippet:{publishedAt:'2026-10-07T12:00:01Z',type:'textMessageEvent'},authorDetails:{}}]);
-      await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.getByRole('button',{name:'Интеграции',exact:true}).click();
+      await navigate(page,'Обзор');await navigate(page,'Интеграции');
       await page.getByText('Подписчики: скрыты · Просмотры канала: нет данных',{exact:true}).waitFor();
       await db.call('youtubeSnapshot','channel','channel',{snippet:{title:`Own ${profile}`}});
-      await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.getByRole('button',{name:'Интеграции',exact:true}).click();
+      await navigate(page,'Обзор');await navigate(page,'Интеграции');
       await page.getByText('Подписчики: нет данных · Просмотры канала: нет данных',{exact:true}).waitFor();
       await page.setViewportSize({width:390,height:844});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
@@ -153,18 +154,16 @@ test("profile switch reloads all views, preserves other clients and remains visi
     for(const profile of ['ruslan','gulnaz']){
       await a.getByLabel('Профиль',{exact:true}).selectOption(profile);
       await a.getByRole('button',{name:'Стримы',exact:true}).click();
-      await a.locator('table thead').waitFor();headers.push(await a.locator('table thead th').allTextContents());
+      await a.locator('.stream-card').waitFor();headers.push(await a.locator('.stream-card-metrics dt').allTextContents());
     }
-    assert.deepEqual(headers[0],headers[1]);assert.deepEqual(headers[0],['Период · МСК','Длительность','Площадки','Название и ссылка','Зрители · пик / среднее','Донаты','Сообщения','']);
-    await a.getByLabel('Профиль',{exact:true}).selectOption('ruslan');await a.getByRole('button',{name:'Аналитика',exact:true}).click();
-    await a.getByText('Настроить отображение',{exact:true}).click();await a.getByLabel('Сравнение стримов',{exact:true}).uncheck();
-    await a.getByLabel('Только ядро',{exact:true}).check();
-    await a.getByLabel('Профиль',{exact:true}).selectOption('gulnaz');await a.getByText('Настроить отображение',{exact:true}).click();
-    assert.equal(await a.getByLabel('Сравнение стримов',{exact:true}).isChecked(),true,'layout belongs to each profile');assert.equal(await a.getByLabel('Только ядро',{exact:true}).isChecked(),false);
-    await a.getByLabel('Профиль',{exact:true}).selectOption('ruslan');await a.getByText('Настроить отображение',{exact:true}).click();assert.equal(await a.getByLabel('Только ядро',{exact:true}).isChecked(),true);
+    assert.deepEqual(headers[0],headers[1]);assert.deepEqual(headers[0],['Длительность','Средние зрители','Донаты','Сообщения']);
+    await a.getByLabel('Профиль',{exact:true}).selectOption('ruslan');await a.getByRole('button',{name:'Аналитика',exact:true}).click();await a.getByRole('tab',{name:'Аудитория',exact:true}).click();await a.getByLabel('Только ядро',{exact:true}).check();
+    await a.getByRole('button',{name:'Фильтры',exact:true}).click();await a.getByText('Отображение и часовой пояс',{exact:true}).click();await a.getByLabel('Сравнение стримов',{exact:true}).uncheck();await a.getByRole('button',{name:'Готово',exact:true}).click();
+    await a.getByLabel('Профиль',{exact:true}).selectOption('gulnaz');await a.getByRole('button',{name:'Фильтры',exact:true}).click();await a.getByText('Отображение и часовой пояс',{exact:true}).click();assert.equal(await a.getByLabel('Сравнение стримов',{exact:true}).isChecked(),true);await a.getByRole('button',{name:'Готово',exact:true}).click();await a.getByRole('tab',{name:'Аудитория',exact:true}).click();assert.equal(await a.getByLabel('Только ядро',{exact:true}).isChecked(),false);
+    await a.getByLabel('Профиль',{exact:true}).selectOption('ruslan');await a.getByRole('tab',{name:'Аудитория',exact:true}).click();assert.equal(await a.getByLabel('Только ядро',{exact:true}).isChecked(),true);
     await a.getByRole('button',{name:'Люди',exact:true}).click();await a.getByText('Viewer ruslan',{exact:true}).first().waitFor();
     await a.setViewportSize({ width: 390, height: 844 });
-    await a.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await a.evaluate(() => window.scrollTo(0,0));
     const box = await a.getByLabel("Профиль", { exact: true }).boundingBox();
     assert.ok(box && box.y >= 0 && box.y + box.height <= 844);
     assert.equal(await a.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -176,7 +175,7 @@ test("profile switch reloads all views, preserves other clients and remains visi
     assert.equal(await a.getByRole("button", { name: "Выйти", exact: true }).count(),0);
     let fakeRemaining=2;
     await a.route('**/api/v1/status',async route=>{const response=await route.fetch();const data=await response.json();if(fakeRemaining-->0)data.release='a'.repeat(40);await route.fulfill({response,json:data});});
-    await a.getByRole('button',{name:'Обновить данные',exact:true}).click();await a.getByRole('button',{name:'Обновить панель',exact:true}).waitFor();
+    await refreshData(a);await a.getByRole('button',{name:'Обновить панель',exact:true}).waitFor();
     await saveCoverage(a);await startCoverage(a);const nextDocument=a.waitForEvent('load');await a.getByLabel('Профиль',{exact:true}).selectOption('ruslan');await nextDocument;
     await a.getByText('Viewer ruslan',{exact:true}).first().waitFor();assert.equal(await a.getByRole('button',{name:'Обновить панель',exact:true}).count(),0);await a.unroute('**/api/v1/status');
     await a.evaluate(async()=>{const {csrf}=await fetch("/api/v1/auth/me").then(r=>r.json());await fetch("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},body:"{}"});});

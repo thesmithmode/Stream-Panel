@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {streamRange,intervalRange} from './stream-time.ts';
+import {streamRange,intervalRange,compactStreamRange} from './stream-time.ts';
 test('stream dates always use Moscow and cross a date boundary correctly',()=>{
  assert.equal(streamRange(Date.parse('2026-09-13T08:04Z'),Date.parse('2026-09-13T11:55Z')),'2026-09-13 11:04 — 2026-09-13 14:55');
  assert.equal(streamRange(Date.parse('2026-09-13T22:04Z'),null),'2026-09-14 01:04 — в эфире');
@@ -10,3 +10,5 @@ test('single-day intervals omit repeated dates, multi-day streams retain them',(
  assert.equal(intervalRange(start,end,start,end),'22:00 — 23:00');
  assert.match(intervalRange(start,end,start,end+7200000),/2026-10-11/);
 });
+
+test('compact stream dates keep midnight boundaries and live state',()=>{const at=Date.parse('2026-10-20T06:59Z');assert.equal(compactStreamRange(at,at+3600000),'20 октября · 09:59–10:59');assert.equal(compactStreamRange(at,null),'20 октября · 09:59 — в эфире');assert.equal(compactStreamRange(at,at+86400000),'20 октября · 09:59–21 октября · 09:59');});
