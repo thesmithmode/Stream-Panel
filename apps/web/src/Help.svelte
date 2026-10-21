@@ -11,10 +11,14 @@
   async function showPopover() {
     open = true;
     await tick();
-    if (!open) return;
+    if (open) positionPopover();
+  }
+
+  function positionPopover() {
     const trigger = root?.querySelector("button");
     if (!trigger || !popup) return;
     const anchor = trigger.getBoundingClientRect();
+    if(anchor.bottom<0||anchor.top>window.innerHeight){closePopover();return;}
     const box = popup.getBoundingClientRect();
     const margin = 8;
     left = Math.max(margin, Math.min(anchor.left, window.innerWidth - box.width - margin));
@@ -44,7 +48,7 @@
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && open) closePopover(true);
     };
-    const onViewportChange=(event:Event)=>{if(event.type!=="scroll"||!popup?.contains(event.target as Node))closePopover();};
+    const onViewportChange=(event:Event)=>{if(open&&(event.type!=="scroll"||!popup?.contains(event.target as Node)))positionPopover();};
     window.addEventListener("resize",onViewportChange);
     window.addEventListener("scroll",onViewportChange,true);
     document.addEventListener("pointerdown", onPointerDown);

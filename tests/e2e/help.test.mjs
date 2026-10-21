@@ -41,6 +41,10 @@ test("presence help popover supports click, Escape, outside click, and mobile vi
     assert.ok(box.x >= 0 && box.x + box.width <= 390, `popover horizontal bounds ${JSON.stringify(box)}`);
     assert.ok(box.y >= 0 && box.y + box.height <= 844, `popover vertical bounds ${JSON.stringify(box)}`);
     await assertPopover(trigger, popover, true);
+    await page.evaluate(async()=>{scrollBy(0,16);await new Promise(requestAnimationFrame);});
+    await assertPopover(trigger,popover,true);
+    await page.setViewportSize({width:360,height:800});await assertPopover(trigger,popover,true);
+    const moved=await popover.boundingBox();assert.ok(moved&&moved.x>=0&&moved.x+moved.width<=360&&moved.y>=0&&moved.y+moved.height<=800);
     assert.deepEqual(errors, []);
 
     await saveCoverage(page);
