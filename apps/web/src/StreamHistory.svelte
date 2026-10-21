@@ -26,7 +26,7 @@
    </div>
    <dl class="stream-card-metrics">
     <div><dt>Длительность</dt><dd>{formatDuration((session.durationMs??((session.ended_at_ms??Date.now())-session.started_at_ms))/60000)}</dd></div>
-    <div><dt>Средние зрители</dt><dd>{(session.viewerPartial?session.viewerKnownMean:session.viewerMean)?.toLocaleString('ru-RU',{maximumFractionDigits:1})??'—'}{#if session.viewerPartial}<span class="partial-label">частично</span>{/if}</dd></div>
+    <div><dt>Средние зрители</dt><dd>{(session.viewerPartial?session.viewerKnownMean:session.viewerMean)?.toLocaleString('ru-RU',{maximumFractionDigits:1})??'—'}</dd></div>
     <div><dt>Донаты</dt><dd>{Object.entries(session.donationTotals??{}).map(([c,a])=>money(a,c)).join(' · ')||'—'}</dd></div>
     <div><dt>Сообщения</dt><dd>{session.messageCount??0}</dd></div>
    </dl></a>

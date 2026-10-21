@@ -43,8 +43,18 @@ test("presence help popover supports click, Escape, outside click, and mobile vi
     await assertPopover(trigger, popover, true);
     await page.evaluate(async()=>{scrollBy(0,16);await new Promise(requestAnimationFrame);});
     await assertPopover(trigger,popover,true);
-    await page.setViewportSize({width:360,height:800});await assertPopover(trigger,popover,true);
-    const moved=await popover.boundingBox();assert.ok(moved&&moved.x>=0&&moved.x+moved.width<=360&&moved.y>=0&&moved.y+moved.height<=800);
+    for(const viewport of [{width:360,height:800},{width:320,height:568},{width:1280,height:800}]){
+      await page.setViewportSize(viewport);await assertPopover(trigger,popover,true);
+      // Resizing returns before the browser dispatches its resize event.
+      // Wait for the resulting layout rather than sampling the old frame.
+      await page.waitForFunction(()=>{
+        const popup=document.querySelector('[role="dialog"][aria-label="Об аудитории стрима"]');
+        if(!popup)return false;
+        const box=popup.getBoundingClientRect();
+        return box.left>=0&&box.right<=innerWidth&&box.top>=0&&box.bottom<=innerHeight;
+      });
+      const moved=await popover.boundingBox();assert.ok(moved&&moved.x>=0&&moved.x+moved.width<=viewport.width&&moved.y>=0&&moved.y+moved.height<=viewport.height);
+    }
     assert.deepEqual(errors, []);
 
     await saveCoverage(page);

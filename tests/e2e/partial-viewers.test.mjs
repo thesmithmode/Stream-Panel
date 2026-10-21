@@ -6,7 +6,7 @@ import {launchBrowser} from '../helpers/browser.mjs';
 import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';
 import {assertUiLayout} from '../helpers/ui-layout.mjs';
 
-test('partial provider counters remain visible and labelled in stream cards, overview and Monday analytics',{timeout:60000},async()=>{
+test('partial provider counters preserve values and secondary explanations in stream cards, overview and Monday analytics',{timeout:60000},async()=>{
  const app=await application();let browser;
  try{
   const minute=60000,base=Date.parse('2026-10-19T06:00:00Z');
@@ -22,10 +22,15 @@ test('partial provider counters remain visible and labelled in stream cards, ove
   await goto(page,app.bootstrap());assert.equal(await page.title(),'Stream Panel');
   await page.getByRole('button',{name:'Стримы',exact:true}).click();
   const row=page.locator(`[data-session-id="${id}"]`),count=row.locator('.stream-card-metrics>div').nth(1);
-  assert.match(await count.textContent(),/6/);await row.locator('.stream-actions summary').click();assert.match(await row.textContent(),/Пик зрителей: 8/);assert.equal(await page.locator('body').textContent().then(t=>t.includes('≥')),false);assert.match(await row.textContent(),/Неполные данные площадок/);
+  assert.match(await count.textContent(),/6/);assert.doesNotMatch(await count.textContent(),/частично/);
+  const menu=page.getByRole('dialog',{name:'Детали эфира',exact:true}),trigger=row.locator('.stream-actions summary');
+  await trigger.click();await menu.waitFor();assert.match(await menu.textContent(),/Пик зрителей: 8/);assert.equal(await page.locator('body').textContent().then(t=>t.includes('≥')),false);assert.match(await menu.textContent(),/Неполные данные площадок/);
   await assertUiLayout(page);
   if(process.env.STREAM_PANEL_QA_SCREENSHOTS)await page.screenshot({path:'/tmp/sp-partial-stream-390.png',fullPage:true});
-  await page.keyboard.press('Escape');await row.locator('.stream-open').click();
+  await page.keyboard.press('Escape');await menu.waitFor({state:'hidden'});assert.equal(await trigger.getAttribute('aria-expanded'),'false');
+  // Native keyboard activation must use the same menu state as pointer clicks.
+  await trigger.focus();await page.keyboard.press('Enter');await menu.waitFor();await page.keyboard.press('Escape');await menu.waitFor({state:'hidden'});
+  await row.locator('.stream-open').click();
   await page.locator('.stream-kpis').getByText('8',{exact:true}).waitFor();await page.locator('.stream-kpis').getByText('6',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Аналитика',exact:true}).click();
   await page.getByRole('tab',{name:'Время',exact:true}).click();await page.getByText('Настроить карту',{exact:true}).click();await page.getByLabel('Расчёт карты').waitFor();await page.getByLabel('Метрика карты',{exact:true}).selectOption('viewers');

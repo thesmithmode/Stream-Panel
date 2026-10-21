@@ -12,7 +12,7 @@ test('person notes support mobile CRUD and return 409 without losing a stale dra
   const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(10000);
   await startCoverage(page);await goto(page,app.bootstrap());
   await page.getByRole('button',{name:'Люди',exact:true}).click();
-  await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();await page.getByRole('tab',{name:'Заметки и метки',exact:true}).click();
+  await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();await page.getByRole('tab',{name:'Заметки',exact:true}).click();
   const section=page.getByRole('region',{name:'Заметки о человеке'});
   await section.getByLabel('Новая заметка').fill('Первая заметка\nВторая строка');
   let releaseSave;const holdSave=new Promise(resolve=>releaseSave=resolve);
@@ -39,7 +39,7 @@ test('person notes support mobile CRUD and return 409 without losing a stale dra
   await section.locator('.note-body').filter({hasText:'Исправленная заметка'}).waitFor();
   for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:800});await assertUiLayout(page);}await page.setViewportSize({width:390,height:844});
   await reload(page);await page.getByRole('button',{name:'Люди',exact:true}).click();
-  await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();await page.getByRole('tab',{name:'Заметки и метки',exact:true}).click();
+  await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();await page.getByRole('tab',{name:'Заметки',exact:true}).click();
   await section.locator('.note-body').filter({hasText:'Исправленная заметка'}).waitFor();
   await page.screenshot({path:'/tmp/sp-notes-mobile.png',fullPage:true});
   assert.equal(await section.getByRole('button',{name:'Удалить заметку',exact:true}).count(),0);

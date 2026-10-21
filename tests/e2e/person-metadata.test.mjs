@@ -10,7 +10,7 @@ test('tags and manual core work on mobile, persist, reject stale changes and agr
   await seed(app);browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(10000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await startCoverage(page);await goto(page,app.bootstrap());
-  const open=async()=>{await page.getByRole('button',{name:'Люди',exact:true}).click();await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();await page.getByRole('tab',{name:'Заметки и метки',exact:true}).click();};
+  const open=async()=>{await page.getByRole('button',{name:'Люди',exact:true}).click();await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();await page.getByRole('tab',{name:'Заметки',exact:true}).click();};
   await open();const form=page.getByRole('region',{name:'Метки человека'});
   await form.getByLabel('Новый тег').fill('Друг');await form.getByRole('button',{name:'Добавить тег',exact:true}).click();
   await form.getByLabel('Ядро аудитории',{exact:true}).selectOption('include');
