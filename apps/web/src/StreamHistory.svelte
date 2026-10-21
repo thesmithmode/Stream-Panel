@@ -5,9 +5,9 @@
  import {sessionGroup} from './session-group';
  import {compactStreamRange as streamRange} from './stream-time';
  import Help from './Help.svelte';
+ import ActionMenu from './ActionMenu.svelte';
  import {routeUrl} from './route';
  import {getProfile} from './api';
- import Icon from './Icon.svelte';
  let {sessions,selected=$bindable([]),busy=false,page,onpage,onopen,onmerge,onunmerge,ondelete,validUrl}:{sessions:Session[];selected?:string[];busy?:boolean;page:number;onpage:(page:number)=>void;onopen:(id:string)=>void;onmerge:()=>Promise<void>;onunmerge:(id:string)=>void;ondelete:(id:string)=>void;validUrl:(entry:{platform:string;url:string})=>boolean}=$props();
  let selecting=$state(false),filter=$state('all');
  const visible=$derived(sessions.filter(s=>filter==='all'||(filter==='live'?s.ended_at_ms===null:s.ended_at_ms!==null)));
@@ -22,22 +22,22 @@
   <article class="stream-card" data-session-id={session.id}>
    <a class="stream-open" aria-label={`Открыть ${session.primaryTitle||'стрим'}`} href={routeUrl({view:'stream',session:session.id,person:'',profile:getProfile()})} onclick={e=>{e.preventDefault();onopen(session.id);}}>
    <div class="stream-card-heading">
-    <div><span class="stream-period">{streamRange(session.started_at_ms,session.ended_at_ms)}</span><h3>{session.primaryTitle||'Без названия'}</h3><span class="stream-platforms">{session.platforms?.map(p=>p==='twitch'?'Twitch':'YouTube').join(' · ')||'Источник неизвестен'}{#if session.ended_at_ms===null}<span class="live-label">В эфире</span>{/if}{#if (session.memberIds?.length??0)>1}<span> · {session.memberIds!.length} части</span>{/if}</span></div><Icon name="arrow"/>
+    <div><span class="stream-period">{streamRange(session.started_at_ms,session.ended_at_ms)}</span><h3>{session.primaryTitle||'Без названия'}</h3><span class="stream-platforms">{session.platforms?.map(p=>p==='twitch'?'Twitch':'YouTube').join(' · ')||'Источник неизвестен'}{#if session.ended_at_ms===null}<span class="live-label">В эфире</span>{/if}{#if (session.memberIds?.length??0)>1}<span> · {session.memberIds!.length} части</span>{/if}</span></div>
    </div>
    <dl class="stream-card-metrics">
     <div><dt>Длительность</dt><dd>{formatDuration((session.durationMs??((session.ended_at_ms??Date.now())-session.started_at_ms))/60000)}</dd></div>
-    <div><dt>Средние зрители</dt><dd>{(session.viewerPartial?session.viewerKnownMean:session.viewerMean)?.toLocaleString('ru-RU',{maximumFractionDigits:1})??'—'}{#if session.viewerPartial}<span class="partial-mark" aria-label="Неполные данные площадок">!</span>{/if}</dd></div>
+    <div><dt>Средние зрители</dt><dd>{(session.viewerPartial?session.viewerKnownMean:session.viewerMean)?.toLocaleString('ru-RU',{maximumFractionDigits:1})??'—'}{#if session.viewerPartial}<span class="partial-label">частично</span>{/if}</dd></div>
     <div><dt>Донаты</dt><dd>{Object.entries(session.donationTotals??{}).map(([c,a])=>money(a,c)).join(' · ')||'—'}</dd></div>
     <div><dt>Сообщения</dt><dd>{session.messageCount??0}</dd></div>
    </dl></a>
    {#if selecting&&session.kind==='platform'}<label class="stream-selection"><input type="checkbox" aria-label="Выбрать стрим" checked={selected.includes(session.id)} disabled={busy} onchange={event=>toggle(session.id,event.currentTarget.checked)}/>Выбрать</label>{/if}
-   <details class="stream-actions"><summary aria-label={`Действия: ${session.primaryTitle||'стрим'}`}><Icon name="more" size={18}/></summary><div>
+   <ActionMenu variant="stream-actions" label={`Действия: ${session.primaryTitle||'стрим'}`} title="Детали эфира">{#snippet children(close)}
     {#if session.viewerPartial}<span class="small muted">Неполные данные площадок: сумма известных зрителей.</span>{/if}<span class="small muted">Пик зрителей: {(session.viewerPartial?session.viewerKnownPeak:session.viewerPeak)??'—'}</span><span class="small muted">Донатов: {session.donationCount??0}</span>
     {#each (session.confirmedUrls??[]).filter(validUrl) as entry,index}<a href={entry.url} target="_blank" rel="noopener noreferrer">{entry.platform==='twitch'?'Twitch':'YouTube'}{(session.confirmedUrls??[]).filter(e=>e.platform===entry.platform).length>1?` · часть ${(session.confirmedUrls??[]).filter(validUrl).slice(0,index+1).filter(e=>e.platform===entry.platform).length}`:''}</a>{/each}
     {#each session.breaks??[] as pause}<span class="small">Перерыв: {streamRange(pause.from,pause.to)}</span>{/each}
-    {#if (session.memberIds?.length??0)>1}<button disabled={busy} onclick={()=>onunmerge(session.id)}>Разъединить</button>{/if}
-    {#if session.kind==='manual'}<button class="danger" disabled={busy} onclick={()=>ondelete(session.id)}>Удалить</button>{/if}
-   </div></details>
+    {#if (session.memberIds?.length??0)>1}<button disabled={busy} onclick={()=>{close();onunmerge(session.id);}}>Разъединить</button>{/if}
+    {#if session.kind==='manual'}<button class="danger" disabled={busy} onclick={()=>{close();ondelete(session.id);}}>Удалить</button>{/if}
+   {/snippet}</ActionMenu>
   </article>
  {:else}<div class="empty-small">{sessions.length?'Нет эфиров по выбранному фильтру.':'Стримов пока нет'}</div>{/each}
  {#if page>0||sessions.length>=100}<div class="history-pages"><button class="outline" disabled={busy||page===0} onclick={()=>onpage(page-1)}>Назад</button><span>Страница {page+1}</span><button class="outline" disabled={busy||sessions.length<100} onclick={()=>onpage(page+1)}>Далее</button></div>{/if}

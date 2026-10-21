@@ -6,6 +6,14 @@ Permanent GitHub branch: `checkpoint/ui-before-redesign-2026-10-21`.
 The redesign changes the web interface and its browser tests, not database schemas,
 collectors, report calculations, APIs, authentication or stored facts.
 
+## Before the consistency polish
+
+The first responsive UI release remains available at
+`7233e5050c0b90103b3f404dec89e30081d5a96c`, branch
+`checkpoint/ui-before-polish-2026-10-21`. The follow-up changes disclosure controls,
+overflow sheets, spacing and partial-data labels only. To undo this follow-up,
+revert its release merge on current main using the same process below.
+
 ## Roll back the UI
 
 Revert the redesign merge/squash commit on a branch from the **current main**,
@@ -28,7 +36,7 @@ backend/schema changes just to change the appearance.
 | Merge streams | Streams → Select → check streams → Merge |
 | Unmerge / delete manual stream / platform recording links | Stream card → … |
 | Viewer peak / donor count / breaks | Stream card → …; peak also in stream totals |
-| Stream chart and minute drilldown | Stream → Results; chart options under sliders |
+| Stream chart and minute drilldown | Stream → Results; metric and 1/5/15 min controls above the chart (5 min default, last choice saved per profile) |
 | Viewer ranking, sort, linked accounts, intervals | Stream → Participants |
 | Following / subscription history | Stream → Results → Subscribers |
 | Archived chat, moderation and donation events | Stream → Events |

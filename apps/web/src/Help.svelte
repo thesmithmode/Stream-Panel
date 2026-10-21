@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
 
-  let { label, text, id }: { label: string; text: string; id: string } = $props();
+  let { label, text, id, trigger='?' }: { label: string; text: string; id: string; trigger?: string } = $props();
   let open = $state(false);
   let root = $state<HTMLDivElement | undefined>();
   let popup = $state<HTMLDivElement | undefined>();
@@ -11,10 +11,14 @@
   async function showPopover() {
     open = true;
     await tick();
-    if (!open) return;
+    if (open) positionPopover();
+  }
+
+  function positionPopover() {
     const trigger = root?.querySelector("button");
     if (!trigger || !popup) return;
     const anchor = trigger.getBoundingClientRect();
+    if(anchor.bottom<0||anchor.top>window.innerHeight){closePopover();return;}
     const box = popup.getBoundingClientRect();
     const margin = 8;
     left = Math.max(margin, Math.min(anchor.left, window.innerWidth - box.width - margin));
@@ -44,9 +48,14 @@
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && open) closePopover(true);
     };
+    const onViewportChange=(event:Event)=>{if(open&&(event.type!=="scroll"||!popup?.contains(event.target as Node)))positionPopover();};
+    window.addEventListener("resize",onViewportChange);
+    window.addEventListener("scroll",onViewportChange,true);
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
     return () => {
+      window.removeEventListener("resize",onViewportChange);
+      window.removeEventListener("scroll",onViewportChange,true);
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
@@ -55,13 +64,13 @@
 
 <div class="help" bind:this={root}>
   <button
-    class="help-button"
+    class="help-button" class:help-text={trigger!=='?'}
     type="button"
     aria-label={label}
     aria-expanded={open}
     aria-controls={id}
     onclick={togglePopover}
-  >?</button>
+  >{trigger}</button>
   {#if open}<div
       class="help-popover"
       id={id}
@@ -97,6 +106,8 @@
     font-weight: 700;
     line-height: 1;
   }
+
+  .help-text { width:auto; height:auto; min-height:28px; padding:2px 0; border:0; border-radius:0; background:none; color:var(--muted); font-size:12px; font-weight:400; text-decoration:underline dotted; text-underline-offset:3px; }
 
   .help-popover {
     position: fixed;

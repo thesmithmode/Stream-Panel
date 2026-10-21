@@ -25,7 +25,7 @@ test('partial provider counters remain visible and labelled in stream cards, ove
   assert.match(await count.textContent(),/6/);await row.locator('.stream-actions summary').click();assert.match(await row.textContent(),/Пик зрителей: 8/);assert.equal(await page.locator('body').textContent().then(t=>t.includes('≥')),false);assert.match(await row.textContent(),/Неполные данные площадок/);
   await assertUiLayout(page);
   if(process.env.STREAM_PANEL_QA_SCREENSHOTS)await page.screenshot({path:'/tmp/sp-partial-stream-390.png',fullPage:true});
-  await row.locator('.stream-open').click();
+  await page.keyboard.press('Escape');await row.locator('.stream-open').click();
   await page.locator('.stream-kpis').getByText('8',{exact:true}).waitFor();await page.locator('.stream-kpis').getByText('6',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Аналитика',exact:true}).click();
   await page.getByRole('tab',{name:'Время',exact:true}).click();await page.getByText('Настроить карту',{exact:true}).click();await page.getByLabel('Расчёт карты').waitFor();await page.getByLabel('Метрика карты',{exact:true}).selectOption('viewers');

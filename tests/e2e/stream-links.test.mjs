@@ -61,10 +61,13 @@ test("stream history shows only confirmed Twitch and YouTube links from the plat
       assert.equal(await link.getAttribute("target"), "_blank");
       assert.equal(await link.getAttribute("rel"), "noopener noreferrer");
     }
+    await page.keyboard.press('Escape');
     const youtubeRow = page.locator(".stream-card").filter({ hasText: "YouTube only stream" });
     await youtubeRow.locator(".stream-actions summary").click();
+    await youtubeRow.getByRole("link", { name: "YouTube", exact: true }).waitFor();
     assert.equal(await youtubeRow.getByRole("link", { name: "YouTube", exact: true }).count(), 1);
     assert.equal(await youtubeRow.getByRole("link", { name: "Twitch", exact: true }).count(), 0);
+    await page.keyboard.press('Escape');
     const legacyRow = page.locator(`[data-session-id="${legacyId}"]`);
     assert.equal(await legacyRow.locator(".stream-actions").getByRole("link").count(), 0);
     const manualRow = page.locator(`[data-session-id="${manualId}"]`);
@@ -73,7 +76,7 @@ test("stream history shows only confirmed Twitch and YouTube links from the plat
     assert.equal(await bothRow.getByRole("button",{name:"Удалить",exact:true}).count(),0);
     await manualRow.locator(".stream-actions summary").click();await manualRow.getByRole("button",{name:"Удалить",exact:true}).click();
     await page.getByRole('dialog').getByRole('button',{name:'Отмена',exact:true}).click();assert.equal((await a.db.call('sessions')).some(s=>s.id===manualId),true);
-    await manualRow.getByRole("button",{name:"Удалить",exact:true}).click();await acceptConfirmation(page,'Удалить');
+    await manualRow.locator(".stream-actions summary").click();await manualRow.getByRole("button",{name:"Удалить",exact:true}).click();await acceptConfirmation(page,'Удалить');
     await manualRow.waitFor({state:"detached"});
     assert.equal((await a.db.call("sessions")).some(s=>s.id===manualId),false);
     assert.equal((await a.db.call("sessions")).some(s=>s.id===bothId),true);
@@ -104,6 +107,6 @@ test('long stream titles and several YouTube recordings keep Open visible on des
    const rect=await open.boundingBox();assert.ok(rect&&rect.x>=0&&rect.x+rect.width<=width,JSON.stringify({width,rect}));
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   }
-  await open.click();await page.locator('.stream-page').waitFor();assert.deepEqual(errors,[]);await saveCoverage(page);
+  await page.keyboard.press('Escape');await open.click();await page.locator('.stream-page').waitFor();assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });
