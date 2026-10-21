@@ -39,6 +39,7 @@ test('overflow sheets do not stretch cards; disclosure controls remain aligned w
    assert.equal((await card.boundingBox()).height,height);assert.equal(await trigger.getAttribute('aria-haspopup'),'dialog');
    await page.keyboard.press('Escape');await menu.waitFor({state:'hidden'});assert.equal(await trigger.evaluate(e=>e===document.activeElement),true);
    await trigger.click();await menu.waitFor();await menu.getByRole('button',{name:'Закрыть',exact:true}).click();await menu.waitFor({state:'hidden'});
+   await trigger.click();await menu.waitFor();await menu.evaluate(dialog=>dialog.requestClose());await menu.waitFor({state:'hidden'});assert.equal(await trigger.getAttribute('aria-expanded'),'false','native dismissal keeps disclosure state synchronized');
   }
   await page.keyboard.press('Tab');await card.locator('.stream-open').focus();assert.equal(await card.locator('.stream-open').evaluate(e=>e.matches(':focus-visible')),true);assert.equal(await card.locator('.stream-open').evaluate(e=>getComputedStyle(e).outlineOffset),'-3px');
   await card.locator('.stream-open').click();await page.locator('.series-panel svg').waitFor();assert.equal(await page.getByRole('button',{name:'5 мин',exact:true}).getAttribute('aria-pressed'),'true');
