@@ -1,5 +1,5 @@
 <script lang="ts">
- import type {Snippet} from 'svelte';
+ import {untrack,type Snippet} from 'svelte';
  import {clockActivitySeries,clockDonationSeries,clockAxis,type ClockActivity} from '../../../packages/core/src/clock-activity';
  import {clockLabel,timeAudience,type Window,type TimePerson,type TimeAudienceSummary} from './time-audience';
  import TimeAudience from './TimeAudience.svelte';
@@ -7,11 +7,25 @@
  import {chartMetrics} from './chart-series';
  import Help from './Help.svelte';
  import PeriodSelect from './PeriodSelect.svelte';
- let {scope,visitorRevision,categoryFilter,rows,metric=$bindable('viewers'),resolution=$bindable(15),timezone,period='all',onperiod,windows=[],people=[],summary=[],onPerson,loadVisitors}:{visitorRevision?:string|undefined;scope?:string;categoryFilter:Snippet<[string]>;rows:ClockActivity[];metric?:ActivityMetric;resolution?:number;timezone:string;period?:number|'all'|'custom';onperiod:(value:number|'all'|'custom')=>void;windows?:Window[];people?:TimePerson[];summary?:TimeAudienceSummary[];onPerson:(id:string)=>void;loadVisitors?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>}=$props();
+ let {scope,visitorRevision,categoryFilter,rows,metric=$bindable('viewers'),resolution=$bindable(15),timezone,period='all',onperiod,windows=[],people=[],summary=[],summarySelection,loadSummary,onPerson,loadVisitors}:{visitorRevision?:string|undefined;scope?:string;categoryFilter:Snippet<[string]>;rows:ClockActivity[];metric?:ActivityMetric;resolution?:number;timezone:string;period?:number|'all'|'custom';onperiod:(value:number|'all'|'custom')=>void;windows?:Window[];people?:TimePerson[];summary?:TimeAudienceSummary[];summarySelection?:{day:string;resolution:number};loadSummary?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>;onPerson:(id:string)=>void;loadVisitors?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>}=$props();
  let day=$state('all'),currency=$state('RUB'),selected=$state<number|null>(null),availableWidth=$state(800);
  const plotWidth=$derived(Math.max(300,availableWidth));
  const step=$derived([1,5,15,30,60].includes(resolution)?resolution:15);
- const attendance=$derived(summary.length?summary.filter(b=>b.day===day&&b.resolution===step):timeAudience(windows,people,timezone,step,day).map(b=>({...b,streams:b.streams.size,people:[]})));
+ let loadedSummaries=$state<Record<string,TimeAudienceSummary[]>>({}),summaryBusy=$state(false),summaryError=$state(''),summaryRetry=$state(0);
+ const summaryKey=$derived(JSON.stringify([scope,visitorRevision,day,step]));
+ const initialSummary=$derived(!summarySelection||(summarySelection.day===day&&summarySelection.resolution===step)||(step===60&&['пн','вт','ср','чт','пт','сб','вс'].includes(day)));
+ const displayedSummary=$derived(initialSummary?summary:loadedSummaries[summaryKey]??[]);
+ $effect(()=>{
+  const key=summaryKey,loader=loadSummary,initial=initialSummary,currentDay=day,resolution=step;void summaryRetry;
+  summaryBusy=false;summaryError='';
+  if(initial||!loader||untrack(()=>loadedSummaries[key]!==undefined))return;
+  const controller=new AbortController();summaryBusy=true;
+  void untrack(()=>loader({clockDay:currentDay,clockResolution:resolution},controller.signal)).then(result=>{
+   if(!controller.signal.aborted){const retained=Object.entries(untrack(()=>loadedSummaries)).slice(-49);loadedSummaries={...Object.fromEntries(retained),[key]:result.clockBuckets??[]};}
+  }).catch(e=>{if(!controller.signal.aborted)summaryError=e.message;}).finally(()=>{if(!controller.signal.aborted)summaryBusy=false;});
+  return ()=>controller.abort();
+ });
+ const attendance=$derived(summarySelection||displayedSummary.length?displayedSummary.filter(b=>b.day===day&&b.resolution===step):timeAudience(windows,people,timezone,step,day).map(b=>({...b,streams:b.streams.size,people:[]})));
  const currencies=$derived([...new Set(rows.flatMap(row=>Object.keys(row.donationAmounts??{})))].sort());
  const activeCurrency=$derived(currencies.includes(currency)?currency:currencies[0]??'RUB');
  const buckets=$derived((metric==='activeAudience'?Array.from({length:1440/step},(_,i)=>{const minute=i*step,b=attendance.find(b=>b.minute===minute);return {minute,value:b?.averageAudience??null,duration:b?.airtimeMs??0,total:b?.personTimeMs??0};}):metric==='donations'?clockDonationSeries(rows,activeCurrency,step,day):clockActivitySeries(rows,metric,step,day,true)));
@@ -56,7 +70,9 @@
   {#each ticks as minute}<text x={45+(minute-start)/span*(plotWidth-70)} y="230" text-anchor={minute===start?'start':minute===start+span?'end':'middle'} fill="currentColor" font-size="12">{clockLabel(minute)}</text>{/each}
  </svg></div>
  <p class="clock-caption small" role="status">{chosen?description(chosen):'Нажмите столбец: точное значение, люди и их явка. Серый — нет данных.'}</p>
-<TimeAudience {scope} revision={visitorRevision} {windows} {people} {summary} {timezone} {onPerson} {loadVisitors} {day} resolution={step} {selected}/>
+{#if summaryBusy}<p class="clock-caption small" role="status">Загружаем детализацию графика…</p>{/if}
+ {#if summaryError}<p class="clock-caption small" role="alert">{summaryError} <button onclick={()=>summaryRetry++}>Повторить</button></p>{/if}
+ <TimeAudience deferredSummary={!!summarySelection} {scope} revision={visitorRevision} {windows} {people} summary={displayedSummary} {timezone} {onPerson} {loadVisitors} {day} resolution={step} {selected}/>
 </section>
 <style>
  .clock-controls{display:flex;flex-wrap:wrap;gap:12px;padding:16px 20px}.clock-controls label{display:grid;gap:6px;font-size:12px;flex:1 1 160px;min-width:0}select{width:100%;min-width:0}.clock-caption{padding:0 20px 12px;margin:0}.clock-plot{padding:8px 16px;min-width:0}svg{display:block;width:100%;height:auto;overflow:visible}g{cursor:pointer}g.chosen{outline:1px solid var(--accent)}g:focus{outline:2px solid var(--accent)}

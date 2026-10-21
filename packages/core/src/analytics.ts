@@ -1,3 +1,4 @@
+import {latestFollowerSnapshotsSql} from './follower-queries.js';
 import {dateTimeFormatter} from './date-time-formatter.js';
 import {clockActivity} from './clock-activity.js';
 import {donationTiming} from './donation-statistics.js';
@@ -20,6 +21,7 @@ export interface AnalyticsOptions {
     audienceSearch?:string;
     audienceSort?:string;
     audienceCoreOnly?:boolean;
+    clockCompact?:boolean;
     clockDay?:string;
     clockMinute?:number;
     clockResolution?:number;
@@ -285,7 +287,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         minute(at);
         elapsedMinutes.set(at,(elapsedMinutes.get(at)??0)+Math.max(0,Math.min(at+60000,segment.to)-Math.max(at,segment.from))/60000);
     }
-    const followRows=db.prepare("SELECT p.source,p.account_id,p.payload_json FROM follower_observations p WHERE key='followers' AND id=(SELECT q.id FROM follower_observations q WHERE q.source=p.source AND q.account_id=p.account_id AND q.key='followers' ORDER BY observed_at_ms DESC,id DESC LIMIT 1)").all() as {source:string;account_id:string;payload_json:string}[];
+    const followRows=db.prepare(latestFollowerSnapshotsSql).all() as {source:string;account_id:string;payload_json:string}[];
     const followerPeople=new Set<string>(),negativeFollowers=new Set<string>();
     const platformFollowers={twitch:new Set<string>(),youtube:new Set<string>()};
     const platformNonFollowers={twitch:new Set<string>(),youtube:new Set<string>()};

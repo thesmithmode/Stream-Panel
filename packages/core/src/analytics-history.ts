@@ -1,3 +1,4 @@
+import {latestFollowerChecksSql,latestFollowerSnapshotsSql} from './follower-queries.js';
 import {dateTimeFormatter} from './date-time-formatter.js';
 import {streamInsights,InsightAccumulator,type InsightCard} from './insights.js';
 import {mergeClockActivity, type ClockActivity} from './clock-activity.js';
@@ -28,6 +29,7 @@ type Report = ReturnType<typeof audienceAnalytics> & {
     insights?:InsightCard[];
     clockBuckets?: ClockBucket[];
     clockRevision?:string;
+    clockSelection?:{day:string;resolution:number};
     aggregate?: boolean;
     preparing?: boolean;
     ready?: number;
@@ -63,14 +65,14 @@ export class AnalyticsHistory {
         if (!statement) { statement = this.db.prepare(sql); this.statements.set(sql, statement); }
         return statement;
     }
-    private readonly completed = new Map<string,{value:Report;bytes:number;workspace?:AnalyticsWorkspace<Person>;liveRevision?:string}>();
+    private readonly completed = new Map<string,{value:Report;bytes:number;workspace?:AnalyticsWorkspace<Person>;liveRevision?:string;savedKey?:string}>();
     private completedBytes=0;
-    private remember(key:string,value:Report,workspace?:AnalyticsWorkspace<Person>,liveRevision?:string){
+    private remember(key:string,value:Report,workspace?:AnalyticsWorkspace<Person>,liveRevision?:string,savedKey?:string){
         const limit=this.cachePolicy.maxCompletedBytes??16*1024*1024,bytes=serialize(value).byteLength;
         if(bytes>limit){workspace?.dispose();return;}
         const previous=this.completed.get(key);if(previous){previous.workspace?.dispose();this.completedBytes-=previous.bytes;this.completed.delete(key);}
         while(this.completed.size>=16||this.completedBytes+bytes>limit){const oldest=this.completed.keys().next().value!;this.completedBytes-=this.completed.get(oldest)!.bytes;this.completed.get(oldest)!.workspace?.dispose();this.completed.delete(oldest);}
-        this.completed.set(key,{value:structuredClone(value),bytes,...(workspace?{workspace}:{}),...(liveRevision?{liveRevision}:{})});this.completedBytes+=bytes;
+        this.completed.set(key,{value:structuredClone(value),bytes,...(workspace?{workspace}:{}),...(liveRevision?{liveRevision}:{}),...(savedKey?{savedKey}:{})});this.completedBytes+=bytes;
     }
     private readonly jobs = new Map<string, {
         iterator: Generator<Progress, Report, void>;
@@ -96,6 +98,13 @@ export class AnalyticsHistory {
     }
     close(){this.liveStreams.clear();for(const job of this.jobs.values())job.workspace.dispose();this.jobs.clear();for(const entry of this.completed.values())entry.workspace?.dispose();this.completed.clear();this.completedBytes=0;}
     private page(value:Report,workspace:AnalyticsWorkspace<Person>|undefined,options:AnalyticsOptions):Report{
+        // Project before cloning or crossing the worker boundary. The complete cached
+        // report stays available for every day/resolution and legacy API clients.
+        if(options.clockCompact){
+            const day=options.clockDay??'all',resolution=options.clockResolution??15;
+            value={...value,clockSelection:{day,resolution},clockBuckets:(value.clockBuckets??[]).filter(b=>
+                (b.day===day&&b.resolution===resolution)||(b.resolution===60&&days.slice(3).includes(b.day)))};
+        }
         if(!workspace)return value;
         const page=workspace.people.page(options.audienceOffset??0,options.audienceSearch??'',options.audienceSort??'core',options.audienceCoreOnly??false);
         return {...value,audience:page.items,...(workspace.people.size>100?{audiencePage:{total:page.total,offset:page.offset,limit:page.limit}}:{}),...(options.clockMinute!==undefined?{clockVisitors:workspace.clockPage(options.clockDay??'all',options.clockMinute,options.clockResolution??60,options.clockOffset??0)}:{})};
@@ -137,15 +146,7 @@ export class AnalyticsHistory {
     private followerRevision(){
         // A repeated check of the same payload must not rebuild unchanged history.
         // Seek the latest check for each distinct payload instead of scanning all checks.
-        return this.statement(`WITH versions AS (
-          SELECT p.source,p.account_id,p.id,
-           (SELECT c.observed_at_ms FROM follower_checks c WHERE c.snapshot_id=p.id ORDER BY c.observed_at_ms DESC,c.id DESC LIMIT 1) AS at,
-           (SELECT c.id FROM follower_checks c WHERE c.snapshot_id=p.id ORDER BY c.observed_at_ms DESC,c.id DESC LIMIT 1) AS check_id
-          FROM provider_snapshots p WHERE p.key='followers'
-        ), ranked AS (
-          SELECT source,account_id,id,row_number() OVER(PARTITION BY source,account_id ORDER BY at DESC,check_id DESC) AS rank
-          FROM versions WHERE at IS NOT NULL
-        ) SELECT source,account_id,id FROM ranked WHERE rank=1 ORDER BY source,account_id`).all();
+        return this.statement(`SELECT source,account_id,snapshot_id AS id FROM (${latestFollowerChecksSql}) ORDER BY source,account_id`).all();
     }
     private build(options: AnalyticsOptions, session: Session): Report {
         const report = audienceAnalytics(this.db, { ...options, sessionId: session.id });
@@ -318,21 +319,28 @@ export class AnalyticsHistory {
         const sessions = this.sessions(options);
         const live = sessions.some(session => session.ended_at_ms === null);
         const lastEnd = sessions.reduce((end, session) => Math.max(end, session.ended_at_ms ?? options.toMs), options.fromMs);
-        const {audienceOffset,audienceSearch,audienceSort,audienceCoreOnly,clockDay,clockMinute,clockResolution,clockOffset,clockBatch,...baseOptions}=options;
-        void audienceOffset;void audienceSearch;void audienceSort;void audienceCoreOnly;void clockDay;void clockMinute;void clockResolution;void clockOffset;void clockBatch;
+        const {audienceOffset,audienceSearch,audienceSort,audienceCoreOnly,clockDay,clockMinute,clockResolution,clockOffset,clockBatch,clockCompact,...baseOptions}=options;
+        void audienceOffset;void audienceSearch;void audienceSort;void audienceCoreOnly;void clockDay;void clockMinute;void clockResolution;void clockOffset;void clockBatch;void clockCompact;
         const canonical = { ...baseOptions,source:options.source??'all',category:options.category??'', fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
         const fingerprint = createHash('sha256').update(JSON.stringify([3,historical, Object.fromEntries(Object.entries(canonical).sort(([a],[b])=>a.localeCompare(b))), this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.annotationsRevision(), this.followerRevision()])).digest('hex');
         const liveRevision=JSON.stringify(sessions.filter(s=>s.ended_at_ms===null).map(s=>[s.id,s.revision]));
         const retained=this.completed.get(fingerprint);
-        const cached=retained&&(!live||retained.liveRevision===liveRevision)?retained:undefined;
+        const cached=retained&&(!live||retained.liveRevision===liveRevision)&&(!retained.savedKey||this.statement('SELECT 1 FROM analytics_reports WHERE cache_key=?').get(retained.savedKey))?retained:undefined;
         if(cached){
-            if(clockOnly)return this.clockResult({...cached.value,filters:{...cached.value.filters,fromMs:options.fromMs,toMs:options.toMs}},cached.workspace,options);
+            const workspace=cached.savedKey?new AnalyticsWorkspace<Person>(this.db,cached.savedKey):cached.workspace;
+            try{
+            if(clockOnly)return this.clockResult({...cached.value,filters:{...cached.value.filters,fromMs:options.fromMs,toMs:options.toMs}},workspace,options);
             this.completed.delete(fingerprint);this.completed.set(fingerprint,cached);
             const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as { payload_json: string; updated_at_ms: number } | undefined : undefined;
-            return this.page({ ...structuredClone(cached.value), filters: { ...cached.value.filters, fromMs: options.fromMs, toMs: options.toMs }, youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, donationTiming: donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow', options.category) },cached.workspace,options);
+            return structuredClone(this.page({ ...cached.value, filters: { ...cached.value.filters, fromMs: options.fromMs, toMs: options.toMs }, youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, donationTiming: donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow', options.category) },workspace,options));
+            }finally{if(cached.savedKey)workspace?.dispose();}
         }
         const saved=!live&&historical?this.reportCache.get(fingerprint):undefined;
         if(saved){
+            // Rolling requests with unchanged effective stream bounds reuse the
+            // decoded report after restart, too. Saved membership is checked on
+            // every hit: durable eviction must never turn a cached page empty.
+            this.remember(fingerprint,saved,undefined,undefined,fingerprint);
             const workspace=new AnalyticsWorkspace<Person>(this.db,fingerprint);
             try{
                 const value={...saved,filters:{...saved.filters,fromMs:options.fromMs,toMs:options.toMs}};
@@ -528,7 +536,7 @@ export class AnalyticsHistory {
             person.detailAvailable=true;people.set(person.id,person);
             if(performance.now()-sliceStart>250){yield {preparing:true,ready:processed,total:sessions.length*2};sliceStart=performance.now();}
         }
-        const current = this.statement("SELECT p.source,p.account_id,p.payload_json FROM follower_observations p WHERE p.id=(SELECT q.id FROM follower_observations q WHERE q.source=p.source AND q.account_id=p.account_id ORDER BY q.observed_at_ms DESC,q.id DESC LIMIT 1)").all() as {
+        const current = this.statement(latestFollowerSnapshotsSql).all() as {
             source: string;
             account_id: string;
             payload_json: string;
