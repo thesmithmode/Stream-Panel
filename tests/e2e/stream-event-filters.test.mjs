@@ -13,7 +13,7 @@ test('stream charts retain exact message counts while the event feed contains no
   await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`[data-session-id="${id}"]`).locator('.stream-open').click();
   const feed=page.locator('.stream-feed'),messages=page.locator('.stream-kpis > div').filter({hasText:'Сообщения'}).locator('strong');
   await messages.getByText('2',{exact:true}).waitFor();assert.equal(await feed.count(),0);
-  await page.getByLabel('Настроить график эфира').click();
+  await page.getByRole('button',{name:'1 мин',exact:true}).click();
   for(const metric of ['messages','twitchMessages','youtubeMessages','viewers','twitchViewers','youtubeViewers']){
    await page.getByLabel('Показатель графика стрима').selectOption(metric);
    assert.equal(await feed.getByText('Twitch message content',{exact:true}).count(),0);assert.equal(await feed.getByText('YouTube message content',{exact:true}).count(),0);

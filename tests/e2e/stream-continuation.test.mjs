@@ -30,10 +30,10 @@ test('stream continuation shows Moscow dates, a real break, participant interval
   await ranking.getByText('Интервалы',{exact:true}).click();
   assert.ok((await ranking.textContent()).includes('11:04 — 11:07'));
   assert.ok((await ranking.textContent()).includes('11:14 — 11:17'));
-  await page.getByLabel('История названий и категорий',{exact:true}).click();
+  await page.locator('.metadata-menu>summary').click();await page.getByRole('dialog',{name:'История названий и категорий',exact:true}).waitFor();
   assert.ok((await page.locator('.stream-facts').textContent()).includes('First game · First title'));
   assert.ok((await page.locator('.stream-facts').textContent()).includes('Second game · Second title'));
-  await page.getByRole('tab',{name:'Итоги',exact:true}).click();const breakBar=page.locator('.series-panel .chart-bar').nth(4);assert.match(await breakBar.getAttribute('aria-label'),/Перерыв/);await breakBar.click();assert.ok((await page.getByRole('region',{name:'Детали выбранного столбца'}).textContent()).includes('перерыв'));
+  await page.keyboard.press('Escape');await page.getByRole('tab',{name:'Итоги',exact:true}).click();await page.getByRole('button',{name:'1 мин',exact:true}).click();const breakBar=page.locator('.series-panel .chart-bar').nth(4);assert.match(await breakBar.getAttribute('aria-label'),/Перерыв/);await breakBar.click();assert.ok((await page.getByRole('region',{name:'Детали выбранного столбца'}).textContent()).includes('перерыв'));
   const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(evidence){await mkdir(evidence,{recursive:true});await page.screenshot({path:join(evidence,'stream-continuation-desktop.png'),fullPage:true});}
   await navigate(page,'Интеграции');
   for(const provider of ['Twitch','DonationAlerts','YouTube']){

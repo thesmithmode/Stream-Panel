@@ -15,6 +15,7 @@
   import type {Session} from './api';
   import {
     api,
+    getProfile,
     money,
     type Summary,
   } from "./api";
@@ -37,7 +38,11 @@
   const viewerMetrics=$derived(audienceData?.streamComparison?.[0]?.viewers);
   const viewers=$derived(viewerMetrics?.known?.partialMinutes?viewerMetrics.known:viewerMetrics?.all);
   const viewerPartial=$derived((viewerMetrics?.known?.partialMinutes??0)>0);
-  let resolution=$state(1);
+  function loadResolution(){
+    try{const saved=Number(localStorage.getItem(`sp-stream-resolution-${getProfile()}`));return [1,5,15].includes(saved)?saved:5;}catch{return 5;}
+  }
+  let resolution=$state(loadResolution());
+  function setResolution(value:number){resolution=value;try{localStorage.setItem(`sp-stream-resolution-${getProfile()}`,String(value));}catch{/* Preferences are optional. */}}
   let activeTab=$state('summary');
   const decimal=(n:number)=>n.toLocaleString('ru-RU',{maximumFractionDigits:1});
   let metadata=$state<Array<{at:number;title:string;categoryName:string}>>([]);
@@ -76,7 +81,10 @@
 {#if activeTab==='summary'}
 <section class="panel series-panel">
   <header><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2></header>
-  <details class="chart-options"><summary aria-label="Настроить график эфира">Настроить график</summary><div class="chart-controls filter-fields"><label>Показатель<select aria-label="Показатель графика стрима" bind:value={audienceMetric}>{#each chartMetrics as choice}<option value={choice.value}>{choice.label}</option>{/each}</select></label><label>Детализация<select aria-label="Детализация графика" bind:value={resolution}><option value={1}>1м</option><option value={5}>5м</option><option value={15}>15м</option></select></label></div></details>
+  <div class="stream-chart-toolbar">
+    <select aria-label="Показатель графика стрима" bind:value={audienceMetric}>{#each chartMetrics as choice}<option value={choice.value}>{choice.label}</option>{/each}</select>
+    <div class="period-chips" role="group" aria-label="Детализация графика">{#each [1,5,15] as step}<button class:active={resolution===step} aria-pressed={resolution===step} onclick={()=>setResolution(step)}>{step} мин</button>{/each}</div>
+  </div>
   {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceData}
     <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric={audienceMetric} {resolution} showResolution={false} showRegulars={true} {onPerson}/>
   {:else}<p class="empty-small" role="status">{audienceBusy?'Загружаем график…':'Выберите стрим'}</p>{/if}
@@ -89,6 +97,6 @@
 {:else if sessionFilter}<section class="panel"><header><h2>События стрима · 48 ч</h2></header><div class="settings-body"><RecentEvents sessionId={sessionFilter}/></div></section>{/if}
 </div>
 <style>
- .stream-title-row{display:flex;gap:16px;align-items:start}.stream-title-row h1{flex:1;min-width:0;font-size:26px;line-height:1.3;margin:0 0 12px;overflow-wrap:anywhere}.stream-meta{color:var(--muted);margin:0 0 6px;font-size:14px}.series-panel>header{display:flex;align-items:center;justify-content:space-between}.chart-controls{display:flex;gap:12px;margin-top:12px}.chart-controls label{display:grid;gap:6px;flex:1;min-width:0;font-size:13px}.chart-controls select{width:100%;min-width:0}
+ .stream-title-row{display:flex;gap:16px;align-items:start}.stream-title-row h1{flex:1;min-width:0;font-size:26px;line-height:1.3;margin:0 0 12px;overflow-wrap:anywhere}.stream-meta{color:var(--muted);margin:0 0 6px;font-size:14px}.series-panel>header{display:flex;align-items:center;justify-content:space-between}
  @media(min-width:1000px){.stream-title-row h1{font-size:30px}}
 </style>

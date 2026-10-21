@@ -40,13 +40,14 @@ test('overflow sheets do not stretch cards; disclosure controls remain aligned w
    await page.keyboard.press('Escape');await menu.waitFor({state:'hidden'});assert.equal(await trigger.evaluate(e=>e===document.activeElement),true);
    await trigger.click();await menu.waitFor();await menu.getByRole('button',{name:'Закрыть',exact:true}).click();await menu.waitFor({state:'hidden'});
   }
-  await card.locator('.stream-open').click();await page.locator('.series-panel svg').waitFor();
+  await card.locator('.stream-open').click();await page.locator('.series-panel svg').waitFor();assert.equal(await page.getByRole('button',{name:'5 мин',exact:true}).getAttribute('aria-pressed'),'true');
   for(const width of [320,390,768,1440,1920]){
-   await page.setViewportSize({width,height:900});const settings=page.getByLabel('Настроить график эфира');await settings.scrollIntoViewIfNeeded();const before=await settings.boundingBox();await settings.click();await page.getByLabel('Показатель графика стрима').waitFor();const after=await settings.boundingBox();assert.equal(after.x,before.x);assert.equal(after.width,before.width);assert.equal(after.height,before.height);
-   await page.getByLabel('Показатель графика стрима').selectOption('messages');await page.getByLabel('Детализация графика',{exact:true}).selectOption('5');await assertUiLayout(page);await settings.click();
+   await page.setViewportSize({width,height:900});const toolbar=page.locator('.stream-chart-toolbar');await toolbar.scrollIntoViewIfNeeded();const before=await toolbar.boundingBox();
+   await page.getByLabel('Показатель графика стрима').selectOption('messages');for(const step of [1,15,5]){await toolbar.getByRole('button',{name:`${step} мин`,exact:true}).click();assert.equal(await toolbar.getByRole('button',{name:`${step} мин`,exact:true}).getAttribute('aria-pressed'),'true');const after=await toolbar.boundingBox();assert.equal(after.x,before.x);assert.equal(after.width,before.width);assert.equal(after.height,before.height);}await assertUiLayout(page);
    const insights=page.getByRole('button',{name:'Инсайты',exact:true});await insights.click();assert.equal(await insights.getAttribute('aria-expanded'),'true');await insights.click();assert.equal(await insights.getAttribute('aria-expanded'),'false');
    await page.locator('.section-disclosure>summary').filter({hasText:/^Подписчики$/}).click();await page.getByRole('region',{name:'Подписчики за стрим',exact:true}).getByText('Новых подписок не зафиксировано.',{exact:true}).waitFor();assert.equal(await page.getByRole('heading',{name:'Подписчики за стрим',exact:true}).count(),0);await page.locator('.section-disclosure>summary').filter({hasText:/^Подписчики$/}).click();
   }
+  await page.getByRole('button',{name:'15 мин',exact:true}).click();await page.reload();await page.locator('.series-panel svg').waitFor();assert.equal(await page.getByRole('button',{name:'15 мин',exact:true}).getAttribute('aria-pressed'),'true');
   await page.locator('.metadata-menu>summary').click();const metadata=page.getByRole('dialog',{name:'История названий и категорий',exact:true});await metadata.waitFor();await metadata.getByText(/Dota 2/).waitFor();await assertUiLayout(page);await page.keyboard.press('Escape');
   assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await a.close();}

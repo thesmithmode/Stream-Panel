@@ -36,7 +36,7 @@ backend/schema changes just to change the appearance.
 | Merge streams | Streams → Select → check streams → Merge |
 | Unmerge / delete manual stream / platform recording links | Stream card → … |
 | Viewer peak / donor count / breaks | Stream card → …; peak also in stream totals |
-| Stream chart and minute drilldown | Stream → Results; chart options under sliders |
+| Stream chart and minute drilldown | Stream → Results; metric and 1/5/15 min controls above the chart (5 min default, last choice saved per profile) |
 | Viewer ranking, sort, linked accounts, intervals | Stream → Participants |
 | Following / subscription history | Stream → Results → Subscribers |
 | Archived chat, moderation and donation events | Stream → Events |
