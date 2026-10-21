@@ -47,6 +47,7 @@
     return result;
   }
   const visitorLoader=$derived.by(()=>{const filters=data?.filters;return (params:Record<string,string|number>,signal:AbortSignal)=>reportPage(params,signal,'analytics/clock',filters);});
+  const clockLoader=$derived.by(()=>{const filters=data?.filters;return (params:Record<string,string|number>,signal:AbortSignal)=>reportPage(params,signal,'analytics/clock-summary',filters);});
   $effect(()=>{void search;void view.sort;void view.coreOnly;void reportScope;audienceOffset=0;});
   $effect(()=>{
     const current=data,offset=audienceOffset,term=search,sort=view.sort,core=view.coreOnly;
@@ -111,7 +112,7 @@
       // search or core-only after an auto-refresh cannot hide participants.
       const offset=0,term='',sort=view.sort,core=false;
       const audienceQuery=JSON.stringify([scope,offset,term,sort,core]);
-      const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,timezone,mode:'summary',insights:'1',audienceOffset:String(offset),audienceSearch:term,audienceSort:sort,audienceCoreOnly:core?'1':'0'});
+      const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,timezone,mode:'summary',insights:'1',clockCompact:'1',clockDay:'all',clockResolution:String(view.resolution),audienceOffset:String(offset),audienceSearch:term,audienceSort:sort,audienceCoreOnly:core?'1':'0'});
       let result=await api(`analytics?${q}`,undefined,controller.signal);
       while(result.preparing&&id===requestId){buildProgress=`${result.stage==='aggregate'?'Собираем отчёт':'Готовим историю'}: ${Math.round(result.ready/Math.max(1,result.total)*100)}%`;if(id!==requestId)return;result=await api(`analytics?${q}`,undefined,controller.signal);}
       buildProgress='';
@@ -169,7 +170,7 @@
       {#each weekdays as weekday}<div class="heatmap-row"><strong>{weekday}</strong>{#each Array.from({length:24},(_,i)=>i) as hour}<button aria-label={hourTitle(weekday,hour)} title={hourTitle(weekday,hour)} onclick={()=>selectedHour={day:weekday,hour}} style:background={heatValue(hourCells.get(`${weekday}:${hour}`))!==null?`rgba(95,196,170,${.15+.85*(heatValue(hourCells.get(`${weekday}:${hour}`))??0)/hourMax})`:"#3b4350"}></button>{/each}</div>{/each}
     </div>{/if}{#if selectedHour}<p class="analytics-help small" role="status">{hourTitle(selectedHour.day,selectedHour.hour)}</p>{/if}<div class="analytics-help"><Help id="analytics-hours" label="О карте активности" text="Шкала яркости общая для всей карты: одинаковые значения во всех днях и часах имеют одинаковый цвет. Максимум определяется выбранными периодом, категорией и метрикой. Наблюдения Twitch усредняются по минутам с полными опросами; оценка YouTube и сообщения — по записанным минутам эфира. Серый — нет данных."/></div></section>{/if}
 
-  {#if view.trend}<ActivityClock scope={reportScope} visitorRevision={data.clockRevision} {categoryFilter} rows={data.activityClock??[]} windows={data.activityWindows??[]} people={data.audience??[]} summary={data.clockBuckets??[]} loadVisitors={visitorLoader} {onPerson} bind:metric={view.metric} bind:resolution={view.resolution} {timezone} {period} onperiod={value=>{if(value!=='custom')preset(value);}}/>{/if}
+  {#if view.trend}<ActivityClock scope={reportScope} visitorRevision={data.clockRevision} {categoryFilter} rows={data.activityClock??[]} windows={data.activityWindows??[]} people={data.audience??[]} summary={data.clockBuckets??[]} summarySelection={data.clockSelection} loadSummary={clockLoader} loadVisitors={visitorLoader} {onPerson} bind:metric={view.metric} bind:resolution={view.resolution} {timezone} {period} onperiod={value=>{if(value!=='custom')preset(value);}}/>{/if}
 
   <div class="timing-grid">
   {#if data.donationTiming}<DonationPatterns {categoryFilter} timing={data.donationTiming}/>{/if}

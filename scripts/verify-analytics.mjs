@@ -24,13 +24,15 @@ try{
    if(!active){let rounds=0;while(store.warmAnalytics(options,true).preparing)if(++rounds>10000)throw Error('WARM_DID_NOT_FINISH');}
    const warmMs=Math.round(performance.now()-start),repeat=read();
    if(JSON.stringify(first.report.summary)!==JSON.stringify(repeat.report.summary))throw Error('WARM_CHANGED_SUMMARY');
+   const compact=read({...options,clockCompact:true,clockDay:'all',clockResolution:15});
+   if(JSON.stringify(compact.report.summary)!==JSON.stringify(repeat.report.summary))throw Error('COMPACT_CHANGED_SUMMARY');
    const periods=[];
    for(const days of [7,30]){
-    const query={...options,fromMs:options.toMs-days*86400000},cold=read(query),hot=read(query),shifted=read({...query,fromMs:query.fromMs+60000,toMs:query.toMs+60000});
+    const query={...options,clockCompact:true,clockDay:'all',clockResolution:15,fromMs:options.toMs-days*86400000},cold=read(query),hot=read(query),shifted=read({...query,fromMs:query.fromMs+60000,toMs:query.toMs+60000});
     if(JSON.stringify(cold.report.summary)!==JSON.stringify(hot.report.summary))throw Error('REPEAT_CHANGED_SUMMARY');
     periods.push({days,firstReadyMs:cold.ms,firstRequests:cold.requests,hotReadyMs:hot.ms,shiftedReadyMs:shifted.ms,shiftedRequests:shifted.requests});
    }
-   console.log(JSON.stringify({analyticsProbe:true,profile,active,firstReadyMs:first.ms,firstRequests:first.requests,warmMs,hotReadyMs:repeat.ms,hotRequests:repeat.requests,streams:repeat.report.summary.streams,responseBytes:Buffer.byteLength(JSON.stringify(repeat.report)),gzipBytes:gzipSync(JSON.stringify(repeat.report),{level:1}).length,periods}));
+   console.log(JSON.stringify({analyticsProbe:true,profile,active,firstReadyMs:first.ms,firstRequests:first.requests,warmMs,hotReadyMs:repeat.ms,hotRequests:repeat.requests,streams:repeat.report.summary.streams,responseBytes:Buffer.byteLength(JSON.stringify(repeat.report)),compactResponseBytes:Buffer.byteLength(JSON.stringify(compact.report)),compactHotReadyMs:compact.ms,gzipBytes:gzipSync(JSON.stringify(repeat.report),{level:1}).length,periods}));
   }finally{store.close();}
  }
 }finally{source.close();await rm(staging,{recursive:true,force:true});}
