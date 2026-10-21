@@ -70,7 +70,7 @@ details[open]:not(.action-menu)>summary::after{transform:rotate(225deg);margin-b
 .analytics-results>.audience-growth .growth-selection dd.no-data{font-size:16px;font-weight:400;color:var(--muted);}
 
 .stream-chart-toolbar{display:flex;align-items:center;gap:12px;margin:12px 0 4px;min-width:0;}
-.stream-chart-toolbar>select{flex:1;min-width:0;width:100%;min-height:44px;font-size:14px;}
+.stream-chart-toolbar>select{flex:1;min-width:0;width:100%;max-width:320px;min-height:44px;font-size:14px;}
 .stream-chart-toolbar>.period-chips{flex:0 0 168px;}
 .stream-chart-toolbar .period-chips button{font-size:13px;padding:8px 6px;}
 @media(max-width:360px){.stream-chart-toolbar{gap:8px}.stream-chart-toolbar>.period-chips{flex-basis:150px}.stream-chart-toolbar>select{font-size:13px;padding-inline:8px}.stream-chart-toolbar .period-chips button{font-size:12px;padding-inline:4px}}
