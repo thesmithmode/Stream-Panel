@@ -5,8 +5,8 @@
   let {label,title=label,children,variant=''}:{label:string;title?:string;children:Snippet<[()=>void]>;variant?:string}=$props();
   let open=$state(false);
 </script>
-<details class={`action-menu ${variant}`} bind:open>
-  <summary aria-label={label} aria-haspopup="dialog"><Icon name="more"/></summary>
+<details class={`action-menu ${variant}`} {open}>
+  <summary aria-label={label} aria-haspopup="dialog" aria-expanded={open} onclick={event=>{event.preventDefault();open=!open;}}><Icon name="more"/></summary>
   <Sheet bind:open {title}><div class="action-menu-content">{@render children(()=>open=false)}</div></Sheet>
 </details>
 <style>

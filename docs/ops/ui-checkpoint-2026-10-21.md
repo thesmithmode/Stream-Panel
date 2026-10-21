@@ -16,6 +16,11 @@ revert its release merge on current main using the same process below.
 
 ## Roll back the UI
 
+Before the chart-density and People refinement, production is preserved at
+`69f0d07e328e16f9cf714a49bbb0d1f211e5bd98`, branch
+`checkpoint/ui-before-people-2026-10-21`. This refinement adds read-only 30-day
+donation totals without changing stored facts or database schemas.
+
 Revert the redesign merge/squash commit on a branch from the **current main**,
 run the existing quality gate, merge and let `Deploy server` publish the release.
 For a normal merge use `git revert -m 1 MERGE_SHA`; for a squash commit use
@@ -28,7 +33,7 @@ backend/schema changes just to change the appearance.
 
 | Previously visible | New location |
 | --- | --- |
-| Channel overview totals | More → Channel totals; donation sum also on Streams |
+| Channel overview totals | More → Channel totals; 30-day and all-time donation sums also on Streams |
 | Profile selection | Page heading |
 | Refresh on/off, interval, manual refresh | More → Data refresh |
 | Integrations, settings, logout and backups | More → Integrations / Settings |
@@ -48,7 +53,12 @@ backend/schema changes just to change the appearance.
 | Growth, categories, stream comparison, YouTube channel report | Analytics → Trends; detailed tables expand |
 | Heatmap, clock and interval visitors, schedule and donation timing | Analytics → Time; each chart has options |
 | Audience composition, search, core filter, attendance, minute intervals | Analytics → Audience |
-| People, notes, tags, merge/split/undo, donation editing and assignment | Existing People / Donations flows |
+| People search, ranking and paging | People → directory; desktop directory remains beside the selected card |
+| Person statistics, activity, messages, donations, notes/tags, merge/split/undo | Person card → Overview / Activity / Messages / Donations / Notes / Accounts; phone back button returns to the directory |
+| Donation editing and assignment | Donations; person card → Donations |
 
-Missing measurements remain distinct from zero. Partial counts retain a visible
-indicator and their explanation. Settings remain scoped to the selected profile.
+Missing measurements remain distinct from zero. Incomplete measurements remain
+explained in stream actions, chart help and selected-bar details; the repeated
+visible "частично" label was removed at the user's request. Settings remain
+scoped to the selected profile. Unknown donation dates count toward all-time
+totals only; the 30-day period uses confirmed timestamps and exact currency sums.
