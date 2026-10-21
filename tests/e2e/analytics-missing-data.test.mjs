@@ -1,3 +1,4 @@
+import {navigate,setFilter,openFilters,closeFilters} from '../helpers/navigation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
@@ -29,24 +30,24 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
  await page.route('**/api/v1/analytics?*',route=>route.fulfill({json:data}));
  page.setDefaultTimeout(8000);
  const response=()=>page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/analytics');
- const renderNextHistory=async()=>{assert.deepEqual(errors,[]);await page.getByRole('button',{name:'Обзор',exact:true}).click();const received=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await received;};
+ const renderNextHistory=async()=>{assert.deepEqual(errors,[]);await navigate(page,'Обзор');const received=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await received;await page.getByRole('tab',{name:'Аудитория',exact:true}).click();};
  try {
   await goto(page,`http://127.0.0.1:${port}`);
   await page.getByLabel('Логин',{exact:true}).fill('fixture');await page.getByLabel('Пароль',{exact:true}).fill('fixture-missing-data-password');await page.getByRole('button',{name:'Войти',exact:true}).click();
-  const first=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await first;
+  const first=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await first;await page.getByRole('tab',{name:'Аудитория',exact:true}).click();
   await page.getByRole('button',{name:person.name,exact:true}).waitFor();
   assert.ok(await page.getByText('0 из 1 (нет данных)',{exact:true}).count());
-  const legacyGrowth=page.locator('.audience-growth');await legacyGrowth.locator('svg g').first().click();await legacyGrowth.locator('svg g').first().focus();await page.keyboard.press(' ');await page.keyboard.press('ArrowRight');assert.ok(new URL(page.url()).searchParams.get('view')==='analytics');assert.equal(await legacyGrowth.locator('.growth-recent button:disabled').count(),2);assert.equal(await legacyGrowth.getByRole('button',{name:'Открыть эфир',exact:true}).isDisabled(),true);assert.equal(await legacyGrowth.getByText('Без категории',{exact:true}).count(),3);
-  await page.getByLabel('Период аналитики').selectOption('custom');assert.equal(await page.getByLabel('Период суточного графика').inputValue(),'custom');
+  await page.getByRole('tab',{name:'Динамика',exact:true}).click();const legacyGrowth=page.locator('.audience-growth');await legacyGrowth.locator('svg g').first().click();await legacyGrowth.locator('svg g').first().focus();await page.keyboard.press(' ');await page.keyboard.press('ArrowRight');assert.ok(new URL(page.url()).searchParams.get('view')==='analytics');assert.equal(await legacyGrowth.locator('.growth-recent button:disabled').count(),2);assert.equal(await legacyGrowth.getByRole('button',{name:'Открыть эфир',exact:true}).isDisabled(),true);assert.equal(await legacyGrowth.getByText('Без категории',{exact:true}).count(),3);
+  await setFilter(page,'Период аналитики','custom');
   const report=page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).locator('..').locator('..');
   assert.equal(await report.locator('th').count(),0);assert.equal(await report.locator('tbody tr').count(),0);
-  const hours=page.locator('.hour-table');await hours.locator('summary').click();
+  await page.getByRole('tab',{name:'Время',exact:true}).click();await page.getByText('Настроить карту',{exact:true}).click();const hours=page.locator('.hour-table');await hours.locator('summary').click();
   for(const metric of ['observed','estimated','messages','viewers']){
    await page.getByLabel('Метрика карты').selectOption(metric);
    assert.equal((await hours.locator('tbody tr td').nth(1).textContent()).trim(),'нет данных');
    assert.match(await page.locator('.hour-heatmap .heatmap-row button').first().getAttribute('title'),/нет данных/);
   }
-  const streams=page.getByRole('heading',{name:'Сравнение стримов',exact:true}).locator('..').locator('..');
+  await page.getByRole('tab',{name:'Динамика',exact:true}).click();await page.getByText('Таблица сравнения стримов',{exact:true}).click();const streams=page.locator('.analytics-secondary details').filter({hasText:'Таблица сравнения стримов'});
   assert.equal((await streams.locator('tbody tr td').nth(5).textContent()).trim(),'0 / 0 / —');
   assert.equal((await streams.locator('tbody tr td').nth(6).textContent()).trim(),'— / —');
   assert.equal((await streams.locator('tbody tr td').nth(7).textContent()).trim(),'— / —');

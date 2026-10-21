@@ -1,3 +1,4 @@
+import {navigate} from '../helpers/navigation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm,writeFile,readFile} from 'node:fs/promises';
@@ -20,7 +21,7 @@ test('authenticated backup UI lists server files, separates cloud status and dow
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844},acceptDownloads:true});page.setDefaultTimeout(10000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));await startCoverage(page);await goto(page,origin);
   await page.getByLabel('Логин',{exact:true}).fill('ruslan');await page.getByLabel('Пароль',{exact:true}).fill('backup-download-password');await page.getByRole('button',{name:'Войти',exact:true}).click();
-  await page.getByRole('button',{name:'Настройки',exact:true}).click();
+  await navigate(page,'Настройки');
   const region=page.getByLabel('Файлы резервных копий');await region.getByText(filename,{exact:true}).waitFor();
   assert.equal(await region.getByText(join(dir,'backups'),{exact:true}).count(),1);
   assert.equal(await region.getByText('Сохранена',{exact:true}).count(),1);assert.equal(await region.getByText('Ошибка',{exact:true}).count(),1);
@@ -31,7 +32,7 @@ test('authenticated backup UI lists server files, separates cloud status and dow
   await page.route('**/api/v1/backups',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'BACKUP_NOT_CONFIGURED'})}));
   await region.getByRole('button',{name:'Обновить список копий',exact:true}).click();await region.getByRole('alert').filter({hasText:'не настроено'}).waitFor();
   await page.unroute('**/api/v1/backups');await region.getByRole('button',{name:'Обновить список копий',exact:true}).click();await region.getByRole('alert').waitFor({state:'detached'});
-  await page.getByRole('button',{name:'Интеграции',exact:true}).click();
+  await navigate(page,'Интеграции');
   const credentials=page.getByLabel('Сохранённые ключи интеграций');
   await page.route('**/api/v1/integrations/credentials',route=>route.fulfill({status:500,contentType:'application/json',body:'{"error":"REQUEST_FAILED"}'}));
   await credentials.getByRole('button',{name:'Загрузить ключи'}).click();await credentials.getByRole('alert').waitFor();await page.unroute('**/api/v1/integrations/credentials');
@@ -40,7 +41,7 @@ test('authenticated backup UI lists server files, separates cloud status and dow
   await credentials.getByRole('button',{name:'Показать значения'}).click();assert.equal(await credentials.getByLabel('Client secret',{exact:true}).getAttribute('type'),'text');
   for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:800});await assertUiLayout(page);}await page.setViewportSize({width:390,height:844});
   await credentials.getByRole('button',{name:'Скрыть значения'}).click();await credentials.getByRole('button',{name:'Закрыть ключи'}).click();assert.equal(await credentials.getByLabel('Client secret',{exact:true}).count(),0);
-  await page.getByRole('button',{name:'Настройки',exact:true}).click();
+  await navigate(page,'Настройки');
   const restore=page.getByLabel('Восстановление резервной копии');
   await page.route('**/api/v1/backup/key',route=>route.fulfill({status:500,contentType:'application/json',body:'{"error":"REQUEST_FAILED"}'}));await restore.getByRole('button',{name:'Скачать ключ восстановления'}).click();await restore.getByRole('alert').waitFor();await page.unroute('**/api/v1/backup/key');
   const keyPending=page.waitForEvent('download');await restore.getByRole('button',{name:'Скачать ключ восстановления'}).click();const keyDownload=await keyPending;assert.equal((await readFile(await keyDownload.path(),'utf8')).trim(),'b'.repeat(64));

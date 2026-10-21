@@ -1,3 +1,4 @@
+import {clockSettings,setFilter} from '../helpers/navigation.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';
 import {application} from '../helpers/application.mjs';import {launchBrowser} from '../helpers/browser.mjs';import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';import {assertUiLayout} from '../helpers/ui-layout.mjs';
 test('audience trend switches platforms, shows seven-stream smoothing and opens the exact broadcast',{timeout:60000},async()=>{
@@ -13,11 +14,10 @@ test('audience trend switches platforms, shows seven-stream smoothing and opens 
   await chart.getByRole('button',{name:'YouTube',exact:true}).click();assert.ok((await chart.locator('svg g').first().getAttribute('aria-label')).includes('средние зрители: нет данных'));
   await chart.getByRole('button',{name:'Вместе',exact:true}).click();assert.equal(await chart.locator('details').count(),0);assert.equal(await chart.locator('.growth-recent button').count(),3);assert.ok((await chart.locator('.growth-recent button').first().textContent()).includes('54'));
   await chart.locator('svg g').first().click();assert.ok((await chart.locator('.growth-selection').textContent()).includes('43'));assert.ok((await chart.locator('.growth-selection').textContent()).includes('Game'));
-  const clock=page.locator('.activity-clock');
+  await page.getByRole('tab',{name:'Время',exact:true}).click();await clockSettings(page);const clock=page.locator('.activity-clock');
   await clock.getByLabel('Метрика графика').selectOption('messages');await clock.getByText('Сообщения на час эфира · Europe/Moscow',{exact:true}).waitFor();
-  await clock.getByLabel('Период суточного графика').selectOption('7');await chart.getByText('Для линии тенденции нужно 7 эфиров.',{exact:false}).waitFor();
-  assert.ok(await chart.locator('svg g').count()<7);assert.equal(await chart.locator('.growth-pages').count(),0);
-  await clock.getByLabel('Период суточного графика').selectOption('all');await chart.locator('svg g').nth(11).waitFor();await clock.locator('svg g').first().focus();await page.keyboard.press(' ');await page.keyboard.press('ArrowRight');assert.ok((await clock.getByRole('status').textContent()).includes('00:00'));
+  await setFilter(page,'Период аналитики','7');await page.getByRole('tab',{name:'Динамика',exact:true}).click();await chart.getByRole('button',{name:'О среднем за семь эфиров',exact:true}).click();await page.getByRole('dialog',{name:'О среднем за семь эфиров',exact:true}).getByText(/Нужно семь эфиров/).waitFor();await page.keyboard.press('Escape');assert.ok(await chart.locator('svg g').count()<7);assert.equal(await chart.locator('.growth-pages').count(),0);
+  await setFilter(page,'Период аналитики','all');await chart.locator('svg g').nth(11).waitFor();
   await page.evaluate(()=>window.scrollTo(0,0));await assertUiLayout(page);await chart.screenshot({path:'/tmp/analytics-growth-mobile.png'});await page.setViewportSize({width:1280,height:800});await page.evaluate(()=>window.scrollTo(0,0));await assertUiLayout(page);await chart.screenshot({path:'/tmp/analytics-growth-desktop.png'});
   await chart.locator('svg g').first().click();await chart.getByRole('button',{name:'Открыть эфир',exact:true}).click();await page.waitForURL(url=>url.searchParams.get('stream')===ids[43]);await page.goBack();await chart.waitFor();
   await chart.locator('.growth-recent button').first().click();await page.waitForURL(url=>url.searchParams.get('stream')===ids[54]);await page.goBack();await chart.waitFor();

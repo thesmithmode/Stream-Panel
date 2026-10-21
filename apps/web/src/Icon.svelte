@@ -1,6 +1,10 @@
 <script lang="ts">
   let { name, size = 20 }: { name: string; size?: number } = $props();
   const paths: Record<string, string> = {
+    more: "M5 12h.01M12 12h.01M19 12h.01",
+    close: "m6 6 12 12M18 6 6 18",
+    filters: "M4 7h16M4 17h16M9 4v6M15 14v6",
+    back: "m15 5-7 7 7 7",
     pencil: "m16 3 5 5-12 12-6 1 1-6ZM14 5l5 5",
     trash: "M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7",
     donations: "M12 3v18M16 7H9a3 3 0 0 0 0 6h6a3 3 0 0 1 0 6H8",

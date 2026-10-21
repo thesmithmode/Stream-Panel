@@ -1,3 +1,4 @@
+import {navigate} from '../helpers/navigation.mjs';
 import {acceptConfirmation} from '../helpers/confirmation.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -40,7 +41,7 @@ test(
         .click();
       await page.getByLabel("Client secret", { exact: true }).waitFor();
       checks.push("empty-state CTA opens real connection forms");
-      await page.getByRole("button", { name: "Обзор", exact: true }).click();
+      await navigate(page,'Обзор');
       assert.equal(await page.locator(".record-button").count(), 0);
       assert.equal(await page.getByRole("button", { name: /запись/i }).count(), 0);
       checks.push("manual recording controls are absent");
@@ -145,9 +146,7 @@ test(
       await page.getByText("Twitch", { exact: true }).waitFor();
       await page.getByText("Запись не закрыта", { exact: true }).waitFor({ state: "hidden" });
       checks.push("automatic stream session remains in history after DB close");
-      await page
-        .getByRole("navigation").getByRole("button", { name: "Настройки", exact: true })
-        .click();
+      await navigate(page,'Настройки');
       await page
         .getByRole("button", { name: "Создать резервную копию", exact: true })
         .click();
@@ -158,7 +157,7 @@ test(
       checks.push("SQLite backup through UI");
       for (const width of [390, 768, 1536]) {
         await page.setViewportSize({ width, height: 844 });
-        await page.getByRole("button", { name: "Обзор", exact: true }).click();
+        await navigate(page,'Обзор');
         const overflow = await page.evaluate(
           () => document.documentElement.scrollWidth > innerWidth,
         );
@@ -186,9 +185,7 @@ test(
           false,
           "people overflow at " + width,
         );
-        await page
-          .getByRole("navigation").getByRole("button", { name: "Интеграции", exact: true })
-          .click();
+        await navigate(page,'Интеграции');
         assert.equal(
           await page.evaluate(
             () => document.documentElement.scrollWidth > innerWidth,

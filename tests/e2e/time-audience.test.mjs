@@ -1,3 +1,4 @@
+import {clockSettings} from '../helpers/navigation.mjs';
 import {assertUiLayout} from '../helpers/ui-layout.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import {application} from '../helpers/application.mjs';import {launchBrowser} from '../helpers/browser.mjs';import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';import {mkdir} from 'node:fs/promises';import {join} from 'node:path';
 test('time audience drills from hour to minute, donors use common periods and platform colors, and all-donation patterns replace leader lists',{timeout:60000},async()=>{
@@ -19,8 +20,8 @@ test('time audience drills from hour to minute, donors use common periods and pl
    if(p==='7'){await page.locator('.person-row').filter({hasText:'Large donor'}).waitFor();assert.ok((await page.locator('.person-row').first().textContent()).includes('Large donor'));}
   }
   await page.getByLabel('Валюта сортировки донатеров').selectOption('EUR');await page.locator('.person-row').filter({hasText:'Euro donor'}).waitFor();await page.waitForFunction(()=>document.querySelector('.person-row')?.textContent.includes('Euro donor'));
-  await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('heading',{name:'Активность по часам',exact:true}).waitFor();assert.equal(await page.getByRole('heading',{name:'Кто поддерживает стримы',exact:true}).count(),0);
-  assert.deepEqual((await page.locator('.analytics-results > .panel h2').allTextContents()).slice(0,2),['Инсайты','Активность по дням и часам']);
+  await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('tab',{name:'Время',exact:true}).click();await clockSettings(page);await page.getByRole('heading',{name:'Активность по часам',exact:true}).waitFor();assert.equal(await page.getByRole('heading',{name:'Кто поддерживает стримы',exact:true}).count(),0);
+  assert.deepEqual((await page.locator('.analytics-results > .panel h2').allTextContents()).slice(0,2),['Активность по дням и часам','Активность по часам']);
   await assertUiLayout(page);const chart=page.locator('.activity-clock');await chart.getByLabel('Метрика графика').selectOption('activeAudience');await chart.getByLabel('Шаг графика').selectOption('60');
   await chart.getByText('Средняя активная аудитория за время эфира · Europe/Moscow',{exact:true}).waitFor();
   const averageBar=chart.getByRole('button',{name:/13:00–14:00: 1,33 активных/});assert.equal(await averageBar.count(),1);
@@ -30,8 +31,8 @@ test('time audience drills from hour to minute, donors use common periods and pl
   for(const step of ['30','15','5','1']){await chart.getByLabel('Шаг графика').selectOption(step);await chart.getByRole('button',{name:/13:00–13:/}).click();await chart.locator('tbody tr').first().waitFor();}
   for(const group of ['weekdays','weekends']){await chart.getByLabel('Дни недели').selectOption(group);assert.equal(await chart.locator('svg g').count(),1440,'day grouping preserves the full day');}
   await chart.getByLabel('Дни недели').selectOption('пн');await chart.getByLabel('Дни недели').selectOption('all');await chart.getByLabel('Шаг графика').selectOption('60');assert.equal(await chart.locator('svg g').count(),24);
-  const donations=page.locator('.donation-patterns');for(const dim of ['weekday','hour']){await donations.getByLabel('Группировать донаты').selectOption(dim);for(const metric of ['count','amount'])await donations.getByLabel('Показатель донатов').selectOption(metric);}await donations.getByLabel('Валюта донатов').selectOption('EUR');
-  await page.locator('.hour-table summary').click();assert.ok(await page.locator('.hour-table tbody tr').count()>0);assert.ok(await page.locator('.compact-audience .compact-audience-table').count()>0);assert.deepEqual(errors,[]);
+  await page.locator('.donation-patterns .controls>summary').click();const donations=page.locator('.donation-patterns');for(const dim of ['weekday','hour']){await donations.getByLabel('Группировать донаты').selectOption(dim);for(const metric of ['count','amount'])await donations.getByLabel('Показатель донатов').selectOption(metric);}await donations.getByLabel('Валюта донатов').selectOption('EUR');
+  await page.locator('.hour-table summary').click();assert.ok(await page.locator('.hour-table tbody tr').count()>0);await page.getByRole('tab',{name:'Аудитория',exact:true}).click();assert.ok(await page.locator('.compact-audience .compact-audience-table').count()>0);await page.getByRole('tab',{name:'Время',exact:true}).click();assert.deepEqual(errors,[]);
   const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(evidence){await mkdir(evidence,{recursive:true});await chart.scrollIntoViewIfNeeded();await page.screenshot({path:join(evidence,'time-audience-mobile.png'),fullPage:false});}await page.setViewportSize({width:1280,height:800});await chart.scrollIntoViewIfNeeded();await assertUiLayout(page);if(evidence)await page.screenshot({path:join(evidence,'time-audience-desktop.png'),fullPage:false});await saveCoverage(page);
  }finally{await browser?.close();await a.close();}
 });

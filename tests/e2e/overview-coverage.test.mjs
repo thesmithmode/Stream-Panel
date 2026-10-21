@@ -49,9 +49,9 @@ test("Overview insights render loading, empty, error and person paths; expand in
     await startCoverage(page);
     await goto(page, app.bootstrap());
 
-    await page.getByRole("button", { name: "Обзор", exact: true }).waitFor();
+    await page.getByRole("button", { name: "Стримы", exact: true }).waitFor();
     await page.getByRole("button", { name: "Стримы", exact: true }).click();
-    await page.getByRole("button", { name: "Открыть", exact: true }).click();
+    await page.locator('.stream-open').click();
     const trigger = page.getByRole("button", { name: "Показать инсайты", exact: true });
     await trigger.click();
     const insightDialog = page.locator(".insight-body");
@@ -68,7 +68,7 @@ test("Overview insights render loading, empty, error and person paths; expand in
 
     await reload(page);
     await page.getByRole("button", { name: "Стримы", exact: true }).click();
-    await page.getByRole("button", { name: "Открыть", exact: true }).click();
+    await page.locator('.stream-open').click();
     await page.getByRole("button", { name: "Показать инсайты", exact: true }).click();
     await page.getByText("Активный участник", { exact: true }).waitFor();
     assert.equal(new URL(insightUrls[1]).searchParams.get('to'),'12345');

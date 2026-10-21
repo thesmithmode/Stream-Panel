@@ -1,3 +1,4 @@
+import {navigate} from '../helpers/navigation.mjs';
 import {acceptConfirmation} from '../helpers/confirmation.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -31,7 +32,7 @@ test("stream history shows only confirmed Twitch and YouTube links from the plat
     page.on("pageerror", error => errors.push(error.message));
     await startCoverage(page);
     await goto(page, a.bootstrap());
-    await page.locator(".channel-metrics").waitFor();
+    await navigate(page,"Обзор");await page.locator(".channel-metrics").waitFor();
     const sessions = await page.evaluate(() => fetch("/api/v1/sessions").then(response => response.json()));
     const combined = sessions.find(session => session.id === bothId);
     assert.deepEqual(combined.platforms, ["twitch", "youtube"]);
@@ -51,31 +52,33 @@ test("stream history shows only confirmed Twitch and YouTube links from the plat
     assert.deepEqual(manual.confirmedUrls, []);
 
     await page.getByRole("button", { name: "Стримы", exact: true }).click();
-    const bothRow = page.locator("tbody tr").filter({ hasText: "Combined platform stream" });
-    assert.equal(await bothRow.locator(".platform-labels").textContent(), "Twitch, YouTube");
+    const bothRow = page.locator(".stream-card").filter({ hasText: "Combined platform stream" });
+    assert.equal(await bothRow.locator(".stream-platforms").textContent(), "Twitch · YouTube");
+    await bothRow.locator(".stream-actions summary").click();
     for (const [label, url] of [["Twitch", "https://www.twitch.tv/channel"], ["YouTube", "https://www.youtube.com/watch?v=combined-video"]]) {
       const link = bothRow.getByRole("link", { name: label, exact: true });
       assert.equal(await link.getAttribute("href"), url);
       assert.equal(await link.getAttribute("target"), "_blank");
       assert.equal(await link.getAttribute("rel"), "noopener noreferrer");
     }
-    const youtubeRow = page.locator("tbody tr").filter({ hasText: "YouTube only stream" });
+    const youtubeRow = page.locator(".stream-card").filter({ hasText: "YouTube only stream" });
+    await youtubeRow.locator(".stream-actions summary").click();
     assert.equal(await youtubeRow.getByRole("link", { name: "YouTube", exact: true }).count(), 1);
     assert.equal(await youtubeRow.getByRole("link", { name: "Twitch", exact: true }).count(), 0);
-    const legacyRow = page.locator(`tbody tr[data-session-id="${legacyId}"]`);
-    assert.equal(await legacyRow.getByRole("link").count(), 0);
-    const manualRow = page.locator(`tbody tr[data-session-id="${manualId}"]`);
-    assert.equal(await manualRow.locator(".platform-labels").textContent(), "Источник неизвестен");
-    assert.equal(await manualRow.getByRole("link").count(), 0);
+    const legacyRow = page.locator(`[data-session-id="${legacyId}"]`);
+    assert.equal(await legacyRow.locator(".stream-actions").getByRole("link").count(), 0);
+    const manualRow = page.locator(`[data-session-id="${manualId}"]`);
+    assert.equal(await manualRow.locator(".stream-platforms").textContent(), "Источник неизвестен");
+    assert.equal(await manualRow.locator(".stream-actions").getByRole("link").count(), 0);
     assert.equal(await bothRow.getByRole("button",{name:"Удалить",exact:true}).count(),0);
-    await manualRow.getByRole("button",{name:"Удалить",exact:true}).click();
+    await manualRow.locator(".stream-actions summary").click();await manualRow.getByRole("button",{name:"Удалить",exact:true}).click();
     await page.getByRole('dialog').getByRole('button',{name:'Отмена',exact:true}).click();assert.equal((await a.db.call('sessions')).some(s=>s.id===manualId),true);
     await manualRow.getByRole("button",{name:"Удалить",exact:true}).click();await acceptConfirmation(page,'Удалить');
     await manualRow.waitFor({state:"detached"});
     assert.equal((await a.db.call("sessions")).some(s=>s.id===manualId),false);
     assert.equal((await a.db.call("sessions")).some(s=>s.id===bothId),true);
     await page.route('**/api/v1/sessions',async route=>{const response=await route.fetch();const rows=await response.json();await route.fulfill({response,json:rows.map(({durationMs,breaks,confirmedUrls,viewerMean,viewerPeak,donationTotals,donationCount,...legacy})=>legacy)});});
-    await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.getByRole('button',{name:'Стримы',exact:true}).click();await bothRow.waitFor();assert.equal(await bothRow.getByRole('link').count(),0);assert.ok((await bothRow.textContent()).includes('— / —'));assert.ok((await bothRow.textContent()).includes('0 донатов'));
+    await navigate(page,'Обзор');await page.getByRole('button',{name:'Стримы',exact:true}).click();await bothRow.waitFor();await bothRow.locator('.stream-actions summary').click();assert.equal(await bothRow.locator('.stream-actions').getByRole('link').count(),0);assert.ok((await bothRow.textContent()).includes('Средние зрители—'));assert.ok((await bothRow.textContent()).includes('Донатов: 0'));
     assert.deepEqual(errors, []);
     await saveCoverage(page);
     await context.close();
@@ -93,8 +96,8 @@ test('long stream titles and several YouTube recordings keep Open visible on des
   for(const video of ['one','two'])await app.db.call('observePlatformStream','youtube','yt-owner',video,at,at,`https://youtube.com/watch?v=${video}`,'YouTube title');
   browser=await launchBrowser();const page=await browser.newPage();page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();
-  const row=page.locator(`tr[data-session-id="${id}"]`),open=row.getByRole('button',{name:'Открыть',exact:true});
-  await row.getByRole('link',{name:'YouTube · часть 1',exact:true}).waitFor();
+  const row=page.locator(`[data-session-id="${id}"]`),open=row.locator('.stream-open');
+  await row.locator('.stream-actions summary').click();await row.getByRole('link',{name:'YouTube · часть 1',exact:true}).waitFor();
   await row.getByRole('link',{name:'YouTube · часть 2',exact:true}).waitFor();
   for(const width of [1440,1024,820,390]){
    await page.setViewportSize({width,height:900});await open.scrollIntoViewIfNeeded();

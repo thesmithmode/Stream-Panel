@@ -1,4 +1,6 @@
 <script lang="ts">
+ import SectionTabs from "./SectionTabs.svelte";
+  import Icon from "./Icon.svelte";
   import {untrack} from 'svelte';
   import {ConnectionError} from "./request";
   import StreamDonations from "./StreamDonations.svelte";
@@ -9,7 +11,7 @@
   import {chartMetrics,type ChartMetric} from './chart-series';
   import AudienceChart from "./AudienceChart.svelte";
   import AudienceRanking from "./AudienceRanking.svelte";
-  import {streamRange,streamTime} from './stream-time';
+  import {compactStreamRange as streamRange,streamTime} from './stream-time';
   import type {Session} from './api';
   import {
     api,
@@ -36,7 +38,7 @@
   const viewers=$derived(viewerMetrics?.known?.partialMinutes?viewerMetrics.known:viewerMetrics?.all);
   const viewerPartial=$derived((viewerMetrics?.known?.partialMinutes??0)>0);
   let resolution=$state(1);
-  let showEvents=$state(false);
+  let activeTab=$state('summary');
   const decimal=(n:number)=>n.toLocaleString('ru-RU',{maximumFractionDigits:1});
   let metadata=$state<Array<{at:number;title:string;categoryName:string}>>([]);
   let audienceRequest=0,lastAudienceSession='';
@@ -55,30 +57,37 @@
     });
   });
 </script>
-{#if session}<section class="panel stream-facts">
- <header><h2>{session.primaryTitle||'Описание стрима'}</h2><span>{streamRange(session.started_at_ms,session.ended_at_ms)} МСК</span></header>
+{#if session}<section class="stream-facts">
+ <div class="stream-title-row"><h1>{session.primaryTitle||'Стрим'}</h1><details class="metadata-menu"><summary aria-label="История названий и категорий"><Icon name="more"/></summary><div>
+ <h2>История названий и категорий</h2>
  {#each session.breaks??[] as pause}<p class="small">Перерыв: {streamRange(pause.from,pause.to)} МСК</p>{/each}
- <details class="compact-details"><summary>История названий и категорий</summary>
-  {#each [...metadata].sort((a,b)=>b.at-a.at) as row}<p class="small">{streamTime(row.at)}{row.categoryName&&row.categoryName!=="Категория неизвестна"?` · ${row.categoryName}`:''} · {row.title||'Без названия'}</p>{:else}<p class="small muted">Нет сохранённых метаданных.</p>{/each}
-
- </details>
+ {#each [...metadata].sort((a,b)=>b.at-a.at) as row}<p class="small">{streamTime(row.at)}{row.categoryName&&row.categoryName!=="Категория неизвестна"?` · ${row.categoryName}`:''} · {row.title||'Без названия'}</p>{:else}<p class="small muted">Нет сохранённых метаданных.</p>{/each}
+ </div></details></div>
+ <p class="stream-meta">{streamRange(session.started_at_ms,session.ended_at_ms)} МСК</p>
+ <p class="stream-meta">{[...new Set(metadata.map(row=>row.categoryName).filter(name=>name&&name!=="Категория неизвестна"))].join(' · ')}{metadata.some(row=>row.categoryName)?' · ':''}{session.platforms?.map(p=>p==='twitch'?'Twitch':'YouTube').join(' + ')}</p>
 </section>{/if}
-{#if viewerPartial}<p class="small muted">Неполные данные площадок: сумма известных зрителей; неизвестные значения не считаются нулями.</p>{/if}
-<section class="metrics stream-metrics">
- <div class="metric"><div><span>Средние зрители</span><strong>{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'Нет замеров'}</strong></div></div>
- <div class="metric"><div><span>Максимум зрителей</span><strong>{viewers?.peak!=null?viewers.peak:(audienceBusy?'…':'Нет замеров')}</strong></div></div>
- <div class="metric"><div><span>Сообщения</span><strong>{summary.messages.toLocaleString('ru-RU')}</strong></div></div>
- <div class="metric"><div><span>Донаты</span><strong>{Object.keys(summary.totals).length?Object.entries(summary.totals).map(([c,a])=>money(a,c)).join(' · '):'0'}</strong></div></div>
+<section class="stream-kpis" aria-label="Итоги эфира">
+ <div><span>Средние зрители</span><strong><span class="kpi-number">{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'—'}</span>{#if viewerPartial}<Help id="stream-partial" label="Неполные данные зрителей" text="Показана сумма известных зрителей площадок. Пропущенные замеры не считаются нулём."/>{/if}</strong></div>
+ <div><span>Пик зрителей</span><strong>{viewers?.peak!=null?viewers.peak:(audienceBusy?'…':'—')}</strong></div>
+ <div><span>Донаты</span><strong>{Object.keys(summary.totals).length?Object.entries(summary.totals).map(([c,a])=>money(a,c)).join(' · '):'—'}</strong></div>
+ <div><span>Сообщения</span><strong>{summary.messages.toLocaleString('ru-RU')}</strong></div>
 </section>
-{#if sessionFilter}<StreamDonations sessionId={sessionFilter} {onPerson} {changed} />{/if}
-{#if sessionFilter}<section class="panel"><header><h2>События стрима · 48 ч</h2><button class="outline small" aria-expanded={showEvents} onclick={()=>showEvents=!showEvents}>{showEvents?'Скрыть события':'Показать события'}</button></header>{#if showEvents}<div class="settings-body"><RecentEvents sessionId={sessionFilter}/></div>{/if}</section>{/if}
-<Insights sessionId={sessionFilter} refreshToken={summary} {onPerson} {onStream} />
+<SectionTabs items={[["summary","Итоги"],["people","Участники"],["events","События"]]} bind:value={activeTab} label="Разделы эфира" panelId="stream-tabpanel"/>
+<div id="stream-tabpanel" role="tabpanel" aria-label={activeTab==='summary'?'Итоги':activeTab==='people'?'Участники':'События'}>
+{#if activeTab==='summary'}
 <section class="panel series-panel">
-  <header><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Поэтому 10 зрителей и 4 ника в чате возможны одновременно. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2><div class="chart-controls"><select aria-label="Показатель графика стрима" bind:value={audienceMetric}>{#each chartMetrics as choice}<option value={choice.value}>{choice.label}</option>{/each}</select><select aria-label="Детализация графика" bind:value={resolution}><option value={1}>1м</option><option value={5}>5м</option><option value={15}>15м</option></select></div></header>
+  <header><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2><details class="chart-options"><summary aria-label="Настроить график эфира"><Icon name="filters" size={20}/></summary><div class="chart-controls"><label>Показатель<select aria-label="Показатель графика стрима" bind:value={audienceMetric}>{#each chartMetrics as choice}<option value={choice.value}>{choice.label}</option>{/each}</select></label><label>Детализация<select aria-label="Детализация графика" bind:value={resolution}><option value={1}>1м</option><option value={5}>5м</option><option value={15}>15м</option></select></label></div></details></header>
   {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceData}
     <AudienceChart points={audienceData.timeline} audience={audienceData.audience} metric={audienceMetric} {resolution} showResolution={false} showRegulars={true} {onPerson}/>
   {:else}<p class="empty-small" role="status">{audienceBusy?'Загружаем график…':'Выберите стрим'}</p>{/if}
 </section>
-<div class="stream-details-grid"><AudienceRanking people={audienceData?.audience??[]} {onPerson} showIntervals streamStart={session?.started_at_ms??0} streamEnd={session?.ended_at_ms??Date.now()}/>
-{#if sessionFilter}<Following sessionId={sessionFilter} {onPerson} />{/if}</div>
-<style>.series-panel header{flex-wrap:wrap;gap:12px}.chart-controls{display:flex;gap:8px;min-width:0}.chart-controls select{border-radius:999px;width:auto;max-width:100%;padding:8px 30px 8px 12px;font-size:13px}.chart-controls select:first-child{min-width:0;flex:1}.chart-controls select:last-child{flex-shrink:0}.stream-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}@media(max-width:600px){.chart-controls{width:100%;justify-content:space-between}}.stream-details-grid{display:grid;grid-template-columns:1fr;gap:20px;margin-bottom:20px;align-items:start}@media(max-width:900px){.stream-details-grid{grid-template-columns:1fr}}</style>
+<Insights sessionId={sessionFilter} refreshToken={summary} {onPerson} {onStream} />
+{#if sessionFilter}<StreamDonations sessionId={sessionFilter} {onPerson} {changed}/><details class="section-disclosure"><summary>Подписчики</summary><Following sessionId={sessionFilter} {onPerson}/></details>{/if}
+{:else if activeTab==='people'}
+<AudienceRanking people={audienceData?.audience??[]} {onPerson} showIntervals streamStart={session?.started_at_ms??0} streamEnd={session?.ended_at_ms??Date.now()}/>
+{:else if sessionFilter}<section class="panel"><header><h2>События стрима · 48 ч</h2></header><div class="settings-body"><RecentEvents sessionId={sessionFilter}/></div></section>{/if}
+</div>
+<style>
+ .stream-title-row{display:flex;gap:16px;align-items:start}.stream-title-row h1{flex:1;min-width:0;font-size:26px;line-height:1.3;margin:0 0 12px;overflow-wrap:anywhere}.stream-meta{color:var(--muted);margin:0 0 6px;font-size:14px}.series-panel>header{display:flex;align-items:center;justify-content:space-between}.chart-options[open]{flex-basis:100%}.chart-options summary{display:flex;justify-content:end;cursor:pointer;list-style:none}.chart-controls{display:flex;gap:12px;margin-top:12px}.chart-controls label{display:grid;gap:6px;flex:1;min-width:0;font-size:13px}.chart-controls select{width:100%;min-width:0}.metadata-menu{position:relative}.metadata-menu summary{list-style:none;cursor:pointer;min-width:44px;min-height:44px;display:grid;place-items:center}.metadata-menu>div{position:absolute;z-index:5;right:0;top:44px;width:min(360px,calc(100vw - 48px));padding:16px;border:1px solid var(--border);border-radius:10px;background:var(--surface);box-shadow:0 12px 32px #0008}.metadata-menu h2{font-size:16px;margin-bottom:12px}
+ @media(min-width:1000px){.stream-title-row h1{font-size:30px}}
+</style>

@@ -1,3 +1,4 @@
+import {refreshData} from '../helpers/navigation.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createApplication } from "../../dist/apps/daemon/src/server.js";
@@ -40,7 +41,7 @@ test(
       await seed(a);
       await page.getByRole("button",{name:"Стримы",exact:true}).click();
       await a.db.stop();
-      await page.getByRole("button",{name:"Обновить данные",exact:true}).click();
+      await refreshData(page);
       await page.evaluate(()=>window.dispatchEvent(new Event("focus")));
       await page
         .getByRole("alert")

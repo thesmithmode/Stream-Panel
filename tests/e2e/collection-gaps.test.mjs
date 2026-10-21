@@ -1,3 +1,4 @@
+import {navigate} from '../helpers/navigation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {application} from '../helpers/application.mjs';
@@ -15,11 +16,11 @@ test('collection diagnostics stay archived without cluttering desktop and mobile
   await a.db.call('gap','twitch','connection_lost_no_replay',now-300000,now-240000);
   await a.db.call('gap','twitch','chatters_poll_failed',now-120000,null);
   await goto(page,a.bootstrap());
-  await page.getByRole('navigation').getByRole('button',{name:'Интеграции',exact:true}).click();
+  await navigate(page,'Интеграции');
   assert.equal(await page.getByRole('region',{name:'Пропуски сбора'}).count(),0);
   const archived=await page.evaluate(()=>fetch('/api/v1/status').then(r=>r.json()).then(s=>s.gaps));assert.equal(archived.length,3,'raw collection diagnostics remain archived');
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  await reload(page);await page.getByRole('navigation').getByRole('button',{name:'Интеграции',exact:true}).click();assert.equal(await page.getByRole('region',{name:'Пропуски сбора'}).count(),0);
+  await reload(page);await navigate(page,'Интеграции');assert.equal(await page.getByRole('region',{name:'Пропуски сбора'}).count(),0);
   assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await a.close();}
 });

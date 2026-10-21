@@ -1,3 +1,4 @@
+import {setFilter} from '../helpers/navigation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdir} from 'node:fs/promises';
@@ -24,12 +25,12 @@ test('insights use complete historical audience beyond the first page; period, c
   assert.equal(await section.locator('.insight-filters').count(),0);assert.ok(await section.locator('.insight-card').count()>0);
   const screenshots=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;
   if(screenshots){await mkdir(screenshots,{recursive:true});await section.screenshot({path:join(screenshots,'insights-desktop.png')});}
-  await page.getByLabel('Период аналитики',{exact:true}).selectOption('7');await section.getByText('Для выбранного периода пока недостаточно данных для выводов.',{exact:false}).waitFor();
-  await page.getByLabel('Период аналитики',{exact:true}).selectOption('30');await section.locator('.insight-card').first().waitFor();
-  await page.locator('.analytics-category-filter select').selectOption('wow');await section.getByText('Для выбранного периода пока недостаточно данных для выводов.',{exact:false}).waitFor();
-  await page.locator('.analytics-category-filter select').selectOption('dota');await section.locator('.insight-card').first().waitFor();
-  await page.locator('.analytics-controls label').filter({hasText:'Площадка'}).locator('select').selectOption('youtube');await section.getByText('Для выбранного периода пока недостаточно данных для выводов.',{exact:false}).waitFor();
-  await page.locator('.analytics-controls label').filter({hasText:'Площадка'}).locator('select').selectOption('all');await section.locator('.insight-card').first().waitFor();
+  await setFilter(page,'Период аналитики','7');await section.getByText('Для выбранного периода пока недостаточно данных для выводов.',{exact:false}).waitFor();
+  await setFilter(page,'Период аналитики','30');await section.locator('.insight-card').first().waitFor();
+  await setFilter(page,'Категория Twitch','wow');await section.getByText('Для выбранного периода пока недостаточно данных для выводов.',{exact:false}).waitFor();
+  await setFilter(page,'Категория Twitch','dota');await section.locator('.insight-card').first().waitFor();
+  await setFilter(page,'Площадка','youtube');await section.getByText('Для выбранного периода пока недостаточно данных для выводов.',{exact:false}).waitFor();
+  await setFilter(page,'Площадка','all');await section.locator('.insight-card').first().waitFor();
   await page.setViewportSize({width:390,height:844});await section.scrollIntoViewIfNeeded();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   if(screenshots)await page.screenshot({path:join(screenshots,'insights-mobile.png')});

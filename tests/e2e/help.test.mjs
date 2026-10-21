@@ -19,7 +19,7 @@ test("presence help popover supports click, Escape, outside click, and mobile vi
     await page.getByRole("button", { name: "Открыть интеграции", exact: true }).waitFor();
     await seed(a);
     await reload(page);
-    await page.getByRole("button",{name:"Стримы",exact:true}).click();await page.getByRole("button",{name:"Открыть",exact:true}).click();
+    await page.getByRole("button",{name:"Стримы",exact:true}).click();await page.locator('.stream-open').click();
 
     const trigger = page.getByRole("button", { name: "Об аудитории стрима" });
     const popover = page.getByRole("dialog", { name: "Об аудитории стрима" });

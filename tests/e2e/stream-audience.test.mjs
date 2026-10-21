@@ -27,22 +27,20 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
    const response=await route.fetch(),data=await response.json();
    for(const person of data.audience??[]){
     if(person.name==='Silent Viewer'){person.accounts=[{source:'twitch',name:'Silent Twitch'},{source:'youtube',name:'Silent YouTube'}];person.donations={EUR:'500'};person.intervals.push({from:base,to:base+minute,kind:'chat_proxy'});}
-    if(person.name==='Talkative Viewer')person.donations={RUB:'22800'};
+    if(person.name==='Talkative Viewer'){person.donations={RUB:'22800'};person.accounts=[{source:'twitch',name:'Talkative Twitch'}];}
    }
    await route.fulfill({response,json:data});
   });
   await goto(page,app.bootstrap());
   await page.getByRole('button',{name:'Стримы',exact:true}).click();
-  await page.locator(`tr[data-session-id="${first}"]`).getByRole('button',{name:'Открыть',exact:true}).click();
-  const rank=page.getByRole('region',{name:'Рейтинг участников'});
+  await page.locator(`[data-session-id="${first}"]`).locator('.stream-open').click();
+  await page.getByRole('tab',{name:'Участники',exact:true}).click();const rank=page.getByRole('region',{name:'Рейтинг участников'});
   await rank.getByRole('button',{name:'Silent Viewer',exact:true}).waitFor();
   assert.equal(await rank.locator('tbody td:nth-child(2) strong').first().textContent(),'5 мин');
+  const renamed=rank.locator('tbody tr').filter({hasText:'Talkative Viewer'});await renamed.locator('.account-details>summary').click();assert.equal(await renamed.getByRole('button',{name:'Talkative Twitch',exact:true}).count(),1,'a renamed single account remains reachable');await renamed.locator('.account-details>summary').click();
   await assertUiLayout(page);
   assert.equal(await page.locator('.stream-feed').count(),0);
-  assert.equal(await page.evaluate(() => {
-    const panels = [...document.querySelectorAll('.stream-details-grid > .panel')].map(p => p.getBoundingClientRect());
-    return panels.length === 2 && panels[0].bottom <= panels[1].top;
-  }), true, 'audience table and follower panel align vertically');
+  assert.equal(await page.locator('.following').isVisible(),false,'subscriptions live under the results disclosure');
   assert.ok((await rank.locator('tbody tr').nth(1).textContent()).includes('3 мин'));
   assert.equal(await rank.getByRole('button',{name:'Other Stream Viewer',exact:true}).count(),0);
   assert.equal(await rank.getByRole('button',{name:'streamelements',exact:true}).count(),0);
@@ -55,14 +53,14 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   await rank.getByRole('button',{name:'Донаты, RUB',exact:false}).click();
   assert.equal(await rank.locator('tbody td:first-child').first().getByRole('button',{name:'Talkative Viewer',exact:true}).count(),1);
   await rank.getByRole('button',{name:'Донаты, EUR',exact:false}).click();
-  assert.equal(await rank.getByRole('button',{name:'Silent Twitch',exact:true}).evaluate(el=>getComputedStyle(el).color),'rgb(169, 112, 255)');
+  await rank.locator('.account-details>summary').first().click();assert.equal(await rank.getByRole('button',{name:'Silent Twitch',exact:true}).evaluate(el=>getComputedStyle(el).color),'rgb(169, 112, 255)');
   assert.equal(await rank.getByRole('button',{name:'Silent YouTube',exact:true}).evaluate(el=>getComputedStyle(el).color),'rgb(255, 89, 89)');
-  await rank.getByRole('button',{name:/^Время в эфире/}).click();
+  await rank.getByRole('button',{name:/^Время в чате/}).click();
   assert.equal(await page.getByText('Последний замер:',{exact:false}).count(),0);
   assert.equal(await page.getByRole('button',{name:'Все донаты',exact:true}).count(),0);
   await rank.locator('tbody tr').first().getByText('Интервалы',{exact:true}).click();
   await rank.getByText(/Пауза/).waitFor();
-  await page.getByLabel('Показатель графика стрима').selectOption('twitchViewers');
+  await page.getByRole('tab',{name:'Итоги',exact:true}).click();await page.getByLabel('Настроить график эфира').click();await page.getByLabel('Показатель графика стрима').selectOption('twitchViewers');
   const bars=page.locator('.series-panel .chart-bar');
   await bars.first().click();
   const detail=page.getByRole('region',{name:'Детали выбранного столбца'});
@@ -84,22 +82,22 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   assert.equal(await page.locator('.stream-feed').count(),0);
   assert.equal(await page.evaluate(() => {
     const nav = [...document.querySelectorAll('.sidebar nav button')].map(b => b.getBoundingClientRect());
-    const cards = [...document.querySelectorAll('.stream-metrics .metric')].map(c => c.getBoundingClientRect());
-    return nav.length === 7 && new Set(nav.map(b=>Math.round(b.top))).size===2 && nav.every(b=>b.left>=0&&b.right<=innerWidth) && cards.length >= 2 && Math.abs(cards[0].top-cards[1].top)<1;
-  }), true, 'all seven mobile destinations fit in two rows and metrics use two columns');
+    const cards = [...document.querySelectorAll('.stream-kpis > div')].map(c => c.getBoundingClientRect());
+    return nav.length === 5 && new Set(nav.map(b=>Math.round(b.top))).size===1 && nav.every(b=>b.left>=0&&b.right<=innerWidth) && cards.length >= 2 && Math.abs(cards[0].top-cards[1].top)<1;
+  }), true, 'five mobile destinations fit in one row and metrics use two columns');
   await bars.first().click();await detail.waitFor();
   await detail.getByRole('button',{name:'О детализации минуты',exact:true}).click();
   const help=page.getByRole('dialog',{name:'О детализации минуты'});await help.waitFor();
   const box=await help.boundingBox();assert.ok(box.x>=0&&box.x+box.width<=390);
   await page.keyboard.press('Escape');assert.equal(await help.count(),0);
-  assert.equal(await page.evaluate(()=>{const nav=document.querySelector('.sidebar').getBoundingClientRect(),main=document.querySelector('main').getBoundingClientRect();return nav.bottom<=main.top+.5;}),true,'mobile navigation must remain above content, not overlay the scrolled chart');
+  assert.equal(await page.evaluate(()=>{const nav=document.querySelector('.sidebar').getBoundingClientRect(),main=document.querySelector('main').getBoundingClientRect();return nav.top>=0&&nav.bottom<=innerHeight&&main.height>0;}),true,'mobile navigation must remain above content, not overlay the scrolled chart');
   if(evidence)await page.screenshot({path:join(evidence,'stream-audience-mobile.png'),fullPage:true});
   await assertUiLayout(page);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await detail.getByRole('button',{name:'Silent Viewer',exact:true}).click();
   await page.getByRole('heading',{name:'Silent Viewer',exact:true}).waitFor();
   await page.getByRole('button',{name:'Стримы',exact:true}).click();
-  await page.locator(`tr[data-session-id="${first}"]`).getByRole('button',{name:'Открыть',exact:true}).click();
-  await rank.getByRole('button',{name:'Silent Viewer',exact:true}).click();
+  await page.locator(`[data-session-id="${first}"]`).locator('.stream-open').click();
+  await page.getByRole('tab',{name:'Участники',exact:true}).click();await rank.getByRole('button',{name:'Silent Viewer',exact:true}).click();
   await page.getByRole('heading',{name:'Silent Viewer',exact:true}).waitFor();
   assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}

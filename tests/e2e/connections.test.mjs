@@ -1,3 +1,4 @@
+import {navigate} from '../helpers/navigation.mjs';
 import {acceptConfirmation} from '../helpers/confirmation.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -171,14 +172,10 @@ test(
         page,
         `${a.origin}/oauth/donationalerts/callback?code=provider-code&state=${oauth.searchParams.get("state")}`,
       );
-      await page
-        .getByRole("navigation").getByRole("button", { name: "Интеграции", exact: true })
-        .click();
+      await navigate(page,'Интеграции');
       await until(() => a.da.status.state === "connected", 8000);
       await reload(page);
-      await page
-        .getByRole("navigation").getByRole("button", { name: "Интеграции", exact: true })
-        .click();
+      await navigate(page,'Интеграции');
       await page.getByText("Сбор донатов включён", { exact: true }).waitFor();
       const publicStatus = await page.evaluate(() =>
         fetch("/api/v1/status").then((r) => r.json()),
@@ -225,9 +222,7 @@ test(
       assert.equal(a.configuration.value.daAccessToken, "manual-access");
       await a.db.call("gap", "twitch", "fixture_gap", Date.now(), null);
       await reload(page);
-      await page
-        .getByRole("navigation").getByRole("button", { name: "Интеграции", exact: true })
-        .click();
+      await navigate(page,'Интеграции');
       assert.equal(await page.getByText("twitch: fixture_gap", { exact: true }).count(),0);
       await saveCoverage(page);
       await context.close();
@@ -276,17 +271,17 @@ test(
       assert.equal(await page.locator(".record-button").count(), 0);
       assert.equal(await page.getByRole("button", { name: /запись/i }).count(), 0);
       await page.getByRole("button", { name: "Стримы", exact: true }).click();
-      await page.getByText("Twitch", { exact: true }).waitFor();
-      await page.getByRole("button", { name: "Открыть", exact: true }).click();
+      await page.locator(".stream-platforms").filter({hasText:"Twitch"}).waitFor();
+      await page.locator('.stream-open').click();
       assert.equal(await page.locator('.stream-feed').count(),0);
-      await page.getByRole('region',{name:'Рейтинг участников'}).getByRole('button',{name:'Тестовый зритель',exact:true}).click();
+      await page.getByRole('tab',{name:'Участники',exact:true}).click();await page.getByRole('region',{name:'Рейтинг участников'}).getByRole('button',{name:'Тестовый зритель',exact:true}).click();
       await page.getByRole("tab", {name:"Редактировать аккаунты",exact:true}).click();await page.getByLabel("Имя группы").waitFor();
       await page.getByRole("button", { name: "Стримы", exact: true }).click();
-      await page.getByRole("button", { name: "Открыть", exact: true }).click();
-      assert.equal(await page.getByRole("button", {name:"К списку стримов",exact:true}).count(),0);
+      await page.locator('.stream-open').click();
+      assert.equal(await page.getByRole("button", {name:"К списку стримов",exact:true}).count(),1);
       assert.equal(await page.getByLabel("Период аналитики").count(), 0);
       assert.equal(await page.locator('.stream-feed').count(),0);
-      await page.getByRole("button", {name:"Обзор",exact:true}).click();
+      await navigate(page,'Обзор');
 
       await a.db.call("endSession", s, Date.now(), "estimated");
       await reload(page);
