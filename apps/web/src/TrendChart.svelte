@@ -37,7 +37,7 @@
 <div class="trend-chart" bind:clientWidth={availableWidth}>
   {#if !buckets.length}<p class="muted">Пока нет точек для графика</p>{:else}
     {#if split}<div class="legend chart-legend"><span><i class="regular-swatch"></i>Ядро аудитории</span><span><i class="follower-swatch"></i>Подписчики</span><span><i class="other-swatch"></i>{isMessageMetric(metric)?'Залётные':'Остальные участники'}</span>{#if hasUnknown}<span><i class="unknown-swatch"></i>Статус подписки неизвестен</span>{/if}</div>{/if}
-    {#if !split}<p class="small muted viewer-groups">Площадки не раскрывают состав всех зрителей. Разделение на группы доступно для сообщений.</p>{/if}
+
     <div class="trend-plot"><svg viewBox={`0 0 ${plotWidth} 245`} style="width:100%;display:block" role="group" aria-label="График активности по выбранному периоду">
       <line x1="32" y1="190" x2={plotWidth-10} y2="190" stroke="currentColor" opacity=".25" />
       <text x="5" y="24" fill="currentColor" font-size="12">{Math.round(maximum)}</text><text x="8" y="190" fill="currentColor" font-size="12">0</text>
@@ -62,12 +62,12 @@
       {/each}
     </svg></div>
     {#if pages.length>1}<div class="chart-pages"><button class="outline small" disabled={pageOffset+1>=pages.length} onclick={()=>pageOffset++}>Раньше</button><span>{new Date(start).toLocaleDateString('ru-RU',{timeZone:timezone})} · {timeLabel(start)}–{timeLabel(end)}</span><button class="outline small" disabled={pageOffset===0} onclick={()=>pageOffset--}>Позже</button></div>{/if}
-    <div class="chart-caption"><span>Столбец: {Math.round((buckets[0]?.width??60000)/60000)} мин · {timezone}</span><Help id={`${id}-help`} label="Как читать график" text="Нажмите столбец для детализации. Шкала — каждые 15 минут; для периодов длиннее суток шаг укрупняется. Интервал столбца выбирается: 1, 5 или 15 минут; длинный период листается блоками; внутри выбранного столбца можно выбрать отдельную минуту. Для зрителей высота — среднее по известным замерам, для сообщений — сумма. Ядро имеет приоритет над подпиской; залётные — авторы с подтверждённым отсутствием подписки, неизвестный статус показан отдельно. Зрители (все) — сумма средних замеров Twitch и YouTube; неполные замеры отмечены в детализации. Жёлтый сегмент — ядро аудитории. Серые отметки — нет данных."/></div>
+    <div class="chart-caption"><span>Столбец: {Math.round((buckets[0]?.width??60000)/60000)} мин · {timezone}</span><Help id={`${id}-help`} label="Как читать график" text="Площадки не раскрывают состав всех зрителей. Разделение на группы доступно для сообщений. Нажмите столбец для детализации. Шкала — каждые 15 минут; для периодов длиннее суток шаг укрупняется. Интервал столбца выбирается: 1, 5 или 15 минут; длинный период листается блоками; внутри выбранного столбца можно выбрать отдельную минуту. Для зрителей высота — среднее по известным замерам, для сообщений — сумма. Ядро имеет приоритет над подпиской; залётные — авторы с подтверждённым отсутствием подписки, неизвестный статус показан отдельно. Зрители (все) — сумма средних замеров Twitch и YouTube; неполные замеры отмечены в детализации. Жёлтый сегмент — ядро аудитории. Серые отметки — нет данных."/></div>
   {/if}
 </div>
 
 <style>
-  .viewer-groups{margin:0 0 12px}.unknown-swatch{background:#9b92b5}.trend-chart rect.unknown-segment{fill:#9b92b5}.legend .unknown-swatch{display:inline-block;width:10px;height:10px;border-radius:2px}
+  .unknown-swatch{background:#9b92b5}.trend-chart rect.unknown-segment{fill:#9b92b5}.legend .unknown-swatch{display:inline-block;width:10px;height:10px;border-radius:2px}
   .chart-pages{display:flex;align-items:center;gap:12px;justify-content:center;flex-wrap:wrap;font-size:12px;}
   .chart-caption{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:8px;}
   .trend-chart{width:100%;min-width:0;}

@@ -1,3 +1,4 @@
+import {navigate} from '../helpers/navigation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdir} from 'node:fs/promises';
@@ -21,20 +22,20 @@ test('stream continuation shows Moscow dates, a real break, participant interval
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:850}});page.setDefaultTimeout(10000);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));await startCoverage(page);await goto(page,app.bootstrap());
   await page.getByRole('button',{name:'Стримы',exact:true}).click();
-  const row=page.locator(`tr[data-session-id="${id}"]`);assert.ok((await row.textContent()).includes('2026-09-13 11:04 — 2026-09-13 11:17'));
-  assert.ok((await row.textContent()).includes('Перерыв: 2026-09-13 11:07 — 2026-09-13 11:14'));
-  await row.getByRole('button',{name:'Открыть',exact:true}).click();
-  const ranking=page.getByRole('region',{name:'Рейтинг участников'});await ranking.getByRole('button',{name:'Silent Viewer',exact:true}).waitFor();
+  const row=page.locator(`[data-session-id="${id}"]`);assert.ok((await row.textContent()).includes('13 сентября · 11:04–11:17'));
+  assert.ok((await row.textContent()).includes('Перерыв: 13 сентября · 11:07–11:14'));
+  await row.locator('.stream-open').click();
+  await page.getByRole('tab',{name:'Участники',exact:true}).click();const ranking=page.getByRole('region',{name:'Рейтинг участников'});await ranking.getByRole('button',{name:'Silent Viewer',exact:true}).waitFor();
   assert.equal(await ranking.locator('tbody td:nth-child(2) strong').first().textContent(),'6 мин');
   await ranking.getByText('Интервалы',{exact:true}).click();
   assert.ok((await ranking.textContent()).includes('11:04 — 11:07'));
   assert.ok((await ranking.textContent()).includes('11:14 — 11:17'));
-  await page.getByText('История названий и категорий',{exact:true}).click();
+  await page.getByLabel('История названий и категорий',{exact:true}).click();
   assert.ok((await page.locator('.stream-facts').textContent()).includes('First game · First title'));
   assert.ok((await page.locator('.stream-facts').textContent()).includes('Second game · Second title'));
-  const breakBar=page.locator('.series-panel .chart-bar').nth(4);assert.match(await breakBar.getAttribute('aria-label'),/Перерыв/);await breakBar.click();assert.ok((await page.getByRole('region',{name:'Детали выбранного столбца'}).textContent()).includes('перерыв'));
+  await page.getByRole('tab',{name:'Итоги',exact:true}).click();const breakBar=page.locator('.series-panel .chart-bar').nth(4);assert.match(await breakBar.getAttribute('aria-label'),/Перерыв/);await breakBar.click();assert.ok((await page.getByRole('region',{name:'Детали выбранного столбца'}).textContent()).includes('перерыв'));
   const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(evidence){await mkdir(evidence,{recursive:true});await page.screenshot({path:join(evidence,'stream-continuation-desktop.png'),fullPage:true});}
-  await page.getByRole('button',{name:'Интеграции',exact:true}).click();
+  await navigate(page,'Интеграции');
   for(const provider of ['Twitch','DonationAlerts','YouTube']){
    const button=page.getByRole('button',{name:`Инструкция ${provider}`,exact:true});await button.click();
    const guide=page.getByRole('region',{name:`Подключение ${provider}`,exact:true});await guide.waitFor();assert.ok((await guide.textContent()).includes('Client ID'));

@@ -11,9 +11,9 @@ test('stream archive and person messages show only the selected scope, paginate,
   await a.db.call('endSession',id,at+120000);
   const second=await a.db.call('startSession','owner','other',at+180000,'platform',at+180000);await a.db.call('ingest',{...event(180,'Other stream'),actor:{externalId:'other',displayName:'Other viewer'}});await a.db.call('endSession',second,at+240000);
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(10000);
-  await goto(page,a.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`tr[data-session-id="${id}"]`).getByRole('button',{name:'Открыть',exact:true}).click();
+  await goto(page,a.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`[data-session-id="${id}"]`).locator('.stream-open').click();
   assert.equal(await page.locator('.recent-events').count(),0,'archive loads only on request');
-  await page.getByRole('button',{name:'Показать события',exact:true}).click();const archive=page.locator('.recent-events');await archive.getByText('<script>window.archiveXss=true</script>',{exact:true}).waitFor();
+  await page.getByRole('tab',{name:'События',exact:true}).click();const archive=page.locator('.recent-events');await archive.getByText('<script>window.archiveXss=true</script>',{exact:true}).waitFor();
   assert.equal(await archive.locator('article').count(),50);assert.equal(await archive.getByText('Other stream',{exact:true}).count(),0);assert.equal(await page.evaluate(()=>window.archiveXss),undefined);
   await archive.getByRole('button',{name:'Далее',exact:true}).click();await archive.getByText('Страница 2',{exact:true}).waitFor();await page.waitForFunction(()=>document.querySelectorAll('.recent-events article').length===7);await archive.getByText('Сообщение удалено модерацией.',{exact:true}).waitFor();
   await archive.getByRole('button',{name:'Назад',exact:true}).click();await archive.getByText('Support',{exact:true}).waitFor();await archive.getByText('100,00 RUB',{exact:true}).waitFor();

@@ -9,14 +9,14 @@ test('heatmap uses one scale across weekdays and missing viewer measurements exp
   const stream=data.streamComparison[0],now=Date.now();data.streamComparison=Array.from({length:9},(_,i)=>({...stream,id:'gap-'+i,startedAt:now-(9-i)*86400000,categories:['Game'],viewers:{...stream.viewers,all:{...stream.viewers.all,mean:i===6?null:4.4}}}));
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(10000);
   await page.route('**/api/v1/analytics?*',route=>route.fulfill({json:data}));await goto(page,a.bootstrap());await page.getByRole('button',{name:'Аналитика',exact:true}).click();
-  await page.getByLabel('Метрика карты',{exact:true}).selectOption('viewers');
+  await page.getByRole('tab',{name:'Время',exact:true}).click();await page.getByText('Настроить карту',{exact:true}).click();await page.getByLabel('Метрика карты',{exact:true}).selectOption('viewers');
   await page.waitForFunction(()=>{const cell=prefix=>document.querySelector(`.hour-heatmap button[aria-label^="${prefix}"]`),a=cell('пн 17:00'),b=cell('ср 10:00');return a?.getAttribute('aria-label')?.includes('4.4')&&b&&getComputedStyle(a).backgroundColor!==getComputedStyle(b).backgroundColor;});
   const colors=await page.locator('.hour-heatmap').evaluate(el=>['пн 17:00','вт 4:00','ср 10:00'].map(prefix=>getComputedStyle(el.querySelector(`button[aria-label^="${prefix}"]`)).backgroundColor));
   assert.equal(colors[0],colors[1]);assert.notEqual(colors[0],colors[2]);
-  const chart=page.locator('.audience-growth');await chart.locator('.growth-gap-reason').getByText(/без замеров: 1/).waitFor();
+  await page.getByRole('tab',{name:'Динамика',exact:true}).click();const chart=page.locator('.audience-growth');await chart.getByRole('button',{name:'О среднем за семь эфиров',exact:true}).click();await page.getByRole('dialog',{name:'О среднем за семь эфиров',exact:true}).getByText(/Без замеров: 1/).waitFor();await page.keyboard.press('Escape');
   assert.equal(await chart.locator('g[data-missing="true"] text').textContent(),'?');assert.equal(await chart.locator('g[data-missing="true"] circle:not([fill="transparent"])').count(),0);
-  await chart.getByText('Серый «?» — нет замеров, это не ноль.',{exact:false}).waitFor();
-  await chart.locator('svg g').first().click();await chart.locator('.growth-gap-reason').getByText(/в окне пока 1/).waitFor();
+
+  await chart.locator('svg g').first().click();await chart.getByRole('button',{name:'О среднем за семь эфиров',exact:true}).click();await page.getByRole('dialog',{name:'О среднем за семь эфиров',exact:true}).getByText(/сейчас 1/).waitFor();await page.keyboard.press('Escape');
   for(const width of [390,1280]){await page.setViewportSize({width,height:844});await assertUiLayout(page);}
   assert.equal(await page.title(),'Stream Panel');assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await a.close();}

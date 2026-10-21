@@ -12,7 +12,7 @@ test('small-audience search and core filters remain reversible after auto-refres
   await a.db.call('endSession',id,at+120000);
   browser=await launchBrowser();page=await browser.newPage();page.setDefaultTimeout(10000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  await goto(page,a.bootstrap());await page.getByRole('button',{name:'Аналитика',exact:true}).click();
+  await goto(page,a.bootstrap());await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('tab',{name:'Аудитория',exact:true}).click();
   await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===2);
   const search=page.getByLabel('Поиск участника');
   await search.fill('Alice');await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===1);

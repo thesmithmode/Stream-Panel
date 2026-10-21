@@ -1,3 +1,4 @@
+import {navigate} from '../helpers/navigation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {application} from '../helpers/application.mjs';
@@ -16,7 +17,7 @@ test('YouTube reconnect reuses saved credentials without disconnecting on deskto
       const errors=[];page.on('pageerror',error=>errors.push(error.message));await startCoverage(page);
       await context.route('https://accounts.google.com/**',route=>route.fulfill({contentType:'text/html',body:'Google fixture'}));
       await goto(page,a.bootstrap());
-      await page.getByRole('navigation').getByRole('button',{name:'Интеграции',exact:true}).click();
+      await navigate(page,'Интеграции');
       const panel=page.locator('section.settings:not(.wide)').filter({has:page.getByRole('heading',{name:'YouTube',exact:true})});
       await panel.getByText(/Google отклонил токен продления/).waitFor();
       assert.equal(await panel.locator('input[type=password]:visible').count(),0);

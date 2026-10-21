@@ -1,5 +1,7 @@
 <script lang="ts">
-  import {donationCountLabel} from "./labels";
+  import Sheet from "./Sheet.svelte";
+  import DonationTotal from "./DonationTotal.svelte";
+  import StreamHistory from "./StreamHistory.svelte";
   import PeriodSelect from './PeriodSelect.svelte';
   import { onMount } from "svelte";
   import {readRoute,routeUrl,type View} from "./route";
@@ -9,7 +11,7 @@
   import Icon from "./Icon.svelte";
   import Confirmation from "./Confirmation.svelte";
   import {confirmAction} from "./confirmation.svelte";
-  import {streamRange} from "./stream-time";
+
   import Overview from "./Overview.svelte";
   import ChannelOverview from "./ChannelOverview.svelte";
   import Settings from "./Settings.svelte";
@@ -26,15 +28,15 @@
     setProfile,
     type Profile,
     type Session,
-    money,
     type Summary,
   } from "./api";
-  import {sessionGroup} from "./session-group";
-  import {formatDuration} from "./duration";
+
+
   let retryInitialization=()=>{};
   let autoRefresh=$state(true),refreshSeconds=$state(60);
   function toggleRefresh(){autoRefresh=!autoRefresh;if(autoRefresh)void action(async()=>{});}
-  let tab = $state("overview"),
+  let moreOpen=$state(false);
+  let tab = $state("sessions"),
     authorized = $state(false),
     loading = $state(true),
     error = $state(""),
@@ -63,7 +65,7 @@
   let refreshTask:{epoch:number;task:Promise<void>;controller:AbortController}|null=null;
   function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
   function clearScope(){selectedSessions=[];sessionPage=0;refreshTask?.controller.abort();busy=false;scopeReady=false;summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
-  function restoreRoute(){const route=readRoute(location.search,getProfile()),selected=accessibleProfile(route.profile),denied=selected!==route.profile;epoch++;tab=denied&&route.view==='stream'?'overview':route.view;sessionFilter=denied?'':route.session;personId=denied?'':route.person;setProfile(selected);profile=selected;clearScope();}
+  function restoreRoute(){const route=readRoute(location.search,getProfile()),selected=accessibleProfile(route.profile),denied=selected!==route.profile;epoch++;tab=denied&&route.view==='stream'?'sessions':route.view;sessionFilter=denied?'':route.session;personId=denied?'':route.person;setProfile(selected);profile=selected;clearScope();}
   function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}connectionLost=!navigator.onLine;if(document.hidden||!navigator.onLine)return;error=authMessage((e as Error).message);}
 
   const authMessage = (code: string) => ({ INVALID_SESSION_GROUP: "Выберите эфиры в пределах 31 дня (до 100 частей). Активным может быть только последний.", SESSION_GROUP_NOT_FOUND:"Объединение уже отменено. Обновите список.", INVALID_LOGIN: "Неверный логин или пароль", LOGIN_RATE_LIMIT: "Слишком много попыток. Попробуйте позже.", LOGIN_REQUIRED: "Войдите в свой профиль", LOCAL_LOGIN_REQUIRED: "Войдите в свой профиль" }[code] ?? code);
@@ -92,20 +94,12 @@
     stream: "Стрим",
     sessions: "Стримы",
     people: "Люди",
-    analytics: "Аналитика аудитории",
+    analytics: "Аналитика",
     donations: "Донаты",
     connections: "Интеграции",
     settings: "Настройки",
   };
-  const nav = [
-    ["overview", "Обзор"],
-    ["sessions", "Стримы"],
-    ["people", "Люди"],
-    ["analytics", "Аналитика"],
-    ["donations", "Донаты"],
-    ["connections", "Интеграции"],
-    ["settings", "Настройки"],
-  ] as const;
+  const nav = [["sessions","Стримы"],["analytics","Аналитика"],["people","Люди"],["donations","Донаты"]] as const;
   async function refresh(fresh=false,initialStatus?:any) {
     const current=epoch;
     if(refreshTask?.epoch===current){
@@ -138,11 +132,10 @@
     }
   }
   function navigate(next:string,person='') {
-    epoch++;if(next==='overview'||next==='people'||next==='analytics')sessionFilter='';tab=next;personId=person;clearScope();saveRoute();
+    moreOpen=false;epoch++;if(next!=='stream')sessionFilter='';tab=next;personId=person;clearScope();saveRoute();
     window.scrollTo({top:0,behavior:'instant'});void action(async()=>{});
   }
   function openPerson(id:string){navigate('people',id);}
-  function toggleSession(id:string,selected:boolean){selectedSessions=selected?[...selectedSessions,id]:selectedSessions.filter(value=>value!==id);}
   async function mergeSelected(){
     const ids=[...selectedSessions],current=epoch;
     if(!await confirmAction('Объединить стримы?',`Выбрано: ${ids.length}. Статистика будет общей, перерывы сохранятся. Объединение можно отменить.`,'Объединить')||current!==epoch)return;
@@ -155,7 +148,7 @@
   }
   async function switchProfile(next: Profile) {
     if (!allowedProfiles.includes(next) || next === profile) return;
-    epoch++;if(tab==="stream")tab="overview"; setProfile(next); profile = next;
+    epoch++;if(tab==="stream")tab="sessions"; setProfile(next); profile = next;
     status = null; sessions = []; personId = sessionFilter = ""; error = "";
     summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
     clearScope();saveRoute();await action(async () => {});
@@ -217,31 +210,14 @@
   <aside class="sidebar" aria-label="Навигация">
     <a class="brand" href="/">Stream <span>Panel</span></a>
     <nav aria-label="Разделы">
-      {#each nav as [key, label]}<button
-          disabled={loading||!authorized}
-          class:active={tab === key}
-          aria-current={tab===key?'page':undefined}
-          onclick={() => navigate(key)}><Icon name={key} />{label}</button
-        >{/each}
+      {#each nav as [key,label]}<button disabled={loading||!authorized} class:active={tab===key||(key==='sessions'&&tab==='stream')} aria-current={tab===key?'page':undefined} onclick={()=>navigate(key)}><Icon name={key}/>{label}</button>{/each}
+      <button disabled={loading||!authorized} class:active={moreOpen||['overview','connections','settings'].includes(tab)} aria-expanded={moreOpen} onclick={()=>moreOpen=true}><Icon name="more"/>Ещё</button>
     </nav>
-    <div class="sidebar-bottom">
-      {#if authorized}
-        <div class="refresh-controls">
-          <button class="refresh-toggle" aria-label={`Автообновление ${autoRefresh?'Вкл':'Выкл'}`} aria-pressed={autoRefresh} onclick={toggleRefresh}><span class="dot" class:off={!autoRefresh}></span><span class="refresh-label">Автообновление</span> <strong>{autoRefresh?'Вкл':'Выкл'}</strong></button>
-          {#if autoRefresh}<label class="small muted">Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={60}>1 мин</option><option value={300}>5 мин</option><option value={900}>15 мин</option></select></label>{/if}
-          <button class="text-button small manual-refresh" aria-label="Обновить данные" title="Обновить данные" disabled={busy} onclick={()=>void action(async()=>{})}><Icon name="refresh" size={18}/><span>{busy?'Обновляем…':'Обновить данные'}</span></button>
-          {#if autoRefresh&&connectionLost}<span class="small muted" role="status">Не удалось обновить данные</span>{/if}
-        </div>
-        <label class="profile-label"><span class="small muted">Профиль</span><select aria-label="Профиль" value={profile} disabled={busy} onchange={(event) => void switchProfile(event.currentTarget.value as Profile)}>{#each allowedProfiles as allowed}<option value={allowed}>{allowed==='ruslan'?'Руслан':'Гульназ'}</option>{/each}</select></label>
-      {/if}
-    </div>
   </aside>
   <main class:sessions-page={tab==='sessions'} class:stream-page={tab==='stream'} class:people-page={tab==='people'}>
     <div class="page-heading">
-      <div>
-        <h1>{titles[tab]}</h1>
-
-      </div>
+      {#if tab==='stream'}<button aria-label="К списку стримов" class="back-link text-button" onclick={()=>navigate('sessions')}><Icon name="back"/>Стримы</button>{:else}<h1>{titles[tab]}</h1>{/if}
+      {#if authorized}<label class="heading-profile"><span class="dot" class:off={connectionLost||!autoRefresh} title={connectionLost?'Нет связи':autoRefresh?'Автообновление включено':'Автообновление выключено'}></span><select aria-label="Профиль" value={profile} disabled={busy} onchange={event=>void switchProfile(event.currentTarget.value as Profile)}>{#each allowedProfiles as allowed}<option value={allowed}>{allowed==='ruslan'?'Руслан':'Гульназ'}</option>{/each}</select></label>{/if}
     </div>
     {#if loading}<div class="panel empty">
         <p>Загружаем профиль…</p>
@@ -289,56 +265,23 @@
           onSelect={(id)=>{personId=id;saveRoute();}}
           onChange={()=>refresh(true)}
         />
-      {:else if tab === "sessions"}<section class="panel">
-          <header>
-            <h2>История стримов</h2>
-            <span class="small muted">Сначала новые</span>
-          </header>
-          {#if !sessions.length}<div class="empty">
-              <Icon name="sessions" size={48} />
-              <h3>Стримов пока нет</h3>
-              <p>Стрим появится автоматически при начале эфира.</p>
-            </div>{:else}<div class="analytics-controls stream-group-controls"><button class="outline" disabled={busy||selectedSessions.length<2} onclick={()=>action(mergeSelected)}>Объединить выбранные</button><span>Выбрано: {selectedSessions.length}</span></div><div class="table-scroll">
-              <table>
-                <thead
-                  ><tr
-                    ><th>Период · МСК</th><th>Длительность</th><th>Площадки</th
-                    ><th>Название и ссылка</th><th>Зрители · пик / среднее</th><th>Донаты</th><th>Сообщения</th><th></th></tr
-                  ></thead
-                ><tbody
-                  >{#each sessions as session,index}{#if index===0||sessionGroup(session.started_at_ms)!==sessionGroup(sessions[index-1]!.started_at_ms)}<tr class="session-group"><th colspan="8">{sessionGroup(session.started_at_ms)}</th></tr>{/if}<tr data-session-id={session.id}
-                      > <td data-label="Период · МСК">{#if session.kind==='platform'}<label class="stream-selection"><input type="checkbox" aria-label="Выбрать стрим" checked={selectedSessions.includes(session.id)} disabled={busy} onchange={event=>toggleSession(session.id,event.currentTarget.checked)}/> Выбрать</label>{/if}{#if (session.memberIds?.length??0)>1}<small>Объединено частей: {session.memberIds!.length}</small>{/if}{streamRange(session.started_at_ms,session.ended_at_ms)}
-                        {#each session.breaks??[] as pause}<small>Перерыв: {streamRange(pause.from,pause.to)}</small>{/each}
-
-                        </td
-                      ><td data-label="Длительность">{formatDuration((session.durationMs??((session.ended_at_ms??Date.now())-session.started_at_ms))/60000)}</td><td data-label="Площадки" class="platform-labels"
-                        >{session.platforms?.length
-                          ? session.platforms.map((platform) => platform === "twitch" ? "Twitch" : "YouTube").join(", ")
-                          : "Источник неизвестен"}</td
-                      ><td data-label="Название" class="platform-details">
-                        {#if session.primaryTitle}<span>{session.primaryTitle}</span>{/if}
-                        {#each (session.confirmedUrls ?? []).filter((entry) => isConfirmedPlatformUrl(entry)) as entry,linkIndex}
-                          <a href={entry.url} target="_blank" rel="noopener noreferrer">{entry.platform === "twitch" ? "Twitch" : "YouTube"}{#if (session.confirmedUrls??[]).filter(link=>link.platform===entry.platform).length>1}{` · часть ${(session.confirmedUrls??[]).slice(0,linkIndex+1).filter(link=>link.platform===entry.platform).length}`}{/if}</a>
-                        {/each}
-                      </td
-                      ><td data-label="Зрители · пик / среднее">{(session.viewerPartial?session.viewerKnownPeak:session.viewerPeak)??'—'} / {(session.viewerPartial?session.viewerKnownMean:session.viewerMean)?.toLocaleString('ru-RU',{maximumFractionDigits:1})??'—'}{#if session.viewerPartial}<small>Неполные данные площадок</small>{/if}</td><td data-label="Донаты">{#each Object.entries(session.donationTotals??{}) as [currency,amount]}<div>{money(amount,currency)}</div>{:else}—{/each}<small>{donationCountLabel(session.donationCount??0)}</small></td><td data-label="Сообщения">{session.messageCount??0}</td><td
-                        ><button
-                          class="outline small"
-                          onclick={() => {
-                              sessionFilter = session.id;
-                              navigate("stream");
-                            }}>Открыть</button
-                          >{#if (session.memberIds?.length??0)>1}<button class="outline small" disabled={busy} onclick={()=>action(()=>unmergeSession(session.id))}>Разъединить</button>{/if}{#if session.kind === "manual"}<button class="icon-button danger-icon" aria-label="Удалить" title="Удалить стрим" onclick={()=>action(async()=>{if(!await confirmAction("Удалить стрим?","Стрим исчезнет из истории и аналитики. Сохранённые события останутся.","Удалить"))return;await api(`sessions/${session.id}/delete`,{});if(sessionFilter===session.id)sessionFilter="";await refresh();})}><Icon name="trash" size={18}/></button>{/if}
-                        </td
-                      ></tr
-                    >{/each}</tbody
-                >
-              </table>
-            </div>{/if}
-      <div class="history-pages analytics-controls"><button class="outline" disabled={busy||sessionPage===0} onclick={()=>{selectedSessions=[];sessionPage--;void action(async()=>{});}}>Назад</button><span>Страница {sessionPage+1}</span><button class="outline" disabled={busy||sessions.length<100} onclick={()=>{selectedSessions=[];sessionPage++;void action(async()=>{});}}>Далее</button></div>
-        </section>{/if}
+      {:else if tab === "sessions"}
+        <DonationTotal open={()=>navigate('donations')}/>
+        <StreamHistory {sessions} bind:selected={selectedSessions} {busy} page={sessionPage} onpage={page=>{selectedSessions=[];sessionPage=page;void action(async()=>{});}} onopen={id=>{sessionFilter=id;navigate('stream');}} onmerge={()=>action(mergeSelected)} onunmerge={id=>void action(()=>unmergeSession(id))} ondelete={id=>void action(async()=>{if(!await confirmAction('Удалить стрим?','Стрим исчезнет из истории и аналитики. Сохранённые события останутся.','Удалить'))return;await api(`sessions/${id}/delete`,{});})} validUrl={isConfirmedPlatformUrl}/>
+        {#if !sessions.length}<button class="outline" onclick={()=>navigate('connections')}>Открыть интеграции</button>{/if}
+      {/if}
       {/if}
       {/key}
     {/if}
   </main>
 </div>
+
+<Sheet bind:open={moreOpen} title="Ещё">
+ <nav class="more-links" aria-label="Дополнительные разделы">{#each [['connections','Интеграции'],['settings','Настройки'],['overview','Итоги канала']] as const as [key,label]}<button onclick={()=>navigate(key)}><Icon name={key}/>{label}<Icon name="arrow" size={18}/></button>{/each}</nav>
+ <section class="more-refresh"><h3>Обновление данных</h3><div class="refresh-controls">
+ <button class="refresh-toggle" aria-label={`Автообновление ${autoRefresh?'Вкл':'Выкл'}`} aria-pressed={autoRefresh} onclick={toggleRefresh}><span class="dot" class:off={!autoRefresh}></span>Автообновление <strong>{autoRefresh?'Вкл':'Выкл'}</strong></button>
+ {#if autoRefresh}<label>Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={60}>1 мин</option><option value={300}>5 мин</option><option value={900}>15 мин</option></select></label>{/if}
+ <button class="outline manual-refresh" disabled={busy} onclick={()=>void action(async()=>{})}><Icon name="refresh" size={18}/><span>{busy?'Обновляем…':'Обновить данные'}</span></button>
+ {#if connectionLost}<p role="status">Нет связи с сервером</p>{/if}
+ </div></section>
+</Sheet>

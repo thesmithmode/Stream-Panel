@@ -1,3 +1,4 @@
+import {clockSettings} from '../helpers/navigation.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,rm,mkdir} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {AccountStore} from '../../dist/apps/daemon/src/auth.js';import {createHostedApplication} from '../../dist/apps/daemon/src/hosted.js';
 import {launchBrowser} from '../helpers/browser.mjs';import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';import {assertUiLayout} from '../helpers/ui-layout.mjs';
@@ -14,7 +15,7 @@ test('large report pages, searches and clock visitor pages remain complete and r
  page.on('request',r=>{if(new URL(r.url()).pathname==='/api/v1/analytics')reportRequests.push(r.url());});
  page.on('response',r=>{if(new URL(r.url()).pathname==='/api/v1/analytics/audience')audienceResponses.push(r.json());});
  try{
-  await goto(page,origin);assert.ok(await page.title());await page.getByLabel('Логин',{exact:true}).fill('fixture');await page.getByLabel('Пароль',{exact:true}).fill('fixture-paging-password');await page.getByRole('button',{name:'Войти',exact:true}).click();await page.getByRole('button',{name:'Аналитика',exact:true}).click();
+  await goto(page,origin);assert.ok(await page.title());await page.getByLabel('Логин',{exact:true}).fill('fixture');await page.getByLabel('Пароль',{exact:true}).fill('fixture-paging-password');await page.getByRole('button',{name:'Войти',exact:true}).click();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('tab',{name:'Аудитория',exact:true}).click();
   const audience=page.getByRole('heading',{name:'Возвращаемость участников',exact:true}).locator('../..');
   await audience.getByRole('button',{name:'Следующие участники',exact:true}).waitFor();await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===100);
   const initialReports=reportRequests.length;
@@ -24,7 +25,7 @@ test('large report pages, searches and clock visitor pages remain complete and r
   await audience.getByLabel('Сортировка').selectOption('messages');await page.getByLabel('Только ядро',{exact:true}).check();await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===0);await page.getByLabel('Только ядро',{exact:true}).uncheck();await page.getByLabel('Поиск участника').fill('');await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===100);
   assert.equal(reportRequests.length,initialReports,'audience paging and search must not download the full report again');
   assert.ok(audienceResponses.length>0);for(const response of await Promise.all(audienceResponses)){if(!response.preparing){assert.ok(Array.isArray(response.audience));assert.equal(response.clockBuckets,undefined);assert.equal(response.activityClock,undefined);assert.equal(response.streamComparison,undefined);}}
-  const clock=page.locator('.activity-clock');await clock.locator('svg g').filter({hasNot:page.locator('title:has-text("нет данных")')}).first().click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);
+  await page.getByRole('tab',{name:'Время',exact:true}).click();await clockSettings(page);const clock=page.locator('.activity-clock');await clock.locator('svg g').filter({hasNot:page.locator('title:has-text("нет данных")')}).first().click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);
   await clock.getByRole('button',{name:'Следующие в интервале',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===25);
   await clock.getByRole('button',{name:'Предыдущие в интервале',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);
   // An already selected interval loads its new resolution; nearby clicks share the batch.

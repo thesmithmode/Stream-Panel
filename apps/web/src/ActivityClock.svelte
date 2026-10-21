@@ -6,8 +6,7 @@
  import type {ActivityMetric} from './analytics-view';
  import {chartMetrics} from './chart-series';
  import Help from './Help.svelte';
- import PeriodSelect from './PeriodSelect.svelte';
- let {scope,visitorRevision,categoryFilter,rows,metric=$bindable('viewers'),resolution=$bindable(15),timezone,period='all',onperiod,windows=[],people=[],summary=[],summarySelection,loadSummary,onPerson,loadVisitors}:{visitorRevision?:string|undefined;scope?:string;categoryFilter:Snippet<[string]>;rows:ClockActivity[];metric?:ActivityMetric;resolution?:number;timezone:string;period?:number|'all'|'custom';onperiod:(value:number|'all'|'custom')=>void;windows?:Window[];people?:TimePerson[];summary?:TimeAudienceSummary[];summarySelection?:{day:string;resolution:number};loadSummary?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>;onPerson:(id:string)=>void;loadVisitors?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>}=$props();
+ let {scope,visitorRevision,categoryFilter,rows,metric=$bindable('viewers'),resolution=$bindable(15),timezone,windows=[],people=[],summary=[],summarySelection,loadSummary,onPerson,loadVisitors}:{visitorRevision?:string|undefined;scope?:string;categoryFilter:Snippet<[string]>;rows:ClockActivity[];metric?:ActivityMetric;resolution?:number;timezone:string;windows?:Window[];people?:TimePerson[];summary?:TimeAudienceSummary[];summarySelection?:{day:string;resolution:number};loadSummary?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>;onPerson:(id:string)=>void;loadVisitors?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>}=$props();
  let day=$state('all'),currency=$state('RUB'),selected=$state<number|null>(null),availableWidth=$state(800);
  const plotWidth=$derived(Math.max(300,availableWidth));
  const step=$derived([1,5,15,30,60].includes(resolution)?resolution:15);
@@ -43,13 +42,13 @@
 </script>
 <section class="panel activity-clock">
  <header><h2>Активность по часам</h2><Help id="activity-clock-help" label="О суточном графике" text="Все дни выбранного периода совмещены на шкале 00:00–24:00 в часовом поясе аналитики. Зрители — среднее по времени с известными замерами; сообщения — число на час эфира. Время без эфиров и пропущенные замеры не считаются нулями. При неполных данных площадок показана сумма известных зрителей с пометкой о неполных данных; неизвестные значения не считаются нулями. Сумма зрителей площадок не означает уникальных людей. Активные участники — известные люди по наблюдениям Twitch и сигналам чата; это отдельная метрика. Нажмите столбец, чтобы увидеть людей и их явку за тот же интервал. Часы просмотра — накопленная сумма: онлайн × фактическое время известных замеров; она зависит от количества эфиров. Донаты — сумма в выбранной валюте на час эфира, только во время записанных эфиров. Нажмите столбец для точного значения."/></header>{@render categoryFilter("Категория суточного графика")}
- <div class="clock-controls">
-  <PeriodSelect value={period} label="Период суточного графика" days={[7,30]} custom={period==='custom'} onchange={onperiod}/>
+ <details class="clock-settings"><summary>Настроить график</summary><div class="clock-controls">
+
   <label>Метрика графика<select bind:value={metric}>{#each choices as choice}<option value={choice.value}>{choice.label}</option>{/each}</select></label>
   <label>Шаг графика<select bind:value={resolution}><option value={1}>1м</option><option value={5}>5м</option><option value={15}>15м</option><option value={30}>30м</option><option value={60}>1ч</option></select></label>
   <label>Дни недели<select bind:value={day}><option value="all">Все дни</option><option value="weekdays">Будни</option><option value="weekends">Выходные</option>{#each ['пн','вт','ср','чт','пт','сб','вс'] as d}<option value={d}>{d}</option>{/each}</select></label>
   {#if metric==='donations'}<label>Валюта донатов графика<select bind:value={currency}>{#each currencies as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select></label>{/if}
- </div>
+ </div></details>
  <p class="small muted clock-caption">{watchHours?'Часы просмотра за выбранный период · накопленная сумма':metric==='donations'?`Сумма донатов на час эфира · ${activeCurrency}`:metric.endsWith('Messages')||metric==='messages'?'Сообщения на час эфира':metric==='activeAudience'?'Средняя активная аудитория за время эфира':'Среднее число зрителей во время эфира'} · {timezone}</p>
  {#if partialViewers}<p class="clock-caption small muted">Неполные данные площадок: сумма известных зрителей.</p>{/if}
  <div class="clock-plot" bind:clientWidth={availableWidth}><svg viewBox={`0 0 ${plotWidth} 250`} role="group" aria-label={`Активность с ${clockLabel(start)} до ${clockLabel(start+span)}`}>
@@ -69,7 +68,7 @@
   {/each}
   {#each ticks as minute}<text x={45+(minute-start)/span*(plotWidth-70)} y="230" text-anchor={minute===start?'start':minute===start+span?'end':'middle'} fill="currentColor" font-size="12">{clockLabel(minute)}</text>{/each}
  </svg></div>
- <p class="clock-caption small" role="status">{chosen?description(chosen):'Нажмите столбец: точное значение, люди и их явка. Серый — нет данных.'}</p>
+ <p class="clock-caption small" role="status">{chosen?description(chosen):''}</p>
 {#if summaryBusy}<p class="clock-caption small" role="status">Загружаем детализацию графика…</p>{/if}
  {#if summaryError}<p class="clock-caption small" role="alert">{summaryError} <button onclick={()=>summaryRetry++}>Повторить</button></p>{/if}
  <TimeAudience deferredSummary={!!summarySelection} {scope} revision={visitorRevision} {windows} {people} summary={displayedSummary} {timezone} {onPerson} {loadVisitors} {day} resolution={step} {selected}/>

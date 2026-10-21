@@ -1,0 +1,46 @@
+# UI checkpoint — 21 October 2026
+
+Pre-redesign production commit: `4026d3be91a11d89784df1759e12d08885790992`.
+Permanent GitHub branch: `checkpoint/ui-before-redesign-2026-10-21`.
+
+The redesign changes the web interface and its browser tests, not database schemas,
+collectors, report calculations, APIs, authentication or stored facts.
+
+## Roll back the UI
+
+Revert the redesign merge/squash commit on a branch from the **current main**,
+run the existing quality gate, merge and let `Deploy server` publish the release.
+For a normal merge use `git revert -m 1 MERGE_SHA`; for a squash commit use
+`git revert SQUASH_SHA`. Resolve any later UI edits before merging the revert.
+This preserves database history and subsequent backend fixes. Do not restore an
+old database, force-reset main or redeploy the entire checkpoint after later
+backend/schema changes just to change the appearance.
+
+## Function inventory
+
+| Previously visible | New location |
+| --- | --- |
+| Channel overview totals | More → Channel totals; donation sum also on Streams |
+| Profile selection | Page heading |
+| Refresh on/off, interval, manual refresh | More → Data refresh |
+| Integrations, settings, logout and backups | More → Integrations / Settings |
+| Open stream | Click the stream card; link supports normal browser navigation |
+| Merge streams | Streams → Select → check streams → Merge |
+| Unmerge / delete manual stream / platform recording links | Stream card → … |
+| Viewer peak / donor count / breaks | Stream card → …; peak also in stream totals |
+| Stream chart and minute drilldown | Stream → Results; chart options under sliders |
+| Viewer ranking, sort, linked accounts, intervals | Stream → Participants |
+| Following / subscription history | Stream → Results → Subscribers |
+| Archived chat, moderation and donation events | Stream → Events |
+| Stream names, categories, breaks | Stream heading → … |
+| Insights, evidence and person links | Results / Analytics → Insights |
+| Period, platform, category | Analytics → period shortcuts / Filters |
+| Custom dates | Filters → Custom period |
+| Display preferences and timezone | Filters → Display and timezone |
+| Growth, categories, stream comparison, YouTube channel report | Analytics → Trends; detailed tables expand |
+| Heatmap, clock and interval visitors, schedule and donation timing | Analytics → Time; each chart has options |
+| Audience composition, search, core filter, attendance, minute intervals | Analytics → Audience |
+| People, notes, tags, merge/split/undo, donation editing and assignment | Existing People / Donations flows |
+
+Missing measurements remain distinct from zero. Partial counts retain a visible
+indicator and their explanation. Settings remain scoped to the selected profile.

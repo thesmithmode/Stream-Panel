@@ -1,3 +1,4 @@
+import {clockSettings} from '../helpers/navigation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {application} from '../helpers/application.mjs';
@@ -20,17 +21,17 @@ test('partial provider counters remain visible and labelled in stream cards, ove
   const errors=[];page.on('pageerror',error=>errors.push(error.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
   await goto(page,app.bootstrap());assert.equal(await page.title(),'Stream Panel');
   await page.getByRole('button',{name:'Стримы',exact:true}).click();
-  const row=page.locator(`tr[data-session-id="${id}"]`),count=row.locator('[data-label="Зрители · пик / среднее"]');
-  assert.match(await count.textContent(),/8 \/ 6/);assert.equal(await page.locator('body').textContent().then(t=>t.includes('≥')),false);assert.match(await count.textContent(),/Неполные данные площадок/);
+  const row=page.locator(`[data-session-id="${id}"]`),count=row.locator('.stream-card-metrics>div').nth(1);
+  assert.match(await count.textContent(),/6/);await row.locator('.stream-actions summary').click();assert.match(await row.textContent(),/Пик зрителей: 8/);assert.equal(await page.locator('body').textContent().then(t=>t.includes('≥')),false);assert.match(await row.textContent(),/Неполные данные площадок/);
   await assertUiLayout(page);
   if(process.env.STREAM_PANEL_QA_SCREENSHOTS)await page.screenshot({path:'/tmp/sp-partial-stream-390.png',fullPage:true});
-  await row.getByRole('button',{name:'Открыть',exact:true}).click();
-  await page.locator('.stream-metrics').getByText('8',{exact:true}).waitFor();await page.locator('.stream-metrics').getByText('6',{exact:true}).waitFor();
+  await row.locator('.stream-open').click();
+  await page.locator('.stream-kpis').getByText('8',{exact:true}).waitFor();await page.locator('.stream-kpis').getByText('6',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Аналитика',exact:true}).click();
-  await page.getByLabel('Расчёт карты').waitFor();await page.getByLabel('Метрика карты',{exact:true}).selectOption('viewers');
+  await page.getByRole('tab',{name:'Время',exact:true}).click();await page.getByText('Настроить карту',{exact:true}).click();await page.getByLabel('Расчёт карты').waitFor();await page.getByLabel('Метрика карты',{exact:true}).selectOption('viewers');
   const cell=page.locator('.hour-heatmap button[aria-label^="пн 9:00"]');await cell.waitFor();
   await page.waitForFunction(()=>document.querySelector('.hour-heatmap button[aria-label^="пн 9:00"]')?.getAttribute('aria-label')?.includes('6'));assert.match(await cell.getAttribute('aria-label'),/6[.,]0/);await cell.click();
-  const clock=page.locator('.activity-clock');await clock.getByLabel('Шаг графика').selectOption('60');
+  await clockSettings(page);const clock=page.locator('.activity-clock');await clock.getByLabel('Шаг графика').selectOption('60');
   const bucket=clock.getByRole('button',{name:/09:00–10:00: 6/});await bucket.click();
   assert.match(await clock.locator('.clock-caption[role="status"]').textContent(),/6/);
   await clock.getByLabel('Метрика графика').selectOption('youtubeViewers');
