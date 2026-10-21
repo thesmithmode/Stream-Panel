@@ -21,6 +21,12 @@ Before the chart-density and People refinement, production is preserved at
 `checkpoint/ui-before-people-2026-10-21`. This refinement adds read-only 30-day
 donation totals without changing stored facts or database schemas.
 
+Before the compact participant table, production is preserved at
+`07c37065a345fecede9c5fb6a6b010d1e793852f`, branch
+`checkpoint/ui-before-participants-2026-10-22`. The table refinement changes
+presentation and disclosure state only; presence and donation calculations stay
+unchanged. It preserves loaded participant pages during data refresh.
+
 Revert the redesign merge/squash commit on a branch from the **current main**,
 run the existing quality gate, merge and let `Deploy server` publish the release.
 For a normal merge use `git revert -m 1 MERGE_SHA`; for a squash commit use
@@ -42,7 +48,9 @@ backend/schema changes just to change the appearance.
 | Unmerge / delete manual stream / platform recording links | Stream card → … |
 | Viewer peak / donor count / breaks | Stream card → …; peak also in stream totals |
 | Stream chart and minute drilldown | Stream → Results; metric and 1/5/15 min controls above the chart (5 min default, last choice saved per profile) |
-| Viewer ranking, sort, linked accounts, intervals | Stream → Participants |
+| Viewer ranking and sorting | Stream → Participants; tap a column heading, or the currency sort on phones |
+| Participant intervals | Tap the time/chevron; intervals expand directly below that row, collapse without reserved space |
+| Participant account identities | Tap the participant name → Accounts; aliases are not repeated in the stream table |
 | Following / subscription history | Stream → Results → Subscribers |
 | Archived chat, moderation and donation events | Stream → Events |
 | Stream names, categories, breaks | Stream heading → … |

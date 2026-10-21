@@ -37,7 +37,8 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   await page.getByRole('tab',{name:'Участники',exact:true}).click();const rank=page.getByRole('region',{name:'Рейтинг участников'});
   await rank.getByRole('button',{name:'Silent Viewer',exact:true}).waitFor();
   assert.equal(await rank.locator('tbody td:nth-child(2) strong').first().textContent(),'5 мин');
-  const renamed=rank.locator('tbody tr').filter({hasText:'Talkative Viewer'});await renamed.locator('.account-details>summary').click();assert.equal(await renamed.getByRole('button',{name:'Talkative Twitch',exact:true}).count(),1,'a renamed single account remains reachable');await renamed.locator('.account-details>summary').click();
+  assert.equal(await rank.locator('.account-details,.accounts').count(),0,'account aliases do not duplicate the participant name');
+  assert.equal(await rank.getByRole('button',{name:'Talkative Viewer',exact:true}).evaluate(el=>getComputedStyle(el).color),'rgb(169, 112, 255)','renamed Twitch participants keep their platform color');
   await assertUiLayout(page);
   assert.equal(await page.locator('.stream-feed').count(),0);
   assert.equal(await page.locator('.following').isVisible(),false,'subscriptions live under the results disclosure');
@@ -53,12 +54,15 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   await rank.getByRole('button',{name:'Донаты, RUB',exact:false}).click();
   assert.equal(await rank.locator('tbody td:first-child').first().getByRole('button',{name:'Talkative Viewer',exact:true}).count(),1);
   await rank.getByRole('button',{name:'Донаты, EUR',exact:false}).click();
-  await rank.locator('.account-details>summary').first().click();assert.equal(await rank.getByRole('button',{name:'Silent Twitch',exact:true}).evaluate(el=>getComputedStyle(el).color),'rgb(169, 112, 255)');
-  assert.equal(await rank.getByRole('button',{name:'Silent YouTube',exact:true}).evaluate(el=>getComputedStyle(el).color),'rgb(255, 89, 89)');
+  assert.equal(await rank.getByRole('button',{name:'Silent Twitch',exact:true}).count(),0);
+  assert.equal(await rank.getByRole('button',{name:'Silent YouTube',exact:true}).count(),0);
   await rank.getByRole('button',{name:/^Время в чате/}).click();
   assert.equal(await page.getByText('Последний замер:',{exact:false}).count(),0);
   assert.equal(await page.getByRole('button',{name:'Все донаты',exact:true}).count(),0);
-  await rank.locator('tbody tr').first().getByText('Интервалы',{exact:true}).click();
+  await rank.getByRole('button',{name:'Интервалы Silent Viewer',exact:true}).click();
+  const intervals=rank.getByRole('region',{name:'Интервалы Silent Viewer',exact:true});
+  assert.equal(await intervals.locator('.twitch').first().evaluate(el=>getComputedStyle(el).color),'rgb(169, 112, 255)');
+  assert.equal(await intervals.locator('.youtube').first().evaluate(el=>getComputedStyle(el).color),'rgb(255, 89, 89)');
   await rank.getByText(/Пауза/).waitFor();
   await page.getByRole('tab',{name:'Итоги',exact:true}).click();await page.getByRole('button',{name:'1 мин',exact:true}).click();await page.getByLabel('Показатель графика стрима').selectOption('twitchViewers');
   const bars=page.locator('.series-panel .chart-bar');
