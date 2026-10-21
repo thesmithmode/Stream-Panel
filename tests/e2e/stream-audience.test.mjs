@@ -27,7 +27,7 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
    const response=await route.fetch(),data=await response.json();
    for(const person of data.audience??[]){
     if(person.name==='Silent Viewer'){person.accounts=[{source:'twitch',name:'Silent Twitch'},{source:'youtube',name:'Silent YouTube'}];person.donations={EUR:'500'};person.intervals.push({from:base,to:base+minute,kind:'chat_proxy'});}
-    if(person.name==='Talkative Viewer')person.donations={RUB:'22800'};
+    if(person.name==='Talkative Viewer'){person.donations={RUB:'22800'};person.accounts=[{source:'twitch',name:'Talkative Twitch'}];}
    }
    await route.fulfill({response,json:data});
   });
@@ -37,6 +37,7 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   await page.getByRole('tab',{name:'Участники',exact:true}).click();const rank=page.getByRole('region',{name:'Рейтинг участников'});
   await rank.getByRole('button',{name:'Silent Viewer',exact:true}).waitFor();
   assert.equal(await rank.locator('tbody td:nth-child(2) strong').first().textContent(),'5 мин');
+  const renamed=rank.locator('tbody tr').filter({hasText:'Talkative Viewer'});await renamed.locator('.account-details>summary').click();assert.equal(await renamed.getByRole('button',{name:'Talkative Twitch',exact:true}).count(),1,'a renamed single account remains reachable');await renamed.locator('.account-details>summary').click();
   await assertUiLayout(page);
   assert.equal(await page.locator('.stream-feed').count(),0);
   assert.equal(await page.locator('.following').isVisible(),false,'subscriptions live under the results disclosure');
