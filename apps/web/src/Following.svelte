@@ -3,8 +3,9 @@
  import {api,date} from './api';
  import {ConnectionError} from './request';
  import Help from './Help.svelte';
- let {personId='',sessionId='',onPerson}:{personId?:string;sessionId?:string;onPerson:(id:string)=>void}=$props();
+ let {personId='',sessionId='',embedded=false,onPerson}:{personId?:string;sessionId?:string;embedded?:boolean;onPerson:(id:string)=>void}=$props();
  let data=$state<any>(null),error=$state('');
+ const followingHelp='Follow Twitch и подписка YouTube. Статус относится к последней успешной проверке. Отписка Twitch обнаруживается полным опросом: её время — момент обнаружения, точное время недоступно. YouTube скрывает частные подписки; отсутствие в ответе не доказывает отписку. История изменений хранится с подключения панели. Время проверки и дата подписки — разные данные.';
  const platform=(source:string)=>source==='twitch'?'Twitch':'YouTube';
  const status=(value:boolean|null)=>value===true?'Подписан':value===false?'Не подписан':'Неизвестно';
  const time=(at:number)=>new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',hour:'2-digit',minute:'2-digit'}).format(at);
@@ -17,8 +18,8 @@
   return()=>{request.cancel();window.removeEventListener('sp:data-refresh',load);};
  });
 </script>
-<section class="panel following" aria-label={personId?"Подписки на канал":"Подписчики за стрим"}>
- <header><h2>{personId?'Подписки на канал':'Подписчики за стрим'} <Help id="following-help" label="О подписках на канал" text="Follow Twitch и подписка YouTube. Статус относится к последней успешной проверке. Отписка Twitch обнаруживается полным опросом: её время — момент обнаружения, точное время недоступно. YouTube скрывает частные подписки; отсутствие в ответе не доказывает отписку. История изменений хранится с подключения панели. Время проверки и дата подписки — разные данные." /></h2></header>
+<section class="panel following" class:embedded aria-label={personId?"Подписки на канал":"Подписчики за стрим"}>
+{#if embedded}<div class="following-info"><Help trigger="О подписках" id="following-help" label="О подписках на канал" text={followingHelp} /></div>{:else} <header><h2>{personId?'Подписки на канал':'Подписчики за стрим'} <Help id="following-help" label="О подписках на канал" text={followingHelp} /></h2></header>{/if}
  {#if error}<p class="muted" role="status">{error}</p>{/if}
  {#if data===null}<p class="muted">Загружаем подписки…</p>
  {:else if personId}
@@ -36,4 +37,4 @@
   </div>
  {/if}
 </section>
-<style>.follow-summary{padding:10px 20px}.follow-summary p{margin:6px 0}.follower-row{display:flex;gap:12px;align-items:baseline;padding:6px 0;font-size:13px;overflow-wrap:anywhere}.follower-row>span:first-child{font-size:11px;flex-shrink:0}.follower-row time{margin-left:auto;color:var(--muted);font-size:11px;white-space:nowrap}.twitch{color:var(--twitch,#a970ff)}.youtube{color:var(--youtube,#ff5959)}.following{margin-bottom:16px}.follow-platform{padding:14px 20px;border-bottom:1px solid var(--border)}.follow-platform:last-child{border-bottom:0}h4{margin:0 0 8px;font-size:14px}.follow-state{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:baseline}.follow-platform p{margin-bottom:8px}ul{padding-left:18px;max-height:240px;overflow:auto;font-size:12px;line-height:1.8}summary{cursor:pointer}li{overflow-wrap:anywhere}@media(max-width:600px){.follow-platform,.follow-summary{padding:10px 16px}}</style>
+<style>.embedded{border:0;border-radius:0;margin:0}.embedded .follow-summary{padding:0}.following-info{margin-bottom:8px}.follow-summary{padding:10px 20px}.follow-summary p{margin:6px 0}.follower-row{display:flex;gap:12px;align-items:baseline;padding:6px 0;font-size:13px;overflow-wrap:anywhere}.follower-row>span:first-child{font-size:11px;flex-shrink:0}.follower-row time{margin-left:auto;color:var(--muted);font-size:11px;white-space:nowrap}.twitch{color:var(--twitch,#a970ff)}.youtube{color:var(--youtube,#ff5959)}.following{margin-bottom:16px}.follow-platform{padding:14px 20px;border-bottom:1px solid var(--border)}.follow-platform:last-child{border-bottom:0}h4{margin:0 0 8px;font-size:14px}.follow-state{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;align-items:baseline}.follow-platform p{margin-bottom:8px}ul{padding-left:18px;max-height:240px;overflow:auto;font-size:12px;line-height:1.8}summary{cursor:pointer}li{overflow-wrap:anywhere}@media(max-width:600px){.follow-platform,.follow-summary{padding:10px 16px}}</style>
