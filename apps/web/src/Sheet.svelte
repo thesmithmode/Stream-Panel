@@ -4,7 +4,7 @@
   let dialog=$state<HTMLDialogElement>();
   $effect(()=>{if(!dialog)return;if(open&&!dialog.open)dialog.showModal();else if(!open&&dialog.open)dialog.close();});
 </script>
-<dialog class="sheet" aria-label={title} bind:this={dialog} onclose={()=>{if(!dialog?.open)open=false;}} onclick={event=>{if(event.target===dialog)open=false;}} onkeydown={event=>{if(event.key==='Escape')open=false;}}>
+<dialog class="sheet" aria-label={title} bind:this={dialog} onclose={()=>{if(!dialog?.open)open=false;}} oncancel={event=>{event.preventDefault();open=false;}} onclick={event=>{if(event.target===dialog)open=false;}} onkeydown={event=>{if(event.key==='Escape'){event.preventDefault();open=false;}}}>
   <div class="sheet-body">
     <header><h2>{title}</h2><button class="icon-button" aria-label="Закрыть" onclick={()=>open=false}>×</button></header>
     {@render children()}
