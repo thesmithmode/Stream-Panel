@@ -29,11 +29,24 @@ test('large report pages, searches and clock visitor pages remain complete and r
   await clock.getByRole('button',{name:'Предыдущие в интервале',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);
   // An already selected interval loads its new resolution; nearby clicks share the batch.
   const batch=page.waitForResponse(r=>r.url().includes('/analytics/clock?')&&new URL(r.url()).searchParams.get('clockResolution')==='30');
-  await clock.getByLabel('Шаг графика').selectOption('30');await batch;
+  const summaryResponse=page.waitForResponse(r=>r.url().includes('/analytics/clock-summary?'));
+  await clock.getByLabel('Шаг графика').selectOption('30');await summaryResponse;
+  await clock.getByRole('status').filter({hasText:'Загружаем детализацию'}).waitFor({state:'hidden'});
+  await clock.locator('svg g').filter({hasNot:page.locator('title:has-text("нет данных")')}).first().click();await batch;
   let clockRequests=0;const countRequests=request=>{if(request.url().includes('/analytics/clock?'))clockRequests++;};page.on('request',countRequests);
   const bars=clock.locator('svg g').filter({hasNot:page.locator('title:has-text("нет данных")')});
   for(let i=0;i<6;i++){await bars.nth(i%2).click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);}
   assert.equal(clockRequests,0,'prepared column switches make no requests');page.off('request',countRequests);
+  const fullReports=reportRequests.length;
+  let summaryFault=true;
+  await page.route('**/api/v1/analytics/clock-summary?*',route=>{if(summaryFault){summaryFault=false;return route.fulfill({status:400,json:{error:'SUMMARY_UNAVAILABLE'}});}return route.continue();});
+  await clock.getByLabel('Шаг графика').selectOption('5');await clock.getByRole('alert').filter({hasText:'SUMMARY_UNAVAILABLE'}).waitFor();
+  await clock.getByRole('button',{name:'Повторить',exact:true}).click();await clock.getByRole('status').filter({hasText:'Загружаем детализацию'}).waitFor({state:'hidden'});await page.unroute('**/api/v1/analytics/clock-summary?*');
+  let summaries=0;const countSummaries=r=>{if(r.url().includes('/analytics/clock-summary?'))summaries++;};page.on('request',countSummaries);
+  await clock.getByLabel('Шаг графика').selectOption('30');await clock.getByLabel('Шаг графика').selectOption('5');assert.equal(summaries,0,'already loaded resolutions are retained');page.off('request',countSummaries);
+  await clock.getByLabel('Шаг графика').selectOption('30');
+  await clock.locator('svg g').filter({hasNot:page.locator('title:has-text("нет данных")')}).first().click();await page.waitForFunction(()=>document.querySelectorAll('.time-audience tbody tr').length===100);
+  assert.equal(reportRequests.length,fullReports,'clock changes do not reload the report');
   let fault=true;
   await page.route('**/api/v1/analytics/clock?*',route=>{if(fault&&new URL(route.request().url()).searchParams.get('clockOffset')==='100'){fault=false;return route.fulfill({status:400,json:{error:'CLOCK_UNAVAILABLE'}});}return route.continue();});
   await clock.getByRole('button',{name:'Следующие в интервале',exact:true}).click();await clock.getByRole('alert').filter({hasText:'CLOCK_UNAVAILABLE'}).waitFor();assert.equal(await clock.locator('.clock-plot').isVisible(),true);await page.unroute('**/api/v1/analytics/clock?*');

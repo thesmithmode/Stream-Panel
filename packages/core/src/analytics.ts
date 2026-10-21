@@ -21,6 +21,7 @@ export interface AnalyticsOptions {
     audienceSearch?:string;
     audienceSort?:string;
     audienceCoreOnly?:boolean;
+    clockCompact?:boolean;
     clockDay?:string;
     clockMinute?:number;
     clockResolution?:number;

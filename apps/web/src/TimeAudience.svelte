@@ -4,10 +4,10 @@
  import {platformClass} from './period';
  import Help from './Help.svelte';
  import {ClockVisitors} from './clock-visitors';
- let {scope,revision,windows,people,timezone='Europe/Moscow',onPerson,summary=[],loadVisitors,day='all',resolution=60,selected=null}:{revision?:string|undefined;scope?:string|undefined;windows:Window[];people:TimePerson[];timezone?:string;summary?:TimeAudienceSummary[];loadVisitors?:((params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>)|undefined;onPerson:(id:string)=>void;day?:string;resolution?:number;selected?:number|null}=$props();
+ let {scope,revision,windows,people,timezone='Europe/Moscow',onPerson,summary=[],deferredSummary=false,loadVisitors,day='all',resolution=60,selected=null}:{revision?:string|undefined;scope?:string|undefined;windows:Window[];people:TimePerson[];timezone?:string;summary?:TimeAudienceSummary[];deferredSummary?:boolean;loadVisitors?:((params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>)|undefined;onPerson:(id:string)=>void;day?:string;resolution?:number;selected?:number|null}=$props();
  const chosen=$derived.by(()=>{
   if(selected===null)return undefined;
-  if(summary.length)return summary.find(b=>b.day===day&&b.resolution===resolution&&b.minute===selected);
+  if(deferredSummary||summary.length)return summary.find(b=>b.day===day&&b.resolution===resolution&&b.minute===selected);
   const b=timeAudience(windows,people,timezone,resolution,day,Math.floor(selected/60)).find(b=>b.minute===selected);
   return b&&b.streams.size?{...b,streams:b.streams.size,people:[...b.people].map(([id,sessions])=>({id,visits:sessions.size})),peopleDeferred:false}:undefined;
  });

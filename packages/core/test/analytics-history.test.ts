@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {StreamStore} from '../src/store.js';
-import {AnalyticsHistory} from '../src/analytics-history.js';
+import {AnalyticsHistory,type ClockBucket} from '../src/analytics-history.js';
 import {AnalyticsWorkspace} from '../src/analytics-workspace.js';
 import {audienceAnalytics} from '../src/analytics.js';
 const base=Date.UTC(2026,9,1),minute=60000;
@@ -542,5 +542,44 @@ test('incremental polling reads its validation snapshot once and restarts after 
   assert.equal(validations,2,'a correction needs a fresh revision and validation snapshot');
   assert.deepEqual(result.summary,raw.summary);assert.deepEqual(result.hours,raw.hours);assert.deepEqual(result.streamComparison,raw.streamComparison);
   h.close();
+ }finally{s.close();}
+});
+
+test('compact clock projection retains exact selected variants and hourly weekday heatmap without poisoning the full cache',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,7);const h=new AnalyticsHistory((s as any).db),opts={...options,summaryOnly:true};
+  const full=ready(h,opts);assert.ok(full.clockBuckets!.length>0);
+  (h as any).aggregate=()=>{throw Error('selection rebuilt report');};
+  for(const day of ['all','weekdays','weekends','пн','вт','ср','чт','пт','сб','вс'])for(const resolution of [1,5,15,30,60]){
+   const compact=ready(h,{...opts,clockCompact:true,clockDay:day,clockResolution:resolution});
+   assert.deepEqual(compact.clockSelection,{day,resolution});
+   assert.deepEqual(compact.clockBuckets,full.clockBuckets!.filter((b:ClockBucket)=>(b.day===day&&b.resolution===resolution)||(b.resolution===60&&!['all','weekdays','weekends'].includes(b.day))));
+   assert.deepEqual(compact.summary,full.summary);assert.deepEqual(compact.activityClock,full.activityClock);
+   compact.clockBuckets!.splice(0);assert.deepEqual(ready(h,opts).clockBuckets,full.clockBuckets);
+  }
+  const compact=ready(h,{...opts,clockCompact:true});
+  assert.ok(JSON.stringify(compact.clockBuckets).length<JSON.stringify(full.clockBuckets).length/3);
+  h.close();
+ }finally{s.close();}
+});
+
+test('7 and 30 day windows reuse decoded durable reports across minute shifts in gaps, including after restart and eviction',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,4);const db=(s as any).db;
+  for(const days of [7,30]){
+   const toMs=base+5*86400000,opts={...options,fromMs:toMs-days*86400000,toMs,summaryOnly:true};
+   const first=new AnalyticsHistory(db),original=ready(first,opts);first.close();
+   const h=new AnalyticsHistory(db),get=(h as any).reportCache.get.bind((h as any).reportCache);let reads=0;
+   (h as any).reportCache.get=(key:string)=>{reads++;return get(key);};
+   const aggregate=(h as any).aggregate;(h as any).aggregate=()=>{throw Error('unchanged rolling window rebuilt');};
+   for(let minute=1;minute<=3;minute++){
+    const shifted={...opts,fromMs:opts.fromMs+minute*60000,toMs:opts.toMs+minute*60000},result=ready(h,shifted);
+    assert.deepEqual(result.summary,original.summary);assert.equal(result.filters.fromMs,shifted.fromMs);assert.equal(result.filters.toMs,shifted.toMs);
+    assert.equal(result.audience.length,original.audience.length);
+   }
+   assert.equal(reads,1,'only first shifted request decodes the durable payload');
+   db.exec('DELETE FROM analytics_reports');(h as any).aggregate=aggregate;
+   const rebuilt=ready(h,opts);assert.deepEqual(rebuilt.summary,original.summary);assert.deepEqual(rebuilt.audience,original.audience);h.close();
+  }
  }finally{s.close();}
 });
