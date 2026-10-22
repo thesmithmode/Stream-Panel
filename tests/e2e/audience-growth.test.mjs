@@ -15,7 +15,7 @@ test('audience trend switches platforms, shows 7/30-day smoothing and opens the 
   await chart.getByRole('button',{name:'Вместе',exact:true}).click();assert.equal(await chart.locator('details').count(),0);assert.equal(await chart.locator('.growth-recent button').count(),3);assert.ok((await chart.locator('.growth-recent button').first().textContent()).includes('54'));
   await chart.locator('svg g').first().click();assert.ok((await chart.locator('.growth-selection').textContent()).includes('43'));assert.ok((await chart.locator('.growth-selection').textContent()).includes('Game'));
   await page.getByRole('tab',{name:'Время',exact:true}).click();await clockSettings(page);const clock=page.locator('.activity-clock');
-  await clock.getByLabel('Метрика графика').selectOption('messages');await clock.getByText('Сообщения на час эфира · Europe/Moscow',{exact:true}).waitFor();
+  await clock.getByLabel('Метрика графика').selectOption('messages');await clock.getByText('Сообщения/ч · МСК',{exact:true}).waitFor();
   await setFilter(page,'Период аналитики','7');await page.getByRole('tab',{name:'Динамика',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.audience-growth svg g').length<7);await chart.getByRole('button',{name:'О скользящем среднем',exact:true}).click();await page.getByRole('dialog',{name:'О скользящем среднем',exact:true}).getByText(/Пропуски и дни без эфиров/).waitFor();await page.keyboard.press('Escape');assert.ok(await chart.locator('svg g').count()<7);assert.equal(await chart.locator('.growth-pages').count(),0);
   await setFilter(page,'Период аналитики','all');await chart.locator('svg g').nth(11).waitFor();
   // Keep a deliberate missing broadcast between measured ones; lines must bridge it.
