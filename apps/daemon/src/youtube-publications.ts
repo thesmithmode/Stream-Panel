@@ -7,7 +7,16 @@ interface Dependencies {
  save:(items:Publication[],at:number)=>Promise<void>;
  cursor:(key:string,data:unknown)=>Promise<void>;
 }
-/** Uses the uploads playlist, not expensive search requests or duration guesses. */
+/** Length-based display matches these channels' short clips and >15 minute videos.
+ * Analytics remains authoritative when it has processed an upload. */
+export function publicationKind(duration:unknown):Publication['kind']{
+ if(typeof duration!=='string')return 'unknown';
+ const match=/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(duration);
+ if(!match||!match.slice(1).some(Boolean))return 'unknown';
+ const seconds=Number(match[1]??0)*86400+Number(match[2]??0)*3600+Number(match[3]??0)*60+Number(match[4]??0);
+ return seconds>900?'video':seconds>0&&seconds<=180?'shorts':'unknown';
+}
+/** Uses the uploads playlist instead of expensive search requests. */
 export async function collectYouTubePublications(d:Dependencies){
  if(d.at-(d.snapshots['cursor:publications']?.updatedAt??-Infinity)<900000)return;
  const playlist=d.channel.contentDetails?.relatedPlaylists?.uploads;
@@ -30,14 +39,14 @@ export async function collectYouTubePublications(d:Dependencies){
  }
  const ids=[...items.keys()],videos:Publication[]=[];
  for(let offset=0;offset<ids.length;offset+=50){
-  const batch=ids.slice(offset,offset+50),response=await d.api('videos',{part:'snippet,liveStreamingDetails,status',id:batch.join(',')});if(!d.valid())return;
+  const batch=ids.slice(offset,offset+50),response=await d.api('videos',{part:'snippet,contentDetails,liveStreamingDetails,status',id:batch.join(',')});if(!d.valid())return;
   if(!Array.isArray(response.items))throw new Error('INVALID_UPLOAD_VIDEOS');
   for(const row of response.items){
    // A public archive is the same broadcast, not an additional uploaded video.
    if(!items.has(row?.id)||!batch.includes(row.id)||row.liveStreamingDetails||row.status?.privacyStatus!=='public')continue;
    const publishedAt=Date.parse(row.snippet?.publishedAt??'');
    if(!Number.isSafeInteger(publishedAt)||publishedAt<cutoff||publishedAt>d.at||typeof row.snippet?.title!=='string')continue;
-   videos.push({id:row.id,title:row.snippet.title,publishedAt,kind:'unknown'});
+   videos.push({id:row.id,title:row.snippet.title,publishedAt,kind:publicationKind(row.contentDetails?.duration)});
   }
  }
  // Analytics classifies Shorts authoritatively, but may not have processed a new upload.
@@ -50,7 +59,7 @@ export async function collectYouTubePublications(d:Dependencies){
    if(idIndex<0||kindIndex<0||!Array.isArray(report.rows))throw new Error('INVALID_CONTENT_TYPES');
    const types=new Map<string,Publication['kind']>();
    for(const row of report.rows){const type=row[kindIndex];if(type==='SHORTS'||type==='VIDEO_ON_DEMAND')types.set(row[idIndex],type==='SHORTS'?'shorts':'video');}
-   await d.save(videos.map(video=>({...video,kind:types.get(video.id)??'unknown'})),d.at);if(!d.valid())return;
+   await d.save(videos.map(video=>({...video,kind:types.get(video.id)??video.kind})),d.at);if(!d.valid())return;
    await d.cursor('cursor:publicationTypes',true);
   }catch{/* Keep known publication times; retry classification on a later collection. */}
  }

@@ -1,4 +1,4 @@
-import type {CountPoint,Publication} from '../../../packages/core/src/subscriber-history.ts';
+import type {CountPoint} from '../../../packages/core/src/subscriber-history.ts';
 export interface FollowPoint {id:string;name:string;at:number}
 export function subscriberSteps(counts:CountPoint[],follows:FollowPoint[],source:string,from:number){
  const points:CountPoint[]=[];let cursor=0;
@@ -18,8 +18,14 @@ export function subscriberSteps(counts:CountPoint[],follows:FollowPoint[],source
 export function stepPath(points:CountPoint[],x:(at:number)=>number,y:(value:number)=>number){
  return points.map((p,i)=>`${i?'H':'M'}${x(p.at)}${i?'V':','}${y(p.total)}`).join(' ');
 }
-export function publicationGroups(items:Publication[],from:number,to:number,width:number){
- const groups:{at:number;items:Publication[]}[]=[];
- for(const item of items){const previous=groups.at(-1);if(previous&&(item.publishedAt-previous.at)/(to-from)*width<30)previous.items.push(item);else groups.push({at:item.publishedAt,items:[item]});}
- return groups;
+/** Last known value at a time; never invent history before the first observation. */
+export function subscriberValueAt(points:CountPoint[],at:number):number|null{
+ let low=0,high=points.length;
+ while(low<high){const middle=(low+high)>>>1;if(points[middle]!.at<=at)low=middle+1;else high=middle;}
+ return low?points[low-1]!.total:null;
+}
+/** Extend the last known count to the requested time, without adding observations. */
+export function subscriberPath(points:CountPoint[],to:number,x:(at:number)=>number,y:(value:number)=>number){
+ const last=points.at(-1);
+ return stepPath(points,x,y)+(last&&to>last.at?` H${x(to)}`:'');
 }
