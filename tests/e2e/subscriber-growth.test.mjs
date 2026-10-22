@@ -21,8 +21,29 @@ test('subscriber timeline keeps real channel data, responsive controls, stream b
   await card.locator('circle[role=button]').first().focus();await page.keyboard.press('Enter');await card.locator('.subscriber-selection').waitFor();assert.ok((await card.locator('.subscriber-selection').textContent()).includes('Точное время подписки неизвестно'));
   await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));await page.waitForFunction(()=>document.querySelector('.subscriber-growth')?.getAttribute('aria-busy')==='false');await page.setViewportSize({width:1280,height:900});await card.scrollIntoViewIfNeeded();await assertUiLayout(page);await card.screenshot({path:'/tmp/subscriber-desktop.png'});
   await card.getByRole('button',{name:'Twitch',exact:true}).click();await card.locator('.subscriber-total strong').filter({hasText:'144'}).waitFor();assert.equal(await card.locator('.publication-marker').count(),0);assert.ok(await card.getByRole('button',{name:'О графике подписчиков'}).count());
-  await card.getByRole('button',{name:'Предыдущий период подписчиков'}).click();await card.getByText('История появится после первого замера. Старые значения не восстанавливаются догадкой.',{exact:true}).waitFor();await card.getByRole('button',{name:'Следующий период подписчиков'}).click();await card.locator('.subscriber-total strong').filter({hasText:'144'}).waitFor();
+  await card.getByRole('button',{name:'Предыдущий период подписчиков'}).click();await card.getByText('Нет замеров за этот период.',{exact:true}).waitFor();await card.getByRole('button',{name:'Следующий период подписчиков'}).click();await card.locator('.subscriber-total strong').filter({hasText:'144'}).waitFor();
   await card.getByRole('button',{name:'YouTube',exact:true}).click();await card.locator('.stream-band').first().click();await card.getByRole('button',{name:'Открыть эфир',exact:true}).click();await page.waitForURL(url=>url.searchParams.get('stream')===stream);
+  assert.deepEqual(errors,[]);await saveCoverage(page);
+ }finally{await browser?.close();await a.close();}
+});
+
+test('the first YouTube count is visible and compact controls leave room for the graph',{timeout:45000},async()=>{
+ const a=await application();let browser;
+ try{
+  const at=Date.now()-60000;a.configuration.value.youtubeAccountId='yt';
+  await a.db.call('youtubeSnapshot','yt','channel',{statistics:{subscriberCount:'320'}},at);
+  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];page.setDefaultTimeout(8000);page.on('pageerror',e=>errors.push(e.message));await goto(page,a.bootstrap());
+  await page.getByRole('button',{name:'Аналитика',exact:true}).click();const card=page.locator('.subscriber-growth');await card.getByRole('button',{name:'YouTube',exact:true}).click();await card.locator('.subscriber-total strong').filter({hasText:'320'}).waitFor();
+  assert.equal(await card.locator('.count-marker').count(),1);assert.ok(await card.locator('.count-marker').evaluate(el=>el.getBoundingClientRect().width>5));
+  await card.getByRole('button',{name:'О графике подписчиков'}).click();await card.getByRole('dialog').filter({hasText:'Последний замер:'}).waitFor();await page.keyboard.press('Escape');
+  for(const width of [320,390,768,1280]){
+   await page.setViewportSize({width,height:900});await card.scrollIntoViewIfNeeded();await assertUiLayout(page);
+   const bounds=await card.evaluate(el=>{const box=el.getBoundingClientRect(),plot=el.querySelector('.subscriber-plot').getBoundingClientRect();return {controls:plot.top-box.top,plotHeight:plot.height};});
+   assert.ok(bounds.controls<240,`compact controls at ${width}: ${JSON.stringify(bounds)}`);assert.ok(bounds.plotHeight>200,`visible graph at ${width}`);
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  }
+  await a.db.call('youtubeSnapshot','yt','channel',{statistics:{subscriberCount:'321'}},at+30000);await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));await card.locator('.subscriber-total strong').filter({hasText:'321'}).waitFor();assert.ok((await card.locator('.subscriber-plot path').getAttribute('d')).includes('H'));
+  await page.setViewportSize({width:390,height:844});await card.scrollIntoViewIfNeeded();await card.screenshot({path:'/tmp/subscriber-youtube-fixed-mobile.png'});
   assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await a.close();}
 });

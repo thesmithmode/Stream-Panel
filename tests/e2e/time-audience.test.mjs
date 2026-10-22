@@ -23,7 +23,7 @@ test('time audience drills from hour to minute, donors use common periods and pl
   await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('tab',{name:'Время',exact:true}).click();await clockSettings(page);await page.getByRole('heading',{name:'Активность по часам',exact:true}).waitFor();assert.equal(await page.getByRole('heading',{name:'Кто поддерживает стримы',exact:true}).count(),0);
   assert.deepEqual((await page.locator('.analytics-results > .panel h2').allTextContents()).slice(0,2),['Активность по дням и часам','Активность по часам']);
   await assertUiLayout(page);const chart=page.locator('.activity-clock');await chart.getByLabel('Метрика графика').selectOption('activeAudience');await chart.getByLabel('Шаг графика').selectOption('60');
-  await chart.getByText('Средняя активная аудитория за время эфира · Europe/Moscow',{exact:true}).waitFor();
+  await chart.getByText('Активная аудитория · среднее · МСК',{exact:true}).waitFor();
   const averageBar=chart.getByRole('button',{name:/13:00–14:00: 1,33 активных/});assert.equal(await averageBar.count(),1);
   await chart.getByRole('button',{name:/14:00–15:00: 0 активных/}).click();await chart.getByText('Персональных сигналов в этом интервале нет.',{exact:true}).waitFor();
   await averageBar.click();await chart.getByRole('cell',{name:'100%',exact:true}).waitFor();await chart.getByRole('cell',{name:'33%',exact:true}).waitFor();
