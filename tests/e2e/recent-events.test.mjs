@@ -18,6 +18,33 @@ test('stream archive and person messages show only the selected scope, paginate,
   await archive.getByRole('button',{name:'Далее',exact:true}).click();await archive.getByText('Страница 2',{exact:true}).waitFor();await page.waitForFunction(()=>document.querySelectorAll('.recent-events article').length===7);await archive.getByText('Сообщение удалено модерацией.',{exact:true}).waitFor();
   await archive.getByRole('button',{name:'Назад',exact:true}).click();await archive.getByText('Support',{exact:true}).waitFor();await archive.getByText('100,00 RUB',{exact:true}).waitFor();
   for(const width of [390,1280]){await page.setViewportSize({width,height:844});await assertUiLayout(page);}
+  const midnight=Date.UTC(2026,9,21,21),long='Очень длинное сообщение без обрезки. '.repeat(12),token='x'.repeat(180);
+  const compactRows=[
+   {id:'short',source:'twitch',actor_name:'Egor4ik',at_ms:midnight+60000,payload:{text:'Привет!'}},
+   {id:'youtube',source:'youtube',actor_name:'Mila',at_ms:midnight,payload:{text:'Я тут'}},
+   {id:'long',source:'twitch',actor_name:'ДлинноеИмя'.repeat(8),at_ms:midnight-1000,payload:{text:long}},
+   {id:'token',source:'youtube',actor_name:'Mila',at_ms:midnight-2000,payload:{text:token}},
+   {id:'lines',source:'twitch',actor_name:'Mila',at_ms:midnight-3000,payload:{text:'Первая строка\nВторая строка'}},
+   {id:'money',source:'donationalerts',actor_name:null,at_ms:midnight-4000,payload:{amountMinor:'12345',currency:'RUB',text:'Спасибо!'}},
+  ].map(row=>({type:'chat.message',...row}));
+  await page.route('**/api/v1/events/recent?*',route=>route.fulfill({json:compactRows}));await archive.getByRole('button',{name:'Обновить',exact:true}).click();await archive.getByText('Привет!',{exact:true}).waitFor();
+  assert.equal(await archive.locator('.event-day').count(),2,'dates group by Moscow day, including midnight');
+  assert.equal(await archive.locator('article time').first().textContent(),'00:01:00');
+  assert.equal(await archive.locator('article time').first().getAttribute('datetime'),new Date(midnight+60000).toISOString());
+  await archive.getByText('123,45 RUB',{exact:true}).waitFor();
+  for(const width of [320,390,768,1440]){
+   await page.setViewportSize({width,height:844});await assertUiLayout(page);
+   const geometry=await archive.locator('article').first().evaluate(el=>{const bounds=Array.from(el.children).map(child=>child.getBoundingClientRect());return {height:el.getBoundingClientRect().height,centers:bounds.map(b=>(b.top+b.bottom)/2)};});
+   assert.ok(geometry.height<=32,`short event is one compact line at ${width}px`);
+   assert.ok(Math.max(...geometry.centers)-Math.min(...geometry.centers)<6,`time, author and message share a line at ${width}px`);
+   assert.equal(await archive.locator('article').nth(2).locator('.event-text').textContent(),long);
+   const longAuthor=archive.locator('article').nth(2).locator('.event-author');assert.ok((await longAuthor.boundingBox()).height<22,'long nick stays on one line');assert.ok((await longAuthor.getAttribute('title')).includes(compactRows[2].actor_name));
+   assert.equal(await archive.locator('article').nth(3).locator('.event-text').textContent(),token);
+   assert.ok((await archive.locator('article').nth(2).boundingBox()).height>geometry.height,'long message wraps');
+   assert.ok((await archive.locator('article').nth(4).boundingBox()).height>geometry.height,'intentional newlines remain');
+  }
+  const colors=await archive.locator('.event-author').evaluateAll(els=>els.slice(0,2).map(el=>getComputedStyle(el).color));assert.notEqual(colors[0],colors[1]);
+  await page.unroute('**/api/v1/events/recent?*');await archive.getByRole('button',{name:'Обновить',exact:true}).click();await archive.getByText('Support',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Люди',exact:true}).click();await page.getByRole('button',{name:'Archive viewer',exact:true}).click();await page.getByRole('tab',{name:'Сообщения',exact:true}).click();
   await page.locator('.recent-events').getByText('<script>window.archiveXss=true</script>',{exact:true}).waitFor();assert.equal(await page.locator('.recent-events article').count(),50);assert.equal(await page.locator('.recent-events').getByText('Other stream',{exact:true}).count(),0);
   await page.setViewportSize({width:360,height:844});await assertUiLayout(page);assert.equal(await page.title(),'Stream Panel');assert.deepEqual(errors,[]);await saveCoverage(page);
