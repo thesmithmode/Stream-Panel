@@ -69,11 +69,12 @@
   {#each ticks as minute}<text x={45+(minute-start)/span*(plotWidth-70)} y="230" text-anchor={minute===start?'start':minute===start+span?'end':'middle'} fill="currentColor" font-size="12">{clockLabel(minute)}</text>{/each}
  </svg></div>
  <p class="clock-caption small" role="status">{chosen?description(chosen):''}</p>
-{#if summaryBusy}<p class="clock-caption small" role="status">Загружаем детализацию графика…</p>{/if}
+{#if summaryBusy}<p class="refresh-status" role="status">Загружаем детализацию графика…</p>{/if}
  {#if summaryError}<p class="clock-caption small" role="alert">{summaryError} <button onclick={()=>summaryRetry++}>Повторить</button></p>{/if}
  <TimeAudience deferredSummary={!!summarySelection} {scope} revision={visitorRevision} {windows} {people} summary={displayedSummary} {timezone} {onPerson} {loadVisitors} {day} resolution={step} {selected}/>
 </section>
 <style>
+ .refresh-status{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;}
  .clock-controls{display:flex;flex-wrap:wrap;gap:12px;padding:16px 20px}.clock-controls label{display:grid;gap:6px;font-size:12px;flex:1 1 160px;min-width:0}select{width:100%;min-width:0}.clock-caption{padding:0 20px 12px;margin:0}.clock-plot{padding:8px 16px;min-width:0}svg{display:block;width:100%;height:auto;overflow:visible}g{cursor:pointer}g.chosen{outline:1px solid var(--accent)}g:focus{outline:2px solid var(--accent)}
  @media(max-width:600px){.clock-plot{padding:8px}.clock-controls{padding:12px;gap:10px}.clock-caption{padding-left:12px;padding-right:12px}}
 </style>

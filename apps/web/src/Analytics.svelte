@@ -154,7 +154,7 @@
  </div></details>
  <div class="filter-actions"><button class="outline" onclick={()=>{category='';source='all';preset('all');}}>Сбросить фильтры</button><button class="primary" onclick={()=>filtersOpen=false}>Готово</button></div>
 </div></Sheet>
-{#if busy}<p class="small muted" role="status">{buildProgress||'Обновляем аналитику…'}</p>{/if}
+{#if busy&&!data}<p class="small muted" role="status">{buildProgress||'Обновляем аналитику…'}</p>{/if}
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 <div id="analytics-tabpanel" role="tabpanel" aria-label={section==='dynamics'?'Динамика':section==='time'?'Время':'Аудитория'}>
 {#if data}
@@ -162,7 +162,7 @@
   {#if section==='dynamics'}
   <div class="analytics-kpis"><div><strong>{data.summary?.streams??0}</strong><span>Эфиров</span></div>{#if data.donationTiming}<div><strong>{Object.entries(data.donationTiming.totals??{}).map(([c,a])=>money(String(a),c)).join(' · ')||'—'}</strong><span>Донаты</span></div>{/if}</div>
   <AudienceGrowth {categoryFilter} streams={data.streamComparison??[]} {timezone} {onStream}/>
-  <Insights report={data} loading={busy} {onPerson} {onStream}/>
+  <Insights report={data} loading={busy&&!data} {onPerson} {onStream}/>
   <details class="section-disclosure"><summary>Сравнение категорий и возвращаемости</summary><ComparisonCharts scope={reportScope} {categoryFilter} {timezone} {onStream} showGrowth={false} streams={data.streamComparison??[]} categories={(data.categories??[]).filter((c:any)=>c.id&&c.name!=="Категория неизвестна")}/></details>
   {/if}
   {#if section==='time'}
