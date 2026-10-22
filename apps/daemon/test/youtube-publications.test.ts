@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {collectYouTubePublications} from '../src/youtube-publications.js';import {subscriberInterval} from '../src/subscriber-cadence.js';
+import {collectYouTubePublications,publicationKind} from '../src/youtube-publications.js';import {subscriberInterval} from '../src/subscriber-cadence.js';
 import type {Publication} from '../../../packages/core/src/subscriber-history.js';
 const at=Date.UTC(2026,9,22,12),iso=(n:number)=>new Date(n).toISOString();
 function fixture(mode='ok'){
@@ -37,4 +37,12 @@ test('uploads pagination failures cannot partially commit, polling is bounded an
  const g=fixture();g.d.channel={contentDetails:{relatedPlaylists:{uploads:''}}};await collectYouTubePublications(g.d);assert.deepEqual(g.calls,[]);
  const h=fixture();h.d.snapshots['cursor:publicationTypes']={data:true,updatedAt:at};await collectYouTubePublications(h.d);assert.equal(h.saved.length,1);assert.deepEqual(h.cursors,['cursor:publications']);
  assert.equal(subscriberInterval(true),60000);assert.equal(subscriberInterval(false),900000);
+});
+test('publication shapes use clip lengths before Analytics is ready and never include broadcast archives',async()=>{
+ for(const [duration,expected] of [['PT2M','shorts'],['PT3M','shorts'],['PT15M1S','video'],['PT1H','video'],['P1D','video'],['PT0S','unknown'],['PT15M','unknown'],['PT4M','unknown'],['bad','unknown'],['P','unknown'],['PT','unknown'],['','unknown']] as const)assert.equal(publicationKind(duration),expected,duration);
+ assert.equal(publicationKind(undefined),'unknown');
+ const f=fixture('types-failure'),api=f.d.api;
+ f.d.api=async(resource,params)=>{const response=await api(resource,params);if(resource==='videos'){assert.ok(params.part?.includes('contentDetails'));for(const row of response.items)row.contentDetails={duration:row.id==='long'?'PT18M':'PT2M'};}return response;};
+ await collectYouTubePublications(f.d);
+ assert.deepEqual(f.saved[0]?.map(p=>[p.id,p.kind]),[['short1','shorts'],['long','video'],['short2','shorts']]);
 });
