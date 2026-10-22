@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,writeFile,symlink,readdir,stat} from 'node:fs/promises';
+import {mkdtemp,rm,writeFile,readFile,symlink,readdir,stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHostedApplication} from '../src/hosted.js';
@@ -17,7 +17,7 @@ test('backup listing and encrypted downloads require login, reject cross-site re
   const {filename}=await h.backup!.run();
   const list=await h.app.inject({url:'/api/v1/backups',headers});assert.equal(list.statusCode,200);assert.equal(list.json().directory,join(dir,'backups'));assert.equal(list.json().files[0].filename,filename);
   assert.equal(list.json().local.state,'success');assert.equal(list.json().cloud.state,'disabled');
-  const file=await h.app.inject({url:`/api/v1/backups/${filename}`,headers});assert.equal(file.statusCode,200);assert.equal(file.rawPayload.subarray(0,5).toString(),'SPBK1');assert.match(String(file.headers['content-disposition']),/attachment/);assert.equal(file.headers['cache-control'],'no-store');
+  const file=await h.app.inject({url:`/api/v1/backups/${filename}`,headers});assert.equal(file.statusCode,200);assert.match(file.rawPayload.subarray(0,5).toString(),/^SPBK[12]$/);assert.deepEqual(file.rawPayload,await readFile(join(dir,'backups',filename)));assert.match(String(file.headers['content-disposition']),/attachment/);assert.equal(file.headers['cache-control'],'no-store');
   assert.equal(Number(file.headers['content-length']),file.rawPayload.length);
   const before=await readdir(join(dir,'backups')),stateBefore=await stat(join(dir,'backup-state.json'));
   for(let i=0;i<10;i++){
@@ -40,3 +40,4 @@ test('backup listing and encrypted downloads require login, reject cross-site re
   const after=await h.app.inject({url:'/api/v1/backups',headers});assert.equal(after.json().files.some((f:any)=>f.filename===link),false);
  }finally{await h.app.close();await rm(dir,{recursive:true,force:true});}
 });
+

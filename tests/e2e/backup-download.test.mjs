@@ -27,7 +27,7 @@ test('authenticated backup UI lists server files, separates cloud status and dow
   assert.equal(await region.getByText('Сохранена',{exact:true}).count(),1);assert.equal(await region.getByText('Ошибка',{exact:true}).count(),1);
   const pending=page.waitForEvent('download');await region.getByRole('link',{name:'Скачать копию',exact:true}).click();const download=await pending;
   assert.equal(download.suggestedFilename(),filename);assert.equal(await download.failure(),null);
-  const bytes=await readFile(await download.path());assert.equal(bytes.subarray(0,5).toString(),'SPBK1');assert.deepEqual(bytes,await h.backup.file(filename));
+  const bytes=await readFile(await download.path());assert.match(bytes.subarray(0,5).toString(),/^SPBK[12]$/);assert.deepEqual(bytes,await h.backup.file(filename));
   await region.getByRole('button',{name:'Обновить список копий',exact:true}).click();await region.getByText(filename,{exact:true}).waitFor();
   await page.route('**/api/v1/backups',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'BACKUP_NOT_CONFIGURED'})}));
   await region.getByRole('button',{name:'Обновить список копий',exact:true}).click();await region.getByRole('alert').filter({hasText:'не настроено'}).waitFor();
@@ -55,3 +55,4 @@ test('authenticated backup UI lists server files, separates cloud status and dow
   await restore.getByRole('button',{name:'Импортировать резервную копию'}).click();await restore.getByRole('status').filter({hasText:'Сервис перезапускается'}).waitFor();assert.equal(await restore.getByLabel('Ключ восстановления',{exact:true}).inputValue(),'');assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await h.app.close();await rm(dir,{recursive:true,force:true});}
 });
+

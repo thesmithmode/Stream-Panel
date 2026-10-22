@@ -1,3 +1,4 @@
+import {SubscriberHistory} from './subscriber-history.js';
 import type Database from 'better-sqlite3';
 import {createHash,randomUUID as cryptoId} from 'node:crypto';
 import {parse,stringify} from 'lossless-json';
@@ -13,7 +14,8 @@ export class ProviderStorage {
   const clean={followers:data.followers.map(({id,name,followedAtMs})=>({id,name,followedAtMs})).sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0),complete:data.complete,total:data.total};
   const payload=JSON.stringify(clean),id=createHash('sha256').update(JSON.stringify([source,account,payload])).digest('hex');
   this.db.transaction(()=>{
-   this.db.prepare("INSERT OR IGNORE INTO provider_snapshots VALUES (?,?,?,'followers',?,?,?)").run(id,source,account,at,session,payload);
+   const saved=this.db.prepare("INSERT OR IGNORE INTO provider_snapshots VALUES (?,?,?,'followers',?,?,?)").run(id,source,account,at,session,payload);
+   if(saved.changes&&source==='twitch'){const history=new SubscriberHistory(this.db);for(const follower of clean.followers)if(follower.followedAtMs!==null)history.follow(account,follower.id,follower.name,follower.followedAtMs);}
    this.db.prepare('INSERT INTO follower_checks VALUES (?,?,?,?)').run(cryptoId(),id,at,session);
   }).immediate();
  }
@@ -85,3 +87,4 @@ function findArchivedDonation(value:any,depth=0):any {
  for(const key of ['data','result','publication','push','pub']){let child=value[key];if(typeof child==='string'){try{child=parse(child);}catch{continue;}}const found=findArchivedDonation(child,depth+1);if(found)return found;}
  return null;
 }
+

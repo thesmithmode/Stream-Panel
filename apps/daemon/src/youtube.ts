@@ -1,7 +1,9 @@
+import {subscriberInterval} from './subscriber-cadence.js';
+import {collectYouTubePublications} from './youtube-publications.js';
 import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import type { ConfigurationPort, Tokens } from "./config.js";
 import type {StorePort} from './store-contract.js';
-type YoutubeStore = StorePort<'followingSnapshot' | 'gap' | 'observePlatformStream' | 'platformMissing' | 'youtubeData' | 'youtubeMessages' | 'youtubeQuota' | 'youtubeSnapshot' | 'youtubeViewers'>;
+type YoutubeStore = StorePort<'youtubePublications' | 'followingSnapshot' | 'gap' | 'observePlatformStream' | 'platformMissing' | 'youtubeData' | 'youtubeMessages' | 'youtubeQuota' | 'youtubeSnapshot' | 'youtubeViewers'>;
 import { object, string } from "./provider-values.js";
 const scopes = ["https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/yt-analytics.readonly"];
 const videoParts='snippet,statistics,contentDetails,liveStreamingDetails,status,recordingDetails,topicDetails,localizations,paidProductPlacementDetails';
@@ -146,17 +148,26 @@ export class YouTubeConnection {
     const previous = await this.db.call("youtubeData", tokens.userId);
     if (!valid()) return 300000;
     let channelSnapshot: Record<string, unknown> | undefined;
-    if (this.now() - (previous.snapshots.channel?.updatedAt ?? 0) >= 21600000) {
+    let refreshedMetadata=false;
+    if (this.now() - (previous.snapshots['cursor:channelMetadata']?.updatedAt??previous.snapshots.channel?.updatedAt??0) >= 21600000) {
       const channel = await this.api("channels", { part: "snippet,statistics,brandingSettings,contentDetails,topicDetails", mine: "true", maxResults: "50" }, tokens);
       if (!valid()) return 300000;
       const own = (Array.isArray(channel.items) ? channel.items : []).find((x: any) => x.id === tokens.userId);
       if (!own) throw new Error("YOUTUBE_CHANNEL_CHANGED");
-      channelSnapshot = own;
+      channelSnapshot = own;refreshedMetadata=true;
     }
     // Finish and validate every discovery page before changing session or snapshot state.
     const discovered = await this.activeBroadcasts(tokens, valid);
     if (!discovered || !valid()) return 300000;
     const broadcasts = discovered;
+    if(!channelSnapshot&&this.now()-(previous.snapshots.channel?.updatedAt??0)>=subscriberInterval(broadcasts.length>0)){
+      try{
+        const response=await this.api('channels',{part:'statistics',id:tokens.userId},tokens);if(!valid())return 300000;
+        const own=(Array.isArray(response.items)?response.items:[]).find((item:any)=>item.id===tokens.userId);
+        if(!own||!own.statistics)throw new Error('INVALID_CHANNEL_COUNT');
+        channelSnapshot={...object(previous.snapshots.channel?.data??{}),...own};
+      }catch{if(valid())await this.db.call('gap','youtube','subscriber_count_unavailable',this.now(),this.now());}
+    }
     const videoIds = broadcasts.map((broadcast) => string(broadcast.id));
     const savedCursor=previous.snapshots['cursor:archivedVideos']?.data;
     const cursor=savedCursor&&typeof savedCursor==='object'&&!Array.isArray(savedCursor)?savedCursor as Record<string,unknown>:{};
@@ -183,6 +194,7 @@ export class YouTubeConnection {
     }
     const observedAt = this.now();
     if (channelSnapshot) await this.db.call("youtubeSnapshot", tokens.userId, "channel", channelSnapshot, observedAt);
+    if(valid()&&(refreshedMetadata||!previous.snapshots['cursor:channelMetadata']))await this.db.call('youtubeSnapshot',tokens.userId,'cursor:channelMetadata',true,refreshedMetadata?observedAt:previous.snapshots.channel?.updatedAt??observedAt);
     if (!valid()) return 300000;
     await this.db.call("youtubeSnapshot", tokens.userId, "broadcasts", broadcasts, observedAt);
     if (!valid()) return 300000;
@@ -235,8 +247,17 @@ export class YouTubeConnection {
       await this.db.call("youtubeSnapshot", tokens.userId, "report", { start, end, ...report }, this.now());
       if (!valid()) return 300000;
     }
-    await this.collectSubscribers(tokens,valid,this.now());if(!valid())return 300000;
+    await this.collectSubscribers(tokens,valid,this.now(),broadcasts.length>0);if(!valid())return 300000;
     if(archivedIds.length&&(removed.length||!Number.isFinite(Number(cursor.checkedAt))||this.now()-Number(cursor.checkedAt??0)>=21600000))await this.collectArchivedVideos(tokens,archivedIds,valid,this.now());if(!valid())return 300000;
+    try{
+      await collectYouTubePublications({account:tokens.userId,at:this.now(),valid,
+        channel:channelSnapshot??object(previous.snapshots.channel?.data??{}),snapshots:previous.snapshots,
+        api:(resource,params)=>this.api(resource,params,tokens),
+        types:params=>this.authorizedJson(`https://youtubeanalytics.googleapis.com/v2/reports?${new URLSearchParams(params)}`,tokens),
+        save:(items,at)=>this.db.call('youtubePublications',tokens.userId,items,at),
+        cursor:(key,data)=>this.db.call('youtubeSnapshot',tokens.userId,key,data,this.now())});
+    }catch{if(valid())await this.db.call('gap','youtube','publications_unavailable',this.now(),this.now());}
+    if(!valid())return 300000;
     this.status = { state: "connected", account: tokens.userId, detail: broadcasts.length ? "Чат активных эфиров собирается" : "Канал подключён; активных эфиров нет" };
     return Math.min(interval, 3600000);
   }
@@ -251,8 +272,8 @@ export class YouTubeConnection {
       await this.db.call('youtubeSnapshot',tokens.userId,'cursor:archivedVideos',{ids,checkedAt:at},at);
     }catch{if(valid())await this.db.call('gap','youtube','archived_video_metadata_unavailable',at,at);}
   }
-  private async collectSubscribers(tokens:Tokens,valid:()=>boolean,at:number){
-    const previous=await this.db.call('youtubeData',tokens.userId);if(!valid()||at-(previous.snapshots["cursor:followers"]?.updatedAt??-Infinity)<15*60000)return;
+  private async collectSubscribers(tokens:Tokens,valid:()=>boolean,at:number,live=false){
+    const previous=await this.db.call('youtubeData',tokens.userId);if(!valid()||at-(previous.snapshots["cursor:followers"]?.updatedAt??-Infinity)<subscriberInterval(live))return;
     try{
       const channelStats=object(object(previous.snapshots.channel?.data??{}).statistics??{}),count=Number(channelStats.subscriberCount);
       const subscriberTotal=channelStats.hiddenSubscriberCount===true||!Number.isSafeInteger(count)||count<0?null:count;
@@ -289,3 +310,4 @@ export class YouTubeConnection {
   }
   async disconnect() { await this.stop(); delete this.config.value.youtube; await this.config.save(); }
 }
+
