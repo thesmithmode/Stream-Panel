@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {application,seed} from '../helpers/application.mjs';import {launchBrowser} from '../helpers/browser.mjs';import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';import {assertUiLayout} from '../helpers/ui-layout.mjs';
-test('heatmap uses one scale across weekdays and missing viewer measurements explain trend gaps without looking like zero',{timeout:60000},async()=>{
+test('heatmap uses one scale across weekdays and missing viewer measurements keep continuous trends without looking like zero',{timeout:60000},async()=>{
  const a=await application();let browser;
  try{
   await seed(a);const opts={fromMs:0,toMs:Date.now(),summaryOnly:true,source:'all',category:'',timezone:'Europe/Moscow'};let data;do{data=await a.db.call('analytics',opts);}while(data.preparing);
@@ -13,10 +13,12 @@ test('heatmap uses one scale across weekdays and missing viewer measurements exp
   await page.waitForFunction(()=>{const cell=prefix=>document.querySelector(`.hour-heatmap button[aria-label^="${prefix}"]`),a=cell('пн 17:00'),b=cell('ср 10:00');return a?.getAttribute('aria-label')?.includes('4.4')&&b&&getComputedStyle(a).backgroundColor!==getComputedStyle(b).backgroundColor;});
   const colors=await page.locator('.hour-heatmap').evaluate(el=>['пн 17:00','вт 4:00','ср 10:00'].map(prefix=>getComputedStyle(el.querySelector(`button[aria-label^="${prefix}"]`)).backgroundColor));
   assert.equal(colors[0],colors[1]);assert.notEqual(colors[0],colors[2]);
-  await page.getByRole('tab',{name:'Динамика',exact:true}).click();const chart=page.locator('.audience-growth');await chart.getByRole('button',{name:'О среднем за семь эфиров',exact:true}).click();await page.getByRole('dialog',{name:'О среднем за семь эфиров',exact:true}).getByText(/Без замеров: 1/).waitFor();await page.keyboard.press('Escape');
+  await page.getByRole('tab',{name:'Динамика',exact:true}).click();const chart=page.locator('.audience-growth');await chart.getByRole('button',{name:'О скользящем среднем',exact:true}).click();await page.getByRole('dialog',{name:'О скользящем среднем',exact:true}).getByText(/за последние 7 дней в выбранном периоде: 6/).waitFor();await page.keyboard.press('Escape');
   assert.equal(await chart.locator('g[data-missing="true"] text').textContent(),'?');assert.equal(await chart.locator('g[data-missing="true"] circle:not([fill="transparent"])').count(),0);
 
-  await chart.locator('svg g').first().click();await chart.getByRole('button',{name:'О среднем за семь эфиров',exact:true}).click();await page.getByRole('dialog',{name:'О среднем за семь эфиров',exact:true}).getByText(/сейчас 1/).waitFor();await page.keyboard.press('Escape');
+  for(const path of await chart.locator('svg > path').evaluateAll(paths=>paths.map(p=>p.getAttribute('d'))))assert.equal((path.match(/M/g)??[]).length,1);
+  assert.equal(await chart.locator('.growth-selection .trend-legend').textContent(),'4,4');
+  await chart.locator('svg g').first().click();await chart.getByRole('button',{name:'О скользящем среднем',exact:true}).click();await page.getByRole('dialog',{name:'О скользящем среднем',exact:true}).getByText(/за последние 7 дней в выбранном периоде: 1/).waitFor();await page.keyboard.press('Escape');
   for(const width of [390,1280]){await page.setViewportSize({width,height:844});await assertUiLayout(page);}
   assert.equal(await page.title(),'Stream Panel');assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await a.close();}
