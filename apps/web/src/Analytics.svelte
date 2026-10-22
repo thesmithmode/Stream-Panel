@@ -8,6 +8,7 @@
   import Help from "./Help.svelte";
   import Sheet from "./Sheet.svelte";
   import Icon from "./Icon.svelte";
+  import SubscriberGrowth from "./SubscriberGrowth.svelte";
   import AudienceGrowth from "./AudienceGrowth.svelte";
   import PeriodSelect from './PeriodSelect.svelte';
   import ActivityClock from "./ActivityClock.svelte";
@@ -162,6 +163,7 @@
   {#if section==='dynamics'}
   <div class="analytics-kpis"><div><strong>{data.summary?.streams??0}</strong><span>Эфиров</span></div>{#if data.donationTiming}<div><strong>{Object.entries(data.donationTiming.totals??{}).map(([c,a])=>money(String(a),c)).join(' · ')||'—'}</strong><span>Донаты</span></div>{/if}</div>
   <AudienceGrowth {categoryFilter} streams={data.streamComparison??[]} {timezone} {onStream}/>
+  <SubscriberGrowth {profile} {timezone} {onStream}/>
   <Insights report={data} loading={busy&&!data} {onPerson} {onStream}/>
   <details class="section-disclosure"><summary>Сравнение категорий и возвращаемости</summary><ComparisonCharts scope={reportScope} {categoryFilter} {timezone} {onStream} showGrowth={false} streams={data.streamComparison??[]} categories={(data.categories??[]).filter((c:any)=>c.id&&c.name!=="Категория неизвестна")}/></details>
   {/if}
@@ -233,3 +235,4 @@
 }
 @media(max-width:1100px){.timing-grid{grid-template-columns:minmax(0,1fr)}.timing-grid :global(.time-patterns),.timing-grid :global(.donation-patterns){grid-column:auto;grid-row:auto}}.report-pending :global(.hour-heatmap),.report-pending :global(.clock-plot),.report-pending :global(.clock-caption),.report-pending :global(.time-audience),.report-pending :global(.pattern-bars),.report-pending :global(.bars),.report-pending :global(.compact-audience),.report-pending :global(.comparison-bars),.report-pending :global(.growth-plot),.report-pending :global(.regular-summary),.report-pending :global(.composition-bar),.report-pending :global(.composition-row),.report-pending :global(.table-wrap),.report-pending :global(.donation-patterns header>span){visibility:hidden}.compact-audience{max-height:560px;overflow:auto}.compact-audience-table{width:100%;border-collapse:collapse;min-width:620px}.compact-audience-table td,.compact-audience-table th{padding:12px;text-align:left;border-bottom:1px solid var(--border);font-size:12px}.hour-table summary{padding:16px 20px;font-weight:600;cursor:pointer}.hour-table .table-wrap{max-height:440px;overflow:auto}.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}.analytics-help{padding:0 20px 12px;}header h2{display:flex;align-items:center;gap:8px;}
 </style>
+

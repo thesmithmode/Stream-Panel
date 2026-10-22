@@ -1,3 +1,4 @@
+import {SubscriberHistory} from './subscriber-history.js';
 import type Database from 'better-sqlite3';
 import {randomUUID} from 'node:crypto';
 import {assertTimestamp,candidateKey,matchKey,daDonorExternalId,eventKey,type EventInput} from './domain.js';
@@ -45,6 +46,7 @@ export class EventIngestion {
     const payload = JSON.stringify(event.type === "chat.message" ? chatMetadata(event.payload) :
       ["chat.message_delete","chat.clear","chat.clear_user_messages"].includes(event.type) ? moderationMetadata(event.payload) : event.payload);
     return this.db.transaction(() => {
+      if(event.source==='twitch'&&event.type==='follow'&&event.actor&&event.occurredAtMs!==null)new SubscriberHistory(this.db).follow(event.accountId,event.actor.externalId,event.actor.displayName,event.occurredAtMs);
       const previous = this.db
         .prepare(`SELECT identity_id AS id FROM events WHERE id = ?`)
         .get(eventKey(event)) as { id: string | null } | undefined;
@@ -326,4 +328,5 @@ export class EventIngestion {
   }
 
 }
+
 

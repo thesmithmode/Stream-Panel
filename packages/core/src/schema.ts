@@ -570,6 +570,19 @@ ${(['identity_aliases','youtube_identity_aliases'] as const).flatMap(table=>['in
 })).join('\n')}
 PRAGMA user_version=24;
 `;
-export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24] as const;
+/** Independent, profile-scoped observations; source facts and existing tables stay intact. */
+export const schemaV25=`
+CREATE TABLE IF NOT EXISTS subscriber_counts(source TEXT NOT NULL CHECK(source IN ('twitch','youtube')),account_id TEXT NOT NULL,observed_at_ms INTEGER NOT NULL,total INTEGER NOT NULL CHECK(total>=0),PRIMARY KEY(source,account_id,observed_at_ms)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS subscriber_follows(account_id TEXT NOT NULL,external_id TEXT NOT NULL,followed_at_ms INTEGER NOT NULL,name TEXT NOT NULL,followed_second INTEGER NOT NULL,PRIMARY KEY(account_id,followed_second,external_id)) WITHOUT ROWID;
+INSERT OR IGNORE INTO subscriber_follows SELECT p.account_id,json_extract(f.value,'$.id'),json_extract(f.value,'$.followedAtMs'),coalesce(json_extract(f.value,'$.name'),json_extract(f.value,'$.id')),CAST(json_extract(f.value,'$.followedAtMs')/1000 AS INTEGER) FROM provider_snapshots p,json_each(p.payload_json,'$.followers') f WHERE p.source='twitch' AND p.key='followers' AND json_type(f.value,'$.followedAtMs')='integer' AND json_extract(f.value,'$.followedAtMs')>=0;
+INSERT OR IGNORE INTO subscriber_follows SELECT e.account_id,i.external_id,e.occurred_at_ms,i.display_name,CAST(e.occurred_at_ms/1000 AS INTEGER) FROM events e JOIN identities i ON i.id=e.identity_id WHERE e.source='twitch' AND e.type='follow' AND e.occurred_at_ms IS NOT NULL;
+CREATE TABLE IF NOT EXISTS youtube_publications(account_id TEXT NOT NULL,video_id TEXT NOT NULL,title TEXT NOT NULL,published_at_ms INTEGER NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('shorts','video','unknown')),updated_at_ms INTEGER NOT NULL,PRIMARY KEY(account_id,video_id)) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS subscriber_stream_time ON platform_streams(platform,account_id,started_at_ms);
+CREATE INDEX IF NOT EXISTS youtube_publications_time ON youtube_publications(account_id,published_at_ms);
+INSERT OR IGNORE INTO subscriber_counts SELECT p.source,p.account_id,c.observed_at_ms,json_extract(p.payload_json,'$.total') FROM provider_snapshots p JOIN follower_checks c ON c.snapshot_id=p.id WHERE p.key='followers' AND p.source='twitch' AND json_type(p.payload_json,'$.total')='integer' AND json_extract(p.payload_json,'$.total')>=0;
+PRAGMA user_version=25;
+`;
+export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24,schemaV25] as const;
 export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;
+
 

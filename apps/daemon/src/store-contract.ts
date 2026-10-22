@@ -2,6 +2,8 @@ import type {StreamStore} from '../../../packages/core/src/store.js';
 
 /** One allowlist defines worker operations, client types and cache policy. */
 export const storeOperations={
+  subscriberHistory:"read",
+  youtubePublications:"write",
   channelOverview:"cached",
   analytics:"cached",
   clockAudience:"cached",
@@ -104,4 +106,5 @@ export function invalidatesCachedReads(method:StoreMethod,args:readonly unknown[
   if(method==='youtubeMessages'&&Array.isArray(args[2])&&args[2].length===0)return false;
   return storeOperations[method]==='write'&&method!=='close'&&!(method==='collectionLifecycle'&&args[0]==='heartbeat');
 }
+
 
