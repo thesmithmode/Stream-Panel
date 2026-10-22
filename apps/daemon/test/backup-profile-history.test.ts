@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {StreamStore} from '../../../packages/core/src/store.js';
 import {AccountStore} from '../src/auth.js';
-import {BackupService,restoreBackup} from '../src/backup.js';
+import {BackupService,restoreBackupFile} from '../src/backup.js';
 
 test('encrypted restore retains isolated person metadata, raw events and unfinished platform lifecycle',{timeout:15000},async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-backup-profile-history-'));
@@ -27,14 +27,20 @@ test('encrypted restore retains isolated person metadata, raw events and unfinis
    const metadata=store.setPersonMetadata(person,[`profile-${index}`],index===0,store.personRevision(person));
    store.recordPoll(session,'same-twitch-account',{startedAtMs:started,completedAtMs:started+60000,status:'complete',userIds:['same-viewer']});
    store.platformMissing('youtube','same-youtube-channel',[],now);
-   return {session,person,note,metadata,events:store.events(session),stats:store.personStats(person),platforms:store.platformStreams(session)};
+   store.followingSnapshot('twitch','same-twitch-account',[{id:'follower',name:'Follower',followedAtMs:started+1000}],true,started+2000,index+10);
+   store.youtubeSnapshot('same-youtube-channel','channel',{statistics:{subscriberCount:String(index+100)}},started+2000);
+   store.youtubePublications('same-youtube-channel',[{id:'short',title:`Profile ${index}`,publishedAt:started+1000,kind:'shorts'}],started+2000);
+   const subscriberQuery={source:'youtube' as const,account:'same-youtube-channel',from:started,to:now};
+   const subscribers=store.subscriberHistory(subscriberQuery);
+   return {subscriberQuery,subscribers,session,person,note,metadata,events:store.events(session),stats:store.personStats(person),platforms:store.platformStreams(session)};
   });
   const {filename}=await backup.run();
   const destination=join(dir,'restored');
-  await restoreBackup(await readFile(join(dir,'backups',filename)),key,destination);
+  await restoreBackupFile(join(dir,'backups',filename),key,destination);
   for(let index=0;index<stores.length;index++){
    const store=new StreamStore(join(destination,'data.sqlite'),index===0?'ruslan':'gulnaz');restored.push(store);
    const original=expected[index]!;
+   assert.deepEqual(store.subscriberHistory(original.subscriberQuery),original.subscribers);
    assert.deepEqual(store.personNotes(original.person),[original.note]);
    assert.deepEqual(store.personMetadata(original.person),original.metadata);
    assert.deepEqual(store.events(original.session),original.events);
@@ -56,3 +62,4 @@ test('encrypted restore retains isolated person metadata, raw events and unfinis
   }
  }finally{await backup.stop();for(const store of [...restored,...stores])store.close();auth.close();await rm(dir,{recursive:true,force:true});}
 });
+

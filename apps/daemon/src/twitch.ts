@@ -1,3 +1,4 @@
+import {subscriberInterval} from './subscriber-cadence.js';
 import WebSocket from "ws";
 import type { ConfigurationPort, Tokens } from "./config.js";
 import type {StorePort} from './store-contract.js';
@@ -609,7 +610,7 @@ export class TwitchConnection {
   }
   private async collectFollowers(account:string,current:()=>boolean,at:number){
     if(!this.token?.scopes.includes('moderator:read:followers')){this.status.capabilities.followers='Для проверки подписок нужен повторный вход в Twitch с разрешением читать подписчиков';return;}
-    if(this.lastFollowersPollAt!==null&&at-this.lastFollowersPollAt<15*60000)return;
+    if(this.lastFollowersPollAt!==null&&at-this.lastFollowersPollAt<subscriberInterval(this.platformLive))return;
     try{
       const followers:{id:string;name:string;followedAtMs:number|null;raw:unknown}[]=[],seen=new Set<string>();let cursor='',complete=false,total:number|null=null;
       for(let page=0;page<25;page++){
@@ -806,3 +807,4 @@ export class TwitchConnection {
     };
   }
 }
+

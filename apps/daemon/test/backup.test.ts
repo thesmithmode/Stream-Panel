@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {StreamStore} from '../../../packages/core/src/store.js';
 import {AccountStore} from '../src/auth.js';
-import {BackupService,sealBackup,openBackup,restoreBackup} from '../src/backup.js';
+import {BackupService,sealBackup,openBackup,restoreBackup,restoreBackupFile} from '../src/backup.js';
 test('encrypted online backup restores both profiles and credentials, revokes sessions, rotates only owned objects',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-backup-')),key=randomBytes(32),path=join(dir,'data.sqlite');
  const auth=new AccountStore(path);await auth.createUser('ruslan','ruslan','Руслан','long-backup-password');const login=await auth.login('ruslan','long-backup-password','ip');
@@ -29,11 +29,11 @@ test('encrypted online backup restores both profiles and credentials, revokes se
   assert.throws(()=>sealBackup(Buffer.from('hi'),Buffer.alloc(1)),/INVALID_BACKUP_KEY/);assert.throws(()=>openBackup(Buffer.alloc(1),key),/INVALID_BACKUP/);
   const promise=backup.run();assert.equal(backup.run(),promise);const first=await promise;
   const blob=await readFile(join(dir,'backups',first.filename));assert.equal(blob.includes(Buffer.from('token')),false);assert.throws(()=>openBackup(blob,randomBytes(32)));
-  await restoreBackup(blob,key,join(dir,'restored'));
+  await restoreBackupFile(join(dir,'backups',first.filename),key,join(dir,'restored'));
   const ra=new StreamStore(join(dir,'restored','data.sqlite'),'ruslan'),rb=new StreamStore(join(dir,'restored','data.sqlite'),'gulnaz'),rAuth=new AccountStore(join(dir,'restored','data.sqlite'));
   try{assert.equal(ra.youtubeData('channel').snapshots.report!.data.views,1);assert.equal(rb.youtubeData('channel').snapshots.report!.data.views,2);assert.equal(rAuth.session(`sp_session=${login!.token}`),null);assert.equal(JSON.parse(await readFile(join(dir,'restored','profiles','ruslan','secrets.json'),'utf8')).daAccessToken,'token');}finally{ra.close();rb.close();rAuth.close();}
-  await assert.rejects(restoreBackup(blob,key,join(dir,'restored')),/EEXIST/);
-  await assert.rejects(restoreBackup(blob,randomBytes(32),join(dir,'wrong-key')));
+  await assert.rejects(restoreBackupFile(join(dir,'backups',first.filename),key,join(dir,'restored')),/EEXIST/);
+  await assert.rejects(restoreBackupFile(join(dir,'backups',first.filename),randomBytes(32),join(dir,'wrong-key')));
   for(let i=0;i<8;i++)await backup.run();assert.equal(remote.filter(x=>x.endsWith('.spbk')).length,1);assert.equal((await readdir(join(dir,'backups'))).filter(x=>x.endsWith('.spbk')).length,7);
   privateBucket=false;const privateFailure=await backup.run();assert.equal(privateFailure.cloudError,'BACKUP_BUCKET_MUST_BE_PRIVATE');assert.equal(backup.status.state,'partial');assert.equal(backup.status.local.filename,privateFailure.filename);privateBucket=true;fail=true;const uploadFailure=await backup.run();assert.equal(uploadFailure.cloudError,'BACKUP_UPLOAD_FAILED');assert.ok(await readFile(join(dir,'backups',uploadFailure.filename)));fail=false;
   const local=new BackupService(dir,{keyFile:join(dir,'key')});await local.run();assert.equal(local.status.state,'local');await local.stop();
@@ -99,3 +99,4 @@ test('corrupt cloud download keeps previous remote copies and skips cloud rotati
   assert.equal(backup.status.local.filename,result.filename);
  }finally{await backup.stop();store.close();await rm(dir,{recursive:true,force:true});}
 });
+

@@ -54,3 +54,10 @@ test('YouTube subscriber collection paginates and stores available subscribers w
   }finally{await c.stop();}
  }
 });
+
+test('existing follower poll uses one minute live and fifteen minutes offline without extra timers',async()=>{
+ const writes:any[]=[],config={value:{twitchClientId:'client123',twitch:{access:'fixture',userId:'owner',scopes:['moderator:read:followers']}},save:async()=>{}} as unknown as Configuration;
+ const db={call:async(method:string,...args:any[])=>{writes.push([method,...args]);}} as unknown as StoreClient;
+ const c=new TwitchConnection(config,db,async()=>Response.json({total:0,data:[],pagination:{}}));const r=c as unknown as {platformLive:boolean;collectFollowers(account:string,current:()=>boolean,at:number):Promise<void>};
+ try{r.platformLive=false;await r.collectFollowers('owner',()=>true,at);await r.collectFollowers('owner',()=>true,at+60000);assert.equal(writes.length,1);r.platformLive=true;await r.collectFollowers('owner',()=>true,at+60000);assert.equal(writes.length,2);r.platformLive=false;await r.collectFollowers('owner',()=>true,at+120000);assert.equal(writes.length,2);await r.collectFollowers('owner',()=>true,at+16*60000);assert.equal(writes.length,3);}finally{await c.stop();}
+});

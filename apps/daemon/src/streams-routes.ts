@@ -4,9 +4,15 @@ import type { StorePort } from './store-contract.js';
 import { object, string } from './provider-values.js';
 import { analyticsSettings } from './analytics-settings.js';
 import { randomUUID } from 'node:crypto';
-type Store = StorePort<'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteManualSession' | 'endSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'startSession' | 'streamMetadata' | 'summary'>;
+type Store = StorePort<'subscriberHistory' | 'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteManualSession' | 'endSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'startSession' | 'streamMetadata' | 'summary'>;
 export function registerStreamsRoutes(app: FastifyInstance, db: Store, configuration: ConfigurationPort) {
     app.get('/api/v1/events/recent',request=>{const q=object(request.query);return db.call('recentEvents',Number(q.offset??0),Number(q.limit??100),{...(string(q.session)?{session:string(q.session)}:{}),...(string(q.person)?{person:string(q.person)}:{}),messagesOnly:string(q.messages)==='1'});});
+    app.get('/api/v1/analytics/subscribers',request=>{
+      const q=object(request.query),source=string(q.source);
+      if(source!=='twitch'&&source!=='youtube')throw new Error('INVALID_SUBSCRIBER_WINDOW');
+      const account=source==='twitch'?configuration.value.twitch?.userId??'':configuration.value.youtube?.userId??configuration.value.youtubeAccountId??'';
+      return db.call('subscriberHistory',{source,account,from:Number(q.from),to:Math.min(Number(q.to),Date.now())});
+    });
     app.get("/api/v1/overview", () => db.call("channelOverview", configuration.value.excludedBotLogins));
     for(const path of ["/api/v1/analytics","/api/v1/analytics/clock","/api/v1/analytics/audience","/api/v1/analytics/clock-summary"])app.get(path, async (request) => {
         const q = object(request.query);
@@ -67,4 +73,5 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
         return db.call("grid", string(q.session), string(q.person), Number(q.from), Number(q.to));
     });
 }
+
 

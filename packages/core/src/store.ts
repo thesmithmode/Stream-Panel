@@ -1,3 +1,4 @@
+import {SubscriberHistory,type SubscriberQuery,type Publication} from './subscriber-history.js';
 import {SessionGroups,logicalReadDatabase} from "./session-groups.js";
 import {AnalyticsHistory} from "./analytics-history.js";
 import {EventIngestion} from "./event-ingestion.js";
@@ -324,6 +325,11 @@ export class StreamStore {
     if(key.startsWith("chat:")||key.startsWith("api:"))return;
     this.db.transaction(()=>{
       this.db.prepare("INSERT INTO youtube_snapshots VALUES (?,?,?,?) ON CONFLICT(account_id,key) DO UPDATE SET payload_json=excluded.payload_json,updated_at_ms=excluded.updated_at_ms").run(account, key, JSON.stringify(payload), now);
+      if(key==='channel'){
+        const stats=(payload as {statistics?:{subscriberCount?:unknown;hiddenSubscriberCount?:boolean}})?.statistics;
+        const count=stats?.subscriberCount;
+        if(stats?.hiddenSubscriberCount!==true&&typeof count==='string'&&/^\d+$/.test(count)&&Number.isSafeInteger(Number(count)))new SubscriberHistory(this.db).count('youtube',account,Number(count),now);
+      }
 
     }).immediate();
   }
@@ -343,8 +349,13 @@ export class StreamStore {
   followingSnapshot(source:'twitch'|'youtube',account:string,followers:Follower[],complete:boolean,at:number,total:number|null=null):void {
     if(!['twitch','youtube'].includes(source)||!account||typeof complete!=='boolean'||followers.length>25000||total!==null&&(!Number.isSafeInteger(total)||total<0))throw new Error('INVALID_FOLLOWERS');
     for(const follower of followers){if(!follower.id||typeof follower.name!=='string')throw new Error('INVALID_FOLLOWERS');if(follower.followedAtMs!==null)assertTimestamp(follower.followedAtMs);}
-    this.providerSnapshot(source,account,'followers',{followers:[...new Map(followers.map(f=>[f.id,f])).values()],complete,total},at);
+    this.db.transaction(()=>{
+      this.providerSnapshot(source,account,'followers',{followers:[...new Map(followers.map(f=>[f.id,f])).values()],complete,total},at);
+      if(source==='twitch'&&total!==null)new SubscriberHistory(this.db).count(source,account,total,at);
+    }).immediate();
   }
+  subscriberHistory(query:SubscriberQuery){return new SubscriberHistory(this.db).query(query);}
+  youtubePublications(account:string,items:Publication[],at:number){new SubscriberHistory(this.db).publications(account,items,at);}
   personFollowing(personId:string,sessionId=''){sessionId=sessionId?this.groups.root(sessionId):'';if(!this.db.prepare('SELECT 1 FROM persons WHERE id=?').get(personId))throw new Error('PERSON_NOT_FOUND');if(sessionId)this.sessionRow(sessionId);return personFollowing(this.reads,personId,sessionId);}
   followingAnalytics(sessionId:string){sessionId=this.groups.root(sessionId);this.sessionRow(sessionId);return followingAnalytics(this.reads,sessionId);}
   streamMetadata(sessionId:string){
@@ -587,4 +598,5 @@ export class StreamStore {
     }
   }
 }
+
 
