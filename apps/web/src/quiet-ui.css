@@ -145,7 +145,8 @@ button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,s
 .people-directory .person-row .avatar.sr-only{position:absolute;width:1px;height:1px;flex:0 0 1px;overflow:hidden;clip:rect(0,0,0,0);}
 .people-directory .person-row small.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);}
 .person-detail .person-scroll>h3{margin-block:12px 6px;}
-.settings-fields{gap:12px;}
+.profile-settings .settings-fields{gap:12px;margin:4px 0 12px;}
+.profile-settings .settings-fields>label{margin:0;}
 .settings .settings-body .actions{margin-top:8px;}
 @media(max-width:720px){
  main{padding-top:12px;}
