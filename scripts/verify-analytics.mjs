@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {StreamStore} from '../dist/packages/core/src/store.js';
 import {analyticsSettings} from '../dist/apps/daemon/src/analytics-settings.js';
+import {localDateWindow} from '../dist/packages/core/src/time-audience.js';
 import {gzipSync} from 'node:zlib';
 const dir=process.env.STREAM_PANEL_DATA_DIR;
 if(!dir)throw Error('DATA_DIRECTORY_REQUIRED');
@@ -18,6 +19,15 @@ try{
   const cfg=JSON.parse(await readFile(join(dir,'profiles',profile,'secrets.json'),'utf8'));
   const store=new StreamStore(join(staging,'data.sqlite'),profile);
   try{
+   // Check the actual graph reports on the private copy; log counts, never credentials.
+   const to=Date.now(),timezone=analyticsSettings(cfg.analyticsSettings).timezone;
+   const day=new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).format(to);
+   for(const source of ['twitch','youtube'])for(const days of [1,7,30]){
+    const account=source==='twitch'?cfg.twitch?.userId??'':cfg.youtube?.userId??cfg.youtubeAccountId??'';
+    const from=localDateWindow(new Date(Date.parse(day)-(days-1)*86400000).toISOString().slice(0,10),timezone).from;
+    const report=store.subscriberHistory({source,account,from,to});
+    console.log(JSON.stringify({subscriberProbe:true,profile,source,days,points:report.counts.length,total:report.total,firstAt:report.firstAt,lastAt:report.lastAt}));
+   }
    const options={...analyticsSettings(cfg.analyticsSettings),fromMs:0,toMs:Math.floor(Date.now()/60000)*60000,source:'all',category:'',summaryOnly:true,includeInsights:true,excludedLogins:cfg.excludedBotLogins??[],ownerId:cfg.twitch?.userId??'',youtubeAccount:cfg.youtube?.userId??cfg.youtubeAccountId??''};
    const read=(query=options)=>{let report,requests=0;const start=performance.now();do{report=store.analytics(query);if(++requests>10000)throw Error('ANALYTICS_DID_NOT_FINISH');}while(report.preparing);return {report,requests,ms:Math.round(performance.now()-start)};};
    const first=read(),active=store.sessions().some(s=>s.ended_at_ms===null),start=performance.now();

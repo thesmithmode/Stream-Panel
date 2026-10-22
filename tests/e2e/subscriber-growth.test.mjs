@@ -1,6 +1,53 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {application} from '../helpers/application.mjs';import {launchBrowser} from '../helpers/browser.mjs';import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';import {assertUiLayout} from '../helpers/ui-layout.mjs';
 import {localDateWindow} from '../../dist/packages/core/src/time-audience.js';
+
+// Inspect the screenshot's painted pixels, rather than only an SVG path's presence.
+async function paintedLineWidth(page,card,source){
+ const png=await card.locator('.subscriber-plot').screenshot();
+ return page.evaluate(async({bytes,source})=>{
+  const bitmap=await createImageBitmap(new Blob([new Uint8Array(bytes)],{type:'image/png'}));
+  const canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;
+  const ctx=canvas.getContext('2d');ctx.drawImage(bitmap,0,0);bitmap.close();
+  const {data}=ctx.getImageData(0,0,canvas.width,canvas.height);let longest=0;
+  for(let y=0;y<canvas.height;y++){let run=0;for(let x=0;x<canvas.width;x++){
+   const i=(y*canvas.width+x)*4,r=data[i],g=data[i+1],b=data[i+2];
+   const painted=source==='Twitch'?b>170&&r>100&&b>g*1.4:r>180&&r>g*1.7&&r>b*1.7;
+   run=painted?run+1:0;longest=Math.max(longest,run);
+  }}
+  return {longest,width:canvas.width};
+ },{bytes:[...png],source});
+}
+
+test('unchanged Twitch and YouTube totals paint a readable line five minutes after midnight',{timeout:60000},async()=>{
+ const a=await application();let browser;
+ try{
+  const midnight=localDateWindow('2026-10-21','Europe/Moscow').from,now=midnight+5*60000;
+  a.configuration.value.twitch={userId:'owner',access:'fixture',refresh:'fixture',expiresAt:Date.now()+3600000,scopes:[]};a.configuration.value.youtubeAccountId='yt';
+  await a.db.call('followingSnapshot','twitch','owner',[],true,midnight-31*86400000,144);
+  await a.db.call('youtubeSnapshot','yt','channel',{statistics:{subscriberCount:'29'}},midnight-31*86400000);
+  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];
+  page.setDefaultTimeout(8000);page.on('pageerror',e=>errors.push(e.message));await page.clock.setFixedTime(now);
+  await goto(page,a.bootstrap());await page.getByRole('button',{name:'Аналитика',exact:true}).click();const card=page.locator('.subscriber-growth');
+  for(const source of ['Twitch','YouTube']){
+   await card.getByRole('button',{name:source,exact:true}).click();await card.locator('.subscriber-total strong').filter({hasText:source==='Twitch'?'144':'29'}).waitFor();
+   for(const width of [320,390,1280]){
+    await page.setViewportSize({width,height:900});await card.scrollIntoViewIfNeeded();
+    const painted=await paintedLineWidth(page,card,source);
+    assert.ok(painted.longest>painted.width*.65,`${source} at ${width}: visible continuous line ${JSON.stringify(painted)}`);
+    await assertUiLayout(page);
+   }
+   assert.ok((await card.locator('svg').textContent()).includes('00:05'));
+   assert.equal((await card.locator('svg').textContent()).includes('24:00'),false);
+   for(const period of ['7 дней','30 дней','Сутки']){
+    await card.getByRole('button',{name:period,exact:true}).click();await page.waitForFunction(()=>document.querySelector('.subscriber-growth')?.getAttribute('aria-busy')==='false');
+    const painted=await paintedLineWidth(page,card,source);assert.ok(painted.longest>painted.width*.65,`${source} ${period}: ${JSON.stringify(painted)}`);
+   }
+   await page.setViewportSize({width:390,height:844});await card.screenshot({path:`/tmp/subscriber-${source.toLowerCase()}-midnight-fixed.png`});
+  }
+  assert.deepEqual(errors,[]);await saveCoverage(page);
+ }finally{await browser?.close();await a.close();}
+});
 test('subscriber timeline keeps stream shading and individual publication shapes on the count line',{timeout:60000},async()=>{
  const a=await application();let browser;
  try{
