@@ -36,7 +36,7 @@
 <section class="panel insights-section" aria-label="Инсайты">
  <header><h2><button class="disclosure-toggle" aria-expanded={opened} aria-controls={disclosureId} onclick={()=>opened=!opened}>Инсайты<Icon name="arrow" size={18}/></button></h2></header>
  {#if opened}<div class="insight-body" id={disclosureId}>
-  {#if busy||loading||data?.preparing}<p class="muted" role="status">Ищем закономерности…</p>
+  {#if (busy||loading||data?.preparing)&&!data?.insights}<p class="muted" role="status">Ищем закономерности…</p>
   {:else if error}<p class="notice error" role="alert">{error}</p><button class="outline small" onclick={()=>retry++}>Повторить</button>
   {:else if !cards.length}<p class="muted">{sessionId?'Заметных особенностей этого эфира пока не найдено.':'Для выбранного периода пока недостаточно данных для выводов.'}</p>
   {:else}

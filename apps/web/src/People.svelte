@@ -53,7 +53,7 @@
   let donorCurrency=$state('RUB'),rankRefresh=$state(0);
   const donorCurrencies=$derived([...new Set(tops.flatMap(p=>Object.keys(p.donationTotals)))].sort());
   const rankLabels=$derived(new Map(tops.map(t=>[t.id,sortBy==='donations'?Object.entries(t.donationTotals).map(([currency,amount])=>money(amount,currency)).join(' · ')||`${t.donationCount} донатов`:sortBy==='observed_minutes'?formatDuration(t.observedMinutes):`${t.messageCount} сообщ.`])));
-  let pageRows = $state<Person[]>([]), peopleOffset = $state(0), peopleTotal = $state(0), peopleLoading = $state(false);
+  let pageRows = $state<Person[]>([]), peopleOffset = $state(0), peopleTotal = $state(0), peopleLoading = $state(false), peopleLoaded=$state(false);
   const directory = latestRequest(), recipients = latestRequest();
   let people = $state<Person[]>([]);
   $effect(()=>{
@@ -99,7 +99,7 @@
     const timer=setTimeout(()=>{
       const query=new URLSearchParams({search:term,period:currentPeriod,offset:String(offset),limit:'50'});
       void directory.run(signal=>api<{items:Person[];total:number}>(`persons/page?${query}`,undefined,signal),result=>{
-        pageRows=result.items;peopleTotal=result.total;peopleLoading=false;
+        pageRows=result.items;peopleTotal=result.total;peopleLoading=false;peopleLoaded=true;
         if(offset>=result.total&&offset>0)peopleOffset=Math.max(0,Math.floor(Math.max(0,result.total-1)/50)*50);
       },failure=>{error=failure.message;peopleLoading=false;});
     },term?200:0);
@@ -237,8 +237,8 @@
       />
     </div>
     <div class="people-list">
-    {#if peopleLoading&&sortBy==='default'}<p class="small muted" role="status">Загружаем людей…</p>{/if}
-    {#if !visible.length&&!peopleLoading}<div class="empty-small">
+    {#if peopleLoading&&!peopleLoaded&&sortBy==='default'}<p class="small muted" role="status">Загружаем людей…</p>{/if}
+    {#if !visible.length&&(peopleLoaded||!peopleLoading)}<div class="empty-small">
         <Icon name="people" size={36} />
         <p>{search.trim()?'Никого не найдено':'Пока никого нет'}</p>
         <span class="small muted"

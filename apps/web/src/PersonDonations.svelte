@@ -7,12 +7,12 @@
  type Audit={id:string;revision:number;kind:string;created_at_ms:number;before_json:string;after_json:string};
  let {personId,people,revision=0,onChange}:{personId:string;people:Person[];revision?:number;onChange:()=>Promise<void>}=$props();
  let rows=$state<Donation[]>([]),total=$state(0),offset=$state(0),busy=$state(false),error=$state(''),conflict=$state(false);
- let loading=$state(true),loadedOffset=$state(0);
+ let loaded=$state(false),loading=$state(true),loadedOffset=$state(0);
  let editing=$state<Donation|null>(null),recipient=$state('');
  let histories=$state<Record<string,Audit[]>>({});let generation=0;
  async function refresh(){
   const ticket=++generation,page=offset;loading=true;
-  try{const result=await api(`donations?person=${encodeURIComponent(personId)}&offset=${page}&limit=10&includeDeleted=true`);if(ticket!==generation)return;rows=result.items;total=result.total;loadedOffset=page;if(page>=total&&page>0)offset=Math.max(0,Math.floor(Math.max(0,total-1)/10)*10);}
+  try{const result=await api(`donations?person=${encodeURIComponent(personId)}&offset=${page}&limit=10&includeDeleted=true`);if(ticket!==generation)return;rows=result.items;total=result.total;loaded=true;loadedOffset=page;if(page>=total&&page>0)offset=Math.max(0,Math.floor(Math.max(0,total-1)/10)*10);}
   catch(e){if(ticket===generation)error=(e as Error).message;throw e;}
   finally{if(ticket===generation)loading=false;}
  }
@@ -32,8 +32,8 @@
   {:else}<button class="icon-button" aria-label="Изменить привязку" title="Изменить привязку" disabled={busy||loading} onclick={()=>{editing=row;recipient=row.personId??personId;}}><Icon name="pencil" size={18}/></button>{/if}
   <details ontoggle={e=>{if(e.currentTarget.open)void audit(row.id).catch(e=>error=e.message);}}><summary>История привязок</summary>{#each histories[row.id]??[] as entry}<div class="audit-entry"><p class="small">{date(entry.created_at_ms)}</p>{#each donationAuditChanges(entry.before_json,entry.after_json) as change}<p class="small donation-message">{change.label}: {change.before??''} → {change.after}</p>{/each}</div>{/each}</details>
  </article>{/each}
- {#if loading}<p role="status">Загружаем донаты…</p>{/if}
- {#if !rows.length&&!loading}<p class="muted">Донатов пока нет</p>{/if}
+ {#if loading&&!loaded}<p role="status">Загружаем донаты…</p>{/if}
+ {#if !rows.length&&loaded}<p class="muted">Донатов пока нет</p>{/if}
  {#if total>10}<div class="pagination"><button class="outline" disabled={busy||loading||offset===0} onclick={()=>offset=Math.max(0,offset-10)}>Предыдущие донаты</button><span>{loadedOffset+1}–{Math.min(loadedOffset+10,total)} из {total}</span><button class="outline" disabled={busy||loading||offset+10>=total} onclick={()=>offset+=10}>Следующие донаты</button></div>{/if}
 </section>
 <style>
