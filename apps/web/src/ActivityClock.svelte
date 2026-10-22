@@ -49,7 +49,7 @@
   <label>Дни недели<select bind:value={day}><option value="all">Все дни</option><option value="weekdays">Будни</option><option value="weekends">Выходные</option>{#each ['пн','вт','ср','чт','пт','сб','вс'] as d}<option value={d}>{d}</option>{/each}</select></label>
   {#if metric==='donations'}<label>Валюта донатов графика<select bind:value={currency}>{#each currencies as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select></label>{/if}
  </div></details>
- <p class="small muted clock-caption">{watchHours?'Часы просмотра за выбранный период · накопленная сумма':metric==='donations'?`Сумма донатов на час эфира · ${activeCurrency}`:metric.endsWith('Messages')||metric==='messages'?'Сообщения на час эфира':metric==='activeAudience'?'Средняя активная аудитория за время эфира':'Среднее число зрителей во время эфира'} · {timezone}</p>
+ <p class="small muted clock-caption">{watchHours?'Часы просмотра · сумма':metric==='donations'?`Донаты · ${activeCurrency}/ч`:metric.endsWith('Messages')||metric==='messages'?'Сообщения/ч':metric==='activeAudience'?'Активная аудитория · среднее':'Зрители · среднее'} · {timezone==='Europe/Moscow'?'МСК':timezone}</p>
  {#if partialViewers}<p class="clock-caption small muted">Неполные данные площадок: сумма известных зрителей.</p>{/if}
  <div class="clock-plot" bind:clientWidth={availableWidth}><svg viewBox={`0 0 ${plotWidth} 250`} role="group" aria-label={`Активность с ${clockLabel(start)} до ${clockLabel(start+span)}`}>
   {#each levels as value}

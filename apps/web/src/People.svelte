@@ -220,15 +220,6 @@
         >{/each}
     </div>
     {#if sortBy==='donations'}<div class="donor-filters">{#if donorCurrencies.length>1}<label>Сортировать по валюте<select aria-label="Валюта сортировки донатеров" bind:value={donorCurrency}>{#each [...new Set(['RUB',...donorCurrencies])] as c}<option value={c}>{c}</option>{/each}</select></label>{/if}</div>{/if}
-    {#if sortBy !== "default"}<p class="small muted tops-hint">
-        Топ по {sortBy === "messages"
-          ? "сообщениям"
-          : sortBy === "donations"
-            ? "общей сумме донатов"
-            : "наблюдаемым минутам"}{period
-          ? ` за последние ${period} дней`
-          : " (вся история)"}
-      </p>{/if}
     <div class="search">
       <input
         aria-label="Поиск человека"
@@ -249,10 +240,10 @@
         class="person-row"
         aria-label={person.display_name}
         onclick={() => openPerson(person.id)}
-        ><span class="avatar"
+        ><span class="avatar sr-only"
           >{person.display_name.slice(0, 1).toUpperCase()}</span
         ><span
-          ><strong class={platformClass(person.sources)}>{person.display_name}</strong><small>{sourcesLabel(person.sources)}</small
+          ><strong class={platformClass(person.sources)}>{person.display_name}</strong><small class:sr-only={!person.sources?.includes(',')}>{sourcesLabel(person.sources)}</small
           ></span
         >{#if sortBy!=='default'}<span class="count">{rankLabels.get(person.id)}</span>{/if}</button
       >{/each}

@@ -16,6 +16,7 @@ export class YouTubeConnection {
   private running: Promise<void> | undefined;
   private requests = new Set<AbortController>();
   private refreshing: Promise<void> | undefined;
+  private initialCountChecked = false;
   constructor(private config: ConfigurationPort, private db: YoutubeStore, private redirect: string,
     private profile: string, private request: typeof fetch = fetch, private now = Date.now) {}
   private async json(url: string, init: RequestInit = {}) {
@@ -160,7 +161,10 @@ export class YouTubeConnection {
     const discovered = await this.activeBroadcasts(tokens, valid);
     if (!discovered || !valid()) return 300000;
     const broadcasts = discovered;
-    if(!channelSnapshot&&this.now()-(previous.snapshots.channel?.updatedAt??0)>=subscriberInterval(broadcasts.length>0)){
+    // Legacy channel metadata is not a subscriber-history observation. Start the
+    // history with a fresh API value instead of waiting on the old metadata age.
+    if(!channelSnapshot&&((previous.subscriberCountAt===null&&!this.initialCountChecked)||this.now()-(previous.snapshots.channel?.updatedAt??0)>=subscriberInterval(broadcasts.length>0))){
+      this.initialCountChecked=true;
       try{
         const response=await this.api('channels',{part:'statistics',id:tokens.userId},tokens);if(!valid())return 300000;
         const own=(Array.isArray(response.items)?response.items:[]).find((item:any)=>item.id===tokens.userId);
@@ -193,7 +197,10 @@ export class YouTubeConnection {
       for (const [id, item] of batch) videoDetails.set(id, item);
     }
     const observedAt = this.now();
-    if (channelSnapshot) await this.db.call("youtubeSnapshot", tokens.userId, "channel", channelSnapshot, observedAt);
+    if (channelSnapshot) {
+      this.initialCountChecked=true;
+      await this.db.call("youtubeSnapshot", tokens.userId, "channel", channelSnapshot, observedAt);
+    }
     if(valid()&&(refreshedMetadata||!previous.snapshots['cursor:channelMetadata']))await this.db.call('youtubeSnapshot',tokens.userId,'cursor:channelMetadata',true,refreshedMetadata?observedAt:previous.snapshots.channel?.updatedAt??observedAt);
     if (!valid()) return 300000;
     await this.db.call("youtubeSnapshot", tokens.userId, "broadcasts", broadcasts, observedAt);
@@ -306,6 +313,7 @@ export class YouTubeConnection {
     clearTimeout(this.timer); this.timer = undefined;
     for (const controller of this.requests) controller.abort();
     await this.running; this.running = undefined;
+    this.initialCountChecked=false;
     this.status = { state: "disconnected", account: "", detail: "" };
   }
   async disconnect() { await this.stop(); delete this.config.value.youtube; await this.config.save(); }

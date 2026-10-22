@@ -68,8 +68,7 @@
  {#each session.breaks??[] as pause}<p class="small">Перерыв: {streamRange(pause.from,pause.to)} МСК</p>{/each}
  {#each [...metadata].sort((a,b)=>b.at-a.at) as row}<p class="small">{streamTime(row.at)}{row.categoryName&&row.categoryName!=="Категория неизвестна"?` · ${row.categoryName}`:''} · {row.title||'Без названия'}</p>{:else}<p class="small muted">Нет сохранённых метаданных.</p>{/each}
  {/snippet}</ActionMenu></div>
- <p class="stream-meta">{streamRange(session.started_at_ms,session.ended_at_ms)} МСК</p>
- <p class="stream-meta">{[...new Set(metadata.map(row=>row.categoryName).filter(name=>name&&name!=="Категория неизвестна"))].join(' · ')}{metadata.some(row=>row.categoryName)?' · ':''}{session.platforms?.map(p=>p==='twitch'?'Twitch':'YouTube').join(' + ')}</p>
+ <p class="stream-meta">{[`${streamRange(session.started_at_ms,session.ended_at_ms)} МСК`,[...new Set(metadata.map(row=>row.categoryName).filter(name=>name&&name!=="Категория неизвестна"))].join(' · '),session.platforms?.map(p=>p==='twitch'?'Twitch':'YouTube').join(' + ')].filter(Boolean).join(' · ')}</p>
 </section>{/if}
 <section class="stream-kpis" aria-label="Итоги эфира">
  <div><span>Средние зрители</span><strong><span class="kpi-number">{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'—'}</span></strong></div>

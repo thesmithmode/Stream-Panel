@@ -72,3 +72,12 @@ for profile in ('ruslan','gulnaz'):
             except Exception: pass
         except Exception: result['googleStatus']='network_error'
     print('youtube_auth='+json.dumps(result))
+    # Bounded, read-only evidence for the current channel's subscriber graph.
+    account=token.get('userId') or saved.get('youtubeAccountId') or ''
+    table='p_'+profile+'_subscriber_counts'
+    with sqlite3.connect(path.as_uri()+'?mode=ro',uri=True) as history_db:
+        history_db.execute('PRAGMA query_only=ON')
+        if history_db.execute('SELECT 1 FROM sqlite_master WHERE type=\'table\' AND name=?',(table,)).fetchone():
+            count,first,last=history_db.execute(f"SELECT count(*),min(observed_at_ms),max(observed_at_ms) FROM {table} WHERE source='youtube' AND account_id=?",(account,)).fetchone()
+            latest=history_db.execute(f"SELECT total FROM {table} WHERE source='youtube' AND account_id=? ORDER BY observed_at_ms DESC LIMIT 1",(account,)).fetchone()
+            print('youtube_subscribers='+json.dumps({'profile':profile,'configured':bool(account),'samples':count,'first':first,'last':last,'total':latest[0] if latest else None}))

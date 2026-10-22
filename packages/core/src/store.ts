@@ -415,7 +415,8 @@ export class StreamStore {
   youtubeData(account: string) {
     const snapshots = this.db.prepare("SELECT key,payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=?").all(account) as {key:string;payload_json:string;updated_at_ms:number}[];
     const messages = this.db.prepare("SELECT id,payload_json FROM youtube_messages WHERE account_id=? ORDER BY published_at_ms DESC,id DESC LIMIT 200").all(account) as {id:string;payload_json:string}[];
-    return { snapshots: Object.fromEntries(snapshots.map(r => [r.key, {data: JSON.parse(r.payload_json), updatedAt: r.updated_at_ms}])), messages: messages.map(r => ({...JSON.parse(r.payload_json),id:r.id})) };
+    const subscriberCountAt=(this.db.prepare("SELECT observed_at_ms AS at FROM subscriber_counts WHERE source='youtube' AND account_id=? ORDER BY observed_at_ms DESC LIMIT 1").get(account) as {at:number}|undefined)?.at??null;
+    return { subscriberCountAt, snapshots: Object.fromEntries(snapshots.map(r => [r.key, {data: JSON.parse(r.payload_json), updatedAt: r.updated_at_ms}])), messages: messages.map(r => ({...JSON.parse(r.payload_json),id:r.id})) };
   }
 
   ingest(event:EventInput) {return this.eventIngestion.ingest(event);}

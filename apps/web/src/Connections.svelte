@@ -269,7 +269,7 @@
   <section class="panel settings">
     <header><h2>YouTube</h2><IntegrationGuide provider="YouTube" redirect={status.config.youtubeRedirectUri??''}/><span class="state" class:online={status.youtube?.state === "connected"}>{statusLabel(status.youtube?.state ?? "disconnected")}</span></header>
     <div class="settings-body">
-      <p class="small muted">{youtubeDetail}</p>
+      {#if status.youtube?.state!=='connected'}<p class="small muted">{youtubeDetail}</p>{/if}
       {#if ["connected", "connecting", "error"].includes(status.youtube?.state)}
         {#if status.youtube?.state === "error"}
           <details><summary>Настройки приложения Google</summary>

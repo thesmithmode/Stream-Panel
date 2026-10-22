@@ -118,3 +118,41 @@ button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,s
 .people-directory .tops-hint{padding:0 12px;margin:8px 0 0;font-size:12px;}
 .person-detail .person-scroll>h3{margin:16px 0 8px;font-size:15px;}
 .person-detail .account-summary{font-size:14px;}
+
+/* Shared density: keep primary data close to its controls and explanations on demand. */
+.page-heading{margin-bottom:12px;}
+.panel>header{padding:10px 12px;}
+.panel .settings-body{padding:12px;}
+.section-tabs{margin-block:12px;}
+.section-disclosure{margin-block:8px;}
+.section-disclosure>summary,.insights-section.panel .disclosure-toggle{min-height:44px;padding-block:10px;font-size:15px;}
+.applied-filters{margin:6px 0 10px;}
+.analytics-kpis{gap:10px 16px;margin-bottom:16px;padding-bottom:12px;}
+.history-toolbar{margin-bottom:8px;}
+.history-date{margin-block:14px 8px;}
+.stream-card{padding:12px;margin-bottom:8px;}
+.stream-card h3{margin-block:4px;font-size:16px;}
+.stream-card-metrics{gap:8px 14px;margin-top:10px;}
+.stream-card-metrics dt{font-size:12px;margin-bottom:3px;}
+.stream-card-metrics dd{font-size:17px;}
+.stream-card-metrics>div:nth-child(n+3){padding-top:6px;}
+.stream-page .stream-kpis{margin-block:10px;gap:8px 14px;}
+.stream-page .stream-facts .stream-meta{line-height:1.4;margin-bottom:0;}
+.stream-page .series-panel>header{padding:0;}
+.stream-page .stream-chart-toolbar{margin-top:4px;}
+.people-directory .search{padding:8px 12px;}
+.people-directory .person-row{padding-block:8px;min-height:48px;}
+.people-directory .person-row .avatar.sr-only{position:absolute;width:1px;height:1px;flex:0 0 1px;overflow:hidden;clip:rect(0,0,0,0);}
+.people-directory .person-row small.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);}
+.person-detail .person-scroll>h3{margin-block:12px 6px;}
+.profile-settings .settings-fields{gap:12px;margin:4px 0 12px;}
+.profile-settings .settings-fields>label{margin:0;}
+.settings .settings-body .actions{margin-top:8px;}
+@media(max-width:720px){
+ main{padding-top:12px;}
+ .section-tabs{margin-block:10px;}
+ .section-tabs button{min-height:44px;padding-block:10px;}
+ .stream-card{padding:12px;}
+ .stream-card-metrics{margin-top:10px;gap:8px 14px;}
+ .stream-card-metrics>div:nth-child(n+3){padding-top:6px;}
+}

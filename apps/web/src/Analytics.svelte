@@ -141,7 +141,7 @@
  <div class="period-chips" role="group" aria-label="Быстрый выбор периода">{#each [[7,'7 дней'],[30,'30 дней'],['all','Всё время']] as [value,label]}<button class:active={period===value} aria-pressed={period===value} onclick={()=>preset(value as number|'all')}>{label}</button>{/each}</div>
  <button class="outline filters-button" aria-expanded={filtersOpen} onclick={()=>filtersOpen=true}><Icon name="filters" size={18}/>Фильтры{#if category||source!=='all'||period==='custom'}<span class="filter-dot"></span>{/if}</button>
 </div>
-<p class="applied-filters">{categoryOptions.find((c:any)=>c.id===category)?.name??'Все категории'} · {source==='all'?'Все площадки':source==='twitch'?'Twitch / DA':'YouTube'}{#if period==='custom'} · Свой период{/if}</p>
+{#if category||source!=='all'||period==='custom'}<p class="applied-filters">{categoryOptions.find((c:any)=>c.id===category)?.name??'Все категории'} · {source==='all'?'Все площадки':source==='twitch'?'Twitch / DA':'YouTube'}{#if period==='custom'} · Свой период{/if}</p>{/if}
 <SectionTabs items={[["dynamics","Динамика"],["time","Время"],["audience","Аудитория"]]} bind:value={section} label="Разделы аналитики" panelId="analytics-tabpanel"/>
 <Sheet bind:open={filtersOpen} title="Фильтры аналитики"><div class="filter-fields">
  <PeriodSelect value={period} label="Период аналитики" days={[7,30]} custom onchange={value=>{if(value==='custom')period='custom';else preset(value);}}/>
