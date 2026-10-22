@@ -4,6 +4,7 @@ import {application,seed} from '../helpers/application.mjs';
 import {launchBrowser} from '../helpers/browser.mjs';
 import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';
 import {assertUiLayout} from '../helpers/ui-layout.mjs';
+import {mkdir} from 'node:fs/promises';
 import {refreshData} from '../helpers/navigation.mjs';
 
 test('compact participants expand inline without empty space, preserve sorting and fit narrow screens',{timeout:60000},async()=>{
@@ -14,6 +15,7 @@ test('compact participants expand inline without empty space, preserve sorting a
    accounts:[{source:i===2?'youtube':'twitch',name:i===0?'AmaliyaMelina':'Alias that should not repeat'}],
    donations:i===0?{RUB:'22800',EUR:'500',USD:'100'}:{},
    intervals:i===3?[]:[{from:base,to:base+120000,kind:i===2?'chat_proxy':'observed'},{from:base+240000,to:base+360000,kind:i===2?'chat_proxy':'observed'}]}));
+  people[0].intervals.push({from:base,to:base+60000,kind:'chat_proxy'});
   people[1].intervals=[{from:base-86400000,to:base+60000,kind:'observed'}];
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(7000);const errors=[];let empty=false;page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/api/v1/analytics?*',async route=>{const response=await route.fetch(),data=await response.json();await route.fulfill({response,json:{...data,audience:empty?[]:people}});});
@@ -34,7 +36,27 @@ test('compact participants expand inline without empty space, preserve sorting a
    assert.ok(Math.abs(before.height-after.height)<1,'opening intervals does not resize the summary row');
    assert.ok(Math.abs(nextAfter.y-nextBefore.y-detailRow.height)<2,'the next participant moves by exactly the expanded content height');
    assert.equal(await rank.locator('.interval-detail td').getAttribute('colspan'),width<=720?'3':'6');
-   assert.equal(await details.locator('.interval-row').count(),2);await details.getByText('Пауза Twitch · 2 мин',{exact:true}).waitFor();
+   assert.equal(await details.locator('.interval-row').count(),3);
+   await details.locator(width<=720?'.phone-gap':'.interval-gap').filter({hasText:width<=720?'пауза 2м':'Пауза Twitch · 2 мин'}).waitFor();
+   assert.ok(detailRow.height<= (width<=720?106:80),`intervals stay compact at ${width}px: ${detailRow.height}`);
+   const columns=await rank.evaluate(el=>{
+    const head=el.querySelector('thead tr'),row=el.querySelector('.participant-row');
+    return [1,2].map(i=>Math.abs(head.children[i].getBoundingClientRect().right-row.children[i].getBoundingClientRect().right));
+   });
+   assert.ok(columns.every(delta=>delta<1),'time and messages share the header columns');
+   const durationEdges=await rows.evaluateAll(rs=>rs.slice(0,4).map(row=>{const range=document.createRange();range.selectNodeContents(row.querySelector('.interval-toggle strong,.plain-duration'));return range.getBoundingClientRect().right;}));
+   assert.ok(Math.max(...durationEdges)-Math.min(...durationEdges)<1,'durations align with and without disclosure arrows');
+   assert.ok(await details.locator('.interval-row').evaluateAll(rs=>rs.every(row=>{
+    const label=row.querySelector('.interval-source'),time=row.querySelector('.interval-range');
+    if(!label.checkVisibility())return true;
+    const range=document.createRange();range.selectNodeContents(label);
+    return range.getBoundingClientRect().right<=time.getBoundingClientRect().left;
+   })),'platform labels do not overlap time ranges');
+   assert.ok(await details.locator('.interval-row').evaluateAll(rs=>rs.every(row=>row.scrollWidth<=row.clientWidth+1)),'interval text fits without clipping');
+   if(process.env.STREAM_PANEL_QA_SHOTS&&[390,1440].includes(width)){
+    await mkdir(process.env.STREAM_PANEL_QA_SHOTS,{recursive:true});
+    await page.screenshot({path:`${process.env.STREAM_PANEL_QA_SHOTS}/participants-${width}.png`});
+   }
    await assertUiLayout(page);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
    await toggle.focus();await page.keyboard.press('Space');await details.waitFor({state:'detached'});assert.equal(await toggle.getAttribute('aria-expanded'),'false');
    assert.ok(Math.abs((await rows.nth(1).boundingBox()).y-nextBefore.y)<2,'collapsing removes all reserved interval space');

@@ -16,6 +16,10 @@
  function sort(key:string){if(metric===key)descending=!descending;else{metric=key;descending=true;}}
  function toggle(personId:string){const next=new Set(expanded);if(next.has(personId))next.delete(personId);else next.add(personId);expanded=next;}
  const arrow=(key:string)=>metric===key?(descending?' ↓':' ↑'):'';
+ const groups=(person:RankPerson)=>{
+  const rows=intervalRows(person.intervals??[]);
+  return [...new Set(rows.map(span=>span.kind))].map(kind=>rows.filter(span=>span.kind===kind));
+ };
  const source=(kind:string)=>kind==='observed'?'Twitch':'YouTube · оценка';
 </script>
 <svelte:window bind:innerWidth={viewport}/>
@@ -25,7 +29,7 @@
  <div class="table-scroll"><table>
   <thead><tr>
    <th scope="col" aria-sort={metric==='name'?(descending?'descending':'ascending'):'none'}><button onclick={()=>sort('name')}>Участник{arrow('name')}</button></th>
-   <th scope="col" aria-sort={metric==='presence'?(descending?'descending':'ascending'):'none'}><button aria-label={`Время в чате${arrow('presence')}`} onclick={()=>sort('presence')}><span class="desktop-label">Время в чате</span><span class="phone-label">В чате</span>{arrow('presence')}</button></th>
+   <th scope="col" class:with-disclosure={showIntervals} aria-sort={metric==='presence'?(descending?'descending':'ascending'):'none'}><button aria-label={`Время в чате${arrow('presence')}`} onclick={()=>sort('presence')}><span class="desktop-label">Время в чате</span><span class="phone-label">В чате</span>{arrow('presence')}</button></th>
    <th scope="col" aria-sort={metric==='messages'?(descending?'descending':'ascending'):'none'}><button aria-label={`Сообщения${arrow('messages')}`} onclick={()=>sort('messages')}><span class="desktop-label">Сообщения</span><span class="phone-label">Сообщ.</span>{arrow('messages')}</button></th>
    {#each currencyColumns as currency}<th scope="col" class="donation-column" aria-sort={metric===`donation:${currency}`?(descending?'descending':'ascending'):'none'}><button onclick={()=>sort(`donation:${currency}`)}>Донаты, {currency}{arrow(`donation:${currency}`)}</button></th>{/each}
   </tr></thead>
@@ -36,17 +40,25 @@
     <td><button class={`text-button person-name ${platformClass(person.accounts?.map(a=>a.source))}`} title={person.name} onclick={()=>onPerson(person.id)}>{person.name}</button>
      {#if currencies.some(c=>BigInt(person.donations?.[c]??'0')!==0n)}<div class="phone-donations">{#each currencies as c}{#if BigInt(person.donations?.[c]??'0')!==0n}<span>{money(person.donations![c]!,c)}</span>{/if}{/each}</div>{/if}
     </td>
-    <td>{#if hasIntervals}<button class="interval-toggle" aria-label={`Интервалы ${person.name}`} aria-expanded={expanded.has(person.id)} aria-controls={expanded.has(person.id)?regionId:undefined} onclick={()=>toggle(person.id)}><strong>{durationLabel(presenceMinutes(person))}</strong><Icon name="arrow" size={14}/></button>{:else}<strong class="plain-duration">{durationLabel(presenceMinutes(person))}</strong>{/if}</td>
+    <td class:with-disclosure={showIntervals}>{#if hasIntervals}<button class="interval-toggle" aria-label={`Интервалы ${person.name}`} aria-expanded={expanded.has(person.id)} aria-controls={expanded.has(person.id)?regionId:undefined} onclick={()=>toggle(person.id)}><strong>{durationLabel(presenceMinutes(person))}</strong><Icon name="arrow" size={14}/></button>{:else}<strong class="plain-duration">{durationLabel(presenceMinutes(person))}</strong>{/if}</td>
     <td class="message-count">{person.messages??0}</td>
     {#each currencyColumns as currency}<td class="donation-column">{BigInt(person.donations?.[currency]??'0')===0n?'—':money(person.donations![currency]!,currency)}</td>{/each}
    </tr>
    {#if hasIntervals&&expanded.has(person.id)}<tr class="interval-detail"><td colspan={3+currencyColumns.length}>
-    <div id={regionId} role="region" aria-label={`Интервалы ${person.name}`} class="interval-list"><ul>
-     {#each intervalRows(person.intervals!) as span}
-      {#if span.gap>0}<li class="interval-gap">Пауза {span.kind==='observed'?'Twitch':'YouTube'} · {durationLabel(span.gap/60000)}</li>{/if}
-      <li class="interval-row"><div><span class="interval-range">{intervalRange(span.from,span.to,streamStart,streamEnd)}</span><small class:twitch={span.kind==='observed'} class:youtube={span.kind!=='observed'}>{source(span.kind)}</small></div><strong>{durationLabel((span.to-span.from)/60000)}</strong></li>
+    <div id={regionId} role="region" aria-label={`Интервалы ${person.name}`} class="interval-list">
+     {#each groups(person) as spans}
+      <ul class="platform-intervals">
+       {#each spans as span,index}
+        <li class="interval-row">
+         <small class="interval-source" class:twitch={span.kind==='observed'} class:youtube={span.kind!=='observed'} class:repeated={index>0}><span class="desktop-label">{source(span.kind)}</span><span class="phone-label">{span.kind==='observed'?'Twitch':'YT · оценка'}</span></small>
+         <span class="interval-range">{intervalRange(span.from,span.to,streamStart,streamEnd)}</span>
+         <strong>{durationLabel((span.to-span.from)/60000)}{#if span.gap>0}<span class="phone-gap" title={`Пауза ${source(span.kind)} · ${durationLabel(span.gap/60000)}`}> · пауза {durationLabel(span.gap/60000).replaceAll(' мин','м').replaceAll(' ч','ч')}</span>{/if}</strong>
+         {#if span.gap>0}<span class="interval-gap" title="Промежуток без сохранённых сигналов площадки">Пауза {span.kind==='observed'?'Twitch':'YouTube'} · {durationLabel(span.gap/60000)}</span>{/if}
+        </li>
+       {/each}
+      </ul>
      {/each}
-    </ul></div>
+    </div>
    </td></tr>{/if}
   {:else}<tr><td colspan={3+currencyColumns.length} class="muted empty-ranking">Нет сохранённых данных об участниках</td></tr>{/each}</tbody>
  </table></div>
@@ -67,20 +79,34 @@
  .interval-toggle[aria-expanded=true] :global(svg){transform:rotate(-90deg);color:var(--accent);}
  .plain-duration{display:block;padding-block:12px;}.expanded>td{border-bottom:0;}
  .interval-detail>td{padding:0 12px 8px;white-space:normal;}
- .interval-list{padding:0 12px;border-left:2px solid var(--border);}
- .interval-list ul{list-style:none;margin:0;padding:0;display:grid;gap:0;}
- .interval-row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;padding:6px 0;}
- .interval-row>div{min-width:0;}.interval-range{display:block;overflow-wrap:anywhere;}.interval-row small{display:block;font-size:11px;margin-top:2px;}.interval-row>strong{font-size:12px;white-space:nowrap;}
- .interval-gap{color:var(--muted);font-size:11px;padding:6px 0;border-top:1px dashed var(--border);}
+ th.with-disclosure button{margin-right:22px;}
+ td.with-disclosure .plain-duration{padding-right:22px;}
+ .interval-list{padding:2px 0;display:grid;gap:2px;}
+ .platform-intervals{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;align-items:center;gap:2px 16px;}
+ .interval-row{display:flex;align-items:baseline;gap:10px;min-height:26px;font-size:12px;}
+ .interval-source{width:116px;flex:none;font-size:11px;white-space:nowrap;}
+ .interval-source.repeated{display:none;}
+ .interval-range,.interval-row>strong{white-space:nowrap;}
+ .interval-row>strong{font-size:12px;font-weight:500;}
+ .phone-gap{display:none;}
+ .interval-gap{color:var(--muted);font-size:10px;white-space:nowrap;}
+ @media(min-width:721px){.interval-row:has(.interval-gap) .interval-gap{order:-1;}.interval-row:has(.interval-gap) .interval-source{order:-2;}}
  .more{margin:12px;}.empty-ranking{padding:16px;white-space:normal;}
  .phone-label,.phone-donations,.phone-donation-sort{display:none;}
  @media(max-width:720px){
   table{table-layout:fixed;}.desktop-label,.donation-column{display:none;}.phone-label{display:inline;}
   th,td{padding:4px 8px;}th:first-child{width:auto;}th:nth-child(2){width:106px;}th:nth-child(3){width:62px;}
   .person-name{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .interval-toggle{gap:5px;font-size:12px;}.interval-toggle strong{font-weight:500;}
+  .interval-toggle{gap:5px;font-size:12px;}.interval-toggle strong,.plain-duration{font-weight:500;font-size:12px;}
   .message-count{font-size:13px;white-space:normal;overflow-wrap:anywhere;}.phone-donations{display:flex;gap:4px 8px;flex-wrap:wrap;color:var(--muted);font-size:11px;padding-bottom:4px;white-space:normal;overflow-wrap:anywhere;}
   .phone-donation-sort{display:flex;gap:4px 12px;flex-wrap:wrap;padding:0 12px 4px;}.phone-donation-sort button{min-height:36px;font-size:12px;}.phone-donation-sort button[aria-pressed=true]{color:var(--accent);}
-  .interval-detail>td{padding:0 8px 8px;}.interval-list{padding:0 8px;}.interval-row{gap:8px;font-size:12px;}
+  .interval-detail>td{padding:0 8px 6px;}
+  th.with-disclosure button{margin-right:19px;}td.with-disclosure .plain-duration{padding-right:19px;}
+  .platform-intervals{display:grid;gap:0;}
+  .interval-row{display:grid;grid-template-columns:76px minmax(0,1fr) auto;gap:2px 7px;min-height:28px;font-size:11px;align-items:baseline;}
+  .interval-source{width:auto;font-size:10px;}.interval-source.repeated{display:block;}
+  .interval-row>strong{font-size:11px;text-align:right;}.interval-range{white-space:normal;overflow-wrap:anywhere;}
+  .interval-gap{display:none;}.phone-gap{display:inline;color:var(--muted);font-size:9px;font-weight:400;}
+
  }
 </style>
