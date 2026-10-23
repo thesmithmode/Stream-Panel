@@ -75,6 +75,7 @@ test('every chart category selector refreshes donations, time patterns and clock
   await clockSettings(page);const clock=page.locator('.activity-clock');await clock.getByLabel('Метрика графика').selectOption('donations');await clock.getByLabel('Шаг графика').selectOption('60');
   assert.equal(await clock.getByLabel('Час для детализации').count(),0);
   assert.ok(await clock.locator('.value-tick').count()>=3);assert.ok(await clock.locator('.value-grid').count()>=3);assert.equal(await clock.locator('.time-grid').count(),7);
+  await clock.locator('svg g').filter({hasText:'1 200 RUB/ч'}).first().waitFor();
   assert.ok((await clock.locator('svg g').allTextContents()).some(text=>text.includes('1 200 RUB/ч')));
   for(const width of [1280,390]){await page.setViewportSize({width,height:900});await assertUiLayout(page);if(process.env.STREAM_PANEL_QA_SHOTS)await page.locator('.activity-clock').screenshot({path:`${process.env.STREAM_PANEL_QA_SHOTS}/activity-${width}.png`});}
   assert.equal(await page.title(),'Stream Panel');assert.ok(await page.locator('main').innerText());assert.deepEqual(errors,[]);await saveCoverage(page);
