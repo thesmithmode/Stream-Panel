@@ -52,7 +52,7 @@ test('combined timeline hides publications before YouTube observations, retains 
   assert.equal(await card.locator('.subscriber-line').count(),2);assert.equal(await card.locator('.subscriber-date-tick').count(),7);
   const tickDates=await card.locator('.subscriber-date-tick text').allTextContents();assert.equal(new Set(tickDates).size,7);
   const axisColors=await card.locator('.subscriber-axis').evaluateAll(axes=>axes.map(el=>getComputedStyle(el).stroke));assert.notEqual(axisColors[0],axisColors[1]);
-  assert.equal(await card.locator('[data-kind=shorts] .publication-shape').getAttribute('r'),'2');assert.ok((await card.locator('[data-kind=video] .publication-shape').getAttribute('d')).includes('4.5'));
+  assert.equal(await card.locator('[data-kind=shorts] .publication-shape').getAttribute('r'),'2');assert.ok((await card.locator('[data-kind=video] .publication-shape').getAttribute('d')).includes('5.4'));
   assert.equal(await card.locator('.stream-fill').first().getAttribute('height'),'200');assert.equal(await card.locator('.stream-fill').first().getAttribute('opacity'),'.08');assert.equal(await card.locator('.publication-marker').count(),2);assert.equal(await card.locator('[data-video-id^=old]').count(),0);
   assert.equal(await card.locator('.stream-band[data-source=both]').count(),1);assert.equal(await card.locator('.stream-band[data-source=youtube]').count(),1);assert.equal(await card.getByText('YouTube: история с',{exact:false}).count(),0);assert.equal(await card.locator('.subscriber-history-note').count(),0);
   await card.locator('[data-video-id=short]').focus();await page.keyboard.press('Enter');await card.locator('.publication-selection').filter({hasText:'Shorts'}).waitFor();assert.equal((await card.textContent()).includes('СКРЫТОЕ НАЗВАНИЕ'),false);assert.equal((await card.locator('[data-video-id=short] title').textContent()).includes('СКРЫТОЕ'),false);
@@ -76,4 +76,38 @@ test('combined timeline retries failed loads and refreshes both platform counts'
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(8000);await page.route('**/api/v1/analytics/subscribers?*',route=>route.fulfill({status:503,json:{error:'UNAVAILABLE'}}));await goto(page,a.bootstrap());await page.getByRole('button',{name:'Аналитика',exact:true}).click();const card=page.locator('.subscriber-growth');await card.getByRole('button',{name:'Повторить',exact:true}).waitFor();await page.unroute('**/api/v1/analytics/subscribers?*');await card.getByRole('button',{name:'Повторить',exact:true}).click();await card.locator('[data-source=youtube] strong').filter({hasText:'29'}).waitFor();
   await a.db.call('youtubeSnapshot','yt','channel',{statistics:{subscriberCount:'30'}},at+30000);await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));await card.locator('[data-source=youtube] strong').filter({hasText:'30'}).waitFor();await card.getByRole('button',{name:'О графике подписчиков'}).click();await card.getByRole('dialog').waitFor();await page.keyboard.press('Escape');await saveCoverage(page);
  }finally{await browser?.close();await a.close();}
+});
+
+test('periods preload and cache without clearing, rescaling or shifting the previous graph while pending or failed',{timeout:45000},async()=>{
+ const a=await application();let browser,release;
+ const held=new Promise(resolve=>{release=resolve;});let requested=0,monthlyFinished=0,failRefresh=false;
+ try{
+  a.configuration.value.youtubeAccountId='yt';const now=Date.now();
+  await a.db.call('youtubeSnapshot','yt','channel',{statistics:{subscriberCount:'28'}},now-15*86400000);
+  await a.db.call('youtubeSnapshot','yt','channel',{statistics:{subscriberCount:'29'}},now-60000);
+  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(8000);
+  await page.route('**/api/v1/analytics/subscribers?*',async route=>{
+   if(route.request().headers()['x-stream-panel-profile']==='ruslan')requested++;const u=new URL(route.request().url()),monthly=Number(u.searchParams.get('to'))-Number(u.searchParams.get('from'))>10*86400000;
+   if(monthly)await held;
+   if(failRefresh)await route.fulfill({status:503,json:{error:'UNAVAILABLE'}});else await route.continue();
+  });
+  page.on('response',response=>{const u=new URL(response.url());if(response.request().headers()['x-stream-panel-profile']==='ruslan'&&u.pathname.endsWith('/analytics/subscribers')&&Number(u.searchParams.get('to'))-Number(u.searchParams.get('from'))>10*86400000)monthlyFinished++;});
+  await goto(page,a.bootstrap());await page.getByRole('button',{name:'Аналитика',exact:true}).click();const card=page.locator('.subscriber-growth');await card.locator('[data-source=youtube] strong').filter({hasText:'29'}).waitFor();
+  await page.waitForFunction(()=>document.querySelectorAll('.subscriber-date-tick').length===7);
+  const snapshot=()=>card.evaluate(el=>({height:el.getBoundingClientRect().height,plot:el.querySelector('.subscriber-plot').outerHTML,totals:el.querySelector('.subscriber-totals').textContent,range:el.querySelector('.subscriber-date label span').textContent}));
+  const weekly=await snapshot();assert.equal(requested,4,'both periods and platforms start in the background');
+  await card.getByRole('button',{name:'30 дней',exact:true}).click();assert.equal(await card.getAttribute('aria-busy'),'true');assert.deepEqual(await snapshot(),weekly,'pending monthly request keeps the entire weekly view unchanged');
+  assert.equal(await card.getByText('Загружаем подписчиков…',{exact:true}).count(),0);
+  await card.getByRole('button',{name:'7 дней',exact:true}).click();assert.equal(await card.getAttribute('aria-busy'),'false');assert.deepEqual(await snapshot(),weekly);assert.equal(requested,4,'switching shares in-flight requests');
+  release();await new Promise(resolve=>{const check=()=>monthlyFinished===2?resolve():setTimeout(check,10);check();});
+  // Let the parsed response enter the cache before the following user interaction.
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  assert.deepEqual(await snapshot(),weekly,'late background result cannot replace the selected weekly period');
+  await card.getByRole('button',{name:'30 дней',exact:true}).click();assert.equal(await card.getAttribute('aria-busy'),'false');assert.equal(await card.locator('.subscriber-date-tick').count(),7);
+  const monthly=await snapshot();assert.notEqual(monthly.plot,weekly.plot);assert.equal(monthly.height,weekly.height);
+  await card.getByRole('button',{name:'7 дней',exact:true}).click();assert.deepEqual(await snapshot(),weekly);assert.equal(requested,4,'cached periods switch without additional network requests');
+  failRefresh=true;await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));await card.getByRole('alert').waitFor();assert.deepEqual(await snapshot(),weekly,'refresh failure keeps the previous graph and layout');
+  failRefresh=false;await card.getByRole('button',{name:'Повторить',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.subscriber-growth')?.getAttribute('aria-busy')==='false');assert.equal(await card.getByRole('alert').count(),0);
+  await saveCoverage(page);
+ }finally{release();await browser?.close();await a.close();}
 });

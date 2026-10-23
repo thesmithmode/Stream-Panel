@@ -1,9 +1,10 @@
 <script lang="ts">
+ import {cachedAnalytics,loadAnalytics,summaryQuery} from "./analytics-cache";
+ import CategoryComparison from "./CategoryComparison.svelte";
  import SectionTabs from "./SectionTabs.svelte";
   import { onMount, untrack } from "svelte";
   import { api, date, money } from "./api";
   import {analyticsView,loadAnalyticsView,saveAnalyticsView} from "./analytics-view";
-  import YoutubeReport from "./YoutubeReport.svelte";
   import Insights from "./Insights.svelte";
   import Help from "./Help.svelte";
   import Sheet from "./Sheet.svelte";
@@ -28,10 +29,10 @@
   let heatCurrency=$state("RUB");
   let heatCalculation=$state("average"),selectedHour=$state<{day:string;hour:number}|null>(null);
   let period=$state<number|'all'|'custom'>('all');
-  let buildProgress=$state(""),detailData=$state<any>(null),detailBusy=$state(false),streamPage=$state(0);
+  let buildProgress=$state(""),detailData=$state<any>(null),detailBusy=$state(false);
   const reportScope=$derived(JSON.stringify([profile,period,period==='custom'?from:'',period==='custom'?to:'',source,category,timezone]));
   let loadedScope=$state('');
-  let requestId=0, mounted=$state(false),reportController:AbortController|undefined;
+  let requestId=0, mounted=$state(false);
   $effect(()=>{
     const filters=[mounted,period,from,to,source,category,timezone].join("|");
     void filters;
@@ -40,7 +41,7 @@
     let cancelled=false;
     const delay=untrack(()=>data===null?0:150);
     const timer=window.setTimeout(()=>{if(!cancelled)untrack(()=>void refresh());},delay);
-    return ()=>{cancelled=true;window.clearTimeout(timer);requestId++;reportController?.abort();};
+    return ()=>{cancelled=true;window.clearTimeout(timer);requestId++;};
   });
   $effect(()=>{const saved=JSON.stringify(view);void saved;if(mounted)saveAnalyticsView(()=>localStorage,profile,view);});
   let audienceOffset=$state(0),pagedAudience=$state<any>(null),audienceBusy=$state(false),loadedAudienceQuery=$state('');
@@ -66,7 +67,6 @@
     const timer=window.setTimeout(()=>{void reportPage({audienceOffset:offset,audienceSearch:term,audienceSort:sort,audienceCoreOnly:core?1:0},controller.signal,'analytics/audience').then(result=>{if(!controller.signal.aborted){pagedAudience=result;loadedAudienceQuery=query;}}).catch(e=>{if(!controller.signal.aborted)error=e.message;}).finally(()=>{if(!controller.signal.aborted)audienceBusy=false;});},150);
     return ()=>{controller.abort();window.clearTimeout(timer);};
   });
-  const reportPending=$derived(!!data&&loadedScope!==reportScope);
   const weekdays=["пн","вт","ср","чт","пт","сб","вс"];
   const hourCells=$derived(new Map((data?.hours??[]).map((h:any)=>[`${h.day}:${h.hour}`,h])) as Map<string,any>);
   const hourStreamCounts=$derived(new Map((data?.clockBuckets??[]).filter((b:any)=>b.resolution===60&&weekdays.includes(b.day)).map((b:any)=>[`${b.day}:${b.minute/60}`,b.streams])));
@@ -109,9 +109,9 @@
   });
   function selectEntity(e:any){selected=e;day=new Date(e.intervals.at(-1)?.from??new Date(to).getTime()).toLocaleDateString('sv-SE',{timeZone:timezone});}
   function preset(days:number|'all'){period=days;liveEnd=true;const now=Date.now();from=localInput(days==='all'?0:now-days*86400000);to=localInput(now);}
-  async function refresh(){
+  async function refresh(force=false){
     const scope=reportScope,id=++requestId;busy=true;error="";
-    reportController?.abort();const controller=new AbortController();reportController=controller;
+
     const fromMs=new Date(from).getTime(),toMs=new Date(to).getTime();
     try{
       try {localStorage.setItem(`sp-analytics-${profile}`,JSON.stringify({timezone}));}catch{/* optional local preferences */}
@@ -119,21 +119,22 @@
       // search or core-only after an auto-refresh cannot hide participants.
       const offset=0,term='',sort=view.sort,core=false;
       const audienceQuery=JSON.stringify([scope,offset,term,sort,core]);
-      const q=new URLSearchParams({from:String(fromMs),to:String(toMs),source,category,timezone,mode:'summary',insights:'1',clockCompact:'1',clockDay:'all',clockResolution:String(view.resolution),audienceOffset:String(offset),audienceSearch:term,audienceSort:sort,audienceCoreOnly:core?'1':'0'});
-      let result=await api(`analytics?${q}`,undefined,controller.signal);
-      while(result.preparing&&id===requestId){buildProgress=`${result.stage==='aggregate'?'Собираем отчёт':'Готовим историю'}: ${Math.round(result.ready/Math.max(1,result.total)*100)}%`;if(id!==requestId)return;result=await api(`analytics?${q}`,undefined,controller.signal);}
+      const q=summaryQuery(fromMs,toMs,source,category,timezone,view.resolution,sort);
+      const cached=cachedAnalytics(profile,q);
+      if(cached&&id===requestId){data=cached;loadedScope=scope;loadedAudienceQuery=audienceQuery;}
+      const result=await loadAnalytics(profile,q,force);
       buildProgress='';
       if(id===requestId){const previousScope=loadedScope;if(result.filters&&(result.filters.category!==category||result.filters.source!==source||result.filters.timezone!==timezone))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');loadedScope=scope;loadedAudienceQuery=audienceQuery;
         if(JSON.stringify([scope,audienceOffset,search,view.sort,view.coreOnly])===audienceQuery)pagedAudience=null;
         if(JSON.stringify(data)!==JSON.stringify(result))data=Object.fromEntries(Object.entries(result).map(([key,value])=>[key,JSON.stringify(data?.[key])===JSON.stringify(value)?data[key]:value]));
-        if(scope!==previousScope){selected=null;streamPage=0;}}
+        if(scope!==previousScope){selected=null;}}
     }catch(e){if(id===requestId){error=(e as Error).message;}}
     finally{if(id===requestId)busy=false;}
   }
   onMount(()=>{
     try{const saved=JSON.parse(localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved?.timezone)timezone=saved.timezone;}catch{/* private browser may deny storage */}
     view=loadAnalyticsView(()=>localStorage,profile);
-    mounted=true;const update=()=>{if(!document.hidden&&navigator.onLine&&!busy){if(liveEnd){const now=Date.now();if(typeof period==='number')from=localInput(now-period*86400000);const next=localInput(now);if(next===to)void refresh();else to=next;}else void refresh();}};window.addEventListener('sp:data-refresh',update);return ()=>{requestId++;reportController?.abort();window.removeEventListener('sp:data-refresh',update);};
+    mounted=true;const update=()=>{if(!document.hidden&&navigator.onLine&&!busy){if(liveEnd){const now=Date.now();if(typeof period==='number')from=localInput(now-period*86400000);const next=localInput(now);if(next===to)void refresh(true);else to=next;}else void refresh(true);}};window.addEventListener('sp:data-refresh',update);return ()=>{requestId++;window.removeEventListener('sp:data-refresh',update);};
   });
 </script>
 {#snippet categoryFilter(_label:string)}{/snippet}
@@ -151,7 +152,7 @@
  <details class="section-disclosure"><summary>Отображение и часовой пояс</summary><div class="filter-fields">
  <label>Часовой пояс сравнения<select aria-label="Часовой пояс сравнения" bind:value={timezone}><option value="Europe/Moscow">Москва</option><option value="UTC">UTC</option><option value="Asia/Yekaterinburg">Екатеринбург</option></select></label>
  <label>Вид дней и часов<select aria-label="Вид дней и часов" bind:value={view.hourView}><option value="both">Карта и таблица</option><option value="map">Только карта</option><option value="table">Только таблица</option></select></label>
- <label class="check"><input type="checkbox" bind:checked={view.report}/>Отчёт YouTube</label><label class="check"><input type="checkbox" bind:checked={view.trend}/>График активности</label><label class="check"><input type="checkbox" bind:checked={view.categories}/>Сравнение категорий</label><label class="check"><input type="checkbox" bind:checked={view.hours}/>Дни и часы</label><label class="check"><input type="checkbox" bind:checked={view.streams}/>Сравнение стримов</label><label class="check"><input type="checkbox" bind:checked={view.audience}/>Возвращаемость участников</label><button class="outline" onclick={()=>view=analyticsView(null)}>Сбросить отображение</button>
+ <label class="check"><input type="checkbox" bind:checked={view.trend}/>График активности</label><label class="check"><input type="checkbox" bind:checked={view.categories}/>Сравнение категорий</label><label class="check"><input type="checkbox" bind:checked={view.hours}/>Дни и часы</label><label class="check"><input type="checkbox" bind:checked={view.audience}/>Возвращаемость участников</label><button class="outline" onclick={()=>view=analyticsView(null)}>Сбросить отображение</button>
  </div></details>
  <div class="filter-actions"><button class="outline" onclick={()=>{category='';source='all';preset('all');}}>Сбросить фильтры</button><button class="primary" onclick={()=>filtersOpen=false}>Готово</button></div>
 </div></Sheet>
@@ -159,13 +160,13 @@
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 <div id="analytics-tabpanel" role="tabpanel" aria-label={section==='dynamics'?'Динамика':section==='time'?'Время':'Аудитория'}>
 {#if data}
- <div class="analytics-results" class:report-pending={reportPending} aria-busy={reportPending}>
+ <div class="analytics-results" aria-busy={busy}>
   {#if section==='dynamics'}
   <div class="analytics-kpis"><div><strong>{data.summary?.streams??0}</strong><span>Эфиров</span></div>{#if data.donationTiming}<div><strong>{Object.entries(data.donationTiming.totals??{}).map(([c,a])=>money(String(a),c)).join(' · ')||'—'}</strong><span>Донаты</span></div>{/if}</div>
-  <AudienceGrowth {categoryFilter} streams={data.streamComparison??[]} {timezone} {onStream}/>
+  <AudienceGrowth end={data.filters?.toMs??Date.now()} {categoryFilter} streams={data.streamComparison??[]} {timezone} {onStream}/>
   <SubscriberGrowth {profile} {timezone} {onStream}/>
   <Insights report={data} loading={busy&&!data} {onPerson} {onStream}/>
-  <details class="section-disclosure"><summary>Сравнение категорий и возвращаемости</summary><ComparisonCharts scope={reportScope} {categoryFilter} {timezone} {onStream} showGrowth={false} streams={data.streamComparison??[]} categories={(data.categories??[]).filter((c:any)=>c.id&&c.name!=="Категория неизвестна")}/></details>
+  <details class="section-disclosure"><summary>Возвращаемость по эфирам</summary><ComparisonCharts scope={reportScope} {categoryFilter} {timezone} {onStream} showGrowth={false} streams={data.streamComparison??[]}/></details>
   {/if}
   {#if section==='time'}
   {#if view.hours}<section class="panel"><header><h2>Активность по дням и часам</h2></header><details class="chart-options"><summary>Настроить карту</summary><div class="filter-fields"><label>Метрика карты<select aria-label="Метрика карты" bind:value={view.heatMetric}><option value="viewers">Зрители (все)</option><option value="observed">Наблюдения Twitch</option><option value="estimated">Оценка активности YouTube</option><option value="messages">Сообщения</option><option value="donations">Число донатов</option><option value="amount">Сумма донатов</option></select></label>{#if view.heatMetric==='amount'}<label>Валюта карты<select aria-label="Валюта карты" bind:value={heatCurrency}>{#each [...new Set<string>((data.hours??[]).flatMap((h:any)=>Object.keys(h.donationTotals)))] as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select></label>{/if}<label>Расчёт карты<select aria-label="Расчёт карты" bind:value={heatCalculation}><option value="average">Среднее / на час эфира</option><option value="total">Накопленная сумма</option></select></label></div></details>
@@ -200,10 +201,7 @@
 {/if}
 {#if section==='time'&&view.hours&&view.hourView!=="map"}<section class="panel hour-table"><details><summary>Таблица активности по дням и часам</summary><div class="table-wrap"><table class="analytics-table"><thead><tr><th>День / час ({timezone})</th><th>Выбранная метрика</th><th>Сообщения</th><th>Минут с опросами</th><th>Донатов/ч</th></tr></thead><tbody>{#each data.hours as h}<tr><td data-label="День / час">{h.day} · {h.hour}:00</td><td data-label="Выбранная метрика">{heatValue(h)===null?"нет данных":view.heatMetric==='amount'?money(String(Math.round(heatValue(h)!)),heatCurrency):heatValue(h)!.toFixed(1)}</td><td data-label="Сообщения">{h.messages}</td><td data-label="Минут с опросами">{h.observedKnownMinutes.toFixed(1)}</td><td data-label="Донатов/ч">{#each Object.entries(h.donationsPerHourMinor??{}) as [currency,amount]}<div>{amount===null?"—":money(String(amount),currency)}</div>{:else}—{/each}</td></tr>{/each}</tbody></table></div></details></section>{/if}
   {#if section==='dynamics'}<div class="analytics-secondary">
-  {#if view.categories}<details class="section-disclosure"><summary>Таблица категорий</summary><section class="panel"><div class="table-wrap"><table class="analytics-table"><thead><tr><th>Категория</th><th>Эфиры</th><th>Минуты эфира</th><th>Аудитория / ядро</th><th>Сообщений/ч</th><th>Донатов/ч</th><th>Наблюдаемых/мин с данными</th><th>Полнота опросов</th><th>Наблюдаемые / оценочные минуты</th></tr></thead><tbody>{#each data.categories.filter((c:any)=>c.id&&c.name!=="Категория неизвестна") as c}<tr><td data-label="Категория">{c.name}</td><td data-label="Эфиры">{c.sessions}</td><td data-label="Минуты эфира">{Math.round(c.minutes)}</td><td data-label="Аудитория / ядро">{c.audience} / {c.core}</td><td data-label="Сообщений/ч">{c.messagesPerHour.toFixed(1)}</td><td data-label="Донатов/ч">{#each Object.entries(c.donationsPerHourMinor??{}) as [currency,amount]}<div>{amount===null?"—":money(String(amount),currency)}</div>{:else}—{/each}</td><td data-label="Наблюдаемых/мин с данными">{c.observedPerKnownMinute==null?"нет данных":c.observedPerKnownMinute.toFixed(1)}</td><td data-label="Полнота опросов">{c.coverageRatio==null?"нет данных":Math.round(c.coverageRatio*100)+"%"}</td><td data-label="Наблюдаемые / оценочные минуты">{Math.round(c.observedMinutes)} / {Math.round(c.estimatedChatMinutes)}</td></tr>{/each}</tbody></table></div><div class="analytics-help"><Help id="analytics-categories" label="О сравнении категорий" text="Категории берутся только из Twitch. Неизвестная старая категория не восстанавливается догадкой. Сравнение показывает связи, а не причину роста аудитории."/></div></section></details>
-  {/if}
-  {#if view.streams&&data.streamComparison?.length}<details class="section-disclosure"><summary>Таблица сравнения стримов</summary><section class="panel"><div class="table-wrap"><table class="analytics-table"><thead><tr><th>Эфир</th><th>Категории</th><th>Аудитория</th><th>Ядро</th><th>Вернулись / впервые в периоде</th><th>Чатеры: уник. / пик / ср.</th><th>Twitch: ср. / пик</th><th>YouTube: ср. / пик</th><th>Данные зрителей: TW / YT</th><th>Сообщения</th><th>Сообщений/ч</th><th>Донатов/ч</th></tr></thead><tbody>{#each [...data.streamComparison].sort((a:any,b:any)=>b.startedAt-a.startedAt).slice(streamPage*100,(streamPage+1)*100) as stream}<tr><td data-label="Эфир"><button class="text-button" onclick={()=>{liveEnd=false;period='custom';from=localInput(stream.startedAt);to=localInput(stream.endedAt);}}>{date(stream.startedAt)}</button></td><td data-label="Категории">{stream.categories.filter((name:string)=>name!=="Категория неизвестна").join(" · ")||"—"}</td><td data-label="Аудитория">{stream.audience}</td><td data-label="Ядро">{stream.core}</td><td data-label="Вернулись / впервые в периоде">{stream.returning} / {stream.newInPeriod}</td><td data-label="Чатеры: уник. / пик / ср.">{stream.uniqueChatters} / {stream.peakChatters} / {stream.meanChatters===null?"—":stream.meanChatters.toFixed(1)}</td><td data-label="Twitch: ср. / пик">{stream.viewers.twitch.mean===null?"—":stream.viewers.twitch.mean.toFixed(1)} / {stream.viewers.twitch.peak??"—"}</td><td data-label="YouTube: ср. / пик">{stream.viewers.youtube.mean===null?"—":stream.viewers.youtube.mean.toFixed(1)} / {stream.viewers.youtube.peak??"—"}</td><td data-label="Данные зрителей: TW / YT">{Math.round((stream.viewers.twitch.coverageRatio??0)*100)}% / {Math.round((stream.viewers.youtube.coverageRatio??0)*100)}%</td><td data-label="Сообщения">{stream.messages}</td><td data-label="Сообщений/ч">{stream.messagesPerHour==null?"—":stream.messagesPerHour.toFixed(1)}</td><td data-label="Донатов/ч">{#each Object.entries(stream.donationsPerHourMinor??{}) as [currency,amount]}<div>{amount===null?"—":money(String(amount),currency)}</div>{:else}—{/each}</td></tr>{/each}</tbody></table></div><div class="analytics-controls"><button class="outline" disabled={streamPage===0} onclick={()=>streamPage--}>Назад</button><span>Страница {streamPage+1}</span><button class="outline" disabled={(streamPage+1)*100>=data.streamComparison.length} onclick={()=>streamPage++}>Далее</button></div><div class="analytics-help"><Help id="analytics-streams" label="О сравнении стримов" text="Возвращения считаются по аккаунтам среди более ранних эфиров в выбранном периоде. Нажмите дату, чтобы рассмотреть один эфир."/></div></section></details>{/if}
-  {#if view.report&&data.youtubeReport&&!category}<YoutubeReport report={data.youtubeReport}/>{/if}
+  {#if view.categories}<CategoryComparison categories={data.categories??[]} from={data.filters?.fromMs??0} to={data.filters?.toMs??Date.now()} {timezone}/>{/if}
   </div>{/if}
   {#if selected}{#if detailBusy}<p class="small" role="status">Загружаем поминутные данные…</p>{/if}<section class="panel analytics-person"><header><h2>Активность: {selected.name}</h2><button class="outline" onclick={()=>selected=null}>Закрыть детализацию</button></header>
     <div class="settings-body"><p>Эфиров: {selected.sessionCount??selected.sessionIds.length} · Сообщений: {selected.messages} · Наблюдений: {selected.observedMinutes} мин · Оценка активности по чату: {selected.estimatedChatMinutes} мин</p>
@@ -233,6 +231,6 @@
  .timing-grid :global(.donation-patterns>.note){grid-row:6;margin:0;padding:0 20px 16px}
  .timing-grid :global(.discovery-grid){grid-row:7;margin-top:16px}
 }
-@media(max-width:1100px){.timing-grid{grid-template-columns:minmax(0,1fr)}.timing-grid :global(.time-patterns),.timing-grid :global(.donation-patterns){grid-column:auto;grid-row:auto}}.report-pending :global(.hour-heatmap),.report-pending :global(.clock-plot),.report-pending :global(.clock-caption),.report-pending :global(.time-audience),.report-pending :global(.pattern-bars),.report-pending :global(.bars),.report-pending :global(.compact-audience),.report-pending :global(.comparison-bars),.report-pending :global(.growth-plot),.report-pending :global(.regular-summary),.report-pending :global(.composition-bar),.report-pending :global(.composition-row),.report-pending :global(.table-wrap),.report-pending :global(.donation-patterns header>span){visibility:hidden}.compact-audience{max-height:560px;overflow:auto}.compact-audience-table{width:100%;border-collapse:collapse;min-width:620px}.compact-audience-table td,.compact-audience-table th{padding:12px;text-align:left;border-bottom:1px solid var(--border);font-size:12px}.hour-table summary{padding:16px 20px;font-weight:600;cursor:pointer}.hour-table .table-wrap{max-height:440px;overflow:auto}.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}.analytics-help{padding:0 20px 12px;}header h2{display:flex;align-items:center;gap:8px;}
+@media(max-width:1100px){.timing-grid{grid-template-columns:minmax(0,1fr)}.timing-grid :global(.time-patterns),.timing-grid :global(.donation-patterns){grid-column:auto;grid-row:auto}}.compact-audience{max-height:560px;overflow:auto}.compact-audience-table{width:100%;border-collapse:collapse;min-width:620px}.compact-audience-table td,.compact-audience-table th{padding:12px;text-align:left;border-bottom:1px solid var(--border);font-size:12px}.hour-table summary{padding:16px 20px;font-weight:600;cursor:pointer}.hour-table .table-wrap{max-height:440px;overflow:auto}.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}.analytics-help{padding:0 20px 12px;}header h2{display:flex;align-items:center;gap:8px;}
 </style>
 
