@@ -44,3 +44,21 @@ export function subscriberStreamBands(twitch:SubscriberStream[],youtube:Subscrib
  }
  return bands;
 }
+
+/** Independent integer scales keep each platform legible without altering counts. */
+export function subscriberScale(points:CountPoint[]){
+ if(!points.length)return {low:0,high:1,ticks:[] as number[]};
+ const min=points.reduce((n,p)=>Math.min(n,p.total),Infinity),max=points.reduce((n,p)=>Math.max(n,p.total),0);
+ const padding=Math.max(1,(max-min)*.05),from=Math.max(0,min-padding),to=max+padding;
+ const rough=(to-from)/4,power=10**Math.floor(Math.log10(rough));
+ const step=Math.max(1,[1,2,5,10].find(n=>n*power>=rough)!*power);
+ const low=Math.floor(from/step)*step,high=Math.ceil(to/step)*step;
+ return {low,high,ticks:Array.from({length:Math.round((high-low)/step)+1},(_,i)=>low+i*step)};
+}
+/** Weekly labels show every local day; month labels stay readable on a phone. */
+export function subscriberDateOffsets(days:number){
+ const step=days<=7?1:5,offsets:number[]=[];
+ for(let i=0;i<days;i+=step)offsets.push(i);
+ if(offsets.at(-1)!==days-1)offsets.push(days-1);
+ return offsets;
+}

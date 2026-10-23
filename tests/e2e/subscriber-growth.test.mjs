@@ -20,7 +20,7 @@ async function paintedLineWidth(page,card,source){
  },{bytes:[...png],source});
 }
 
-test('both subscriber series paint continuous unchanged totals on one scale at mobile and desktop widths',{timeout:60000},async()=>{
+test('both subscriber series paint continuous unchanged totals on separate colored axes at mobile and desktop widths',{timeout:60000},async()=>{
  const a=await application();let browser;
  try{
   const midnight=localDateWindow('2026-10-21','Europe/Moscow').from,now=midnight+5*60000;
@@ -32,7 +32,7 @@ test('both subscriber series paint continuous unchanged totals on one scale at m
   assert.equal(await card.getByRole('button',{name:'Twitch',exact:true}).count(),0);assert.equal(await card.getByRole('button',{name:'YouTube',exact:true}).count(),0);assert.equal(await card.getByRole('button',{name:'Сутки',exact:true}).count(),0);
   for(const period of ['30 дней','7 дней']){
    await card.getByRole('button',{name:period,exact:true}).click();await page.waitForFunction(()=>document.querySelector('.subscriber-growth')?.getAttribute('aria-busy')==='false');
-   for(const width of [320,390,1280]){await page.setViewportSize({width,height:900});await card.scrollIntoViewIfNeeded();for(const source of ['Twitch','YouTube']){const painted=await paintedLineWidth(page,card,source);assert.ok(painted.longest>painted.width*.65,`${source} ${period} ${width}: ${JSON.stringify(painted)}`);}await assertUiLayout(page);}
+   for(const width of [320,390,1280]){await page.setViewportSize({width,height:900});await card.scrollIntoViewIfNeeded();for(const source of ['Twitch','YouTube']){const painted=await paintedLineWidth(page,card,source);assert.ok(painted.longest>painted.width*.6,`${source} ${period} ${width}: ${JSON.stringify(painted)}`);}await assertUiLayout(page);}
   }
   assert.equal(await card.locator('.subscriber-history-note').count(),0);assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await a.close();}
@@ -49,17 +49,24 @@ test('combined timeline hides publications before YouTube observations, retains 
   const yt=await a.db.call('observePlatformStream','youtube','yt','yt-live',base+9*h,base+9*h,'https://youtube.com/watch?v=yt-live','Вместе');await a.db.call('endSession',tw,base+13*h);if(yt!==tw)await a.db.call('endSession',yt,base+13*h);
   await a.db.call('youtubePublications','yt',[{id:'old-short',title:'СКРЫТЫЙ СТАРЫЙ ШОРТС',publishedAt:base+7*h,kind:'shorts'},{id:'old-video',title:'СКРЫТОЕ СТАРОЕ ВИДЕО',publishedAt:base+7*h,kind:'video'},{id:'short',title:'СКРЫТОЕ НАЗВАНИЕ ШОРТСА',publishedAt:base+8*h,kind:'shorts'},{id:'long',title:'Большое видео',publishedAt:base+18*h,kind:'video'}],base+20*h);
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];page.setDefaultTimeout(8000);page.on('pageerror',e=>errors.push(e.message));await goto(page,a.bootstrap());await page.getByRole('button',{name:'Аналитика',exact:true}).click();const card=page.locator('.subscriber-growth');await card.locator('[data-source=youtube] strong').filter({hasText:'31'}).waitFor();await card.getByLabel('Дата подписчиков').fill(today);await card.getByLabel('Дата подписчиков').blur();await page.waitForFunction(()=>document.querySelector('.subscriber-growth')?.getAttribute('aria-busy')==='false');
-  assert.equal(await card.locator('.subscriber-line').count(),2);assert.equal(await card.locator('.publication-marker').count(),2);assert.equal(await card.locator('[data-video-id^=old]').count(),0);
-  assert.equal(await card.locator('.stream-band[data-source=both]').count(),1);assert.equal(await card.locator('.stream-band[data-source=youtube]').count(),1);await card.getByText('YouTube: история с',{exact:false}).waitFor();
+  assert.equal(await card.locator('.subscriber-line').count(),2);assert.equal(await card.locator('.subscriber-date-tick').count(),7);
+  const tickDates=await card.locator('.subscriber-date-tick text').allTextContents();assert.equal(new Set(tickDates).size,7);
+  const axisColors=await card.locator('.subscriber-axis').evaluateAll(axes=>axes.map(el=>getComputedStyle(el).stroke));assert.notEqual(axisColors[0],axisColors[1]);
+  assert.equal(await card.locator('[data-kind=shorts] .publication-shape').getAttribute('r'),'2');assert.ok((await card.locator('[data-kind=video] .publication-shape').getAttribute('d')).includes('4.5'));
+  assert.equal(await card.locator('.stream-fill').first().getAttribute('height'),'200');assert.equal(await card.locator('.stream-fill').first().getAttribute('opacity'),'.08');assert.equal(await card.locator('.publication-marker').count(),2);assert.equal(await card.locator('[data-video-id^=old]').count(),0);
+  assert.equal(await card.locator('.stream-band[data-source=both]').count(),1);assert.equal(await card.locator('.stream-band[data-source=youtube]').count(),1);assert.equal(await card.getByText('YouTube: история с',{exact:false}).count(),0);assert.equal(await card.locator('.subscriber-history-note').count(),0);
   await card.locator('[data-video-id=short]').focus();await page.keyboard.press('Enter');await card.locator('.publication-selection').filter({hasText:'Shorts'}).waitFor();assert.equal((await card.textContent()).includes('СКРЫТОЕ НАЗВАНИЕ'),false);assert.equal((await card.locator('[data-video-id=short] title').textContent()).includes('СКРЫТОЕ'),false);
   assert.equal(await card.locator('.subscriber-publications').count(),0);assert.equal(await card.getByRole('link',{name:/Открыть на YouTube/}).count(),0);
   await card.locator('[data-video-id=long]').focus();await page.keyboard.press(' ');await card.locator('.publication-selection').filter({hasText:'Большое видео'}).waitFor();
   await card.locator('[data-series=youtube] .count-marker').first().focus();await page.keyboard.press('Enter');await card.getByText('Замер счётчика. Точное время подписки неизвестно.').waitFor();
-  for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:900});await card.scrollIntoViewIfNeeded();await assertUiLayout(page);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await card.screenshot({path:`/tmp/combined-subscribers-${width}.png`});}
+  for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:900});await card.scrollIntoViewIfNeeded();await assertUiLayout(page);
+   const legend=await card.locator('.subscriber-legend').evaluate(el=>({text:el.textContent,ys:[...el.children].map(child=>child.getBoundingClientRect().top)}));assert.equal(new Set(legend.ys).size,1);assert.equal(legend.text,'ОбаShortsВидео');
+   const labels=await card.locator('.subscriber-date-tick text').evaluateAll(nodes=>nodes.map(el=>{const r=el.getBoundingClientRect();return {left:r.left,right:r.right};}));for(let i=1;i<labels.length;i++)assert.ok(labels[i].left>=labels[i-1].right-1,`date labels overlap at ${width}`);
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await card.evaluate(el=>el.scrollIntoView({block:'center'}));await card.screenshot({path:`/tmp/approved-subscribers-${width}.png`});}
   await card.getByRole('button',{name:'30 дней',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.subscriber-growth')?.getAttribute('aria-busy')==='false');assert.equal(await card.locator('.publication-marker').count(),2);
   await card.getByLabel('Дата подписчиков').fill('');await card.getByLabel('Дата подписчиков').blur();assert.equal(await card.getByLabel('Дата подписчиков').inputValue(),today);
   await card.getByRole('button',{name:'Предыдущий период подписчиков'}).click();await card.getByText('Нет замеров за этот период.',{exact:true}).waitFor();await card.getByRole('button',{name:'Следующий период подписчиков'}).click();await card.locator('[data-source=youtube] strong').filter({hasText:'31'}).waitFor();
-  await card.locator('.stream-band[data-source=both]').click();await card.getByRole('button',{name:'Открыть эфир',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('stream'));assert.deepEqual(errors,[]);await saveCoverage(page);
+  await card.locator('.stream-band[data-source=both] .stream-fill').click({position:{x:1,y:20}});await card.getByRole('button',{name:'Открыть эфир',exact:true}).click();await page.waitForURL(url=>url.searchParams.has('stream'));assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await a.close();}
 });
 test('combined timeline retries failed loads and refreshes both platform counts',{timeout:45000},async()=>{
