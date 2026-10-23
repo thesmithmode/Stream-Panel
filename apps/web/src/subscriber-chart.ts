@@ -29,3 +29,18 @@ export function subscriberPath(points:CountPoint[],to:number,x:(at:number)=>numb
  const last=points.at(-1);
  return stepPath(points,x,y)+(last&&to>last.at?` H${x(to)}`:'');
 }
+
+interface SubscriberStream {id:string;start:number;end:number}
+/** Partition actual airtime: overlaps are neutral, platform-only portions retain their source. */
+export function subscriberStreamBands(twitch:SubscriberStream[],youtube:SubscriberStream[],from:number,to:number){
+ const input=[...twitch.map(s=>({...s,source:'twitch' as const})),...youtube.map(s=>({...s,source:'youtube' as const}))].filter(s=>s.end>from&&s.start<to);
+ const edges=[...new Set(input.flatMap(s=>[Math.max(from,s.start),Math.min(to,s.end)]))].sort((a,b)=>a-b);
+ const bands:{id:string;start:number;end:number;source:'twitch'|'youtube'|'both'}[]=[];
+ for(let i=1;i<edges.length;i++){
+  const start=edges[i-1]!,end=edges[i]!,active=input.filter(s=>s.start<end&&s.end>start);if(!active.length)continue;
+  const source=active.some(s=>s.source==='twitch')&&active.some(s=>s.source==='youtube')?'both':active[0]!.source;
+  const id=active[0]!.id,previous=bands.at(-1);
+  if(previous&&previous.id===id&&previous.source===source&&previous.end===start)previous.end=end;else bands.push({id,start,end,source});
+ }
+ return bands;
+}
