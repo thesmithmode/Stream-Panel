@@ -30,7 +30,7 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
  await page.route('**/api/v1/analytics?*',route=>route.fulfill({json:data}));
  page.setDefaultTimeout(8000);
  const response=()=>page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/analytics');
- const renderNextHistory=async()=>{assert.deepEqual(errors,[]);await navigate(page,'Обзор');const received=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await received;await page.getByRole('tab',{name:'Аудитория',exact:true}).click();};
+ const renderNextHistory=async()=>{assert.deepEqual(errors,[]);await navigate(page,'Обзор');await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.locator('.analytics-results').waitFor();await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');const received=response();await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));await received;await page.getByRole('tab',{name:'Аудитория',exact:true}).click();};
  try {
   await goto(page,`http://127.0.0.1:${port}`);
   await page.getByLabel('Логин',{exact:true}).fill('fixture');await page.getByLabel('Пароль',{exact:true}).fill('fixture-missing-data-password');await page.getByRole('button',{name:'Войти',exact:true}).click();
@@ -47,10 +47,7 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
    assert.equal((await hours.locator('tbody tr td').nth(1).textContent()).trim(),'нет данных');
    assert.match(await page.locator('.hour-heatmap .heatmap-row button').first().getAttribute('title'),/нет данных/);
   }
-  await page.getByRole('tab',{name:'Динамика',exact:true}).click();await page.getByText('Таблица сравнения стримов',{exact:true}).click();const streams=page.locator('.analytics-secondary details').filter({hasText:'Таблица сравнения стримов'});
-  assert.equal((await streams.locator('tbody tr td').nth(5).textContent()).trim(),'0 / 0 / —');
-  assert.equal((await streams.locator('tbody tr td').nth(6).textContent()).trim(),'— / —');
-  assert.equal((await streams.locator('tbody tr td').nth(7).textContent()).trim(),'— / —');
+  await page.getByRole('tab',{name:'Динамика',exact:true}).click();assert.equal(await page.getByText('Таблица сравнения стримов',{exact:true}).count(),0);
   data.aggregate=true;data.timeline=[{at:localDateWindow(new Date(now).toLocaleDateString('sv-SE',{timeZone:'Europe/Moscow'}),'Europe/Moscow').from,presenceKnown:true,observed:1}];await renderNextHistory();await page.getByRole('button',{name:person.name,exact:true}).waitFor();
   await page.route('**/api/v1/analytics?*',route=>new URL(route.request().url()).searchParams.get('from')==='0'?route.fulfill({json:data}):route.fulfill({status:400,json:{error:'DETAIL_UNAVAILABLE'}}));
   await page.getByRole('button',{name:`Интервалы ${person.name}`,exact:true}).click();

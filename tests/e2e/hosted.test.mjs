@@ -129,17 +129,26 @@ test("profile switch reloads all views, preserves other clients and remains visi
     }
     await h.app.listen({ host: "127.0.0.1", port: 47839 });
     browser = await launchBrowser();
-    const pages = [];
+    const pages = [],warmups=[];
     for (let i = 0; i < 2; i++) {
       const context = await browser.newContext(); contexts.push(context);
       const page = await context.newPage(); pages.push(page);
+      const warmed=new Set();let finish;const ready=new Promise(resolve=>{finish=resolve;});warmups.push(ready);
+      page.on('response',async response=>{if(new URL(response.url()).pathname!=='/api/v1/analytics'||response.status()!==200)return;const data=await response.json();if(!data.preparing){warmed.add(response.request().headers()['x-stream-panel-profile']);if(warmed.size===2)finish();}});
       await goto(page, "http://127.0.0.1:47839");
       await page.getByLabel("Логин", { exact: true }).fill("ruslan");
       await page.getByLabel("Пароль", { exact: true }).fill("profile-browser-password");
       await page.getByRole("button", { name: "Войти", exact: true }).click();
       await page.getByRole("button",{name:"Люди",exact:true}).click();await page.locator(".person-row").filter({hasText:"Viewer ruslan"}).waitFor();
     }
+    await Promise.all(warmups);
     const [a, b] = pages;
+    let reloads=0;await a.route('**/api/v1/analytics?*',route=>{reloads++;return route.abort();});
+    for(const selected of ['gulnaz','ruslan']){
+      await a.getByLabel('Профиль',{exact:true}).selectOption(selected);await a.getByRole('button',{name:'Аналитика',exact:true}).click();await a.locator('.analytics-kpis').waitFor();assert.equal(await a.getByRole('alert').count(),0);assert.equal(reloads,0,'both profiles have reports ready before opening analytics');
+      await a.getByRole('button',{name:'Люди',exact:true}).click();await a.getByText(`Viewer ${selected}`,{exact:true}).first().waitFor();
+    }
+    await a.unroute('**/api/v1/analytics?*');
     await a.getByLabel("Профиль", { exact: true }).selectOption("gulnaz");
     await a.locator(".person-row").filter({hasText:"Viewer gulnaz"}).waitFor();
     assert.equal(await a.getByText("Message ruslan", { exact: true }).count(), 0);
@@ -158,8 +167,8 @@ test("profile switch reloads all views, preserves other clients and remains visi
     }
     assert.deepEqual(headers[0],headers[1]);assert.deepEqual(headers[0],['Длительность','Средние зрители','Донаты','Сообщения']);
     await a.getByLabel('Профиль',{exact:true}).selectOption('ruslan');await a.getByRole('button',{name:'Аналитика',exact:true}).click();await a.getByRole('tab',{name:'Аудитория',exact:true}).click();await a.getByLabel('Только ядро',{exact:true}).check();
-    await a.getByRole('button',{name:'Фильтры',exact:true}).click();await a.getByText('Отображение и часовой пояс',{exact:true}).click();await a.getByLabel('Сравнение стримов',{exact:true}).uncheck();await a.getByRole('button',{name:'Готово',exact:true}).click();
-    await a.getByLabel('Профиль',{exact:true}).selectOption('gulnaz');await a.getByRole('button',{name:'Фильтры',exact:true}).click();await a.getByText('Отображение и часовой пояс',{exact:true}).click();assert.equal(await a.getByLabel('Сравнение стримов',{exact:true}).isChecked(),true);await a.getByRole('button',{name:'Готово',exact:true}).click();await a.getByRole('tab',{name:'Аудитория',exact:true}).click();assert.equal(await a.getByLabel('Только ядро',{exact:true}).isChecked(),false);
+    await a.getByRole('button',{name:'Фильтры',exact:true}).click();await a.getByText('Отображение и часовой пояс',{exact:true}).click();await a.getByLabel('Сравнение категорий',{exact:true}).uncheck();await a.getByRole('button',{name:'Готово',exact:true}).click();
+    await a.getByLabel('Профиль',{exact:true}).selectOption('gulnaz');await a.getByRole('button',{name:'Фильтры',exact:true}).click();await a.getByText('Отображение и часовой пояс',{exact:true}).click();assert.equal(await a.getByLabel('Сравнение категорий',{exact:true}).isChecked(),true);await a.getByRole('button',{name:'Готово',exact:true}).click();await a.getByRole('tab',{name:'Аудитория',exact:true}).click();assert.equal(await a.getByLabel('Только ядро',{exact:true}).isChecked(),false);
     await a.getByLabel('Профиль',{exact:true}).selectOption('ruslan');await a.getByRole('tab',{name:'Аудитория',exact:true}).click();assert.equal(await a.getByLabel('Только ядро',{exact:true}).isChecked(),true);
     await a.getByRole('button',{name:'Люди',exact:true}).click();await a.getByText('Viewer ruslan',{exact:true}).first().waitFor();
     await a.setViewportSize({ width: 390, height: 844 });

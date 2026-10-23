@@ -12,7 +12,7 @@ export function startAnalyticsWarmer(runtimes:()=>Iterable<Runtime>,enabled:()=>
    if((runtime.db.queueStatus?.().pending??0)>0){preparing=true;continue;}
    try{
     const cfg=runtime.configuration.value;
-    const result=await runtime.db.call('warmAnalytics',{...analyticsSettings(cfg.analyticsSettings),fromMs:0,toMs:Date.now(),excludedLogins:cfg.excludedBotLogins,ownerId:cfg.twitch?.userId??'',youtubeAccount:cfg.youtube?.userId??cfg.youtubeAccountId??''},true);
+    const result=await runtime.db.call('warmAnalytics',{...analyticsSettings(cfg.analyticsSettings),fromMs:0,toMs:Math.floor(Date.now()/60000)*60000,excludedLogins:cfg.excludedBotLogins,ownerId:cfg.twitch?.userId??'',youtubeAccount:cfg.youtube?.userId??cfg.youtubeAccountId??''},true);
     preparing ||= result.preparing;
    }catch{onError();}
   }

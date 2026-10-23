@@ -1,4 +1,5 @@
 <script lang="ts">
+  import {preloadAnalytics,clearAnalyticsCache} from "./analytics-cache";
   import Sheet from "./Sheet.svelte";
   import DonationTotal from "./DonationTotal.svelte";
   import StreamHistory from "./StreamHistory.svelte";
@@ -56,6 +57,11 @@
   let username = $state(""), password = $state(""), user = $state<any>(null);
   let profile = $state<Profile>(getProfile());
   const allowedProfiles = $derived<readonly Profile[]>(user?.allowedProfiles ?? ["ruslan", "gulnaz"]);
+  $effect(()=>{
+    if(!authorized){clearAnalyticsCache();return;}
+    const profiles=[profile,...allowedProfiles.filter(p=>p!==profile)];
+    void preloadAnalytics(profiles);
+  });
   const accessibleProfile = (next: Profile): Profile => allowedProfiles.includes(next) ? next : allowedProfiles[0]!;
   let sessionPage=$state(0);
   let selectedSessions=$state<string[]>([]);
