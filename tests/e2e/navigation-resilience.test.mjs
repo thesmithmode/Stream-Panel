@@ -20,6 +20,7 @@ test('stream scope never flashes channel totals, reload/back retain the route an
   await page.locator(`[data-session-id="${id}"]`).locator('.stream-open').click();
   assert.ok(!(await page.locator('main').textContent()).includes('12 000'));
   await page.locator('.stream-kpis > div').filter({hasText:'Донаты'}).getByText('—',{exact:true}).waitFor();await page.locator('.stream-kpis').getByText('Средние зрители',{exact:true}).waitFor();
+  await page.locator('.stream-kpis').getByText('10',{exact:true}).waitFor();
   assert.equal(await page.locator('.stream-kpis').getByText('Средние зрители',{exact:true}).locator('..').locator('strong').textContent(),'10');
   assert.equal(await page.getByText('Полнота наблюдений',{exact:true}).count(),0);
   await reload(page);await page.locator('.stream-kpis > div').filter({hasText:'Донаты'}).getByText('—',{exact:true}).waitFor();assert.ok(new URL(page.url()).searchParams.get('stream')===id);

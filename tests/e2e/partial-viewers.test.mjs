@@ -35,7 +35,7 @@ test('partial provider counters preserve values and secondary explanations in st
   await page.getByRole('button',{name:'Аналитика',exact:true}).click();
   await page.getByRole('tab',{name:'Время',exact:true}).click();await page.getByText('Настроить карту',{exact:true}).click();await page.getByLabel('Расчёт карты').waitFor();await page.getByLabel('Метрика карты',{exact:true}).selectOption('viewers');
   const cell=page.locator('.hour-heatmap button[aria-label^="пн 9:00"]');await cell.waitFor();
-  await page.waitForFunction(()=>document.querySelector('.hour-heatmap button[aria-label^="пн 9:00"]')?.getAttribute('aria-label')?.includes('6'));assert.match(await cell.getAttribute('aria-label'),/6[.,]0/);await cell.click();
+  await page.waitForFunction(()=>document.querySelector('.hour-heatmap button[aria-label^="пн 9:00"]')?.getAttribute('aria-label')?.includes('6'));assert.match(await cell.getAttribute('aria-label'),/— 6(?:,0)? ·/);await cell.click();
   await clockSettings(page);const clock=page.locator('.activity-clock');await clock.getByLabel('Шаг графика').selectOption('60');
   const bucket=clock.getByRole('button',{name:/09:00–10:00: 6/});await bucket.click();
   assert.match(await clock.locator('.clock-caption[role="status"]').textContent(),/6/);

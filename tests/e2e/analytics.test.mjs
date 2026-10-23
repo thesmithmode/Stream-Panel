@@ -41,10 +41,10 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
  try{
   for(const profile of ['ruslan','gulnaz']){
    const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
-   const waitReport=(query={})=>page.waitForResponse(async r=>{const u=new URL(r.url());return u.pathname==='/api/v1/analytics'&&r.status()===200&&Object.entries(query).every(([k,v])=>u.searchParams.get(k)===String(v))&&!(await r.json()).preparing;});
-   const selectFilter=async(label,value,query)=>{await setFilter(page,label,value);await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');const response=waitReport(query);await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));return (await response).json();};
+   const waitReport=(query={})=>page.waitForResponse(async r=>{const u=new URL(r.url());return u.pathname==='/api/v1/analytics'&&r.request().headers()['x-stream-panel-profile']===profile&&r.status()===200&&Object.entries(query).every(([k,v])=>u.searchParams.get(k)===String(v))&&!(await r.json()).preparing;});
+   const selectFilter=async(label,value,query)=>{const response=waitReport(query);await setFilter(page,label,value);await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');await refreshData(page);return (await response).json();};
    await goto(page,origin);await page.getByLabel('Логин',{exact:true}).fill(profile);await page.getByLabel('Пароль',{exact:true}).fill(`${profile}-analytics-password`);await page.getByRole('button',{name:'Войти',exact:true}).click();
-   const first=waitReport();await navigate(page,'Аналитика');let analyticsData=await (await first).json();await page.locator('.growth-plot').waitFor();
+   await navigate(page,'Аналитика');await page.locator('.growth-plot').waitFor();await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');const first=waitReport();await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));let analyticsData=await (await first).json();
    assert.equal(await page.getByLabel('Начало периода').isVisible(),false);assert.equal(await page.locator('.chart-category select').count(),0,'one category control replaces repeated chart filters');
    assert.equal(await page.locator('.youtube-report').count(),0);
    assert.equal(await page.getByText('Таблица сравнения стримов',{exact:true}).count(),0);assert.equal(await page.getByRole('heading',{name:'YouTube · итоги канала',exact:true}).count(),0);
@@ -81,7 +81,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    await selectFilter('Площадка','twitch',{source:'twitch',category:'game'});await page.getByRole('button',{name:`Интервалы Regular ${profile}`,exact:true}).click();await page.getByText('Донаты с подтверждённым временем:',{exact:false}).waitFor();await page.getByRole('button',{name:'Закрыть детализацию',exact:true}).click();
    await selectFilter('Площадка','all',{source:'all'});await selectFilter('Категория Twitch','',{category:''});
    for(const days of ['7','30','all'])await selectFilter('Период аналитики',days,{});
-   await openFilters(page);await page.getByLabel('Период аналитики',{exact:true}).selectOption('custom');const empty=waitReport();await page.getByLabel('Начало периода').fill('2000-01-01T00:00');await page.getByLabel('Конец периода').fill('2000-01-02T00:00');await closeFilters(page);await empty;
+   await page.locator('.analytics-toolbar').getByRole('button',{name:'Свои даты',exact:true}).click();const empty=waitReport();await page.getByLabel('Начало периода').fill('2000-01-01T00:00');await page.getByLabel('Конец периода').fill('2000-01-02T00:00');await closeFilters(page);await empty;
    await page.getByText('Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.',{exact:true}).waitFor();
    await openFilters(page);await page.getByRole('button',{name:'Сбросить фильтры',exact:true}).click();await closeFilters(page);await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
    if(profile==='ruslan')for(const width of [320,390,768,1280,1440]){await page.setViewportSize({width,height:900});for(const name of ['Стримы','Люди','Аналитика','Интеграции']){await navigate(page,name);if(name==='Аналитика')await page.locator('.growth-plot').waitFor();await page.locator('main h1').waitFor();await assertUiLayout(page);}}

@@ -11,7 +11,7 @@
   import Icon from "./Icon.svelte";
   import SubscriberGrowth from "./SubscriberGrowth.svelte";
   import AudienceGrowth from "./AudienceGrowth.svelte";
-  import PeriodSelect from './PeriodSelect.svelte';
+  import {num,pct,dateTime} from './format';
   import ActivityClock from "./ActivityClock.svelte";
   import {localDateWindow} from "./time-audience";
   import DonationPatterns from './DonationPatterns.svelte';
@@ -86,7 +86,7 @@
     const cell=hourCells.get(`${day}:${hour}`),value=heatValue(cell);
     const count=hourStreamCounts.get(`${day}:${hour}`);
     const known=view.heatMetric==='viewers'?(cell?.knownViewerSamples??cell?.viewerSamples):view.heatMetric==='observed'?cell?.observedKnownMinutes:cell?.sampleMinutes;
-    return `${day} ${hour}:00 — ${value===null?"нет данных":view.heatMetric==='amount'?money(String(Math.round(value)),heatCurrency):`${value.toFixed(1)}`}${count===undefined?'':` · эфиров: ${count}`} · ${(known??0).toLocaleString('ru-RU',{maximumFractionDigits:1})} мин с данными`;
+    return `${day} ${hour}:00 — ${value===null?"нет данных":view.heatMetric==='amount'?money(String(Math.round(value)),heatCurrency):`${num(value)}`}${count===undefined?'':` · эфиров: ${count}`} · ${(known??0).toLocaleString('ru-RU',{maximumFractionDigits:1})} мин с данными`;
   }
   const categoryOptions=$derived([...(data?.availableCategories??data?.categories??[])].filter((c:any)=>c.id).sort((a:any,b:any)=>a.name.localeCompare(b.name,'ru')));
   const timelineByMinute=$derived(new Map((data?.aggregate?(detailData?.timeline??[]):(data?.timeline??[])).map((point:any)=>[point.at,point])) as Map<number,any>);
@@ -138,14 +138,29 @@
   });
 </script>
 {#snippet categoryFilter(_label:string)}{/snippet}
+{#snippet personDetail()}
+  {#if selected}{#if detailBusy}<p class="small" role="status">Загружаем поминутные данные…</p>{/if}<section class="panel analytics-person"><header><h2>Активность: {selected.name}</h2><button class="outline" onclick={()=>selected=null}>Закрыть детализацию</button></header>
+    <div class="settings-body"><p>Эфиров: {selected.sessionCount??selected.sessionIds.length} · Сообщений: {selected.messages} · Наблюдений: {selected.observedMinutes} мин · Оценка активности по чату: {selected.estimatedChatMinutes} мин</p>
+      {#each Object.entries(selected.donations) as [currency,amount]}<p>Донаты с подтверждённым временем: {money(String(amount),currency)}</p>{/each}
+      <button class="outline" onclick={()=>onPerson(selected.id)}>Открыть карточку человека</button>
+      <label>Дата минутной сетки<input type="date" bind:value={day} /></label>
+      <div class="analytics-minute-grid" aria-label="Минутная сетка активности">{#each detailMinutes as point}<span class={`minute-dot ${point.state}`} title={`${date(point.at)} — ${({observed:"наблюдался в опросе",estimated:"оценка после сообщения",not_observed:"не обнаружен в опросе",unknown:"нет данных"} as Record<string,string>)[point.state]}`}></span>{/each}</div>
+      <Help id="analytics-minute-grid" label="О цветах минутной сетки" text="Бирюзовый — наблюдение, фиолетовый — оценка, светлый — отсутствовал в полном опросе, серый — неизвестно. Для YouTube отсутствие сообщения не означает уход."/>
+      <div class="table-wrap"><table><thead><tr><th>Начало сигнала</th><th>Конец интервала</th><th>Тип</th></tr></thead><tbody>{#each [...(detailPerson?.intervals??[])].sort((a:any,b:any)=>b.from-a.from).slice(0,100) as span}<tr><td data-label="Начало сигнала">{dateTime(span.from)}</td><td data-label="Конец интервала">{dateTime(span.to)}</td><td data-label="Тип">{span.kind==="observed"?"Наблюдения Twitch":"Оценка по чату YouTube"}</td></tr>{/each}</tbody></table></div>
+      <Help id="analytics-intervals" label="О границах интервалов" text={`${data.aggregate?"Показаны интервалы выбранного дня, до 100 строк.":"Показаны первые 100 интервалов."} Границы означают сигналы API с минутной детализацией, не доказанный вход/выход видеозрителя.`}/>
+    </div>
+  </section>{/if}
+{/snippet}
 <div class="analytics-toolbar">
- <div class="period-chips" role="group" aria-label="Быстрый выбор периода">{#each [[7,'7 дней'],[30,'30 дней'],['all','Всё время']] as [value,label]}<button class:active={period===value} aria-pressed={period===value} onclick={()=>preset(value as number|'all')}>{label}</button>{/each}</div>
+ <div class="period-chips" role="group" aria-label="Быстрый выбор периода">{#each [[7,'7 дней'],[30,'30 дней'],['all','Всё время']] as [value,label]}<button class:active={period===value} aria-pressed={period===value} onclick={()=>preset(value as number|'all')}>{label}</button>{/each}<button class:active={period==='custom'} aria-pressed={period==='custom'} onclick={()=>{period='custom';filtersOpen=true;}}>Свои даты</button></div>
  <button class="outline filters-button" aria-expanded={filtersOpen} onclick={()=>filtersOpen=true}><Icon name="filters" size={18}/>Фильтры{#if category||source!=='all'||period==='custom'}<span class="filter-dot"></span>{/if}</button>
 </div>
 {#if category||source!=='all'||period==='custom'}<p class="applied-filters">{categoryOptions.find((c:any)=>c.id===category)?.name??'Все категории'} · {source==='all'?'Все площадки':source==='twitch'?'Twitch / DA':'YouTube'}{#if period==='custom'} · Свой период{/if}</p>{/if}
-<SectionTabs items={[["dynamics","Динамика"],["time","Время"],["audience","Аудитория"]]} bind:value={section} label="Разделы аналитики" panelId="analytics-tabpanel"/>
+{#if data}
+  <div class="analytics-kpis"><div><strong>{data.summary?.streams??0}</strong><span>Эфиров</span></div>{#if data.donationTiming}<div><strong>{Object.entries(data.donationTiming.totals??{}).map(([c,a])=>money(String(a),c)).join(' · ')||'—'}</strong><span>Донаты</span></div>{/if}</div>
+{/if}
+<div class="analytics-navigation"><SectionTabs items={[["dynamics","Динамика"],["time","Время"],["audience","Аудитория"]]} bind:value={section} label="Разделы аналитики" panelId="analytics-tabpanel"/></div>
 <Sheet bind:open={filtersOpen} title="Фильтры аналитики"><div class="filter-fields">
- <PeriodSelect value={period} label="Период аналитики" days={[7,30]} custom onchange={value=>{if(value==='custom')period='custom';else preset(value);}}/>
  {#if period==='custom'}<label>Начало периода<input type="datetime-local" value={from===localInput(0)&&data?.sessions?.length?localInput(data.sessions[0].started_at_ms):from} oninput={e=>{from=e.currentTarget.value;}} required/></label><label>Конец периода<input type="datetime-local" bind:value={to} onchange={()=>liveEnd=false} required/></label>{/if}
  <label>Площадка<select aria-label="Площадка" bind:value={source}><option value="all">Все площадки</option><option value="twitch">Twitch / DA</option><option value="youtube">YouTube</option></select></label>
  <label>Категория Twitch<select aria-label="Категория Twitch" bind:value={category}><option value="">Все категории</option>{#each categoryOptions as c}<option value={c.id}>{c.name}</option>{/each}</select></label>
@@ -162,7 +177,7 @@
 {#if data}
  <div class="analytics-results" aria-busy={busy}>
   {#if section==='dynamics'}
-  <div class="analytics-kpis"><div><strong>{data.summary?.streams??0}</strong><span>Эфиров</span></div>{#if data.donationTiming}<div><strong>{Object.entries(data.donationTiming.totals??{}).map(([c,a])=>money(String(a),c)).join(' · ')||'—'}</strong><span>Донаты</span></div>{/if}</div>
+
   <AudienceGrowth end={data.filters?.toMs??Date.now()} {categoryFilter} streams={data.streamComparison??[]} {timezone} {onStream}/>
   <SubscriberGrowth {profile} {timezone} {onStream}/>
   <Insights report={data} loading={busy&&!data} {onPerson} {onStream}/>
@@ -179,20 +194,20 @@
   {#if view.trend}<ActivityClock scope={reportScope} visitorRevision={data.clockRevision} {categoryFilter} rows={data.activityClock??[]} windows={data.activityWindows??[]} people={data.audience??[]} summary={data.clockBuckets??[]} summarySelection={data.clockSelection} loadSummary={clockLoader} loadVisitors={visitorLoader} {onPerson} bind:metric={view.metric} bind:resolution={view.resolution} {timezone}/>{/if}
 
   <div class="timing-grid">
-  {#if data.donationTiming}<DonationPatterns {categoryFilter} timing={data.donationTiming}/>{/if}
-
   {#if data.patterns&&data.composition}<TimePatterns {categoryFilter} {data} section="time" />{/if}
+
+  {#if data.donationTiming}<DonationPatterns {categoryFilter} timing={data.donationTiming}/>{/if}
   </div>
   {/if}
   {#if section==='audience'}{#if data.composition}<TimePatterns {categoryFilter} {data} section="audience"/>{/if}
   {#if view.audience}<section class="panel"><header><h2>Возвращаемость участников</h2><Help id="analytics-audience" label="О минутах в чате" text="Наблюдаемые минуты Twitch учитывают молчавших участников и исключают неизвестные промежутки. Оценка YouTube показана отдельно. Выберите сортировку по минутам или сообщениям; нажмите имя для подробностей."/><span>{data.audiencePage?(pagedAudience?.audiencePage?.total??data.audiencePage.total):visible.length} профилей</span></header>
-    <p class="small regular-summary">Ядро аудитории: <strong>{data.summary.regulars??0} из {data.summary.entities??0} ({data.summary.regularShare==null?"нет данных":(data.summary.regularShare*100).toFixed(1)+"%"})</strong></p>
+    <p class="small regular-summary">Ядро аудитории: <strong>{data.summary.regulars??0} из {data.summary.entities??0} ({data.summary.regularShare==null?"нет данных":pct(data.summary.regularShare)})</strong></p>
     <div class="analytics-controls"><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label>Сортировка<select aria-label="Сортировка" bind:value={view.sort}><option value="observedMinutes">Минуты в чате</option><option value="estimatedChatMinutes">Оценка активности YouTube</option><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option><option value="attendanceRatio">Доля посещённых эфиров</option></select></label><label class="check"><input type="checkbox" bind:checked={view.coreOnly} /> Только ядро</label></div>
     <div class="table-wrap compact-audience"><table class="compact-audience-table"><thead><tr><th>Участник</th><th>Посещаемость</th><th>Минуты в чате</th><th>Сообщения</th><th>Подробности</th></tr></thead><tbody>{#each visible.slice(0,data.audiencePage?100:200) as e (e.id)}<tr>
       <td class="audience-name" data-label="Участник"><div><button class={`text-button ${platformClass(e.sources??[e.source])}`} disabled={busy} onclick={()=>onPerson(e.id)}>{e.name}</button>{#if e.core}<span class="core-badge">Ядро</span>{:else if e.follower}<span class="follower-badge">Подписчик</span>{/if}{#each e.tags??[] as tag}<span class="person-tag">{tag}</span>{/each}</div><small>{(e.sources??[e.source]).map((source:string)=>source==='youtube'?'YouTube':source==='donationalerts'?'DA':'Twitch').join(' · ')}</small></td>
       <td class="audience-stat" data-label="Посещаемость">{Math.round((e.attendanceRatio??0)*100)}%</td><td class="audience-stat" data-label="Минуты в чате">{Math.round(e.observedMinutes).toLocaleString('ru-RU')}</td><td class="audience-stat" data-label="Сообщения">{e.messages}</td>
-      <td class="audience-more"><button class="text-button small" aria-label={`Интервалы ${e.name}`} onclick={()=>selectEntity(e)}>Интервалы · {e.visits??e.intervals?.length??0}</button><details class="compact-details"><summary>Ещё</summary><dl><dt>Минут / посещённый эфир</dt><dd>{(e.observedMinutesPerSession??0).toFixed(1)}</dd><dt>YouTube · оценка, мин</dt><dd>{e.estimatedChatMinutes}</dd><dt>Часы появления</dt><dd>{(e.arrivalHours??[]).slice(0,3).map((h:any)=>`${h.day} ${h.hour}:00 (${h.visits})`).join(' · ')||'—'}</dd></dl></details></td>
-    </tr>{/each}</tbody></table></div>
+      <td class="audience-more"><button class="text-button small" aria-label={`Интервалы ${e.name}`} onclick={()=>selectEntity(e)}>Интервалы · {e.visits??e.intervals?.length??0}</button><details class="compact-details"><summary>Подробнее</summary><dl><dt>Минут / посещённый эфир</dt><dd>{num(e.observedMinutesPerSession??0)}</dd><dt>YouTube · оценка, мин</dt><dd>{e.estimatedChatMinutes}</dd><dt>Часы появления</dt><dd>{(e.arrivalHours??[]).slice(0,3).map((h:any)=>`${h.day} ${h.hour}:00 (${h.visits})`).join(' · ')||'—'}</dd></dl></details></td>
+    </tr>{#if selected?.id===e.id}<tr class="audience-detail"><td colspan="5">{@render personDetail()}</td></tr>{/if}{/each}</tbody></table></div>
     {#if !visible.length}<p class="muted analytics-empty">Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.</p>{/if}
     {#if visible.length>200}<p class="small muted">Показаны первые 200; используйте поиск или меньший период.</p>{/if}
   {#if data.audiencePage}<div class="analytics-controls"><button class="outline" disabled={audienceBusy||audienceOffset===0} onclick={()=>audienceOffset=Math.max(0,audienceOffset-100)}>Предыдущие участники</button><span>{audienceBusy?'Загрузка…':`Страница ${Math.floor(audienceOffset/100)+1}`}</span><button class="outline" disabled={audienceBusy||audienceOffset+100>=(pagedAudience?.audiencePage?.total??data.audiencePage.total)} onclick={()=>audienceOffset+=100}>Следующие участники</button></div>{/if}
@@ -203,17 +218,7 @@
   {#if section==='dynamics'}<div class="analytics-secondary">
   {#if view.categories}<CategoryComparison categories={data.categories??[]} from={data.filters?.fromMs??0} to={data.filters?.toMs??Date.now()} {timezone}/>{/if}
   </div>{/if}
-  {#if selected}{#if detailBusy}<p class="small" role="status">Загружаем поминутные данные…</p>{/if}<section class="panel analytics-person"><header><h2>Активность: {selected.name}</h2><button class="outline" onclick={()=>selected=null}>Закрыть детализацию</button></header>
-    <div class="settings-body"><p>Эфиров: {selected.sessionCount??selected.sessionIds.length} · Сообщений: {selected.messages} · Наблюдений: {selected.observedMinutes} мин · Оценка активности по чату: {selected.estimatedChatMinutes} мин</p>
-      {#each Object.entries(selected.donations) as [currency,amount]}<p>Донаты с подтверждённым временем: {money(String(amount),currency)}</p>{/each}
-      <button class="outline" onclick={()=>onPerson(selected.id)}>Открыть карточку человека</button>
-      <label>Дата минутной сетки<input type="date" bind:value={day} /></label>
-      <div class="analytics-minute-grid" aria-label="Минутная сетка активности">{#each detailMinutes as point}<span class={`minute-dot ${point.state}`} title={`${date(point.at)} — ${({observed:"наблюдался в опросе",estimated:"оценка после сообщения",not_observed:"не обнаружен в опросе",unknown:"нет данных"} as Record<string,string>)[point.state]}`}></span>{/each}</div>
-      <Help id="analytics-minute-grid" label="О цветах минутной сетки" text="Бирюзовый — наблюдение, фиолетовый — оценка, светлый — отсутствовал в полном опросе, серый — неизвестно. Для YouTube отсутствие сообщения не означает уход."/>
-      <div class="table-wrap"><table><thead><tr><th>Начало сигнала</th><th>Конец интервала</th><th>Тип</th></tr></thead><tbody>{#each [...(detailPerson?.intervals??[])].sort((a:any,b:any)=>b.from-a.from).slice(0,100) as span}<tr><td data-label="Начало сигнала">{date(span.from)}</td><td data-label="Конец интервала">{date(span.to)}</td><td data-label="Тип">{span.kind==="observed"?"Наблюдения Twitch":"Оценка по чату YouTube"}</td></tr>{/each}</tbody></table></div>
-      <Help id="analytics-intervals" label="О границах интервалов" text={`${data.aggregate?"Показаны интервалы выбранного дня, до 100 строк.":"Показаны первые 100 интервалов."} Границы означают сигналы API с минутной детализацией, не доказанный вход/выход видеозрителя.`}/>
-    </div>
-  </section>{/if}
+
  </div>
 {/if}
 
@@ -231,6 +236,25 @@
  .timing-grid :global(.donation-patterns>.note){grid-row:6;margin:0;padding:0 20px 16px}
  .timing-grid :global(.discovery-grid){grid-row:7;margin-top:16px}
 }
-@media(max-width:1100px){.timing-grid{grid-template-columns:minmax(0,1fr)}.timing-grid :global(.time-patterns),.timing-grid :global(.donation-patterns){grid-column:auto;grid-row:auto}}.compact-audience{max-height:560px;overflow:auto}.compact-audience-table{width:100%;border-collapse:collapse;min-width:620px}.compact-audience-table td,.compact-audience-table th{padding:12px;text-align:left;border-bottom:1px solid var(--border);font-size:12px}.hour-table summary{padding:16px 20px;font-weight:600;cursor:pointer}.hour-table .table-wrap{max-height:440px;overflow:auto}.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}.analytics-help{padding:0 20px 12px;}header h2{display:flex;align-items:center;gap:8px;}
+@media(max-width:1100px){.timing-grid{grid-template-columns:minmax(0,1fr)}.timing-grid :global(.time-patterns),.timing-grid :global(.donation-patterns){grid-column:auto;grid-row:auto}}.compact-audience{overflow-x:auto}.compact-audience-table{width:100%;border-collapse:collapse;min-width:620px}.compact-audience-table td,.compact-audience-table th{padding:12px;text-align:right;border-bottom:1px solid var(--border);font-size:12px}.hour-table summary{padding:16px 20px;font-weight:600;cursor:pointer}.hour-table .table-wrap{max-height:440px;overflow:auto}.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}.analytics-help{padding:0 20px 12px;}header h2{display:flex;align-items:center;gap:8px;}
+
+.compact-audience-table td:first-child,.compact-audience-table th:first-child{text-align:left}
+.compact-audience-table .audience-detail>td{text-align:left;padding:12px}
+.audience-detail :global(.analytics-person){border:0;margin:0}
+.analytics-toolbar .period-chips{gap:4px;padding:3px}
+.analytics-toolbar .period-chips button{border-radius:6px;font-size:13px;min-width:0}
+.analytics-toolbar .period-chips button.active{background:var(--surface);color:var(--accent);font-weight:400}
+@media(max-width:720px){
+ .compact-audience-table{min-width:0}.compact-audience-table thead{display:none}
+ .compact-audience-table,.compact-audience-table tbody{display:block}
+ .compact-audience-table tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-bottom:1px solid var(--border);padding:12px}
+ .compact-audience-table td{display:flex;flex-direction:column;text-align:left;border:0;padding:8px 0;min-width:0}
+ .compact-audience-table td[data-label]:before{content:attr(data-label);font-size:12px;color:var(--muted);margin-bottom:4px}
+ .compact-audience-table .audience-name,.compact-audience-table .audience-more{grid-column:1/-1}
+ .compact-audience-table .audience-detail{display:block}.compact-audience-table .audience-detail>td{display:block;padding:0}
+ .analytics-toolbar .period-chips button{padding-inline:4px;font-size:12px}
+}
+.analytics-navigation :global(.section-tabs){margin:24px 0 12px;gap:24px;justify-content:flex-start;overflow-x:auto}
+.analytics-navigation :global(.section-tabs button){font-size:14px;min-height:44px}
 </style>
 

@@ -4,10 +4,13 @@
   import Icon from './Icon.svelte';
   let {label,title=label,children,variant=''}:{label:string;title?:string;children:Snippet<[()=>void]>;variant?:string}=$props();
   let open=$state(false);
+  let trigger=$state<HTMLElement>();
+  let wasOpen=false;
+  $effect(()=>{if(open)wasOpen=true;else if(wasOpen){wasOpen=false;trigger?.focus();}});
 </script>
 <details class={`action-menu ${variant}`} {open}>
-  <summary aria-label={label} aria-haspopup="dialog" aria-expanded={open} onclick={event=>{event.preventDefault();open=!open;}}><Icon name="more"/></summary>
-  <Sheet bind:open {title}><div class="action-menu-content">{@render children(()=>open=false)}</div></Sheet>
+  <summary bind:this={trigger} aria-label={label} aria-haspopup="dialog" aria-expanded={open} onclick={event=>{event.preventDefault();open=!open;}}><Icon name="more"/></summary>
+  {#if open}<Sheet bind:open {title} {trigger} compact><div class="action-menu-content">{@render children(()=>open=false)}</div></Sheet>{/if}
 </details>
 <style>
   details{margin:0;flex:0 0 44px;}

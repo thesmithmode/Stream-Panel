@@ -22,7 +22,7 @@ test('desktop timing charts share a row; redundant YouTube summary stays absent'
      assert.equal(paired.length,dimension==='hour'?24:7);assert.ok(paired.every(p=>Math.abs(p.left-p.right)<2),JSON.stringify(paired));
     }
     await page.getByLabel('Показатель времени',{exact:true}).selectOption('viewers');await page.getByLabel('Показатель донатов',{exact:true}).selectOption('count');
-   }else assert.ok(donations.y+donations.height<=timing.y+2);
+   }else assert.ok(timing.y+timing.height<=donations.y+2);
    if(process.env.STREAM_PANEL_QA_DIR){await mkdir(process.env.STREAM_PANEL_QA_DIR,{recursive:true});await page.screenshot({path:`${process.env.STREAM_PANEL_QA_DIR}/sidebar-${width}.png`});}
    if(process.env.STREAM_PANEL_QA_DIR){await mkdir(process.env.STREAM_PANEL_QA_DIR,{recursive:true});await page.locator('.time-patterns').scrollIntoViewIfNeeded();await page.screenshot({path:`${process.env.STREAM_PANEL_QA_DIR}/timing-${width}.png`});}
   }

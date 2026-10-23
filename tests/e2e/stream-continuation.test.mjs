@@ -23,7 +23,9 @@ test('stream continuation shows Moscow dates, a real break, participant interval
   const errors=[];page.on('pageerror',error=>errors.push(error.message));await startCoverage(page);await goto(page,app.bootstrap());
   await page.getByRole('button',{name:'Стримы',exact:true}).click();
   const row=page.locator(`[data-session-id="${id}"]`);assert.ok((await row.textContent()).includes('13 сентября · 11:04–11:17'));
-  assert.ok((await row.textContent()).includes('Перерыв: 13 сентября · 11:07–11:14'));
+  await row.locator('.stream-actions summary').click();
+  assert.ok((await page.getByRole('dialog',{name:'Детали эфира',exact:true}).textContent()).includes('Перерыв: 13 сентября · 11:07–11:14'));
+  await page.keyboard.press('Escape');
   await row.locator('.stream-open').click();
   await page.getByRole('tab',{name:'Участники',exact:true}).click();const ranking=page.getByRole('region',{name:'Рейтинг участников'});await ranking.getByRole('button',{name:'Silent Viewer',exact:true}).waitFor();
   assert.equal(await ranking.locator('tbody td:nth-child(2) strong').first().textContent(),'6 мин');
