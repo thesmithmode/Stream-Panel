@@ -2,6 +2,8 @@ import { createProfileSelection } from "./profile";
 
 import {requestJson} from "./request";
 let csrf = "";
+const revisions=new Map<string,number>();
+export const getDataRevision=(profile:string)=>revisions.get(profile)??0;
 export type { Profile } from "./profile";
 const selection = createProfileSelection(() => localStorage);
 export const getProfile = selection.get;
@@ -11,17 +13,19 @@ export async function importBackup(file:File,key:string){
   if(file.size>64*1024*1024*1024)throw new Error('BACKUP_SIZE_LIMIT');
   return requestJson('/api/v1/backups/restore',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-CSRF-Token':csrf,'X-Stream-Panel-Profile':getProfile(),...(key?{'X-Backup-Key':key}:{})},body:file,signal:new AbortController().signal,timeoutMs:30*60*1000});
 }
-export async function api<T = any>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-  return requestJson<T>(`/api/v1/${path}`, {
+export async function api<T = any>(path: string, body?: unknown, signal?: AbortSignal, profile: string = getProfile()): Promise<T> {
+  const result=await requestJson<T>(`/api/v1/${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers:
       body === undefined
-        ? { "X-Stream-Panel-Profile": getProfile() }
-        : { "Content-Type": "application/json", "X-CSRF-Token": csrf, "X-Stream-Panel-Profile": getProfile() },
+        ? { "X-Stream-Panel-Profile": profile }
+        : { "Content-Type": "application/json", "X-CSRF-Token": csrf, "X-Stream-Panel-Profile": profile },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     ...(signal ? {signal} : {}),
   });
 
+  if(body!==undefined)revisions.set(profile,getDataRevision(profile)+1);
+  return result;
 }
 export function money(minor: string, currency: string) {
   const value = BigInt(minor);

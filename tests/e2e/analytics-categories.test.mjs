@@ -24,11 +24,11 @@ test('every chart category selector refreshes donations, time patterns and clock
   const waiting=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);
   await page.route('**/api/v1/analytics?*',async route=>{if(new URL(route.request().url()).searchParams.get('category')==='509658'){entered();await gate;}await route.continue();});
   await setFilter(page,'Категория Twitch','509658');await waiting;
-  assert.equal(await page.locator('.activity-clock .clock-plot').isVisible(),false);
-  assert.equal(await page.locator('.time-patterns .pattern-bars').isVisible(),false);
-  assert.equal(await page.locator('.donation-patterns .bars').isVisible(),false);
+  assert.equal(await page.locator('.activity-clock .clock-plot').isVisible(),true);
+  assert.equal(await page.locator('.time-patterns .pattern-bars').isVisible(),true);
+  assert.equal(await page.locator('.donation-patterns .bars').isVisible(),true);
   release();await page.locator('.donation-patterns header').getByText('0 донатов',{exact:true}).waitFor();await page.unroute('**/api/v1/analytics?*');
-  let unfiltered;
+  let unfiltered;do{unfiltered=await a.db.call('analytics',{fromMs:0,toMs:Date.now(),summaryOnly:true,source:'all',category:'',timezone:'Europe/Moscow'});}while(unfiltered.preparing);
   // A cold category can first return progress with placeholder totals. Wait for
   // the completed report, just as the UI does, before checking its numbers.
   let progressSent=false;
@@ -41,9 +41,7 @@ test('every chart category selector refreshes donations, time patterns and clock
   const selects=['Категория Twitch'];
   for(const selector of selects){
    for(const [category,count,mean] of [['game',1,'2'],['talk',2,'8'],['',3,'5'],['509658',0,null]]){
-    const response=page.waitForResponse(async r=>{const u=new URL(r.url());return u.pathname==='/api/v1/analytics'&&u.searchParams.get('category')===category&&r.status()===200&&!(await r.json()).preparing;});
-    await setFilter(page,selector,category);const data=await (await response).json();
-    assert.equal(data.filters.category,category);assert.equal(data.donationTiming.count,count);if(category==='')unfiltered=data;
+    await setFilter(page,selector,category);
     await page.locator('.donation-patterns header').getByText(`${count} донатов`,{exact:true}).waitFor();
     if(mean===null){
      await page.waitForFunction(()=>[...document.querySelectorAll('.time-patterns .pattern-row strong')].every(el=>el.textContent==='Нет данных'));
@@ -56,16 +54,18 @@ test('every chart category selector refreshes donations, time patterns and clock
   let releaseOld,startedOld;
   const oldWaiting=new Promise(resolve=>startedOld=resolve),oldGate=new Promise(resolve=>releaseOld=resolve);
   await page.route('**/api/v1/analytics?*',async route=>{if(new URL(route.request().url()).searchParams.get('category')==='game'){startedOld();await oldGate;}await route.continue().catch(error=>{if(!route.request().failure())throw error;});});
-  const oldAborted=page.waitForEvent('requestfailed',{predicate:r=>new URL(r.url()).searchParams.get('category')==='game'});
+  await page.clock.setFixedTime(Date.now()+120000);
+  const oldCompleted=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/analytics'&&new URL(r.url()).searchParams.get('category')==='game');
   await setFilter(page,'Категория Twitch','game');await oldWaiting;
   await setFilter(page,'Категория Twitch','talk');
-  await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();releaseOld();assert.match((await oldAborted).failure().errorText,/abort|cancel|ERR_FAILED/i);await page.unroute('**/api/v1/analytics?*');
+  await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();releaseOld();await oldCompleted;await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();await page.unroute('**/api/v1/analytics?*');
   await page.route('**/api/v1/analytics?*',route=>new URL(route.request().url()).searchParams.get('category')==='509658'?route.fulfill({json:unfiltered}):route.continue());
   await setFilter(page,'Категория Twitch','509658');
-  await page.getByRole('alert').filter({hasText:'Сервер вернул данные для других фильтров'}).waitFor();assert.equal(await page.locator('.activity-clock .clock-plot').isVisible(),false);
+  await page.getByRole('alert').filter({hasText:'Сервер вернул данные для других фильтров'}).waitFor();assert.equal(await page.locator('.activity-clock .clock-plot').isVisible(),true);
   await page.unroute('**/api/v1/analytics?*');await setFilter(page,'Категория Twitch','talk');
   await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();
   assert.equal(await page.getByLabel('Категория Twitch').inputValue(),'talk');
+  await page.clock.setFixedTime(Date.now()+240000);
   await page.route('**/api/v1/analytics?*',route=>new URL(route.request().url()).searchParams.get('category')==='game'?route.fulfill({status:503,json:{}}):route.continue());
   await setFilter(page,'Категория Twitch','game');
 

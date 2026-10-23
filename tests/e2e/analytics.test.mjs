@@ -42,16 +42,13 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
   for(const profile of ['ruslan','gulnaz']){
    const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
    const waitReport=(query={})=>page.waitForResponse(async r=>{const u=new URL(r.url());return u.pathname==='/api/v1/analytics'&&r.status()===200&&Object.entries(query).every(([k,v])=>u.searchParams.get(k)===String(v))&&!(await r.json()).preparing;});
-   const selectFilter=async(label,value,query)=>{const response=waitReport(query);await setFilter(page,label,value);return (await response).json();};
+   const selectFilter=async(label,value,query)=>{await setFilter(page,label,value);await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');const response=waitReport(query);await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));return (await response).json();};
    await goto(page,origin);await page.getByLabel('Логин',{exact:true}).fill(profile);await page.getByLabel('Пароль',{exact:true}).fill(`${profile}-analytics-password`);await page.getByRole('button',{name:'Войти',exact:true}).click();
    const first=waitReport();await navigate(page,'Аналитика');let analyticsData=await (await first).json();await page.locator('.growth-plot').waitFor();
    assert.equal(await page.getByLabel('Начало периода').isVisible(),false);assert.equal(await page.locator('.chart-category select').count(),0,'one category control replaces repeated chart filters');
-   const report=page.locator('.youtube-report');await report.getByRole('button',{name:'По дням',exact:true}).click();
-   for(const label of ['Дата','Просмотры','Минуты просмотра','Подписались','Отписались','unknownMetric'])assert.equal(await report.getByRole('columnheader',{name:label,exact:true}).count(),1);
-   await page.getByText('Таблица сравнения стримов',{exact:true}).click();const comparison=page.locator('.analytics-secondary .section-disclosure').filter({hasText:'Таблица сравнения стримов'});
-   assert.equal((await comparison.locator('tbody tr').first().locator('td').first().textContent()).trim(),new Date(Math.max(...analyticsData.streamComparison.map(s=>s.startedAt))).toLocaleString('ru-RU',{timeZone:'Europe/Moscow'}));
-   assert.equal(await comparison.getByRole('cell',{name:'13.5 / 15',exact:true}).count(),3);assert.equal(await comparison.getByRole('cell',{name:'4.0 / 4',exact:true}).count(),3);
-   await page.getByText('Сравнение категорий и возвращаемости',{exact:true}).click();await page.locator('.comparison-charts').waitFor();await page.getByText('Таблица категорий',{exact:true}).click();assert.ok(await page.locator('.analytics-secondary table').count()>=2);
+   assert.equal(await page.locator('.youtube-report').count(),0);
+   assert.equal(await page.getByText('Таблица сравнения стримов',{exact:true}).count(),0);assert.equal(await page.getByRole('heading',{name:'YouTube · итоги канала',exact:true}).count(),0);
+   await page.locator('summary').filter({hasText:'Возвращаемость по эфирам'}).click();await page.locator('.comparison-charts').waitFor();await page.locator('.category-comparison').waitFor();assert.ok(await page.locator('.category-comparison .category-row').count()>0);await page.getByRole('button',{name:'Участники',exact:true}).click();assert.equal(await page.locator('.category-comparison table').count(),0);for(const width of [320,1280]){await page.setViewportSize({width,height:900});await page.locator('.category-comparison').scrollIntoViewIfNeeded();await assertUiLayout(page);await page.locator('.category-comparison').screenshot({path:`/tmp/categories-${width}.png`});}
    await page.getByRole('tab',{name:'Время',exact:true}).click();await clockSettings(page);const activity=page.locator('.activity-clock');
    await activity.getByText('00:00',{exact:true}).waitFor();await activity.getByText('24:00',{exact:true}).waitFor();
    for(const [step,count] of [['1',1440],['5',288],['15',96],['30',48],['60',24]]){await activity.getByLabel('Шаг графика').selectOption(step);assert.equal(await activity.locator('svg g').count(),count);}
@@ -77,7 +74,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    for(const name of [`Regular ${profile}`,`Occasional ${profile}`,`YT ${profile}`]){await page.getByLabel('Поиск участника').fill(name);await page.getByRole('button',{name:`Интервалы ${name}`,exact:true}).click();await page.locator('.minute-dot').first().waitFor();assert.equal(await page.locator('.minute-dot').count(),1440);await page.getByRole('button',{name:'Закрыть детализацию',exact:true}).click();}
    await page.getByLabel('Поиск участника').fill('');
    await openFilters(page);await page.getByText('Отображение и часовой пояс',{exact:true}).click();
-   await page.getByLabel('Вид дней и часов').selectOption('table');for(const label of ['Отчёт YouTube','График активности','Сравнение категорий','Дни и часы','Сравнение стримов','Возвращаемость участников']){await page.getByLabel(label,{exact:true}).uncheck();await page.getByLabel(label,{exact:true}).check();}
+   await page.getByLabel('Вид дней и часов').selectOption('table');for(const label of ['График активности','Сравнение категорий','Дни и часы','Возвращаемость участников']){await page.getByLabel(label,{exact:true}).uncheck();await page.getByLabel(label,{exact:true}).check();}
    await page.getByRole('button',{name:'Сбросить отображение',exact:true}).click();await closeFilters(page);
    analyticsData=await selectFilter('Часовой пояс сравнения','UTC',{timezone:'UTC'});await selectFilter('Категория Twitch','game',{category:'game',timezone:'UTC'});assert.equal(await page.getByRole('heading',{name:'YouTube · итоги канала',exact:true}).count(),0);
    await selectFilter('Площадка','youtube',{source:'youtube',category:'game'});await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();assert.equal(await audience.getByRole('button',{name:`Regular ${profile}`,exact:true}).count(),0);
@@ -86,9 +83,9 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    for(const days of ['7','30','all'])await selectFilter('Период аналитики',days,{});
    await openFilters(page);await page.getByLabel('Период аналитики',{exact:true}).selectOption('custom');const empty=waitReport();await page.getByLabel('Начало периода').fill('2000-01-01T00:00');await page.getByLabel('Конец периода').fill('2000-01-02T00:00');await closeFilters(page);await empty;
    await page.getByText('Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.',{exact:true}).waitFor();
-   await openFilters(page);const reset=waitReport();await page.getByRole('button',{name:'Сбросить фильтры',exact:true}).click();await closeFilters(page);await reset;await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
+   await openFilters(page);await page.getByRole('button',{name:'Сбросить фильтры',exact:true}).click();await closeFilters(page);await page.getByRole('button',{name:`Regular ${profile}`,exact:true}).waitFor();
    if(profile==='ruslan')for(const width of [320,390,768,1280,1440]){await page.setViewportSize({width,height:900});for(const name of ['Стримы','Люди','Аналитика','Интеграции']){await navigate(page,name);if(name==='Аналитика')await page.locator('.growth-plot').waitFor();await page.locator('main h1').waitFor();await assertUiLayout(page);}}
-   await navigate(page,'Аналитика');await page.locator('.growth-plot').waitFor();await page.getByRole('button',{name:'Об итогах YouTube',exact:true}).click();assert.match(await page.getByRole('dialog',{name:'Об итогах YouTube',exact:true}).textContent(),/всех видео канала/);await page.keyboard.press('Escape');
+   await navigate(page,'Аналитика');await page.locator('.growth-plot').waitFor();assert.equal(await page.locator('.youtube-report').count(),0);
    await page.getByRole('tab',{name:'Аудитория',exact:true}).click();await audience.getByRole('button',{name:`Regular ${profile}`,exact:true}).click();await page.getByRole('heading',{name:`Regular ${profile}`,exact:true}).waitFor();
    assert.deepEqual(errors,[]);await saveCoverage(page);await page.close();
   }

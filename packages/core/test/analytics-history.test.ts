@@ -339,12 +339,15 @@ test('background warm prepares the landing report without speculative period and
 
 function dbCount(db:any){return db.prepare('SELECT count(*) n FROM analytics_stream_cache').get().n;}
 
-test('live collection is not precomputed and stream completion refreshes the landing report',()=>{
+test('background warming includes live profiles, reuses closed slices and refreshes after completion',()=>{
  const s=new StreamStore(':memory:');try{
   fixture(s,1);const db=(s as any).db,h=new AnalyticsHistory(db);let r;do{r=h.warm(options);}while(r.preparing);
   const at=base+86400000,id=s.startSession('owner','live',at,'platform',at);s.streamSample(id,at,'game','Game','',20);
-  const aggregate=(h as any).aggregate;(h as any).aggregate=()=>{throw Error('collector competed with background');};assert.equal(h.warm(options).preparing,false);
-  (h as any).aggregate=aggregate;s.endSession(id,at+minute);do{r=h.warm(options);}while(r.preparing);
+  const build=(h as any).build.bind(h),built:string[]=[];(h as any).build=(opts:any,session:any)=>{built.push(session.id);return build(opts,session);};
+  const liveOptions={...options,toMs:at+2*minute};
+  do{r=h.warm(liveOptions);}while(r.preparing);assert.ok(!built.includes(String(s.sessions().find(x=>x.id!==id)!.id)),'unchanged closed streams reuse their slices');
+  const live=ready(h,{...liveOptions,fromMs:0,source:'all',category:'',summaryOnly:true,includeInsights:true});assert.equal(live.summary.streams,2);
+  s.endSession(id,at+minute);do{r=h.warm(options);}while(r.preparing);
   assert.equal(ready(h,{...options,fromMs:0,source:'all',category:'',summaryOnly:true,includeInsights:true}).summary.streams,2);h.close();
  }finally{s.close();}
 });
