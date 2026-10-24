@@ -7,7 +7,7 @@
  const number=(n:number)=>n.toLocaleString('ru-RU',{maximumFractionDigits:1});
  const date=(at:number)=>new Date(at).toLocaleDateString('ru-RU',{timeZone:timezone,day:'2-digit',month:'2-digit',year:'numeric'});
 </script>
-<section class="panel category-comparison">
+<section class="panel chart-panel category-comparison">
  <header><h2>Категории</h2><span class="muted">{from===0?'Всё время':date(from)} — {date(to)}</span></header>
  <div class="period-chips" role="group" aria-label="Метрика категорий"><button class:active={metric==='messagesPerHour'} aria-pressed={metric==='messagesPerHour'} onclick={()=>metric='messagesPerHour'}>Сообщений/ч</button><button class:active={metric==='audience'} aria-pressed={metric==='audience'} onclick={()=>metric='audience'}>Участники</button></div>
  <div class="category-rows">{#each rows as c}<article class="category-row"><div class="category-title"><h3>{c.name}</h3><strong>{number(c[metric])}</strong></div><div class="category-bar"><span style:width={`${c[metric]/max*100}%`}></span></div><p>{c.sessions} эфиров · {number(c.minutes/60)} ч · {c.audience} участников · {c.core} в ядре</p></article>{:else}<p class="muted">Нет эфиров с известной категорией.</p>{/each}</div>

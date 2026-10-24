@@ -15,7 +15,7 @@ test('heatmap uses one scale across weekdays and missing viewer measurements kee
   assert.equal(colors[0],colors[1]);assert.notEqual(colors[0],colors[2]);
   await page.getByRole('tab',{name:'Динамика',exact:true}).click();const chart=page.locator('.audience-growth');assert.equal(await chart.getByRole('button',{name:'О скользящем среднем',exact:true}).count(),0);
   assert.ok(await chart.locator('g[data-missing="true"]').count()>0);assert.equal(await chart.locator('g[data-missing="true"] .daily-bar').count(),0);
-  assert.equal(await chart.locator('.daily-bar').count(),8);assert.equal(await chart.locator('svg > path').count(),0);
+  assert.equal(await chart.locator('.daily-bar').count(),8);assert.deepEqual(await chart.locator('svg > text[x="1"]').allTextContents(),['0','2','5']);assert.equal(await chart.locator('svg > path').count(),0);
   assert.match(await chart.locator('.growth-selection').textContent(),/4,4/);
   await chart.locator('svg g[data-missing="true"]').first().click();assert.match(await chart.locator('.growth-selection').textContent(),/нет данных/);
   for(const width of [390,1280]){await page.setViewportSize({width,height:844});await assertUiLayout(page);}
