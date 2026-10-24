@@ -18,8 +18,8 @@
   import {platformClass} from './period';
   import TimePatterns from "./TimePatterns.svelte";
   import ComparisonCharts from "./ComparisonCharts.svelte";
-  let { profile = "local", defaultTimezone="Europe/Moscow", onPerson, onStream }: {profile?:string;defaultTimezone?:string;onPerson:(id:string)=>void;onStream:(id:string)=>void} = $props();
-  let filtersOpen=$state(false),section=$state('dynamics');
+  let { profile = "local", defaultTimezone="Europe/Moscow", section=$bindable('dynamics'),onBack,onPerson, onStream }: {profile?:string;defaultTimezone?:string;section?:string;onBack:()=>void;onPerson:(id:string)=>void;onStream:(id:string)=>void} = $props();
+  let filtersOpen=$state(false);
   let view=$state(analyticsView(null));
   const localInput=(at:number)=>{const d=new Date(at);return new Date(at-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
   let from=$state(localInput(0)),to=$state(localInput(Date.now())),source=$state("all"),category=$state("");
@@ -160,6 +160,7 @@
   <div class="analytics-kpis"><div><strong>{data.summary?.streams??0}</strong><span>Эфиров</span></div>{#if data.donationTiming}<div><strong>{Object.entries(data.donationTiming.totals??{}).map(([c,a])=>money(String(a),c)).join(' · ')||'—'}</strong><span>Донаты</span></div>{/if}</div>
 {/if}
 <div class="analytics-navigation"><SectionTabs items={[["dynamics","Динамика"],["time","Время"],["audience","Аудитория"]]} bind:value={section} label="Разделы аналитики" panelId="analytics-tabpanel"/></div>
+<div class="analytics-mobile-navigation"><button class="analytics-back" onclick={onBack}><Icon name="back"/>Назад</button><SectionTabs onchange={()=>window.scrollTo({top:0})} icons={{dynamics:'analytics',time:'clock',audience:'people'}} items={[["dynamics","Динамика"],["time","Время"],["audience","Аудитория"]]} bind:value={section} label="Разделы аналитики" panelId="analytics-tabpanel"/></div>
 <Sheet bind:open={filtersOpen} title="Фильтры аналитики"><div class="filter-fields">
  {#if period==='custom'}<label>Начало периода<input type="datetime-local" value={from===localInput(0)&&data?.sessions?.length?localInput(data.sessions[0].started_at_ms):from} oninput={e=>{from=e.currentTarget.value;}} required/></label><label>Конец периода<input type="datetime-local" bind:value={to} onchange={()=>liveEnd=false} required/></label>{/if}
  <label>Площадка<select aria-label="Площадка" bind:value={source}><option value="all">Все площадки</option><option value="twitch">Twitch / DA</option><option value="youtube">YouTube</option></select></label>

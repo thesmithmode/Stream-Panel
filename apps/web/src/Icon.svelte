@@ -1,6 +1,7 @@
 <script lang="ts">
   let { name, size = 20 }: { name: string; size?: number } = $props();
   const paths: Record<string, string> = {
+    clock: "M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0M12 6v6l4 2",
     more: "M5 12h.01M12 12h.01M19 12h.01",
     close: "m6 6 12 12M18 6 6 18",
     filters: "M4 7h16M4 17h16M9 4v6M15 14v6",

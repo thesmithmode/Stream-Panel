@@ -105,6 +105,7 @@
     connections: "Интеграции",
     settings: "Настройки",
   };
+  let analyticsSection=$state('dynamics'),analyticsBack=$state('sessions');
   const nav = [["sessions","Стримы"],["analytics","Аналитика"],["people","Люди"],["donations","Донаты"]] as const;
   async function refresh(fresh=false,initialStatus?:any) {
     const current=epoch;
@@ -138,6 +139,7 @@
     }
   }
   function navigate(next:string,person='') {
+    if(next==='analytics'){if(tab!=='analytics')analyticsBack=tab==='stream'?'sessions':tab;analyticsSection='dynamics';}
     moreOpen=false;epoch++;if(next!=='stream')sessionFilter='';tab=next;personId=person;clearScope();saveRoute();
     window.scrollTo({top:0,behavior:'instant'});void action(async()=>{});
   }
@@ -213,7 +215,7 @@
 
 
 <div class="app-shell">
-  <aside class="sidebar" aria-label="Навигация">
+  <aside class:analytics-context={tab==='analytics'&&scopeReady&&authorized&&!loading} class="sidebar" aria-label="Навигация">
     <a class="brand" href="/">Stream <span>Panel</span></a>
     <nav aria-label="Разделы">
       {#each nav as [key,label]}<button disabled={loading||!authorized} class:active={tab===key||(key==='sessions'&&tab==='stream')} aria-current={tab===key?'page':undefined} onclick={()=>navigate(key)}><Icon name={key}/>{label}</button>{/each}
@@ -223,7 +225,7 @@
   <main class:sessions-page={tab==='sessions'} class:stream-page={tab==='stream'} class:people-page={tab==='people'}>
     <div class="page-heading">
       {#if tab==='stream'}<button aria-label="К списку стримов" class="back-link text-button" onclick={()=>navigate('sessions')}><Icon name="back"/>Стримы</button>{:else}<h1>{titles[tab]}</h1>{/if}
-      {#if authorized}<label class="heading-profile"><span class="dot" class:off={connectionLost||!autoRefresh} title={connectionLost?'Нет связи':autoRefresh?'Автообновление включено':'Автообновление выключено'}></span><select aria-label="Профиль" value={profile} disabled={busy} onchange={event=>void switchProfile(event.currentTarget.value as Profile)}>{#each allowedProfiles as allowed}<option value={allowed}>{allowed==='ruslan'?'Руслан':'Гульназ'}</option>{/each}</select></label>{/if}
+      {#if authorized}<label class="heading-profile">{#if tab==='analytics'}<button class="icon-button analytics-menu-trigger" aria-label="Ещё" aria-expanded={moreOpen} onclick={()=>moreOpen=true}><Icon name="more"/></button>{/if}<span class="dot" class:off={connectionLost||!autoRefresh} title={connectionLost?'Нет связи':autoRefresh?'Автообновление включено':'Автообновление выключено'}></span><select aria-label="Профиль" value={profile} disabled={busy} onchange={event=>void switchProfile(event.currentTarget.value as Profile)}>{#each allowedProfiles as allowed}<option value={allowed}>{allowed==='ruslan'?'Руслан':'Гульназ'}</option>{/each}</select></label>{/if}
     </div>
     {#if loading}<div class="panel empty">
         <p>Загружаем профиль…</p>
@@ -257,7 +259,7 @@
           changed={()=>refresh(true)}
         />
       {:else if tab === "analytics"}
-        <Analytics profile={profile} defaultTimezone={status.config.analyticsSettings?.timezone??"Europe/Moscow"} onPerson={openPerson} onStream={id=>{sessionFilter=id;navigate("stream");}} />
+        <Analytics bind:section={analyticsSection} onBack={()=>navigate(analyticsBack)} profile={profile} defaultTimezone={status.config.analyticsSettings?.timezone??"Europe/Moscow"} onPerson={openPerson} onStream={id=>{sessionFilter=id;navigate("stream");}} />
       {:else if tab === "donations"}<StreamDonations onPerson={openPerson} changed={()=>refresh(true)} />
       {:else if tab === "settings"}<Settings {profile} {status} />
       {:else if tab === "connections"}<Connections
