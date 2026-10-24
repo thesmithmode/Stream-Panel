@@ -1,4 +1,4 @@
-import type {ViewerPlatform} from './audience-growth';
+export type ViewerPlatform='all'|'twitch'|'youtube';
 export interface StreamMetric {
  id?:string; startedAt:number; endedAt?:number; durationMs?:number; messages?:number; meanChatters?:number|null; categories?:string[];
  viewers?:Partial<Record<ViewerPlatform|'known',{mean?:number|null;knownMinutes?:number;partialMinutes?:number}>>;
@@ -15,10 +15,10 @@ export function dailyMetrics(streams:StreamMetric[],timezone:string,platform:Vie
   const duration=stream.durationMs??Math.max(0,(stream.endedAt??stream.startedAt)-stream.startedAt);
   const online=onlineMetric(stream,platform),minutes=online?.knownMinutes??duration/60000;
   if(online?.mean!=null&&Number.isFinite(online.mean)&&minutes>0){row.onlineTotal+=online.mean*minutes;row.onlineMinutes+=minutes;row.partial||=!!online.partialMinutes;}
-  if(stream.meanChatters!=null&&Number.isFinite(stream.meanChatters)&&duration>0){row.activeTotal+=stream.meanChatters*duration;row.activeMs+=duration;}
+  if(stream.messages!=null&&Number.isFinite(stream.messages)&&duration>0){row.activeTotal+=stream.messages;row.activeMs+=duration;}
   groups.set(date,row);
  }
- return [...groups.values()].map(row=>({...row,online:row.onlineMinutes?row.onlineTotal/row.onlineMinutes:null,active:row.activeMs?row.activeTotal/row.activeMs:null}));
+ return [...groups.values()].map(row=>({...row,online:row.onlineMinutes?row.onlineTotal/row.onlineMinutes:null,active:row.activeMs?row.activeTotal*3600000/row.activeMs:null}));
 }
 /** A tie retains the first achievement; an unmeasured value never becomes a record. */
 export function streamRecords(streams:StreamMetric[]){
