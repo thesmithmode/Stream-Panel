@@ -151,8 +151,8 @@
   </section>{/if}
 {/snippet}
 <div class="analytics-toolbar">
- <div class="period-chips" role="group" aria-label="Быстрый выбор периода">{#each [[7,'7 дней'],[30,'30 дней'],['all','Всё время']] as [value,label]}<button class:active={period===value} aria-pressed={period===value} onclick={()=>preset(value as number|'all')}>{label}</button>{/each}<button class:active={period==='custom'} aria-pressed={period==='custom'} onclick={()=>{period='custom';filtersOpen=true;}}>Свои даты</button></div>
- <button class="outline filters-button" aria-expanded={filtersOpen} onclick={()=>filtersOpen=true}><Icon name="filters" size={18}/>Фильтры{#if category||source!=='all'||period==='custom'}<span class="filter-dot"></span>{/if}</button>
+ <div class="period-chips" role="group" aria-label="Быстрый выбор периода">{#each [[7,'7 дней'],[30,'30 дней'],['all','Всё время']] as [value,label]}<button class:active={period===value} aria-pressed={period===value} aria-label={String(label)} onclick={()=>preset(value as number|'all')}><span class="period-full">{label}</span><span class="period-short" aria-hidden="true">{value==='all'?'Всё':`${value} дн.`}</span></button>{/each}<button class:active={period==='custom'} aria-pressed={period==='custom'} aria-label="Свои даты" onclick={()=>{period='custom';filtersOpen=true;}}><span class="period-full">Свои даты</span><span class="period-short" aria-hidden="true">Даты</span></button></div>
+ <button class="outline filters-button" aria-label="Фильтры" aria-expanded={filtersOpen} onclick={()=>filtersOpen=true}><Icon name="filters" size={18}/>Фильтры{#if category||source!=='all'||period==='custom'}<span class="filter-dot"></span>{/if}</button>
 </div>
 {#if category||source!=='all'||period==='custom'}<p class="applied-filters">{categoryOptions.find((c:any)=>c.id===category)?.name??'Все категории'} · {source==='all'?'Все площадки':source==='twitch'?'Twitch / DA':'YouTube'}{#if period==='custom'} · Свой период{/if}</p>{/if}
 {#if data}
@@ -239,8 +239,8 @@
 .compact-audience-table>tbody>tr>td:first-child,.compact-audience-table>thead>tr>th:first-child{text-align:left}
 .compact-audience-table .audience-detail>td{text-align:left;padding:12px}
 .audience-detail :global(.analytics-person){border:0;margin:0}
-.analytics-toolbar .period-chips{gap:4px;padding:3px}
-.analytics-toolbar .period-chips button{border-radius:6px;font-size:13px;min-width:0}
+.analytics-toolbar .period-chips{gap:2px;padding:3px;flex-wrap:wrap}
+.analytics-toolbar .period-chips button{border-radius:6px;font-size:13px;min-width:max-content;flex:1 0 auto}
 .analytics-toolbar .period-chips button.active{background:var(--surface);color:var(--accent);font-weight:400}
 @media(max-width:720px){
  .compact-audience-table{min-width:0}.compact-audience-table>thead{display:none}
@@ -256,6 +256,8 @@
  .compact-audience-table>tbody>.audience-detail{display:block}.compact-audience-table .audience-detail>td{display:block;padding:12px}
  .analytics-toolbar .period-chips button{padding-inline:4px;font-size:12px}
 }
+.period-short{display:none}
+@media(max-width:380px){.period-full{display:none}.period-short{display:inline}.analytics-toolbar .filters-button{font-size:0;width:44px;min-width:44px;min-height:44px;padding:10px;gap:0;position:relative;align-self:start}.analytics-toolbar .filters-button :global(svg){display:block;width:18px;height:18px}.analytics-toolbar .filter-dot{position:absolute;top:6px;right:6px}}
 .analytics-navigation :global(.section-tabs){margin:24px 0 12px;gap:24px;justify-content:flex-start;overflow-x:auto}
 .analytics-navigation :global(.section-tabs button){font-size:14px;min-height:44px}
 </style>
