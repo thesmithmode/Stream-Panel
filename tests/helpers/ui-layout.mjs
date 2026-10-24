@@ -12,7 +12,7 @@ export async function assertUiLayout(page) {
       const bounds = {left: Math.max(0,box.left), right: Math.min(innerWidth,box.right), top: Math.max(0,box.top), bottom: Math.min(innerHeight,box.bottom)};
       // The fixed phone navigation occludes the scrolling page below it. Check
       // the visible portion; page padding is verified separately by scrolling.
-      const nav=document.querySelector('.sidebar');
+      const sidebar=document.querySelector('.sidebar');const nav=sidebar?.checkVisibility()?sidebar:document.querySelector('.analytics-mobile-navigation');
       if(nav&&getComputedStyle(nav).position==='fixed'&&!nav.contains(element)&&!element.closest('dialog'))bounds.bottom=Math.min(bounds.bottom,nav.getBoundingClientRect().top);
       for (let parent = element.parentElement; parent; parent = parent.parentElement) {
         const style = getComputedStyle(parent), clip = parent.getBoundingClientRect();

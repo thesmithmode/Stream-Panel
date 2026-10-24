@@ -221,19 +221,19 @@ main {
   align-items: center;
   justify-content: center;
   gap: 9px;
-  border-radius: 5px;
+  border-radius: 9px;
   min-height: 40px;
   padding: 10px 16px;
   font-size: 14px;
-  font-weight: 550;
+  font-weight: 600;
   transition:
     background 0.15s,
     border-color 0.15s;
 }
 .outline {
   background: transparent;
-  border: 1px solid #555f70;
-  color: #c9d0df;
+  border: 1px solid var(--border);
+  color: var(--text);
 }
 .outline:hover:not(:disabled) {
   background: #202531;
