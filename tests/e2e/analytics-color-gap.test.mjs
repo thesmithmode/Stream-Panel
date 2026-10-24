@@ -6,7 +6,7 @@ test('heatmap uses one scale across weekdays and missing viewer measurements kee
   await seed(a);const opts={fromMs:0,toMs:Date.now(),summaryOnly:true,source:'all',category:'',timezone:'Europe/Moscow'};let data;do{data=await a.db.call('analytics',opts);}while(data.preparing);
   const cell=data.hours[0]??{};
   data.hours=[['пн',17,4.4],['вт',4,4.4],['ср',10,1],['чт',18,10]].map(([day,hour,value])=>({...cell,day,hour,sampleMinutes:60,observedKnownMinutes:60,viewerSamples:60,viewersTotal:value*60,knownViewerSamples:60,knownViewersTotal:value*60,donationTotals:{},donationsPerHourMinor:{}}));
-  const stream=data.streamComparison[0],now=Date.now();data.streamComparison=Array.from({length:9},(_,i)=>({...stream,id:'gap-'+i,startedAt:now-(9-i)*86400000,categories:['Game'],viewers:{...stream.viewers,all:{...stream.viewers.all,mean:i===6?null:4.4}}}));
+  const stream=data.streamComparison[0],now=Date.now();data.streamComparison=Array.from({length:9},(_,i)=>({...stream,id:'gap-'+i,startedAt:now-(9-i)*86400000,categories:['Game'],viewers:{all:{mean:i===6?null:4.4},known:{mean:i===6?null:4.4,knownMinutes:1}}}));
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(10000);
   await page.route('**/api/v1/analytics?*',route=>route.fulfill({json:data}));await goto(page,a.bootstrap());await page.getByRole('button',{name:'Аналитика',exact:true}).click();
   await page.getByRole('tab',{name:'Время',exact:true}).click();await page.getByText('Настроить карту',{exact:true}).click();await page.getByLabel('Метрика карты',{exact:true}).selectOption('viewers');
@@ -14,11 +14,10 @@ test('heatmap uses one scale across weekdays and missing viewer measurements kee
   const colors=await page.locator('.hour-heatmap').evaluate(el=>['пн 17:00','вт 4:00','ср 10:00'].map(prefix=>getComputedStyle(el.querySelector(`button[aria-label^="${prefix}"]`)).backgroundColor));
   assert.equal(colors[0],colors[1]);assert.notEqual(colors[0],colors[2]);
   await page.getByRole('tab',{name:'Динамика',exact:true}).click();const chart=page.locator('.audience-growth');assert.equal(await chart.getByRole('button',{name:'О скользящем среднем',exact:true}).count(),0);
-  assert.equal(await chart.locator('g[data-missing="true"] text').textContent(),'?');assert.equal(await chart.locator('g[data-missing="true"] circle:not([fill="transparent"])').count(),0);
-
-  for(const path of await chart.locator('svg > path').evaluateAll(paths=>paths.map(p=>p.getAttribute('d'))))assert.equal((path.match(/M/g)??[]).length,1);
-  assert.equal(await chart.locator('.growth-selection .trend-legend').textContent(),'4,4');
-  await chart.locator('svg g').first().click();assert.equal(await chart.locator('.growth-selection .trend-legend').textContent(),'4,4');
+  assert.ok(await chart.locator('g[data-missing="true"]').count()>0);assert.equal(await chart.locator('g[data-missing="true"] .daily-bar').count(),0);
+  assert.equal(await chart.locator('.daily-bar').count(),8);assert.equal(await chart.locator('svg > path').count(),0);
+  assert.match(await chart.locator('.growth-selection').textContent(),/4,4/);
+  await chart.locator('svg g[data-missing="true"]').first().click();assert.match(await chart.locator('.growth-selection').textContent(),/нет данных/);
   for(const width of [390,1280]){await page.setViewportSize({width,height:844});await assertUiLayout(page);}
   assert.equal(await page.title(),'Stream Panel');assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await a.close();}

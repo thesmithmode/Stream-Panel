@@ -59,8 +59,8 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    for(const day of ['weekdays','weekends','пн','all'])await activity.getByLabel('Дни недели').selectOption(day);
    await page.getByText('Настроить карту',{exact:true}).click();
    const sampled=await page.locator('.heatmap-row button').evaluateAll(cells=>cells.findIndex(c=>/эфиров: [1-9]/.test(c.getAttribute('aria-label')??'')));assert.ok(sampled>=0);await page.locator('.heatmap-row button').nth(sampled).click();
-   await page.locator('.hour-table summary').click();const hours=page.locator('.hour-table');
-   for(const metric of ['observed','estimated','messages','viewers','donations','amount']){await page.getByLabel('Метрика карты',{exact:true}).selectOption(metric);assert.ok(await hours.locator('tbody tr').count()>0);}
+   assert.equal(await page.locator('.hour-table').count(),0);
+   for(const metric of ['observed','estimated','messages','viewers','donations','amount']){await page.getByLabel('Метрика карты',{exact:true}).selectOption(metric);assert.equal(await page.locator('.heatmap-row button').count(),168);}
    for(const value of ['total','average'])await page.getByLabel('Расчёт карты',{exact:true}).selectOption(value);
    for(const settings of ['.time-patterns .pattern-controls','.donation-patterns .controls'])await page.locator(`${settings}>summary`).click();
    for(const dimension of ['hour','weekday']){await page.getByLabel('Сравнение времени',{exact:true}).selectOption(dimension);await page.getByLabel('Группировать донаты',{exact:true}).selectOption(dimension);assert.equal(await page.locator('.pattern-row').count(),dimension==='hour'?24:7);}
@@ -74,7 +74,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    for(const name of [`Regular ${profile}`,`Occasional ${profile}`,`YT ${profile}`]){await page.getByLabel('Поиск участника').fill(name);await page.getByRole('button',{name:`Интервалы ${name}`,exact:true}).click();await page.locator('.minute-dot').first().waitFor();assert.equal(await page.locator('.minute-dot').count(),1440);await page.getByRole('button',{name:'Закрыть детализацию',exact:true}).click();}
    await page.getByLabel('Поиск участника').fill('');
    await openFilters(page);await page.getByText('Отображение и часовой пояс',{exact:true}).click();
-   await page.getByLabel('Вид дней и часов').selectOption('table');for(const label of ['График активности','Сравнение категорий','Дни и часы','Возвращаемость участников']){await page.getByLabel(label,{exact:true}).uncheck();await page.getByLabel(label,{exact:true}).check();}
+   assert.equal(await page.getByLabel('Вид дней и часов').count(),0);for(const label of ['График активности','Сравнение категорий','Дни и часы','Возвращаемость участников']){await page.getByLabel(label,{exact:true}).uncheck();await page.getByLabel(label,{exact:true}).check();}
    await page.getByRole('button',{name:'Сбросить отображение',exact:true}).click();await closeFilters(page);
    analyticsData=await selectFilter('Часовой пояс сравнения','UTC',{timezone:'UTC'});await selectFilter('Категория Twitch','game',{category:'game',timezone:'UTC'});assert.equal(await page.getByRole('heading',{name:'YouTube · итоги канала',exact:true}).count(),0);
    await selectFilter('Площадка','youtube',{source:'youtube',category:'game'});await page.getByRole('button',{name:`YT ${profile}`,exact:true}).waitFor();assert.equal(await audience.getByRole('button',{name:`Regular ${profile}`,exact:true}).count(),0);

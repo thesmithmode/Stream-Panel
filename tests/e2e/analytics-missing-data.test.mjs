@@ -37,14 +37,13 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
   const first=response();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await first;await page.getByRole('tab',{name:'Аудитория',exact:true}).click();
   await page.getByRole('button',{name:person.name,exact:true}).waitFor();
   assert.ok(await page.getByText('0 из 1 (нет данных)',{exact:true}).count());
-  await page.getByRole('tab',{name:'Динамика',exact:true}).click();const legacyGrowth=page.locator('.audience-growth');await legacyGrowth.locator('svg g').first().click();await legacyGrowth.locator('svg g').first().focus();await page.keyboard.press(' ');await page.keyboard.press('ArrowRight');assert.ok(new URL(page.url()).searchParams.get('view')==='analytics');assert.equal(await legacyGrowth.locator('.growth-recent button:disabled').count(),2);assert.equal(await legacyGrowth.getByRole('button',{name:'Открыть эфир',exact:true}).isDisabled(),true);assert.equal(await legacyGrowth.getByText('Без категории',{exact:true}).count(),3);
+  await page.getByRole('tab',{name:'Динамика',exact:true}).click();const legacyGrowth=page.locator('.audience-growth');await legacyGrowth.locator('svg g').first().click();await legacyGrowth.locator('svg g').first().focus();await page.keyboard.press(' ');await page.keyboard.press('ArrowRight');assert.ok(new URL(page.url()).searchParams.get('view')==='analytics');assert.equal(await legacyGrowth.locator('.growth-stream:disabled').count(),2);assert.equal(await legacyGrowth.locator('.daily-bar').count(),1);assert.equal(await legacyGrowth.getByText(/Без категории/).count(),2);
   await setFilter(page,'Период аналитики','custom');
   const report=page.getByRole('heading',{name:'Агрегатный отчёт YouTube: все видео канала',exact:true}).locator('..').locator('..');
   assert.equal(await report.locator('th').count(),0);assert.equal(await report.locator('tbody tr').count(),0);
-  await page.getByRole('tab',{name:'Время',exact:true}).click();await page.getByText('Настроить карту',{exact:true}).click();const hours=page.locator('.hour-table');await hours.locator('summary').click();
+  await page.getByRole('tab',{name:'Время',exact:true}).click();await page.getByText('Настроить карту',{exact:true}).click();assert.equal(await page.locator('.hour-table').count(),0);
   for(const metric of ['observed','estimated','messages','viewers']){
    await page.getByLabel('Метрика карты').selectOption(metric);
-   assert.equal((await hours.locator('tbody tr td').nth(1).textContent()).trim(),'нет данных');
    assert.match(await page.locator('.hour-heatmap .heatmap-row button').first().getAttribute('title'),/нет данных/);
   }
   await page.getByRole('tab',{name:'Динамика',exact:true}).click();assert.equal(await page.getByText('Таблица сравнения стримов',{exact:true}).count(),0);
