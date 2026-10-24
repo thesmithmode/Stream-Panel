@@ -31,6 +31,7 @@ test("two browser accounts see only their own data; logout revokes the session",
     const sid=await runtime.db.call('startSession',owner,'owner-exclusion',at,'platform',at);
     for(const [id,name] of [['ruslan-id','FullRandomName_Twitch'],['gulnaz-id','AmaliaMelina']])await runtime.db.call('ingest',{source:'twitch',accountId:owner,externalId:id,type:'chat.message',actor:{externalId:id,displayName:name},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'Viewer in the other profile'}});
     await runtime.db.call('recordPoll',sid,owner,{startedAtMs:at,completedAtMs:at+60000,status:'complete',userIds:['ruslan-id','gulnaz-id']});await runtime.db.call('endSession',sid,at+120000);
+    runtime.youtube.status.state = "connected";
     runtime.configuration.value.youtube = {userId: "channel",access:"fixture",refresh:"fixture",expiresAt:Date.now()+3600000,scopes:[]};
     await runtime.db.call("youtubeSnapshot", "channel", "channel", {snippet:{title:`Own ${profile}`},statistics:{subscriberCount:"10",viewCount:"100"}});
     await runtime.db.call("youtubeSnapshot", "channel", "report", {start:"2026-09-09",end:"2026-10-06",columnHeaders:[{name:"day"},{name:"views"}],rows:[["2026-10-06",profile==="ruslan"?42:17]]});
@@ -78,13 +79,13 @@ test("two browser accounts see only their own data; logout revokes the session",
       await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('tab',{name:'Аудитория',exact:true}).click();await page.getByRole('button',{name:guestName,exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:ownName,exact:true}).count(),0);
       await navigate(page,'Интеграции');
       assert.equal(await page.getByRole("button",{name:"YouTube",exact:true}).count(),0);
-      await page.getByRole("heading",{name:`YouTube Own ${profile}`}).waitFor();
+      await page.getByRole("heading",{name:"YouTube",exact:true}).waitFor();
       await page.getByText('Подписчики: 10 · Просмотры канала: 100',{exact:true}).waitFor();
       assert.equal(await page.getByText(`YouTube private ${profile === "ruslan" ? "gulnaz" : "ruslan"}`,{exact:false}).count(),0);
       assert.equal(await page.getByRole("button",{name:"Демо",exact:true}).count(),0);
       assert.equal(await page.getByText(`YouTube private ${profile}`,{exact:false}).count(),0);
 
-      await page.getByRole("heading",{name:`YouTube Own ${profile}`}).waitFor();
+      await page.getByRole("heading",{name:"YouTube",exact:true}).waitFor();
       await page.route('**/api/v1/youtube/data',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'WORKER_UNAVAILABLE'})}));
       await navigate(page,'Обзор');await navigate(page,'Интеграции');
       await page.getByRole('alert').filter({hasText:'WORKER_UNAVAILABLE'}).waitFor();

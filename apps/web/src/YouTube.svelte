@@ -14,12 +14,5 @@
   onMount(() => { mounted = true; const update=()=>void refresh();window.addEventListener('sp:data-refresh',update);return()=>{requestId++;window.removeEventListener('sp:data-refresh',update);}; });
   const channel = $derived(data?.snapshots?.channel?.data);
 </script>
-<section class="panel settings wide">
-  <header><h2>YouTube {channel?.snippet?.title ?? ""}</h2><Help id="youtube-channel-help" label="О данных YouTube" text="YouTube не предоставляет список всех зрителей. Чат содержит только события, которые отдал API после подключения."/></header>
-  <div class="settings-body">
-    {#if error}<p class="notice error" role="alert">{error}</p>{/if}
-    {#if channel}
-      <p>Подписчики: {channel.statistics?.hiddenSubscriberCount ? "скрыты" : channel.statistics?.subscriberCount ?? "нет данных"} · Просмотры канала: {channel.statistics?.viewCount ?? "нет данных"}</p>
-    {:else}<p class="muted">Подключите свой канал в разделе «Интеграции». Статистика будет доступна в аналитике и отдельных стримах.</p>{/if}
-  </div>
-</section>
+{#if error}<p class="notice error" role="alert">{error}</p>{/if}
+{#if channel}{#if channel.snippet?.title}<p class="small"><strong>{channel.snippet.title}</strong></p>{/if}<p>Подписчики: {channel.statistics?.hiddenSubscriberCount ? "скрыты" : channel.statistics?.subscriberCount ?? "нет данных"} · Просмотры канала: {channel.statistics?.viewCount ?? "нет данных"}</p><Help id="youtube-channel-help" label="О данных YouTube" text="YouTube не предоставляет список всех зрителей. Чат содержит только события, которые отдал API после подключения."/>{/if}
