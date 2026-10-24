@@ -4,6 +4,7 @@
   import { statusLabel } from "./labels";
   import Credentials from './Credentials.svelte';
   import IntegrationGuide from './IntegrationGuide.svelte';
+  import YouTube from './YouTube.svelte';
   let { status, onChange }: { status: any; onChange: () => Promise<void> } =
     $props();
   let twitchClient = $state(""),
@@ -270,6 +271,7 @@
     <header><h2>YouTube</h2><IntegrationGuide provider="YouTube" redirect={status.config.youtubeRedirectUri??''}/><span class="state" class:online={status.youtube?.state === "connected"}>{statusLabel(status.youtube?.state ?? "disconnected")}</span></header>
     <div class="settings-body">
       {#if status.youtube?.state!=='connected'}<p class="small muted">{youtubeDetail}</p>{/if}
+      {#if status.youtube?.state==='connected'}<YouTube/>{/if}
       {#if ["connected", "connecting", "error"].includes(status.youtube?.state)}
         {#if status.youtube?.state === "error"}
           <details><summary>Настройки приложения Google</summary>

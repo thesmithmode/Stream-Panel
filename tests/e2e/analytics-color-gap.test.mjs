@@ -10,7 +10,7 @@ test('heatmap uses one scale across weekdays and missing viewer measurements kee
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(10000);
   await page.route('**/api/v1/analytics?*',route=>route.fulfill({json:data}));await goto(page,a.bootstrap());await page.getByRole('button',{name:'Аналитика',exact:true}).click();
   await page.getByRole('tab',{name:'Время',exact:true}).click();await page.getByText('Настроить карту',{exact:true}).click();await page.getByLabel('Метрика карты',{exact:true}).selectOption('viewers');
-  await page.waitForFunction(()=>{const cell=prefix=>document.querySelector(`.hour-heatmap button[aria-label^="${prefix}"]`),a=cell('пн 17:00'),b=cell('ср 10:00');return a?.getAttribute('aria-label')?.includes('4.4')&&b&&getComputedStyle(a).backgroundColor!==getComputedStyle(b).backgroundColor;});
+  await page.waitForFunction(()=>{const cell=prefix=>document.querySelector(`.hour-heatmap button[aria-label^="${prefix}"]`),a=cell('пн 17:00'),b=cell('ср 10:00');return a?.getAttribute('aria-label')?.includes('4,4')&&b&&getComputedStyle(a).backgroundColor!==getComputedStyle(b).backgroundColor;});
   const colors=await page.locator('.hour-heatmap').evaluate(el=>['пн 17:00','вт 4:00','ср 10:00'].map(prefix=>getComputedStyle(el.querySelector(`button[aria-label^="${prefix}"]`)).backgroundColor));
   assert.equal(colors[0],colors[1]);assert.notEqual(colors[0],colors[2]);
   await page.getByRole('tab',{name:'Динамика',exact:true}).click();const chart=page.locator('.audience-growth');assert.equal(await chart.getByRole('button',{name:'О скользящем среднем',exact:true}).count(),0);

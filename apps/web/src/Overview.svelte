@@ -1,4 +1,5 @@
 <script lang="ts">
+ import {dateTime} from './format';
  import ActionMenu from "./ActionMenu.svelte";
  import SectionTabs from "./SectionTabs.svelte";
   import {untrack} from 'svelte';
@@ -11,7 +12,7 @@
   import {chartMetrics,type ChartMetric} from './chart-series';
   import AudienceChart from "./AudienceChart.svelte";
   import AudienceRanking from "./AudienceRanking.svelte";
-  import {compactStreamRange as streamRange,streamTime} from './stream-time';
+  import {compactStreamRange as streamRange} from './stream-time';
   import type {Session} from './api';
   import {
     api,
@@ -63,10 +64,10 @@
   });
 </script>
 {#if session}<section class="stream-facts">
- <div class="stream-title-row"><h1>{session.primaryTitle||'Стрим'}</h1><ActionMenu variant="metadata-menu" label="История названий и категорий">{#snippet children()}
+ <div class="stream-title-row"><h1>{session.primaryTitle||'Без названия'}</h1><ActionMenu variant="metadata-menu" label="История названий и категорий">{#snippet children()}
  {#if viewerPartial}<p class="small muted">Показана сумма известных зрителей площадок. Пропущенные замеры не считаются нулём.</p>{/if}
  {#each session.breaks??[] as pause}<p class="small">Перерыв: {streamRange(pause.from,pause.to)} МСК</p>{/each}
- {#each [...metadata].sort((a,b)=>b.at-a.at) as row}<p class="small">{streamTime(row.at)}{row.categoryName&&row.categoryName!=="Категория неизвестна"?` · ${row.categoryName}`:''} · {row.title||'Без названия'}</p>{:else}<p class="small muted">Нет сохранённых метаданных.</p>{/each}
+ {#each [...metadata].sort((a,b)=>b.at-a.at) as row}<p class="small">{dateTime(row.at)}{row.categoryName&&row.categoryName!=="Категория неизвестна"?` · ${row.categoryName}`:''} · {row.title||'Без названия'}</p>{:else}<p class="small muted">Нет сохранённых метаданных.</p>{/each}
  {/snippet}</ActionMenu></div>
  <p class="stream-meta">{[`${streamRange(session.started_at_ms,session.ended_at_ms)} МСК`,[...new Set(metadata.map(row=>row.categoryName).filter(name=>name&&name!=="Категория неизвестна"))].join(' · '),session.platforms?.map(p=>p==='twitch'?'Twitch':'YouTube').join(' + ')].filter(Boolean).join(' · ')}</p>
 </section>{/if}

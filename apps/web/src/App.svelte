@@ -18,7 +18,7 @@
   import Settings from "./Settings.svelte";
   import StreamDonations from './StreamDonations.svelte';
   import Analytics from "./Analytics.svelte";
-  import YouTube from "./YouTube.svelte";
+
   import Connections from "./Connections.svelte";
   let peoplePeriod = $state("");
   import People from "./People.svelte";
@@ -96,7 +96,7 @@
     } catch { return false; }
   }
   const titles: Record<string, string> = {
-    overview: "Обзор канала",
+    overview: "Итоги канала",
     stream: "Стрим",
     sessions: "Стримы",
     people: "Люди",
@@ -264,7 +264,6 @@
           {status}
           onChange={()=>refresh(true)}
         />
-        <YouTube />
       {:else if tab === "people"}<People
           period={peoplePeriod}
           initialId={personId}
@@ -282,8 +281,8 @@
   </main>
 </div>
 
-<Sheet bind:open={moreOpen} title="Ещё">
- <nav class="more-links" aria-label="Дополнительные разделы">{#each [['connections','Интеграции'],['settings','Настройки'],['overview','Итоги канала']] as const as [key,label]}<button onclick={()=>navigate(key)}><Icon name={key}/>{label}<Icon name="arrow" size={18}/></button>{/each}</nav>
+<Sheet bind:open={moreOpen} title="Ещё" compact>
+ <nav class="more-links" aria-label="Дополнительные разделы">{#each [['connections','Интеграции'],['settings','Настройки'],['overview','Итоги канала']] as const as [key,label]}<button class:active={tab===key} aria-current={tab===key?'page':undefined} onclick={()=>navigate(key)}><Icon name={key}/>{label}<Icon name="arrow" size={18}/></button>{/each}</nav>
  <section class="more-refresh"><h3>Обновление данных</h3><div class="refresh-controls">
  <button class="refresh-toggle" aria-label={`Автообновление ${autoRefresh?'Вкл':'Выкл'}`} aria-pressed={autoRefresh} onclick={toggleRefresh}><span class="dot" class:off={!autoRefresh}></span>Автообновление <strong>{autoRefresh?'Вкл':'Выкл'}</strong></button>
  {#if autoRefresh}<label>Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={60}>1 мин</option><option value={300}>5 мин</option><option value={900}>15 мин</option></select></label>{/if}

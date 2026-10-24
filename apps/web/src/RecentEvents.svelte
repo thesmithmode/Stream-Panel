@@ -1,4 +1,6 @@
 <script lang="ts">
+ import AudioDonation from './AudioDonation.svelte';
+ import {isAudioDonation} from './labels';
  import {api,date,money} from './api';
  let {sessionId='',personId='',messagesOnly=false}:{sessionId?:string;personId?:string;messagesOnly?:boolean}=$props();
  type Row={id:string;source:string;type:string;actor_name:string|null;at_ms:number;payload:Record<string,unknown>};
@@ -21,7 +23,7 @@
  {#if error}<p role="alert">{error}</p>{:else if busy}<p role="status">Загружаем…</p>{:else}
   {#each rows as row,index (row.id)}
    {#if index===0||calendar.format(row.at_ms)!==calendar.format(rows[index-1]!.at_ms)}<h3 class="event-day">{calendar.format(row.at_ms)}</h3>{/if}
-   <article><time datetime={new Date(row.at_ms).toISOString()} title={date(row.at_ms)}>{clock.format(row.at_ms)}</time>{' '}<strong class="event-author" class:twitch={row.source==='twitch'} class:youtube={row.source==='youtube'} title={`${row.actor_name??'Без автора'} · ${sourceName(row.source)}`} aria-label={`${row.actor_name??'Без автора'} · ${sourceName(row.source)}`}>{row.actor_name??'Без автора'}:</strong>{' '}<span class="event-text">{#if row.payload.redacted}Сообщение удалено модерацией.{:else if typeof row.payload.text==='string'&&row.payload.text}{row.payload.text}{:else}{labels[row.type]??'Событие'}{/if}</span>
+   <article><time datetime={new Date(row.at_ms).toISOString()} title={date(row.at_ms)}>{clock.format(row.at_ms)}</time>{' '}<strong class="event-author" class:twitch={row.source==='twitch'} class:youtube={row.source==='youtube'} title={`${row.actor_name??'Без автора'} · ${sourceName(row.source)}`} aria-label={`${row.actor_name??'Без автора'} · ${sourceName(row.source)}`}>{row.actor_name??'Без автора'}:</strong>{' '}<span class="event-text">{#if row.payload.redacted}Сообщение удалено модерацией.{:else if typeof row.payload.text==='string'&&row.payload.text}{#if isAudioDonation(row.payload)}<AudioDonation text={row.payload.text}/>{:else}{row.payload.text}{/if}{:else}{labels[row.type]??'Событие'}{/if}</span>
     {#if typeof row.payload.amountMinor==='string'&&/^-?\d+$/.test(row.payload.amountMinor)&&typeof row.payload.currency==='string'}{' '}<strong class="event-amount">{money(row.payload.amountMinor,row.payload.currency)}</strong>{/if}
    </article>
   {:else}<p class="muted">{messagesOnly?'Нет сохранённых сообщений за последние 48 часов.':'Нет сохранённых событий этого стрима за последние 48 часов.'}</p>{/each}

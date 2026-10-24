@@ -31,7 +31,7 @@ test("presence help popover supports click, Escape, outside click, and mobile vi
 
     await trigger.click();
     await popover.waitFor();
-    await page.getByRole("heading", { name: "Стрим", exact: true }).click();
+    await page.getByRole("heading", { name: "Без названия", exact: true }).click();
     await assertPopover(trigger, popover, false);
 
     await page.setViewportSize({ width: 390, height: 844 });

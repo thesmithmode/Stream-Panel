@@ -1,4 +1,5 @@
 <script lang="ts">
+  import {num} from './format';
   import {chartSeries,isMessageMetric, type ChartMetric, type ChartPoint} from './chart-series';
   import {chartLayout,chartPages} from './chart-layout';
   import Help from './Help.svelte';
@@ -28,9 +29,9 @@
     if(point.isBreak)return `${label} · Перерыв`;
     if(!point.known)return `${label} · нет данных`;
     const partial=point.partial?' · неполные замеры площадок':'';
-    const regular=split&&point.value>0?` · ядро: ${point.regularValue.toFixed(1)} (${(point.regularValue/point.value*100).toFixed(1)}%)`:'';
-    const groups=split?` · подписчики: ${point.followerValue.toFixed(1)} · залётные: ${Math.max(0,point.value-point.regularValue-point.followerValue-(point.unknownValue??0)).toFixed(1)}${hasUnknown?` · статус неизвестен: ${(point.unknownValue??0).toFixed(1)}`:''}`:'';
-    return `${label} · всего: ${point.value.toFixed(1)}${regular}${groups}${partial}`;
+    const regular=split&&point.value>0?` · ядро: ${num(point.regularValue)} (${num((point.regularValue/point.value*100))}%)`:'';
+    const groups=split?` · подписчики: ${num(point.followerValue)} · залётные: ${num(Math.max(0,point.value-point.regularValue-point.followerValue-(point.unknownValue??0)))}${hasUnknown?` · статус неизвестен: ${num((point.unknownValue??0))}`:''}`:'';
+    return `${label} · всего: ${num(point.value)}${regular}${groups}${partial}`;
   }
   const titles=$derived(new Map(buckets.map(point=>[point.at,title(point)])));
 </script>

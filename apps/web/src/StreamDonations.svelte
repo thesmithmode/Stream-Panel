@@ -1,4 +1,6 @@
 <script lang="ts">
+ import AudioDonation from './AudioDonation.svelte';
+ import {isAudioDonation} from './labels';
  import {onMount,untrack} from 'svelte';
  import Icon from './Icon.svelte';
  import {api,date,money,type Person} from './api';
@@ -30,7 +32,7 @@
   <div class="donation-summary"><div class="donation-owner">{#if !row.personId||row.personName!==(row.originalActorName||'Аноним')}<span>{row.originalActorName||'Аноним'}</span>{/if}{#if row.personId}<button class="text-button" aria-label={`Связан: ${row.personName}`} onclick={()=>onPerson(row.personId!)}>{row.personName}</button>{/if}</div><strong>{value(row)}</strong><button class="icon-button" aria-label="Привязать к человеку" title={row.personId?"Изменить привязку":"Привязать к человеку"} disabled={busy} onclick={()=>void edit(row)}><Icon name={row.personId?"pencil":"connections"} size={18}/></button></div>
   <time class="small muted">{row.occurredAtMs===null&&row.sourceTime?`${row.sourceTime} · время DA`:date(row.occurredAtMs)}</time>
   {#if showAll&&!row.sessionIds?.length}<span class="small muted">Без привязки к эфиру</span>{/if}
- {#if row.message}<p class="donation-message">{row.message}</p>{/if}
+ {#if row.message}<p class="donation-message">{#if isAudioDonation({text:row.message})}<AudioDonation text={row.message}/>{:else}{row.message}{/if}</p>{/if}
   {#if editing?.id===row.id}<form class="donation-editor" onsubmit={e=>{e.preventDefault();void assign();}}>
    {#if finding}<p class="small muted" role="status">Ищем участников…</p>{:else if candidates.length}<p class="small muted">Писали в чат за 2 минуты до и после доната — выберите, если узнаёте человека.</p><div class="candidate-list">{#each candidates as candidate}<button type="button" class="outline small" class:active={recipient===candidate.id} onclick={()=>recipient=candidate.id}>{candidate.name}<span class="muted">{candidate.messages} сообщ.</span></button>{/each}</div>{:else}<p class="small muted">{row.occurredAtMs===null?'Время доната неизвестно: подсказки по чату недоступны.':'В этом интервале сообщений нет. Найдите человека по имени.'}</p>{/if}
    <label>Поиск человека<input bind:value={search} placeholder="Имя или ник" /></label>
