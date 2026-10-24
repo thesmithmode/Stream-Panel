@@ -1,5 +1,6 @@
 /** Exercise the same progressive navigation that users see, including the More sheet. */
 export async function navigate(page,name){
+ if(name!=='Аналитика'&&await page.locator('.analytics-mobile-navigation').isVisible())await page.getByRole('button',{name:'Назад',exact:true}).click();
  if(['Интеграции','Настройки','Обзор','Итоги канала'].includes(name)){
   if(!await page.getByRole('dialog',{name:'Ещё',exact:true}).isVisible())await page.getByRole('button',{name:'Ещё',exact:true}).click();
   await page.getByRole('dialog',{name:'Ещё',exact:true}).getByRole('button',{name:name==='Обзор'?'Итоги канала':name,exact:true}).click();
