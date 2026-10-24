@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatDuration } from "./duration.ts";
+import { formatDuration,formatHours } from "./duration.ts";
 
 test("formats duration boundaries without zero-valued trailing units", () => {
   const cases: Array<[number, string]> = [
@@ -30,4 +30,11 @@ test("floors fractional minutes and handles omitted or invalid durations", () =>
 test("rejects values whose floored minute count is not a safe integer", () => {
   assert.equal(formatDuration(Number.MAX_SAFE_INTEGER), `${Math.floor(Number.MAX_SAFE_INTEGER / 1_440)} д 31 мин`);
   assert.equal(formatDuration(Number.MAX_SAFE_INTEGER + 1), "—");
+});
+
+test('total hours keep days and minutes, without dropping the fractional hour',()=>{
+ const minutes=4*1440+12*60+22;
+ assert.equal(formatDuration(minutes),'4 д 12 ч 22 мин');assert.equal(formatHours(minutes),'108,37 ч');
+ assert.equal(formatHours(0),'0 ч');assert.equal(formatHours(90),'1,5 ч');
+ for(const value of [null,undefined,-1,NaN,Infinity,Number.MAX_SAFE_INTEGER+1])assert.equal(formatHours(value),'—');
 });

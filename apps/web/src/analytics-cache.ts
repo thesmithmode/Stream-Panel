@@ -4,6 +4,18 @@ import {loadAnalyticsView} from './analytics-view';
 // Shared across mounts. A profile is always part of the key and the request header.
 let generation=0;
 const reports=new Map<string,{value?:any;until:number;pending:boolean;task:Promise<any>}>();
+export interface OverviewTotals {streams:number;durationMinutes:number;attendees:number;messages:number;donations:number;totals:Record<string,string>}
+// Returning to Overview reuses its compact snapshot. Explicit/timed refresh still reads fresh data.
+const overviews=new Map<string,{until:number;pending:boolean;task:Promise<OverviewTotals>}>();
+export function loadOverview(profile:string,force=false){
+ const id=JSON.stringify([profile,getDataRevision(profile)]),prior=overviews.get(id);
+ if(prior&&(prior.pending||(!force&&prior.until>Date.now())))return prior.task;
+ const entry={until:0,pending:true,task:undefined as unknown as Promise<OverviewTotals>};
+ entry.task=api<OverviewTotals>('overview',undefined,undefined,profile).then(value=>{entry.pending=false;entry.until=Date.now()+60000;return value;}).catch(error=>{if(overviews.get(id)===entry)overviews.delete(id);throw error;});
+ overviews.delete(id);overviews.set(id,entry);
+ while(overviews.size>8)overviews.delete(overviews.keys().next().value!);
+ return entry.task;
+}
 function key(profile:string,q:URLSearchParams){
  const params=new URLSearchParams(q);
  // The landing report moves with the clock, while its historical facts stay the same.
@@ -11,7 +23,7 @@ function key(profile:string,q:URLSearchParams){
  params.sort();return JSON.stringify([profile,getDataRevision(profile),params.toString()]);
 }
 export function cachedAnalytics(profile:string,q:URLSearchParams){return reports.get(key(profile,q))?.value;}
-export function clearAnalyticsCache(){generation++;reports.clear();clearSubscriberCache();}
+export function clearAnalyticsCache(){generation++;reports.clear();overviews.clear();clearSubscriberCache();}
 export function loadAnalytics(profile:string,q:URLSearchParams,force=false){
  const id=key(profile,q),prior=reports.get(id);
  if(prior&&(prior.pending||(!force&&prior.until>Date.now())))return prior.task;

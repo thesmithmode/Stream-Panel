@@ -32,3 +32,9 @@ export function formatDuration(minutes: number | null | undefined): string {
   if (remainingMinutes > 0) parts.push(`${remainingMinutes} мин`);
   return parts.join(" ");
 }
+
+/** Total hours use the same recorded minutes; no history is recomputed. */
+export function formatHours(minutes:number|null|undefined):string {
+ if(minutes==null||!Number.isFinite(minutes)||minutes<0||!Number.isSafeInteger(Math.floor(minutes)))return UNKNOWN_DURATION;
+ return `${(minutes/60).toLocaleString('ru-RU',{maximumFractionDigits:2})} ч`;
+}
