@@ -37,7 +37,7 @@
   let autoRefresh=$state(true),refreshSeconds=$state(60);
   function toggleRefresh(){autoRefresh=!autoRefresh;if(autoRefresh)void action(async()=>{});}
   let moreOpen=$state(false);
-  let tab = $state("sessions"),
+  let tab = $state("overview"),
     authorized = $state(false),
     loading = $state(true),
     error = $state(""),
@@ -106,7 +106,7 @@
     settings: "Настройки",
   };
   let analyticsSection=$state('dynamics'),analyticsBack=$state('sessions');
-  const nav = [["sessions","Стримы"],["analytics","Аналитика"],["people","Люди"],["donations","Донаты"]] as const;
+  const nav = [["overview","Обзор"],["sessions","Стримы"],["analytics","Аналитика"],["people","Люди"],["donations","Донаты"]] as const;
   async function refresh(fresh=false,initialStatus?:any) {
     const current=epoch;
     if(refreshTask?.epoch===current){
@@ -219,7 +219,7 @@
     <a class="brand" href="/">Stream <span>Panel</span></a>
     <nav aria-label="Разделы">
       {#each nav as [key,label]}<button disabled={loading||!authorized} class:active={tab===key||(key==='sessions'&&tab==='stream')} aria-current={tab===key?'page':undefined} onclick={()=>navigate(key)}><Icon name={key}/>{label}</button>{/each}
-      <button disabled={loading||!authorized} class:active={moreOpen||['overview','connections','settings'].includes(tab)} aria-expanded={moreOpen} onclick={()=>moreOpen=true}><Icon name="more"/>Ещё</button>
+      <button disabled={loading||!authorized} class:active={moreOpen||['connections','settings'].includes(tab)} aria-expanded={moreOpen} onclick={()=>moreOpen=true}><Icon name="more"/>Ещё</button>
     </nav>
   </aside>
   <main class:sessions-page={tab==='sessions'} class:stream-page={tab==='stream'} class:people-page={tab==='people'}>
@@ -250,7 +250,7 @@
           >
             <PeriodSelect label="Период аналитики" value={peoplePeriod?Number(peoplePeriod):'all'} onchange={value=>{peoplePeriod=value==='all'?'':String(value);epoch++;saveRoute();void action(async()=>{});}}/>
           </div>{/if}
-      {#if tab === "overview"}<ChannelOverview connect={()=>navigate("connections")} />
+      {#if tab === "overview"}<ChannelOverview {profile} timezone={status.config.analyticsSettings?.timezone??"Europe/Moscow"} connect={()=>navigate("connections")} />
       {:else if tab === "stream"}<Overview onStream={id=>{sessionFilter=id;navigate("stream");}} session={sessions.find(s=>s.id===sessionFilter)}
           {summary}
           {sessionFilter}
@@ -284,7 +284,7 @@
 </div>
 
 <Sheet bind:open={moreOpen} title="Ещё" compact>
- <nav class="more-links" aria-label="Дополнительные разделы">{#each [['connections','Интеграции'],['settings','Настройки'],['overview','Итоги канала']] as const as [key,label]}<button class:active={tab===key} aria-current={tab===key?'page':undefined} onclick={()=>navigate(key)}><Icon name={key}/>{label}<Icon name="arrow" size={18}/></button>{/each}</nav>
+ <nav class="more-links" aria-label="Дополнительные разделы">{#each [['connections','Интеграции'],['settings','Настройки']] as const as [key,label]}<button class:active={tab===key} aria-current={tab===key?'page':undefined} onclick={()=>navigate(key)}><Icon name={key}/>{label}<Icon name="arrow" size={18}/></button>{/each}</nav>
  <section class="more-refresh"><h3>Обновление данных</h3><div class="refresh-controls">
  <button class="refresh-toggle" aria-label={`Автообновление ${autoRefresh?'Вкл':'Выкл'}`} aria-pressed={autoRefresh} onclick={toggleRefresh}><span class="dot" class:off={!autoRefresh}></span>Автообновление <strong>{autoRefresh?'Вкл':'Выкл'}</strong></button>
  {#if autoRefresh}<label>Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={60}>1 мин</option><option value={300}>5 мин</option><option value={900}>15 мин</option></select></label>{/if}

@@ -9,7 +9,7 @@ test('quiet navigation preserves secondary functions, keyboard tabs, filters and
  const a=await application();let browser;
  try{
   const sid=await seed(a);await a.db.call('endSession',sid,Date.now());browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];page.setDefaultTimeout(7000);page.on('pageerror',e=>errors.push(e.message));
-  await goto(page,a.bootstrap());await page.locator('.stream-card').waitFor();assert.equal(new URL(page.url()).searchParams.get('view'),'sessions');assert.equal(await page.locator('.sidebar nav button').count(),5);assert.equal(await page.getByRole('checkbox',{name:'Выбрать стрим',exact:true}).count(),0);
+  await goto(page,a.bootstrap());await page.locator('.channel-metrics').waitFor();assert.equal(new URL(page.url()).searchParams.get('view'),'overview');assert.equal(await page.locator('.sidebar nav button').count(),6);await navigate(page,'Стримы');await page.locator('.stream-card').waitFor();assert.equal(await page.getByRole('checkbox',{name:'Выбрать стрим',exact:true}).count(),0);
   await page.getByRole('button',{name:'Выбрать',exact:true}).click();await page.getByRole('checkbox',{name:'Выбрать стрим',exact:true}).check();assert.equal(await page.getByRole('button',{name:'Объединить выбранные',exact:true}).isDisabled(),true);await page.getByRole('checkbox',{name:'Выбрать стрим',exact:true}).uncheck();await page.getByRole('button',{name:'Отмена',exact:true}).click();
   await page.getByLabel('Показать эфиры').selectOption('live');await page.getByText('Нет эфиров по выбранному фильтру.',{exact:true}).waitFor();await page.getByLabel('Показать эфиры').selectOption('ended');await page.locator('.stream-card').waitFor();await page.getByLabel('Показать эфиры').selectOption('all');
   await page.locator('.donation-total').click();await page.getByRole('region',{name:'Все донаты',exact:true}).waitFor();
@@ -32,7 +32,7 @@ test('overflow sheets do not stretch cards; disclosure controls remain aligned w
  try{
   const id=await seed(a),now=Date.now();await a.db.call('streamSample',id,now-600000,'dota','Dota 2','Агент Габена 219 вышел на охоту',8);await a.db.call('endSession',id,now);
   browser=await launchBrowser();const page=await browser.newPage();page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  await goto(page,a.bootstrap());const card=page.locator(`[data-session-id="${id}"]`);
+  await goto(page,a.bootstrap());await navigate(page,'Стримы');const card=page.locator(`[data-session-id="${id}"]`);
   for(const width of [320,390,768,1440,1920]){
    await page.setViewportSize({width,height:900});await card.waitFor();const height=(await card.boundingBox()).height;
    const trigger=card.locator('.stream-actions summary');await trigger.click();const menu=card.getByRole('dialog',{name:'Детали эфира',exact:true});await menu.waitFor();await assertUiLayout(page);
