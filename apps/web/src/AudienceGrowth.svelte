@@ -18,13 +18,14 @@
  const keys=$derived(dates.join('|'));
  $effect(()=>{void keys;selected=displayed.findLastIndex(row=>!!row.point);});
  const current=$derived(displayed[selected]);
+ const dateTicks=$derived(Array.from({length:Math.min(5,displayed.length)},(_,i)=>Math.round(i*(displayed.length-1)/Math.max(1,Math.min(5,displayed.length)-1))));
  const value=(row:typeof displayed[number])=>row.point?.[metric]??null;
  const maximum=$derived(Math.ceil(Math.max(1,...displayed.map(row=>value(row)??0))));
  const ticks=$derived(Array.from(new Set([0,Math.floor(maximum/2),maximum])));
  const width=$derived(Math.max(280,availableWidth)),plotLeft=36;
  const barStep=$derived((width-plotLeft-12)/Math.max(1,displayed.length));
  const x=(i:number)=>plotLeft+barStep*(i+.5);
- const y=(value:number)=>174-value/maximum*144;
+ const y=(value:number)=>150-value/maximum*128;
  const shortDate=(date:string)=>`${date.slice(8)}.${date.slice(5,7)}`;
  const fullDate=(date:string)=>`${shortDate(date)}.${date.slice(0,4)}`;
  const format=(value:number|null)=>value===null?'нет данных':value.toLocaleString('ru-RU',{maximumFractionDigits:2});
@@ -40,12 +41,12 @@
  </div>
  {#if !streams.length}<p class="growth-caption muted">Нужны собранные эфиры.</p>{:else}
  <div class="growth-range"><button class="text-button" aria-label="Предыдущие дни" disabled={page+1>=pageCount} onclick={()=>page++}>‹</button><span>{shortDate(dates[0]!)}–{shortDate(dates.at(-1)!)}{metric==='active'?' · сообщений/ч':''}</span><button class="text-button" aria-label="Следующие дни" disabled={page===0} onclick={()=>page--}>›</button></div>
- <div class="growth-plot" bind:clientWidth={availableWidth}><svg viewBox={`0 0 ${width} 210`} role="group" aria-label={`${label} по дням`}>
+ <div class="growth-plot" bind:clientWidth={availableWidth}><svg viewBox={`0 0 ${width} 190`} role="group" aria-label={`${label} по дням`}>
  {#each ticks as tick}<line x1={plotLeft} x2={width-12} y1={y(tick)} y2={y(tick)} stroke="currentColor" opacity=".12"/><text x="1" y={y(tick)-6} fill="currentColor" font-size="10">{format(tick)}</text>{/each}
  {#each displayed as row,i}<g role="button" tabindex="0" data-missing={value(row)===null} aria-label={title(row)} aria-pressed={selected===i} onclick={()=>selected=i} onkeydown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selected=i;}}}>
- {#if value(row)!==null}<rect class="daily-bar" x={x(i)-barStep*.35} y={y(value(row)!)} width={barStep*.7} height={Math.max(1,174-y(value(row)!))} rx="2" fill={color} opacity={selected===i?1:.7}/>{:else}<line x1={x(i)-2} x2={x(i)+2} y1="174" y2="174" stroke="var(--muted)"/>{/if}
- <rect x={plotLeft+i*barStep} y="24" width={barStep} height="154" fill="transparent"><title>{title(row)}</title></rect>
- </g>{#if i%Math.max(1,Math.ceil(displayed.length/5))===0||i===displayed.length-1}<text x={x(i)} y="200" text-anchor={i===0?'start':i===displayed.length-1?'end':'middle'} fill="currentColor" font-size="10">{shortDate(row.date)}</text>{/if}{/each}
+ {#if value(row)!==null}<rect class="daily-bar" x={x(i)-barStep*.35} y={y(value(row)!)} width={barStep*.7} height={Math.max(1,150-y(value(row)!))} rx="2" fill={color} opacity={selected===i?1:.7}/>{:else}<line x1={x(i)-2} x2={x(i)+2} y1="150" y2="150" stroke="var(--muted)"/>{/if}
+ <rect x={plotLeft+i*barStep} y="16" width={barStep} height="138" fill="transparent"><title>{title(row)}</title></rect>
+ </g>{#if dateTicks.includes(i)}<text x={x(i)} y="178" text-anchor={i===0?'start':i===displayed.length-1?'end':'middle'} fill="currentColor" font-size="10">{shortDate(row.date)}</text>{/if}{/each}
  </svg></div>
  {#if current}<div class="growth-selection" role="status"><div class="growth-selection-head"><strong>{fullDate(current.date)}</strong><span style:color={color}>{label}: <b>{format(value(current))}</b></span></div>
  {#if current.point?.partial&&metric==='online'}<small>Неполные данные площадок</small>{/if}
@@ -54,5 +55,5 @@
  {/if}
 </section>
 <style>
- .daily-chart-toolbar{margin:0 0 12px}.daily-chart-toolbar select{flex:1;max-width:none}.growth-range{display:grid;grid-template-columns:40px minmax(0,1fr) 40px;align-items:center;text-align:center;margin:0 16px;color:var(--muted);font-size:12px}.growth-range button{min-height:40px;font-size:22px}.growth-plot{min-width:0;padding:8px 16px}svg{width:100%;height:auto;display:block;max-height:300px}g{cursor:pointer}g:focus{outline:2px solid var(--accent)}.growth-caption{padding:12px 16px;margin:0}.growth-selection{margin:0 16px;padding:12px 0}.growth-selection-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px}.growth-selection small{display:block;font-size:11px;color:var(--muted);margin-top:6px}.growth-stream{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;min-height:44px;text-align:left;border-top:1px solid var(--border);margin-top:8px;font-size:12px}.growth-stream span:first-child{min-width:0;overflow-wrap:anywhere}.growth-stream span:last-child{white-space:nowrap}
+ .daily-chart-toolbar{margin:0 0 8px;gap:8px}.daily-chart-toolbar select{flex:1;max-width:none}.growth-range{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;align-items:center;text-align:center;margin:0;color:var(--muted);font-size:12px}.growth-range button{min-height:44px;font-size:22px}.growth-plot{min-width:0;padding:8px 16px}svg{width:100%;height:auto;display:block;max-height:300px}g{cursor:pointer}g:focus{outline:2px solid var(--accent)}.growth-caption{padding:12px 16px;margin:0}.growth-selection{margin:0 16px;padding:8px 0 0}.growth-selection-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px}.growth-selection small{display:block;font-size:11px;color:var(--muted);margin-top:6px}.growth-stream{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;min-height:44px;text-align:left;border-top:1px solid var(--border);margin-top:8px;font-size:12px}.growth-stream span:first-child{min-width:0;overflow-wrap:anywhere}.growth-stream span:last-child{white-space:nowrap}
 </style>
