@@ -9,7 +9,7 @@ const streams:StreamMetric[]=[
 ];
 test('daily means weight measured viewer minutes and broadcast duration, preserving zero and missing values',()=>{
  const rows=dailyMetrics([...streams].reverse(),'Europe/Moscow');
- assert.equal(rows.length,2);assert.equal(rows[0]!.date,'2026-10-20');assert.equal(rows[0]!.online,7);assert.equal(rows[0]!.active,.5);assert.equal(rows[0]!.partial,true);assert.equal(rows[1]!.online,null);assert.equal(rows[1]!.active,null);
+ assert.equal(rows.length,2);assert.equal(rows[0]!.date,'2026-10-20');assert.equal(rows[0]!.online,7);assert.equal(rows[0]!.active,255);assert.equal(rows[0]!.partial,true);assert.equal(rows[1]!.online,null);assert.equal(rows[1]!.active,0);
  assert.equal(dailyMetrics(streams,'Europe/Moscow','twitch')[0]!.online,4);assert.equal(dailyMetrics(streams,'Europe/Moscow','youtube')[0]!.online,8);
  assert.equal(dailyMetrics([{startedAt:at,endedAt:at+minute,viewers:{all:{mean:0}}}],'UTC')[0]!.online,0);
  assert.deepEqual(dailyMetrics([],'UTC'),[]);

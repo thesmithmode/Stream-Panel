@@ -9,13 +9,13 @@
  import {routeUrl} from './route';
  import {getProfile} from './api';
  let {sessions,selected=$bindable([]),busy=false,page,onpage,onopen,onmerge,onunmerge,ondelete,validUrl}:{sessions:Session[];selected?:string[];busy?:boolean;page:number;onpage:(page:number)=>void;onopen:(id:string)=>void;onmerge:()=>Promise<void>;onunmerge:(id:string)=>void;ondelete:(id:string)=>void;validUrl:(entry:{platform:string;url:string})=>boolean}=$props();
- let selecting=$state(false),filter=$state('all');
- const visible=$derived(sessions.filter(s=>filter==='all'||(filter==='live'?s.ended_at_ms===null:s.ended_at_ms!==null)));
+ let selecting=$state(false);
+ const visible=$derived(sessions);
  function toggle(id:string,checked:boolean){selected=checked?[...selected,id]:selected.filter(s=>s!==id);}
  function selection(){selecting=!selecting;if(!selecting)selected=[];}
 </script>
 <section class="stream-history" aria-label="История стримов">
- <div class="history-toolbar"><select aria-label="Показать эфиры" bind:value={filter}><option value="all">Все эфиры</option><option value="live">В эфире</option><option value="ended">Завершённые</option></select><button class="text-button" aria-pressed={selecting} onclick={selection}>{selecting?'Отмена':'Выбрать'}</button></div>
+ <div class="history-toolbar"><span>История эфиров</span><button class="text-button" aria-pressed={selecting} onclick={selection}>{selecting?'Отмена':'Выбрать'}</button></div>
  {#if selecting}<div class="selection-toolbar"><span>Выбрано: {selected.length}</span><button class="primary" disabled={busy||selected.length<2} onclick={async()=>{await onmerge();if(!selected.length)selecting=false;}}>Объединить выбранные</button><Help id="merge-help" label="Об объединении эфиров" text="Выберите до 100 частей в пределах 31 дня. Активным может быть только последний эфир. Объединение можно отменить; перерывы сохраняются."/></div>{/if}
  {#each visible as session,index (session.id)}
   {#if index===0||sessionGroup(session.started_at_ms)!==sessionGroup(visible[index-1]!.started_at_ms)}<h2 class="history-date">{sessionGroup(session.started_at_ms)}</h2>{/if}
