@@ -1,6 +1,6 @@
 <script lang="ts">
  import type {Snippet} from 'svelte';
- import type {ViewerPlatform} from './audience-growth';
+ import type {ViewerPlatform} from './daily-metrics';
  import {dailyMetrics,type StreamMetric} from './daily-metrics';
  import Help from './Help.svelte';
  let {categoryFilter,streams,from=0,end=Date.now(),timezone='Europe/Moscow',onStream}:{categoryFilter:Snippet<[string]>;streams:StreamMetric[];from?:number;end?:number;timezone?:string;onStream:(id:string)=>void}=$props();

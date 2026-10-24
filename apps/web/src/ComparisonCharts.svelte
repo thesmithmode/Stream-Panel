@@ -2,7 +2,7 @@
  import type {Snippet} from 'svelte';
  import {date} from './api';
  import AudienceGrowth from './AudienceGrowth.svelte';
- import type {GrowthStream} from './audience-growth';
+ import type {StreamMetric as GrowthStream} from './daily-metrics';
  interface ComparisonStream extends GrowthStream {title?:string;audience:number;returning:number}
  let {showGrowth=true,scope,categoryFilter,streams,timezone,onStream}:{showGrowth?:boolean;scope?:string;categoryFilter:Snippet<[string]>;streams:ComparisonStream[];timezone:string;onStream:(id:string)=>void}=$props();
  let page=$state(0);

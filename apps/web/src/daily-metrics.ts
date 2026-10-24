@@ -1,4 +1,4 @@
-import type {ViewerPlatform} from './audience-growth';
+export type ViewerPlatform='all'|'twitch'|'youtube';
 export interface StreamMetric {
  id?:string; startedAt:number; endedAt?:number; durationMs?:number; messages?:number; meanChatters?:number|null; categories?:string[];
  viewers?:Partial<Record<ViewerPlatform|'known',{mean?:number|null;knownMinutes?:number;partialMinutes?:number}>>;

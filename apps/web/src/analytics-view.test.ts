@@ -5,7 +5,7 @@ test('display preferences validate every option and reset corrupt or incomplete 
  const defaults=analyticsView(null);
  assert.deepEqual(analyticsView({}),defaults);
  assert.deepEqual(analyticsView('broken'),defaults);
- const saved={metric:'messages',heatMetric:'viewers',sort:'attendanceRatio',resolution:30,hourView:'table',showRegulars:false,regularOnly:true,coreOnly:true,report:false,trend:false,categories:false,hours:false,streams:false,audience:false};
+ const saved={metric:'messages',heatMetric:'viewers',sort:'attendanceRatio',resolution:30,showRegulars:false,regularOnly:true,coreOnly:true,report:false,trend:false,categories:false,hours:false,streams:false,audience:false};
  assert.deepEqual(analyticsView(saved),saved);
  assert.deepEqual(analyticsView(Object.fromEntries(Object.keys(saved).map(key=>[key,'invalid']))),defaults);
  assert.equal(analyticsView({resolution:0}).resolution,15);
