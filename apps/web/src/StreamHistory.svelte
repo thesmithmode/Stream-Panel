@@ -10,15 +10,14 @@
  import {getProfile} from './api';
  let {sessions,selected=$bindable([]),busy=false,page,onpage,onopen,onmerge,onunmerge,ondelete,validUrl}:{sessions:Session[];selected?:string[];busy?:boolean;page:number;onpage:(page:number)=>void;onopen:(id:string)=>void;onmerge:()=>Promise<void>;onunmerge:(id:string)=>void;ondelete:(id:string)=>void;validUrl:(entry:{platform:string;url:string})=>boolean}=$props();
  let selecting=$state(false);
- const visible=$derived(sessions);
  function toggle(id:string,checked:boolean){selected=checked?[...selected,id]:selected.filter(s=>s!==id);}
  function selection(){selecting=!selecting;if(!selecting)selected=[];}
 </script>
 <section class="stream-history" aria-label="История стримов">
  <div class="history-toolbar"><span>История эфиров</span><button class="text-button" aria-pressed={selecting} onclick={selection}>{selecting?'Отмена':'Выбрать'}</button></div>
  {#if selecting}<div class="selection-toolbar"><span>Выбрано: {selected.length}</span><button class="primary" disabled={busy||selected.length<2} onclick={async()=>{await onmerge();if(!selected.length)selecting=false;}}>Объединить выбранные</button><Help id="merge-help" label="Об объединении эфиров" text="Выберите до 100 частей в пределах 31 дня. Активным может быть только последний эфир. Объединение можно отменить; перерывы сохраняются."/></div>{/if}
- {#each visible as session,index (session.id)}
-  {#if index===0||sessionGroup(session.started_at_ms)!==sessionGroup(visible[index-1]!.started_at_ms)}<h2 class="history-date">{sessionGroup(session.started_at_ms)}</h2>{/if}
+ {#each sessions as session,index (session.id)}
+  {#if index===0||sessionGroup(session.started_at_ms)!==sessionGroup(sessions[index-1]!.started_at_ms)}<h2 class="history-date">{sessionGroup(session.started_at_ms)}</h2>{/if}
   <article class="stream-card" data-session-id={session.id}>
    <a class="stream-open" aria-label={`Открыть ${session.primaryTitle||'стрим'}`} href={routeUrl({view:'stream',session:session.id,person:'',profile:getProfile()})} onclick={e=>{e.preventDefault();onopen(session.id);}}>
    <div class="stream-card-heading">
@@ -39,6 +38,6 @@
     {#if session.kind==='manual'}<button class="danger" disabled={busy} onclick={()=>{close();ondelete(session.id);}}>Удалить</button>{/if}
    {/snippet}</ActionMenu>
   </article>
- {:else}<div class="empty-small">{sessions.length?'Нет эфиров по выбранному фильтру.':'Стримов пока нет'}</div>{/each}
+ {:else}<div class="empty-small">Стримов пока нет</div>{/each}
  {#if page>0||sessions.length>=100}<div class="history-pages"><button class="outline" disabled={busy||page===0} onclick={()=>onpage(page-1)}>Назад</button><span>Страница {page+1}</span><button class="outline" disabled={busy||sessions.length<100} onclick={()=>onpage(page+1)}>Далее</button></div>{/if}
 </section>
