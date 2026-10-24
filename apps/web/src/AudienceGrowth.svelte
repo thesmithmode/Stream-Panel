@@ -32,7 +32,7 @@
  const color=$derived(metric==='active'?'var(--accent)':platform==='twitch'?'var(--twitch,#a970ff)':platform==='youtube'?'var(--youtube,#ff5959)':'var(--teal)');
  const title=(row:typeof displayed[number])=>`${fullDate(row.date)} · ${label}: ${format(value(row))}${row.point?.partial&&metric==='online'?' · неполные данные площадок':''}`;
 </script>
-<section class="panel audience-growth">
+<section class="panel chart-panel audience-growth">
  <header><h2>Динамика по дням</h2><Help id="daily-growth" label="О средних по дням" text="Онлайн усредняется по минутам с замерами. Сообщения в час — число сообщений, делённое на часы эфира: показывает интенсивность чата, а не качество стрима или оптимальную длительность. Эфир относится к дате начала; несколько эфиров за день объединяются с учётом длительности. Пропущенные замеры не считаются нулём. Вместе — сумма известных значений площадок."/></header>{@render categoryFilter('Категория динамики')}
  <div class="stream-chart-toolbar daily-chart-toolbar">
  <select aria-label="Показатель динамики" bind:value={metric}><option value="online">Средний онлайн</option><option value="active">Сообщения в час</option></select>
