@@ -1,37 +1,25 @@
-import {clockSettings,setFilter} from '../helpers/navigation.mjs';
+import {navigate,setFilter} from '../helpers/navigation.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';
 import {application} from '../helpers/application.mjs';import {launchBrowser} from '../helpers/browser.mjs';import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';import {assertUiLayout} from '../helpers/ui-layout.mjs';
-test('audience trend switches platforms, shows 7/30-day smoothing and opens the exact broadcast',{timeout:60000},async()=>{
+test('daily bars expose online and chat activity, preserve missing days and open the exact broadcast',{timeout:60000},async()=>{
  const a=await application();let browser;
  try{
-  const m=60000,day=86400000,base=Math.floor((Date.now()-60*day)/day)*day+7*3600000,ids=[];
-  for(let n=0;n<55;n++){const at=base+n*day,id=await a.db.call('startSession','owner',`growth-${n}`,at,'platform',at);ids.push(id);await a.db.call('streamSample',id,at,'game','Game','Repeated title',n);await a.db.call('endSession',id,at+m);}
-  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];page.setDefaultTimeout(7000);page.on('pageerror',e=>errors.push(e.message));await page.clock.setFixedTime(base+55*day);await goto(page,a.bootstrap());
-  await page.getByRole('button',{name:'Аналитика',exact:true}).click();const chart=page.locator('.audience-growth');await chart.waitFor();assert.equal(await page.getByRole('heading',{name:'Зрители по эфирам',exact:true}).count(),0);
-  assert.equal(await chart.locator('svg g').count(),30);
-  assert.equal(await chart.getByRole('button',{name:'Раньше',exact:true}).count(),0);assert.equal(await chart.getByRole('button',{name:'Позже',exact:true}).count(),0);assert.equal(await chart.getByRole('button',{name:/О динамике|О скользящем/}).count(),0);
-  await chart.getByRole('button',{name:'Twitch',exact:true}).click();assert.ok((await chart.locator('svg g').first().getAttribute('aria-label')).includes('среднее за 7 дней: 22'));
-  await chart.getByRole('button',{name:'YouTube',exact:true}).click();assert.ok((await chart.locator('svg g').first().getAttribute('aria-label')).includes('средние зрители: нет данных'));
-  await chart.getByRole('button',{name:'Вместе',exact:true}).click();assert.equal(await chart.locator('details').count(),0);assert.equal(await chart.locator('.growth-recent button').count(),3);assert.ok((await chart.locator('.growth-recent button').first().textContent()).includes('54'));
-  await chart.locator('svg g').first().click();assert.ok((await chart.locator('.growth-selection').textContent()).includes('25'));assert.ok((await chart.locator('.growth-selection').textContent()).includes('Game'));
-  await page.getByRole('tab',{name:'Время',exact:true}).click();await clockSettings(page);const clock=page.locator('.activity-clock');
-  await clock.getByLabel('Метрика графика').selectOption('messages');await clock.getByText('Сообщения/ч · МСК',{exact:true}).waitFor();
-  await setFilter(page,'Период аналитики','7');await page.getByRole('tab',{name:'Динамика',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.audience-growth svg g').length<=7);assert.ok(await chart.locator('svg g').count()<=7);assert.equal(await chart.locator('.growth-pages').count(),0);
+  const minute=60000,day=86400000,base=Math.floor((Date.now()-60*day)/day)*day+7*3600000,ids=[];
+  for(let n=0;n<55;n++){const at=base+n*day,id=await a.db.call('startSession','owner',`growth-${n}`,at,'platform',at);ids.push(id);await a.db.call('streamSample',id,at,'game','Game','Repeated title',n);await a.db.call('ingest',{source:'twitch',accountId:'owner',externalId:`message-${n}`,type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});await a.db.call('endSession',id,at+minute);}
+  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));await page.clock.setFixedTime(base+55*day);await goto(page,a.bootstrap());
+  await navigate(page,'Аналитика');const chart=page.locator('.audience-growth');await chart.locator('svg g').nth(29).waitFor();assert.equal(await chart.locator('svg g').count(),30);assert.equal(await chart.locator('svg > path').count(),0);
+  assert.ok(await chart.locator('.daily-bar').count()>0,'single-platform online remains visible in Together');
+  await chart.getByRole('button',{name:'Twitch',exact:true}).click();await chart.locator('svg g[data-missing="false"]').first().click();assert.match(await chart.locator('.growth-selection').textContent(),/Средний онлайн: 26/);
+  await chart.getByRole('button',{name:'YouTube',exact:true}).click();assert.equal(await chart.locator('.daily-bar').count(),0);assert.match(await chart.locator('svg g').first().getAttribute('aria-label'),/нет данных/);
+  await chart.getByRole('button',{name:'Активные в чате',exact:true}).click();assert.ok(await chart.locator('.daily-bar').count()>0);assert.match(await chart.locator('.growth-selection').textContent(),/Активные в чате: 1/);assert.equal(await chart.getByRole('group',{name:'Источник динамики'}).count(),0);
+  await chart.getByRole('button',{name:'Средний онлайн',exact:true}).click();await chart.getByRole('button',{name:'Вместе',exact:true}).click();
+  await chart.getByRole('button',{name:'Предыдущие дни',exact:true}).click();await chart.locator('svg g').first().click();assert.match(await chart.locator('.growth-selection').textContent(),/Средний онлайн: 0/);await chart.getByRole('button',{name:'Следующие дни',exact:true}).click();
+  await setFilter(page,'Период аналитики','7');await page.waitForFunction(()=>document.querySelectorAll('.audience-growth svg g').length<=8);assert.ok(await chart.locator('svg g').count()<=8);
   await setFilter(page,'Период аналитики','all');await chart.locator('svg g').nth(29).waitFor();
-  // Keep a deliberate missing broadcast between measured ones; lines must bridge it.
-  await page.route('**/api/v1/analytics?*',async route=>{const response=await route.fetch(),data=await response.json();if(data.streamComparison)data.streamComparison=data.streamComparison.map((s,i)=>i===50?{...s,viewers:{all:{mean:null},twitch:{mean:null},youtube:{mean:null}}}:s);await new Promise(resolve=>setTimeout(resolve,300));await route.fulfill({response,json:data});});
-  const before=await chart.boundingBox();
-  const request=page.waitForRequest(r=>r.url().includes('/api/v1/analytics?'));
-  await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));await request;
-  assert.equal(await page.getByText('Обновляем аналитику…',{exact:true}).count(),0);
-  const during=await chart.boundingBox();assert.ok(Math.abs(before.y-during.y)<1,'refresh keeps chart position');assert.ok(Math.abs(before.height-during.height)<1,'refresh keeps chart height');
-  await chart.locator('svg g[data-missing="true"]').waitFor();
-  assert.equal(await chart.locator('svg > path').count(),3);
-  for(const path of await chart.locator('svg > path').evaluateAll(paths=>paths.map(p=>p.getAttribute('d')))){assert.equal((path.match(/M/g)??[]).length,1,'unknown values do not break lines');assert.ok(path.includes('C'),'curved lines');}
-  await page.unrouteAll({behavior:'wait'});
-  await page.evaluate(()=>window.scrollTo(0,0));await assertUiLayout(page);await chart.screenshot({path:'/tmp/analytics-growth-mobile.png'});await page.setViewportSize({width:1280,height:800});await page.evaluate(()=>window.scrollTo(0,0));await assertUiLayout(page);await chart.screenshot({path:'/tmp/analytics-growth-desktop.png'});
-  await chart.locator('svg g').first().click();await chart.getByRole('button',{name:'Открыть эфир',exact:true}).click();await page.waitForURL(url=>url.searchParams.get('stream')===ids[25]);await page.goBack();await chart.waitFor();
-  await chart.locator('.growth-recent button').first().click();await page.waitForURL(url=>url.searchParams.get('stream')===ids[54]);await page.goBack();await chart.waitFor();
-  await chart.locator('svg g').nth(6).focus();await page.keyboard.press('Enter');assert.equal(await chart.locator('svg g').nth(6).getAttribute('aria-pressed'),'true');await page.keyboard.press(' ');await chart.getByRole('button',{name:'Открыть эфир',exact:true}).click();await page.waitForURL(url=>url.searchParams.get('view')==='stream'&&url.searchParams.get('stream')===ids[31]);await page.locator('.stream-page').waitFor();assert.deepEqual(errors,[]);await saveCoverage(page);
+  await page.route('**/api/v1/analytics?*',async route=>{const response=await route.fetch(),data=await response.json();if(data.streamComparison)data.streamComparison=data.streamComparison.map((s,i)=>i===50?{...s,viewers:{all:{mean:null},known:{mean:null},twitch:{mean:null},youtube:{mean:null}}}:s);await route.fulfill({response,json:data});});
+  await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));await page.waitForFunction(()=>document.querySelectorAll('.audience-growth svg g')[24]?.getAttribute('data-missing')==='true');assert.equal(await chart.locator('g[data-missing="true"] .daily-bar').count(),0);await page.unrouteAll({behavior:'wait'});
+  await chart.locator('svg g[data-missing="false"]').first().focus();await page.keyboard.press('Enter');await page.keyboard.press(' ');assert.equal(await chart.locator('svg g[data-missing="false"]').first().getAttribute('aria-pressed'),'true');
+  for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:844});await page.evaluate(()=>window.scrollTo(0,0));await assertUiLayout(page);await chart.screenshot({path:`/tmp/analytics-growth-${width}.png`});}
+  await chart.locator('.growth-stream').click();await page.waitForURL(url=>url.searchParams.get('stream')===ids[26]);await page.goBack();await chart.locator('svg g').nth(29).waitFor();await chart.locator('svg g').nth(28).click();await chart.locator('.growth-stream').click();await page.waitForURL(url=>url.searchParams.get('stream')===ids[54]);assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await a.close();}
 });

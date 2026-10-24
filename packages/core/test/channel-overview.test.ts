@@ -29,3 +29,18 @@ test('overview donation window uses exact timestamps, corrections and separate c
   assert.equal(s.channelOverview().totals30.RUB,'100');s.deleteDonation(String(corrected.id),Number(corrected.revision),at);assert.deepEqual(s.channelOverview().totals,data.totals);
  }finally{Date.now=now;s.close();}
 });
+
+test('overview counts a repeated chatter and linked YouTube account once, while silent chat participants remain unique',()=>{
+ const s=new StreamStore(':memory:'),at=Date.now()-7200000;
+ try{
+  for(let n=0;n<2;n++){
+   const start=at+n*3600000,id=s.startSession('owner',`unique-${n}`,start,'platform',start);
+   for(let m=0;m<3;m++)s.ingest({source:'twitch',accountId:'owner',externalId:`unique-${n}-${m}`,type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:start+m*60000,receivedAtMs:start+m*60000,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hi'}});
+   for(let m=0;m<2;m++)s.recordPoll(id,'owner',{startedAtMs:start+m*60000,completedAtMs:start+m*60000,status:'complete',userIds:['viewer','silent','bot'],userNames:{silent:'Silent',bot:'jeetbot'}});
+   s.endSession(id,start+1800000);
+  }
+  s.youtubeMessages('channel','chat',[{id:'linked-yt',snippet:{type:'textMessageEvent',publishedAt:new Date(at+60000).toISOString(),displayMessage:'hello'},authorDetails:{channelId:'yt-viewer',displayName:'Viewer'}}]);
+  s.ingest({source:'donationalerts',accountId:'da',externalId:'donor-only',type:'donation',actor:{externalId:'name:donor',displayName:'Donor'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'rest',payload:{currency:'RUB',amountMinor:'100'}});
+  const overview=s.channelOverview();assert.equal(overview.attendees,2);assert.equal(overview.streams,2);assert.equal(overview.durationMinutes,60);assert.equal(overview.messages,7);
+ }finally{s.close();}
+});
