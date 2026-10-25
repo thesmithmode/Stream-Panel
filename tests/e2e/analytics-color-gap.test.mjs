@@ -13,7 +13,7 @@ test('heatmap uses one scale across weekdays and missing viewer measurements kee
   await page.waitForFunction(()=>{const cell=prefix=>document.querySelector(`.hour-heatmap button[aria-label^="${prefix}"]`),a=cell('пн 17:00'),b=cell('ср 10:00');return a?.getAttribute('aria-label')?.includes('4,4')&&b&&getComputedStyle(a).backgroundColor!==getComputedStyle(b).backgroundColor;});
   const colors=await page.locator('.hour-heatmap').evaluate(el=>['пн 17:00','вт 4:00','ср 10:00'].map(prefix=>getComputedStyle(el.querySelector(`button[aria-label^="${prefix}"]`)).backgroundColor));
   assert.equal(colors[0],colors[1]);assert.notEqual(colors[0],colors[2]);
-  await page.getByRole('tab',{name:'Динамика',exact:true}).click();const chart=page.locator('.audience-growth');assert.equal(await chart.getByRole('button',{name:'О скользящем среднем',exact:true}).count(),0);
+  await page.getByRole('tab',{name:'Динамика',exact:true}).click();const chart=page.locator('.audience-growth');await chart.locator('g[data-missing="true"]').first().waitFor();assert.equal(await chart.getByRole('button',{name:'О скользящем среднем',exact:true}).count(),0);
   assert.ok(await chart.locator('g[data-missing="true"]').count()>0);assert.equal(await chart.locator('g[data-missing="true"] .daily-bar').count(),0);
   assert.equal(await chart.locator('.daily-bar').count(),8);assert.deepEqual(await chart.locator('svg > text[x="1"]').allTextContents(),['0','2','5']);assert.equal(await chart.locator('svg > path').count(),0);
   assert.match(await chart.locator('.growth-selection').textContent(),/4,4/);

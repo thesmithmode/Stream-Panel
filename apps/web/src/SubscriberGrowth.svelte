@@ -47,7 +47,7 @@
   void subscriberPeriod(subscriberScope(profile,days===7?30:7,day,timezone)).promise.catch(()=>{});
  }
  $effect(()=>{void profile;void days;void day;void timezone;if(!ready)return;untrack(()=>load());});
- onMount(()=>{ready=true;const refresh=()=>load(true);globalThis.window.addEventListener('sp:data-refresh',refresh);return()=>{revision++;globalThis.window.removeEventListener('sp:data-refresh',refresh);};});
+ onMount(()=>{ready=true;const refresh=()=>load(true);globalThis.window.addEventListener('sp:subscribers-refresh',refresh);return()=>{revision++;globalThis.window.removeEventListener('sp:subscribers-refresh',refresh);};});
 </script>
 <section class="panel chart-panel subscriber-growth" aria-busy={loading} style:--subscriber-color="var(--accent)">
  <header><div class="subscriber-heading"><h2>Подписчики</h2><Help id="subscriber-growth" label="О графике подписчиков" text="Левая фиолетовая шкала — Twitch, правая красная — YouTube. Шкалы независимы; сравнивайте значения по цвету площадки. Серые полосы — одновременные эфиры, цветные — эфир только одной площадки. Круг — Shorts, ромб — видео; публикации до первого замера YouTube скрыты. Между замерами показано последнее известное число; до первого замера история неизвестна. YouTube не сообщает точное время каждой подписки; с 1000 подписчиков счётчик округляется."/></div></header>

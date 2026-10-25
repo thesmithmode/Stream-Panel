@@ -1,5 +1,7 @@
 <script lang="ts">
-  import {preloadAnalytics,clearAnalyticsCache} from "./analytics-cache";
+  import {screenVersion,refreshInterval,type Changes} from './refresh-policy';
+  import {setServerVersions,bumpReadRevision} from './api';
+  import {clearAnalyticsCache} from "./analytics-cache";
   import Sheet from "./Sheet.svelte";
   import DonationTotal from "./DonationTotal.svelte";
   import StreamHistory from "./StreamHistory.svelte";
@@ -34,7 +36,7 @@
 
 
   let retryInitialization=()=>{};
-  let autoRefresh=$state(true),refreshSeconds=$state(60);
+  let autoRefresh=$state(true),refreshSeconds=$state(0);
   function toggleRefresh(){autoRefresh=!autoRefresh;if(autoRefresh)void action(async()=>{});}
   let moreOpen=$state(false);
   let tab = $state("overview"),
@@ -57,11 +59,9 @@
   let username = $state(""), password = $state(""), user = $state<any>(null);
   let profile = $state<Profile>(getProfile());
   const allowedProfiles = $derived<readonly Profile[]>(user?.allowedProfiles ?? ["ruslan", "gulnaz"]);
-  $effect(()=>{
-    if(!authorized){clearAnalyticsCache();return;}
-    const profiles=[profile,...allowedProfiles.filter(p=>p!==profile)];
-    void preloadAnalytics(profiles);
-  });
+  $effect(()=>{if(!authorized)clearAnalyticsCache();});
+  let changes=$state<Changes|null>(null);
+  const viewer=crypto.randomUUID();
   const accessibleProfile = (next: Profile): Profile => allowedProfiles.includes(next) ? next : allowedProfiles[0]!;
   let sessionPage=$state(0);
   let selectedSessions=$state<string[]>([]);
@@ -70,7 +70,7 @@
   let outdated=$state(false);
   let refreshTask:{epoch:number;task:Promise<void>;controller:AbortController}|null=null;
   function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
-  function clearScope(){selectedSessions=[];sessionPage=0;refreshTask?.controller.abort();busy=false;scopeReady=false;summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
+  function clearScope(){changes=null;selectedSessions=[];sessionPage=0;refreshTask?.controller.abort();busy=false;scopeReady=false;summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
   function restoreRoute(){const route=readRoute(location.search,getProfile()),selected=accessibleProfile(route.profile),denied=selected!==route.profile;epoch++;tab=denied&&route.view==='stream'?'sessions':route.view;sessionFilter=denied?'':route.session;personId=denied?'':route.person;setProfile(selected);profile=selected;clearScope();}
   function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}connectionLost=!navigator.onLine;if(document.hidden||!navigator.onLine)return;error=authMessage((e as Error).message);}
 
@@ -118,10 +118,23 @@
     const controller=new AbortController();
     const deadline=setTimeout(()=>controller.abort(new ConnectionError()),12000);
     const task=(async()=>{
-      const values=Object.fromEntries(await Promise.all(viewRequests(tab as View,sessionFilter).map(async([key,path])=>[key,key==='status'&&initialStatus?initialStatus:await api(key==='sessions'&&tab==='sessions'&&sessionPage>0?`sessions?offset=${sessionPage*100}`:path,undefined,controller.signal)])));
+      const next=await api<Changes>(`changes?${new URLSearchParams({view:tab,viewer,...(sessionFilter?{session:sessionFilter}:{})})}`,undefined,controller.signal);
       if(current!==epoch)return;
-      status=values.status;{setCsrf(status.csrf);user=status.user??user;outdated=isOutdatedRelease(status.release);}
-      sessions=values.sessions??sessions;selectedSessions=selectedSessions.filter(id=>sessions.some(s=>s.id===id));summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';window.dispatchEvent(new Event('sp:data-refresh'));
+      const previous=changes,changed=!previous||screenVersion(tab as View,sessionFilter,previous)!==screenVersion(tab as View,sessionFilter,next);
+      const connectionsChanged=!previous||previous.connectionRevision!==next.connectionRevision;
+      const subscribersChanged=!previous||previous.versions.subscribers!==next.versions.subscribers||previous.versions.follows!==next.versions.follows||previous.versions.activity!==next.versions.activity;
+      setServerVersions(profile,next);changes=next;
+      if(fresh&&scopeReady)bumpReadRevision(profile);
+      const requests=viewRequests(tab as View,sessionFilter).filter(([key])=>key==='status'?connectionsChanged||fresh||!scopeReady:changed||fresh||!scopeReady);
+      const values=Object.fromEntries(await Promise.all(requests.map(async([key,path])=>[key,key==='status'&&initialStatus?initialStatus:await api(key==='sessions'&&tab==='sessions'&&sessionPage>0?`sessions?offset=${sessionPage*100}`:path,undefined,controller.signal)])));
+      if(current!==epoch)return;
+      if(values.status){status=values.status;setCsrf(status.csrf);user=status.user??user;}
+      if(status)status={...status,sync:next.sync};
+      outdated=isOutdatedRelease(next.release);
+      sessions=values.sessions??sessions;selectedSessions=selectedSessions.filter(id=>sessions.some(s=>s.id===id));summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';
+      if(changed||fresh)window.dispatchEvent(new Event('sp:data-refresh'));
+      if(subscribersChanged||fresh)window.dispatchEvent(new Event('sp:subscribers-refresh'));
+      window.dispatchEvent(new Event('sp:clock-refresh'));
     })();refreshTask={epoch:current,task,controller};
     try{await task;}finally{clearTimeout(deadline);if(refreshTask?.task===task)refreshTask=null;}
   }
@@ -165,7 +178,7 @@
   onMount(() => {
     let alive=true,initializing=false,pendingInitialization=false,lastRefresh=Date.now();
     const update=()=>{if(!alive||!autoRefresh||busy||initializing||document.hidden||!navigator.onLine)return;if(!authorized){if(connectionLost&&!username&&!password)void initialize();return;}const current=epoch;void refresh().catch(e=>{if(current!==epoch||!alive)return;if(['LOGIN_REQUIRED','LOCAL_LOGIN_REQUIRED'].includes(e.message)){epoch++;authorized=false;sessions=[];clearScope();}reportFailure(e);});};
-    const timer=setInterval(()=>{if(Date.now()-lastRefresh>=refreshSeconds*1000){lastRefresh=Date.now();update();}},1000);
+    const timer=setInterval(()=>{if(Date.now()-lastRefresh>=refreshInterval(refreshSeconds,tab as View,sessionFilter,changes)*1000){lastRefresh=Date.now();update();}},1000);
     async function initialize() {
       if(initializing||busy){pendingInitialization=true;return;}pendingInitialization=false;initializing=true;
       restoreRoute();
@@ -287,7 +300,7 @@
  <nav class="more-links" aria-label="Дополнительные разделы">{#each [['connections','Интеграции'],['settings','Настройки']] as const as [key,label]}<button class:active={tab===key} aria-current={tab===key?'page':undefined} onclick={()=>navigate(key)}><Icon name={key}/>{label}<Icon name="arrow" size={18}/></button>{/each}</nav>
  <section class="more-refresh"><h3>Обновление данных</h3><div class="refresh-controls">
  <button class="refresh-toggle" aria-label={`Автообновление ${autoRefresh?'Вкл':'Выкл'}`} aria-pressed={autoRefresh} onclick={toggleRefresh}><span class="dot" class:off={!autoRefresh}></span>Автообновление <strong>{autoRefresh?'Вкл':'Выкл'}</strong></button>
- {#if autoRefresh}<label>Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={60}>1 мин</option><option value={300}>5 мин</option><option value={900}>15 мин</option></select></label>{/if}
+ {#if autoRefresh}<label>Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={0}>Авто · 1 / 5 мин</option><option value={60}>1 мин</option><option value={300}>5 мин</option><option value={900}>15 мин</option></select></label>{/if}
  <button class="outline manual-refresh" disabled={busy} onclick={()=>void action(async()=>{})}><Icon name="refresh" size={18}/><span>{busy?'Обновляем…':'Обновить данные'}</span></button>
  {#if connectionLost}<p role="status">Нет связи с сервером</p>{/if}
  </div></section>

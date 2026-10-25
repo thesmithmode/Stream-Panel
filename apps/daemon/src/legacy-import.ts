@@ -42,6 +42,8 @@ export async function migrateLegacy(source:string,destination:string) {
     for(const trigger of recreate)db.exec(`DROP TRIGGER "${trigger.name}"`);
     for(const object of auxiliary)db.exec(`DROP ${object.type} IF EXISTS "${object.name}"`);
     for(const table of actualTables.filter(name=>!name.startsWith('analytics_'))){
+     // This metadata is seeded by the schema; import the original counters verbatim.
+     if(table==='ui_revisions')db.exec('DELETE FROM p_ruslan_ui_revisions');
      counts[table]=(db.prepare(`SELECT count(*) AS n FROM "${table}"`).get() as {n:number}).n;
      db.exec(`INSERT INTO "p_ruslan_${table}" SELECT * FROM "${table}"`);
      const actual=(db.prepare(`SELECT count(*) AS n FROM "p_ruslan_${table}"`).get() as {n:number}).n;

@@ -4,6 +4,20 @@ import {requestJson} from "./request";
 let csrf = "";
 const revisions=new Map<string,number>();
 export const getDataRevision=(profile:string)=>revisions.get(profile)??0;
+const serverVersions=new Map<string,Record<string,string>>();
+export const getServerRevision=(profile:string,scope='report')=>serverVersions.get(profile)?.[scope]??'';
+export const bumpReadRevision=(profile:string)=>revisions.set(profile,getDataRevision(profile)+1);
+export function setServerVersions(profile:string,change:{versions:Record<string,number>;stream:{id:string;revision:number;endedAt:number|null}|null;configRevision?:string;dataEpoch?:string;checkedAt?:number;activeStream?:string|null;requestedSession?:string|null}){
+ const config=[change.configRevision,change.dataEpoch],tick=change.activeStream?Math.floor((change.checkedAt??0)/60000):null;
+ const v=change.versions,values=serverVersions.get(profile)??{};
+ values.report=JSON.stringify([v.activity,v.people,v.donations,v.follows,config,tick]);
+ values.overview=JSON.stringify([v.activity,v.people,v.donations,config,tick]);
+ values.subscribers=JSON.stringify([v.activity,v.subscribers,v.follows,config,tick]);
+ if(change.stream){const value=JSON.stringify([change.stream,v.people,v.donations,v.follows,config,change.activeStream===change.stream.id?tick:null]);values['stream:'+change.stream.id]=value;if(change.requestedSession)values['stream:'+change.requestedSession]=value;}
+ else if(change.requestedSession)values['stream:'+change.requestedSession]=JSON.stringify([null,config]);
+ serverVersions.set(profile,values);
+}
+
 export type { Profile } from "./profile";
 const selection = createProfileSelection(() => localStorage);
 export const getProfile = selection.get;

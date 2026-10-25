@@ -74,7 +74,7 @@ test('combined timeline retries failed loads and refreshes both platform counts'
  try{
   a.configuration.value.youtubeAccountId='yt';const at=Date.now()-60000;await a.db.call('youtubeSnapshot','yt','channel',{statistics:{subscriberCount:'29'}},at);
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(8000);await page.route('**/api/v1/analytics/subscribers?*',route=>route.fulfill({status:503,json:{error:'UNAVAILABLE'}}));await goto(page,a.bootstrap());await page.getByRole('button',{name:'Аналитика',exact:true}).click();const card=page.locator('.subscriber-growth');await card.getByRole('button',{name:'Повторить',exact:true}).waitFor();await page.unroute('**/api/v1/analytics/subscribers?*');await card.getByRole('button',{name:'Повторить',exact:true}).click();await card.locator('[data-source=youtube] strong').filter({hasText:'29'}).waitFor();
-  await a.db.call('youtubeSnapshot','yt','channel',{statistics:{subscriberCount:'30'}},at+30000);await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));await card.locator('[data-source=youtube] strong').filter({hasText:'30'}).waitFor();await card.getByRole('button',{name:'О графике подписчиков'}).click();await card.getByRole('dialog').waitFor();await page.keyboard.press('Escape');await saveCoverage(page);
+  await a.db.call('youtubeSnapshot','yt','channel',{statistics:{subscriberCount:'30'}},at+30000);await page.evaluate(()=>window.dispatchEvent(new Event('sp:subscribers-refresh')));await card.locator('[data-source=youtube] strong').filter({hasText:'30'}).waitFor();await card.getByRole('button',{name:'О графике подписчиков'}).click();await card.getByRole('dialog').waitFor();await page.keyboard.press('Escape');await saveCoverage(page);
  }finally{await browser?.close();await a.close();}
 });
 
@@ -106,7 +106,7 @@ test('periods preload and cache without clearing, rescaling or shifting the prev
   await card.getByRole('button',{name:'30 дней',exact:true}).click();assert.equal(await card.getAttribute('aria-busy'),'false');assert.equal(await card.locator('.subscriber-date-tick').count(),7);
   const monthly=await snapshot();assert.notEqual(monthly.plot,weekly.plot);assert.equal(monthly.height,weekly.height);
   await card.getByRole('button',{name:'7 дней',exact:true}).click();assert.deepEqual(await snapshot(),weekly);assert.equal(requested,4,'cached periods switch without additional network requests');
-  failRefresh=true;await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));await card.getByRole('alert').waitFor();assert.deepEqual(await snapshot(),weekly,'refresh failure keeps the previous graph and layout');
+  failRefresh=true;await page.evaluate(()=>window.dispatchEvent(new Event('sp:subscribers-refresh')));await card.getByRole('alert').waitFor();assert.deepEqual(await snapshot(),weekly,'refresh failure keeps the previous graph and layout');
   failRefresh=false;await card.getByRole('button',{name:'Повторить',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.subscriber-growth')?.getAttribute('aria-busy')==='false');assert.equal(await card.getByRole('alert').count(),0);
   await saveCoverage(page);
  }finally{release();await browser?.close();await a.close();}
