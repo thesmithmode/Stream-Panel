@@ -76,13 +76,26 @@
 </div>
 
 <style>
-  .unknown-swatch{background:#9b92b5}.trend-chart rect.unknown-segment{fill:#9b92b5}.legend .unknown-swatch{display:inline-block;width:10px;height:10px;border-radius:2px}
-  .chart-pages{display:flex;align-items:center;gap:12px;justify-content:center;flex-wrap:wrap;font-size:12px;}
-  .chart-caption{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:8px;}
-  .trend-chart{width:100%;min-width:0;}
+  .trend-chart{position:relative;width:100%;min-width:0;padding:16px 20px;}
+  :global(.stream-page) .trend-chart{padding:4px 0 12px;}
   .trend-plot{width:100%;min-width:0;}
-  svg{overflow:hidden;height:auto;}
+  svg{display:block;width:100%;min-width:0;max-height:280px;overflow:hidden;height:auto;}
+  .total-segment{fill:#5fc4aa;}
+  .total-segment.unknown{fill:#606d7d;}
+  .total-segment.estimated{fill:#ac89ec;}
+  .regular-segment{fill:#f0c44e;}
+  .follower-segment{fill:#5a9ee6;}
+  .unknown-segment{fill:#9b92b5;}
   .chart-bar{cursor:pointer;}
   .chart-bar:focus{outline:none;}
-  .trend-chart rect.bar-highlight{fill:none;stroke:var(--text);stroke-width:2;vector-effect:non-scaling-stroke;pointer-events:none;}
+  .bar-highlight{fill:none;stroke:var(--text);stroke-width:2;vector-effect:non-scaling-stroke;pointer-events:none;}
+  .chart-legend{margin:0 0 12px;}
+  .regular-swatch{background:#f0c44e;}
+  .other-swatch{background:#5fc4aa;}
+  .follower-swatch{background:#5a9ee6;display:inline-block;width:10px;height:10px;border-radius:2px;}
+  .unknown-swatch{background:#9b92b5;display:inline-block;width:10px;height:10px;border-radius:2px;}
+  .chart-pages{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;justify-content:center;font-size:12px;}
+  .chart-pages>span{text-align:center;overflow-wrap:anywhere;}
+  .chart-caption{position:absolute;right:0;top:0;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin:0;}
+  @media(max-width:720px){.chart-pages>button{font-size:12px;padding:8px;min-height:44px;}}
 </style>

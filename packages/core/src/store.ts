@@ -1,3 +1,4 @@
+import {ChannelRecords} from './channel-records.js';
 import {SubscriberHistory,type SubscriberQuery,type Publication} from './subscriber-history.js';
 import {SessionGroups,logicalReadDatabase} from "./session-groups.js";
 import {AnalyticsHistory} from "./analytics-history.js";
@@ -34,6 +35,7 @@ import { type PresencePoll } from "./presence.js";
 
 export class StreamStore {
   private history:AnalyticsHistory;
+  private records:ChannelRecords;
   private readonly reads:Database.Database;
   private readonly groups:SessionGroups;
   private readonly db: Database.Database;
@@ -56,6 +58,7 @@ export class StreamStore {
     try {
       migrateDatabase(this.db);
     this.history=new AnalyticsHistory(this.reads);
+    this.records=new ChannelRecords(this.reads,(id,bots)=>this.streams.sessions(id,0,1,bots)[0]);
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
       this.db.transaction(() => {this.collapseDuplicateDaDonors();this.reconcileNicknameLinks();}).immediate();
     } catch (error) {
@@ -301,7 +304,7 @@ export class StreamStore {
     const links=this.reads.prepare('SELECT session_id,started_at_ms,ended_at_ms FROM platform_streams').all() as {session_id:string;started_at_ms:number;ended_at_ms:number|null}[];
     const windowsBySession=new Map<string,typeof links>();for(const link of links){const list=windowsBySession.get(link.session_id)??[];list.push(link);windowsBySession.set(link.session_id,list);}
     const now=Date.now(),totals30=donationTotals(this.reads,now-30*86400000,now,excluded);
-    return {totals30,streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+windowsFromLinks(windowsBySession.get(s.id)??[],s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees,messages:summary.messages,totals:summary.totals,donations:summary.donations};
+    return {records:this.records.read(excluded),totals30,streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+windowsFromLinks(windowsBySession.get(s.id)??[],s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees,messages:summary.messages,totals:summary.totals,donations:summary.donations};
   }
   analytics(options: AnalyticsOptions):ReturnType<AnalyticsHistory['query']> {
     return this.history.query(options.sessionId?{...options,sessionId:this.groups.root(options.sessionId)}:options);

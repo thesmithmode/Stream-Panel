@@ -20,13 +20,3 @@ export function dailyMetrics(streams:StreamMetric[],timezone:string,platform:Vie
  }
  return [...groups.values()].map(row=>({...row,online:row.onlineMinutes?row.onlineTotal/row.onlineMinutes:null,active:row.activeMs?row.activeTotal*3600000/row.activeMs:null}));
 }
-/** A tie retains the first achievement; an unmeasured value never becomes a record. */
-export function streamRecords(streams:StreamMetric[]){
- const sorted=[...streams].sort((a,b)=>a.startedAt-b.startedAt||(a.id??'').localeCompare(b.id??''));
- const best=(read:(stream:StreamMetric)=>number|null|undefined)=>{
-  let result:{value:number;at:number}|null=null;
-  for(const stream of sorted){const value=read(stream);if(value!=null&&Number.isFinite(value)&&(!result||value>result.value))result={value,at:stream.startedAt};}
-  return result;
- };
- return {online:best(s=>onlineMetric(s)?.mean),messages:best(s=>s.messages)};
-}

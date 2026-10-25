@@ -3,8 +3,7 @@ import type { ConfigurationPort } from './config.js';
 import type { StorePort } from './store-contract.js';
 import { object, string } from './provider-values.js';
 import { analyticsSettings } from './analytics-settings.js';
-import { randomUUID } from 'node:crypto';
-type Store = StorePort<'subscriberHistory' | 'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteManualSession' | 'endSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'startSession' | 'streamMetadata' | 'summary'>;
+type Store = StorePort<'subscriberHistory' | 'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteManualSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'streamMetadata' | 'summary'>;
 export function registerStreamsRoutes(app: FastifyInstance, db: Store, configuration: ConfigurationPort) {
     app.get('/api/v1/events/recent',request=>{const q=object(request.query);return db.call('recentEvents',Number(q.offset??0),Number(q.limit??100),{...(string(q.session)?{session:string(q.session)}:{}),...(string(q.person)?{person:string(q.person)}:{}),messagesOnly:string(q.messages)==='1'});});
     app.get('/api/v1/analytics/subscribers',request=>{
@@ -42,23 +41,6 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
     app.get("/api/v1/sessions/:id/metadata", async (request) => db.call('streamMetadata', string(object(request.params).id)));
     app.post('/api/v1/sessions/merge',async request=>({id:await db.call('mergeSessions',object(request.body).sessionIds as string[])}));
     app.post('/api/v1/sessions/:id/unmerge',async request=>{await db.call('unmergeSessions',string(object(request.params).id));return {ok:true};});
-    app.post("/api/v1/sessions/start", async () => {
-        const existing = await db.call("sessions");
-        if (existing.some((s) => s.ended_at_ms === null))
-            throw new Error("SESSION_ALREADY_OPEN");
-        return {
-            id: await db.call("startSession", configuration.value.twitch?.userId || "local", `manual-${randomUUID()}`, Date.now(), "manual", Date.now()),
-        };
-    });
-    app.post("/api/v1/sessions/:id/stop", async (request) => {
-        const id = string(object(request.params).id), session = (await db.call("sessions")).find((s) => s.id === id);
-        if (!session)
-            throw new Error("SESSION_NOT_FOUND");
-        if (session.kind !== "manual")
-            throw new Error("PLATFORM_SESSION_MANAGED_AUTOMATICALLY");
-        await db.call("endSession", id, Date.now(), "manual");
-        return { ok: true };
-    });
     app.post("/api/v1/sessions/:id/delete", async (request) => {
         await db.call("deleteManualSession", string(object(request.params).id), Date.now());
         return { ok: true };

@@ -21,8 +21,6 @@ export function registerRouteSchemas(app: FastifyInstance) {
         "/api/v1/persons/:id/notes/:noteId/delete": body({ revision }, ["revision"]),
         "/api/v1/sessions/merge": body({sessionIds:{type:'array',items:text,minItems:2,maxItems:100,uniqueItems:true}},['sessionIds']),
         "/api/v1/sessions/:id/unmerge": body(),
-        "/api/v1/sessions/start": body(),
-        "/api/v1/sessions/:id/stop": body(),
         "/api/v1/sessions/:id/delete": body(),
         "/api/v1/persons/:id/rename": body({ name: { type: "string", minLength: 1, maxLength: 200 } }, ["name"]),
         "/api/v1/persons/merge": body({

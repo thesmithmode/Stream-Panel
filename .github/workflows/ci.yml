@@ -1,6 +1,7 @@
 name: Quality gate
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 concurrency:
@@ -9,8 +10,32 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  build:
+    name: Build once
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Archive exact build for tests and release
+        run: |
+          mkdir -p artifacts
+          tar -czf artifacts/build.tar.gz dist apps/web/dist
+          printf '%s\n' "$GITHUB_SHA" > artifacts/build.sha
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compiled-build
+          path: artifacts/build.*
+          retention-days: 1
   segment:
     name: Tests / ${{ matrix.segment }}
+    needs: build
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     strategy:
@@ -29,7 +54,14 @@ jobs:
         if: matrix.segment == 'e2e'
       - run: pnpm check:web
         if: matrix.segment == 'unit'
-      - run: pnpm build
+      - uses: actions/download-artifact@v4
+        with:
+          name: compiled-build
+          path: artifacts
+      - name: Restore exact build
+        run: |
+          test "$(cat artifacts/build.sha)" = "$GITHUB_SHA"
+          tar -xzf artifacts/build.tar.gz
       - run: node scripts/test-with-coverage.mjs ${{ matrix.segment }}
       - uses: actions/upload-artifact@v4
         if: always()
@@ -47,6 +79,7 @@ jobs:
       - run: bash ops/test-bootstrap-ci.sh
   server-bundle:
     name: Linux server bundle
+    needs: build
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
@@ -57,7 +90,14 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
+      - uses: actions/download-artifact@v4
+        with:
+          name: compiled-build
+          path: artifacts
+      - name: Restore exact build
+        run: |
+          test "$(cat artifacts/build.sha)" = "$GITHUB_SHA"
+          tar -xzf artifacts/build.tar.gz
       - run: pnpm prune --prod
       - run: node scripts/server-bundle.mjs
         env:

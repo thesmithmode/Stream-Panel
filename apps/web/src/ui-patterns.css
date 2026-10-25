@@ -1,0 +1,28 @@
+/* Shared controls and chart panels. Component-specific geometry stays with its component. */
+.period-chips{display:flex;flex:1;background:transparent;border:1px solid var(--border);border-radius:9px;overflow:hidden}.period-chips button{flex:1;border:0;border-radius:0;min-height:44px;padding:8px;font-size:14px;background:transparent;color:var(--muted);white-space:nowrap}.period-chips button.active{background:var(--accent);color:#191323;font-weight:600}
+@media(max-width:720px){.period-chips button{font-size:13px;padding:8px 5px}}
+@media(max-width:360px){.period-chips button{font-size:12px}}
+
+.stream-chart-toolbar{display:flex;align-items:center;gap:12px;margin:12px 0 4px;min-width:0;}
+.stream-chart-toolbar>select{flex:1;min-width:0;width:100%;max-width:320px;min-height:44px;font-size:13px;border-radius:9px;}
+.stream-chart-toolbar>.period-chips{flex:0 0 168px;}
+.stream-chart-toolbar .period-chips button{font-size:13px;padding:8px 6px;}
+@media(max-width:360px){.stream-chart-toolbar{gap:8px}.stream-chart-toolbar>.period-chips{flex-basis:150px}.stream-chart-toolbar>select{font-size:13px;padding-inline:8px}.stream-chart-toolbar .period-chips button{font-size:12px;padding-inline:4px}}
+
+.stream-page .stream-chart-toolbar{margin-top:4px;}
+
+/* One segmented-control treatment, derived from the existing audience controls. */
+.category-comparison>.period-chips{margin:0 16px 12px;padding:3px;gap:4px}
+.category-comparison>.period-chips button{border-radius:6px;font-size:13px;font-weight:400}
+.category-comparison>.period-chips button.active{background:var(--surface);color:var(--accent)}
+
+/* Chart controls share the stream viewer/chat toolbar: selectors for metrics,
+   segmented buttons for periods, disclosure for advanced settings. */
+.chart-panel>header{padding:12px 16px;align-items:center}
+.chart-panel select{min-height:44px;font-size:13px;border-radius:9px}
+.chart-panel .control-grid{gap:12px}
+.chart-panel .control-grid label{font-size:12px}
+.chart-panel .period-chips,.subscriber-switch{padding:3px;gap:4px;border:1px solid var(--border);border-radius:9px;background:transparent}
+.chart-panel .period-chips button,.subscriber-switch button{min-height:40px;font-size:13px;font-weight:400;border:0;border-radius:6px;background:transparent;color:var(--muted)}
+.chart-panel .period-chips button.active,.subscriber-switch button.active{background:var(--surface);color:var(--accent)}
+.chart-panel strong,.analytics-table td,.compact-audience-table td{font-variant-numeric:tabular-nums}

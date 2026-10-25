@@ -158,26 +158,26 @@ test("local API requires bootstrap; rejects cross-site reads, Host rebinding, CS
     assert.equal(rebinding.statusCode, 403);
     const csrfMissing = await application.app.inject({
       method: "POST",
-      url: "/api/v1/sessions/start",
+      url: "/api/v1/settings",
       headers: { ...headers, cookie },
       payload: {},
     });
     assert.equal(csrfMissing.statusCode, 403);
     const authorized = await application.app.inject({
       method: "POST",
-      url: "/api/v1/sessions/start",
+      url: "/api/v1/settings",
       headers: { ...headers, cookie, "x-csrf-token": csrf },
       payload: {},
     });
     assert.equal(authorized.statusCode, 200);
-    const sessionId = authorized.json().id;
+    const sessionId=await application.db.call('observePlatformStream','twitch','channel','automatic-fixture',Date.now(),Date.now(),null,'Automatic');
     const duplicate = await application.app.inject({
       method: "POST",
       url: "/api/v1/sessions/start",
       headers: { ...headers, cookie, "x-csrf-token": csrf },
       payload: {},
     });
-    assert.equal(duplicate.statusCode, 409, duplicate.body);
+    assert.equal(duplicate.statusCode, 404, duplicate.body);
     await application.db.call("ingest", {
       ...normalizeTwitch(chatEnvelope, "channel")!,
       occurredAtMs: Date.now(),

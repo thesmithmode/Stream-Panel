@@ -11,11 +11,16 @@ test('overview retains totals during network loss, reports real read errors and 
   const restored=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/overview'&&r.status()===200);await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,get:()=>false});document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('online'));});await restored;assert.equal(await page.getByRole('alert').count(),0);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });
-test('record loading can fail and retry without hiding overview totals',{timeout:45000},async()=>{
+test('overview records load and refresh independently of unavailable analytics reports',{timeout:45000},async()=>{
  const app=await application();let browser;try{
   await seed(app);browser=await launchBrowser();const page=await browser.newPage();page.setDefaultTimeout(8000);
-  await page.route('**/api/v1/analytics?*',route=>route.fulfill({status:500,json:{error:'RECORDS_UNAVAILABLE'}}));await goto(page,app.bootstrap());
-  await page.getByRole('button',{name:'Повторить загрузку рекордов',exact:true}).waitFor();assert.equal(await page.locator('.channel-metrics').getByText('Сообщения',{exact:true}).locator('..').locator('strong').textContent(),'8');
-  await page.unroute('**/api/v1/analytics?*');await page.getByRole('button',{name:'Повторить загрузку рекордов',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.channel-records')?.textContent?.includes('Не удалось загрузить'));assert.equal(await page.locator('.channel-records .metric').count(),2);await saveCoverage(page);
+  await page.route('**/api/v1/analytics?*',route=>route.fulfill({status:500,json:{error:'ANALYTICS_UNAVAILABLE'}}));await goto(page,app.bootstrap());
+  const totals=page.locator('.channel-metrics'),records=page.locator('.channel-records');await totals.waitFor();
+  assert.equal(await totals.getByText('Сообщения',{exact:true}).locator('..').locator('strong').textContent(),'8');
+  assert.equal(await records.getByText('Сообщения',{exact:true}).locator('..').locator('strong').textContent(),'8');
+  assert.equal(await page.getByRole('alert').count(),0);
+  await page.route('**/api/v1/overview',async route=>{const response=await route.fetch(),data=await response.json();await route.fulfill({response,json:{...data,records:{...data.records,messages:{value:9,at:Date.now()}}}});});
+  await refreshData(page);await records.getByText('Сообщения',{exact:true}).locator('..').getByText('9',{exact:true}).waitFor();
+  assert.equal(await totals.getByText('Сообщения',{exact:true}).locator('..').locator('strong').textContent(),'8');await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });
