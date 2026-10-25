@@ -66,7 +66,7 @@ test("worker RPC rejects unsupported operations and oversubscription but remains
     // @ts-expect-error Exercise rejection of an untrusted runtime operation.
     await assert.rejects(db.call("not-an-operation"), /UNKNOWN_OPERATION/);
     const results = await Promise.allSettled(
-      Array.from({ length: 10002 }, (_,index) => db.call("persons",String(index))),
+      Array.from({ length: 10002 }, () => db.call("changes")),
     );
     assert.equal(results.filter((x) => x.status === "rejected").length, 2);
     for (const x of results)

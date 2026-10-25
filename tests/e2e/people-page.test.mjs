@@ -30,7 +30,12 @@ test('people browse beyond 500 records, preserve a selected card and search acro
   await page.getByLabel('Страницы людей').getByText('51–100 из 501',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Предыдущие люди'}).click();
   await page.getByLabel('Страницы людей').getByText('1–50 из 501',{exact:true}).waitFor();
-  await assertUiLayout(page,{label:'people pagination desktop'});
+  for(const height of [720,1000]){
+   await page.setViewportSize({width:1280,height});await page.locator('.people-list').evaluate(el=>el.scrollTop=el.scrollHeight);
+   const boxes=await page.evaluate(()=>{const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return {top:r.top,bottom:r.bottom}};return {last:rect('.person-row:last-child'),list:rect('.people-list'),pages:rect('.people-pages'),height:innerHeight}});
+   assert.ok(boxes.last.bottom<=boxes.list.bottom+1);assert.ok(boxes.pages.bottom<=boxes.height+1);assert.ok(boxes.pages.top>=boxes.list.bottom-1);await assertUiLayout(page);
+  }
+  await page.screenshot({path:'/tmp/people-directory-1280.png'});
   await page.setViewportSize({width:390,height:844});
   await assertUiLayout(page,{label:'people pagination mobile'});
   assert.equal(await page.getByRole('region',{name:'Список людей'}).isVisible(),false);

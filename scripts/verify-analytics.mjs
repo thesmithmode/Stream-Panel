@@ -36,6 +36,11 @@ try{
    if(JSON.stringify(first.report.summary)!==JSON.stringify(repeat.report.summary))throw Error('WARM_CHANGED_SUMMARY');
    const compact=read({...options,clockCompact:true,clockDay:'all',clockResolution:15});
    if(JSON.stringify(compact.report.summary)!==JSON.stringify(repeat.report.summary))throw Error('COMPACT_CHANGED_SUMMARY');
+   const audience=read({...options,panel:'audience',attendanceOnly:true}),dynamics=read({...options,panel:'dynamics',attendanceOnly:true});
+   const attendeeCount=audience.report.audiencePage?.total??audience.report.audience.length;
+   if(attendeeCount!==audience.report.summary.attendees)throw Error('ATTENDANCE_COUNT_MISMATCH');
+   if(JSON.stringify(audience.report.summary)!==JSON.stringify(repeat.report.summary)||JSON.stringify(dynamics.report.summary)!==JSON.stringify(repeat.report.summary))throw Error('PROJECTION_CHANGED_SUMMARY');
+   console.log(JSON.stringify({screenProbe:true,profile,attendees:attendeeCount,fullBytes:Buffer.byteLength(JSON.stringify(repeat.report)),dynamicsBytes:Buffer.byteLength(JSON.stringify(dynamics.report)),audienceBytes:Buffer.byteLength(JSON.stringify(audience.report)),metadataBytes:Buffer.byteLength(JSON.stringify(store.changes()))}));
    const periods=[];
    for(const days of [7,30]){
     const query={...options,clockCompact:true,clockDay:'all',clockResolution:15,fromMs:options.toMs-days*86400000},cold=read(query),hot=read(query),shifted=read({...query,fromMs:query.fromMs+60000,toMs:query.toMs+60000});

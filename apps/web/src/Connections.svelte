@@ -1,6 +1,7 @@
 <script lang="ts">
   import {confirmAction} from "./confirmation.svelte";
   import { api } from "./api";
+  import {dateTime} from './format';
   import { statusLabel } from "./labels";
   import Credentials from './Credentials.svelte';
   import IntegrationGuide from './IntegrationGuide.svelte';
@@ -87,6 +88,9 @@
   }
 </script>
 
+{#snippet syncInfo(provider:string)}
+  <div class="integration-sync"><span>Синхронизация</span><time>{status.sync?.[provider]?.lastSyncAt?dateTime(status.sync[provider].lastSyncAt):'Пока не завершена'}</time>{#if status.sync?.[provider]?.lastFollowersAt}<span>Подписчики</span><time>{dateTime(status.sync[provider].lastFollowersAt)}</time>{/if}</div>
+{/snippet}
 <div class="settings-grid">
   {#if status.user?.canViewCredentials ?? !status.serverMode}<Credentials/>{/if}
   <section class="panel settings">
@@ -98,6 +102,7 @@
       >
     </header>
     <div class="settings-body">
+      {@render syncInfo('twitch')}
       {#if twitchError}<p role="alert" class="notice error">
           Войди снова в Twitch — авторизация сброшена.
         </p>{/if}
@@ -175,6 +180,7 @@
       >
     </header>
     <div class="settings-body">
+      {@render syncInfo('donationalerts')}
       {#if daLive}
         <p class="small">
           {#if status.donationalerts.account}<strong
@@ -270,6 +276,7 @@
   <section class="panel settings">
     <header><h2>YouTube</h2><IntegrationGuide provider="YouTube" redirect={status.config.youtubeRedirectUri??''}/><span class="state" class:online={status.youtube?.state === "connected"}>{statusLabel(status.youtube?.state ?? "disconnected")}</span></header>
     <div class="settings-body">
+      {@render syncInfo('youtube')}
       {#if status.youtube?.state!=='connected'}<p class="small muted">{youtubeDetail}</p>{/if}
       {#if status.youtube?.state==='connected'}<YouTube/>{/if}
       {#if ["connected", "connecting", "error"].includes(status.youtube?.state)}
@@ -302,5 +309,6 @@
   </p>{/if}
 
 <style>
+.integration-sync{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;font-size:12px;margin-bottom:12px}.integration-sync>span{color:var(--muted)}.integration-sync time{text-align:right;font-variant-numeric:tabular-nums}
  :global(.settings>header){flex-wrap:wrap;gap:12px;}
 </style>

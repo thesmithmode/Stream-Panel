@@ -3,6 +3,7 @@ import type {StreamStore} from '../../../packages/core/src/store.js';
 /** One allowlist defines worker operations, client types and cache policy. */
 export const storeOperations={
   subscriberHistory:"read",
+  changes:"read",
   youtubePublications:"write",
   channelOverview:"cached",
   analytics:"cached",

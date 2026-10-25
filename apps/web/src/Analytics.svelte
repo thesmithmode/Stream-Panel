@@ -31,12 +31,12 @@
   let heatCalculation=$state("average"),selectedHour=$state<{day:string;hour:number}|null>(null);
   let period=$state<number|'all'|'custom'>('all');
   let detailData=$state<any>(null),detailBusy=$state(false);
-  const reportScope=$derived(JSON.stringify([profile,period,period==='custom'?from:'',period==='custom'?to:'',source,category,timezone]));
-  let loadedScope=$state('');
+  const reportScope=$derived(JSON.stringify([profile,section,period,period==='custom'?from:'',period==='custom'?to:'',source,category,timezone]));
+  let loadedScope=$state(''),loadedPanel=$state('');
   let refreshController:AbortController|undefined;
   let requestId=0, mounted=$state(false);
   $effect(()=>{
-    const filters=[mounted,period,from,to,source,category,timezone].join("|");
+    const filters=[mounted,section,period,from,to,source,category,timezone].join("|");
     void filters;
     if(!mounted)return;
     busy=true;error="";
@@ -51,7 +51,7 @@
   const visible=$derived(data?.audiencePage?(pagedAudience?.audience??data.audience):(data?.audience??[]).filter((e:any)=>(!view.coreOnly||e.core)&&e.name.toLowerCase().includes(search.toLowerCase())).sort((a:any,b:any)=>view.sort==="sessions"?(b.sessionCount??b.sessionIds.length)-(a.sessionCount??a.sessionIds.length):(b[view.sort]??0)-(a[view.sort]??0)));
   async function reportPage(extra:Record<string,string|number>,signal?:AbortSignal,endpoint='analytics',filters=data?.filters){
     if(!filters)throw new Error('Отчёт ещё не загружен');
-    const q=new URLSearchParams(Object.entries({...filters,from:filters.fromMs,to:filters.toMs,mode:'summary',insights:'1',...extra}).map(([key,value])=>[key,String(value)]));
+    const q=new URLSearchParams(Object.entries({...filters,from:filters.fromMs,to:filters.toMs,mode:'summary',insights:'1',attendanceOnly:'1',...(endpoint==='analytics/audience'?{panel:'audience'}:{}),...extra}).map(([key,value])=>[key,String(value)]));
     return analyticsReport(signal=>api(`${endpoint}?${q}`,undefined,signal),signal??new AbortController().signal);
   }
   const visitorLoader=$derived.by(()=>{const filters=data?.filters;return (params:Record<string,string|number>,signal:AbortSignal)=>reportPage(params,signal,'analytics/clock',filters);});
@@ -120,11 +120,11 @@
       // search or core-only after an auto-refresh cannot hide participants.
       const offset=0,term='',sort=view.sort,core=false;
       const audienceQuery=JSON.stringify([scope,offset,term,sort,core]);
-      const q=summaryQuery(fromMs,toMs,source,category,timezone,view.resolution,sort);
+      const panel=section;const q=summaryQuery(fromMs,toMs,source,category,timezone,view.resolution,sort);q.set('panel',panel);q.set('attendanceOnly','1');
       const cached=cachedAnalytics(profile,q);
-      if(cached&&id===requestId){data=cached;loadedScope=scope;loadedAudienceQuery=audienceQuery;}
+      if(cached&&id===requestId){data=cached;loadedPanel=panel;loadedScope=scope;loadedAudienceQuery=audienceQuery;}
       const result=await loadAnalytics(profile,q,force,signal);
-      if(id===requestId){const previousScope=loadedScope;if(result.filters&&(result.filters.category!==category||result.filters.source!==source||result.filters.timezone!==timezone))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');loadedScope=scope;loadedAudienceQuery=audienceQuery;
+      if(id===requestId){const previousScope=loadedScope;if(result.filters&&(result.filters.category!==category||result.filters.source!==source||result.filters.timezone!==timezone))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');loadedPanel=panel;loadedScope=scope;loadedAudienceQuery=audienceQuery;
         if(JSON.stringify([scope,audienceOffset,search,view.sort,view.coreOnly])===audienceQuery)pagedAudience=null;
         if(JSON.stringify(data)!==JSON.stringify(result))data=Object.fromEntries(Object.entries(result).map(([key,value])=>[key,JSON.stringify(data?.[key])===JSON.stringify(value)?data[key]:value]));
         if(scope!==previousScope){selected=null;}}
@@ -135,7 +135,7 @@
     try{const saved=JSON.parse(localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved?.timezone)timezone=saved.timezone;}catch{/* private browser may deny storage */}
     view=loadAnalyticsView(()=>localStorage,profile);
     const lifetime=new AbortController();
-    mounted=true;const update=()=>{if(!document.hidden&&navigator.onLine&&!busy){if(liveEnd){const now=Date.now();if(typeof period==='number')from=localInput(now-period*86400000);const next=localInput(now);if(next===to)void refresh(true,lifetime.signal);else to=next;}else void refresh(true,lifetime.signal);}};window.addEventListener('sp:data-refresh',update);return ()=>{lifetime.abort();requestId++;window.removeEventListener('sp:data-refresh',update);};
+    mounted=true;const update=()=>{if(!document.hidden&&navigator.onLine&&!busy){if(liveEnd){const now=Date.now();if(typeof period==='number')from=localInput(now-period*86400000);const next=localInput(now);if(next===to)void refresh(true,lifetime.signal);else to=next;}else void refresh(true,lifetime.signal);}};const clock=()=>{if(period!=='all')update();};window.addEventListener('sp:clock-refresh',clock);window.addEventListener('sp:data-refresh',update);return ()=>{lifetime.abort();requestId++;window.removeEventListener('sp:data-refresh',update);window.removeEventListener('sp:clock-refresh',clock);};
   });
 </script>
 {#snippet categoryFilter(_label:string)}{/snippet}
@@ -172,10 +172,10 @@
  </div></details>
  <div class="filter-actions"><button class="outline" onclick={()=>{category='';source='all';preset('all');}}>Сбросить фильтры</button><button class="primary" onclick={()=>filtersOpen=false}>Готово</button></div>
 </div></Sheet>
-{#if busy&&!data}<p class="small muted" role="status">Обновляем аналитику…</p>{/if}
+{#if busy&&(!data||loadedPanel!==section)}<p class="small muted" role="status">Обновляем аналитику…</p>{/if}
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 <div id="analytics-tabpanel" role="tabpanel" aria-label={section==='dynamics'?'Динамика':section==='time'?'Время':'Аудитория'}>
-{#if data}
+{#if data&&loadedPanel===section}
  <div class="analytics-results" aria-busy={busy}>
   {#if section==='dynamics'}
 
@@ -201,12 +201,12 @@
   </div>
   {/if}
   {#if section==='audience'}{#if data.composition}<TimePatterns {categoryFilter} {data} section="audience"/>{/if}
-  {#if view.audience}<section class="panel"><header><h2>Возвращаемость участников</h2><Help id="analytics-audience" label="О минутах в чате" text="Наблюдаемые минуты Twitch учитывают молчавших участников и исключают неизвестные промежутки. Оценка YouTube показана отдельно. Выберите сортировку по минутам или сообщениям; нажмите имя для подробностей."/><span>{data.audiencePage?(pagedAudience?.audiencePage?.total??data.audiencePage.total):visible.length} профилей</span></header>
-    <p class="small regular-summary">Ядро аудитории: <strong>{data.summary.regulars??0} из {data.summary.entities??0} ({data.summary.regularShare==null?"нет данных":pct(data.summary.regularShare)})</strong></p>
+  {#if view.audience}<section class="panel returning-audience"><header><h2>Возвращаемость участников</h2><Help id="analytics-audience" label="О минутах в чате" text="Наблюдаемые минуты Twitch учитывают молчавших участников и исключают неизвестные промежутки. Оценка YouTube показана отдельно. Выберите сортировку по минутам или сообщениям; нажмите имя для подробностей."/><span>{data.audiencePage?(pagedAudience?.audiencePage?.total??data.audiencePage.total):visible.length} участников</span></header>
+    <p class="small regular-summary">Ядро аудитории: <strong>{data.composition?.core??0} из {data.summary.attendees??data.summary.entities??0} ({data.summary.attendees?pct((data.composition?.core??0)/data.summary.attendees):"нет данных"})</strong></p>
     <div class="analytics-controls"><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label>Сортировка<select aria-label="Сортировка" bind:value={view.sort}><option value="observedMinutes">Минуты в чате</option><option value="estimatedChatMinutes">Оценка активности YouTube</option><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option><option value="attendanceRatio">Доля посещённых эфиров</option></select></label><label class="check"><input type="checkbox" bind:checked={view.coreOnly} /> Только ядро</label></div>
     <div class="table-wrap compact-audience"><table class="compact-audience-table"><thead><tr><th>Участник</th><th>Эфиры</th><th>Минуты в чате</th><th>Сообщения</th><th>Интервалы</th></tr></thead><tbody>{#each visible.slice(0,data.audiencePage?100:200) as e (e.id)}<tr class="audience-row">
       <td class="audience-name" data-label="Участник"><div><button class={`text-button ${platformClass(e.sources??[e.source])}`} disabled={busy} onclick={()=>onPerson(e.id)}>{e.name}</button>{#if e.core}<span class="core-badge">Ядро</span>{:else if e.follower}<span class="follower-badge">Подписчик</span>{/if}{#each e.tags??[] as tag}<span class="person-tag">{tag}</span>{/each}</div><small>{(e.sources??[e.source]).map((source:string)=>source==='youtube'?'YouTube':source==='donationalerts'?'DA':'Twitch').join(' · ')}</small></td>
-      <td class="audience-stat" data-label="Эфиры">{e.attendanceCount??e.attendanceSessionIds?.length??0}/{data.summary?.streams??0}</td><td class="audience-stat" data-label={e.source==='youtube'?'Мин · оценка':'Мин в чате'}>{num(e.source==='youtube'?e.estimatedChatMinutes:e.observedMinutes)}</td><td class="audience-stat" data-label="Сообщения">{e.messages}</td>
+      <td class="audience-stat" data-label="Эфиры">{e.attendanceCount??e.attendanceSessionIds?.length??0}/{data.summary?.streams??0}</td><td class="audience-stat" data-label={e.source==='youtube'?'Мин · оценка':'Мин в чате'}>{num(e.source==='youtube'?e.estimatedChatMinutes:e.observedMinutes)}</td><td class="audience-stat" data-label="Сообщения">{num(e.messages,0)}</td>
       <td class="audience-more"><button class="text-button small" aria-label={`Интервалы ${e.name}`} onclick={()=>selectEntity(e)}>Интервалы</button></td>
     </tr>{#if selected?.id===e.id}<tr class="audience-detail"><td colspan="5">{@render personDetail()}</td></tr>{/if}{/each}</tbody></table></div>
     {#if !visible.length}<p class="muted analytics-empty">Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.</p>{/if}
@@ -223,7 +223,7 @@
 {/if}
 
 </div>
-<style>.timing-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}.timing-grid :global(.time-patterns){grid-column:1;grid-row:1}.timing-grid :global(.donation-patterns){grid-column:2;grid-row:1}.timing-grid :global(.discovery-grid){grid-column:1/-1}
+<style>.returning-audience>header>span{font-size:12px;color:var(--muted);white-space:nowrap}.regular-summary{font-size:12px;line-height:1.5}.regular-summary strong{font-size:inherit;font-weight:500}.analytics-controls>span{font-size:12px}.timing-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}.timing-grid :global(.time-patterns){grid-column:1;grid-row:1}.timing-grid :global(.donation-patterns){grid-column:2;grid-row:1}.timing-grid :global(.discovery-grid){grid-column:1/-1}
 @media(min-width:1101px){
  .timing-grid{grid-template-rows:repeat(6,auto) auto;row-gap:0;align-items:stretch}
  .timing-grid :global(.time-patterns),.timing-grid :global(.donation-patterns){display:grid;grid-template-rows:subgrid;grid-row:1/span 6;row-gap:0}
@@ -241,7 +241,7 @@
 .compact-audience-table>tbody>tr>td:first-child,.compact-audience-table>thead>tr>th:first-child{text-align:left}
 .compact-audience-table .audience-detail>td{text-align:left;padding:12px}
 .audience-detail :global(.analytics-person){border:0;margin:0}
-.analytics-toolbar .period-chips{gap:2px;padding:3px;flex-wrap:wrap}
+.analytics-toolbar .period-chips{gap:2px;padding:3px;flex-wrap:nowrap;min-width:0;overflow-x:auto;scrollbar-width:none}
 .analytics-toolbar .period-chips button{border-radius:6px;font-size:13px;min-width:max-content;flex:1 0 auto}
 .analytics-toolbar .period-chips button.active{background:var(--surface);color:var(--accent);font-weight:400}
 @media(max-width:720px){
@@ -259,7 +259,8 @@
  .analytics-toolbar .period-chips button{padding-inline:4px;font-size:12px}
 }
 .period-short{display:none}
-@media(max-width:380px){.period-full{display:none}.period-short{display:inline}.analytics-toolbar .filters-button{font-size:0;width:44px;min-width:44px;min-height:44px;padding:10px;gap:0;position:relative;align-self:start}.analytics-toolbar .filters-button :global(svg){display:block;width:18px;height:18px}.analytics-toolbar .filter-dot{position:absolute;top:6px;right:6px}}
+@media(max-width:380px){.period-full{display:none}.period-short{display:inline}}
+@media(max-width:600px){.analytics-toolbar .filters-button{font-size:0;width:44px;min-width:44px;min-height:44px;padding:10px;gap:0;position:relative;align-self:start}.analytics-toolbar .filters-button :global(svg){display:block;width:18px;height:18px}.analytics-toolbar .filter-dot{position:absolute;top:6px;right:6px}}
 .analytics-navigation :global(.section-tabs){margin:24px 0 12px;gap:24px;justify-content:flex-start;overflow-x:auto}
 .analytics-navigation :global(.section-tabs button){font-size:14px;min-height:44px}
 </style>

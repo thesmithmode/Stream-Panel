@@ -1,4 +1,4 @@
-import {navigate,setFilter,openFilters,closeFilters} from '../helpers/navigation.mjs';
+import {navigate,setFilter,openFilters,closeFilters,refreshData} from '../helpers/navigation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
@@ -30,7 +30,7 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
  await page.route('**/api/v1/analytics?*',route=>route.fulfill({json:data}));
  page.setDefaultTimeout(8000);
  const response=()=>page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/analytics');
- const renderNextHistory=async()=>{assert.deepEqual(errors,[]);await navigate(page,'Обзор');await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.locator('.analytics-results').waitFor();await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');const received=response();await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));await received;await page.getByRole('tab',{name:'Аудитория',exact:true}).click();};
+ const renderNextHistory=async()=>{assert.deepEqual(errors,[]);await navigate(page,'Обзор');await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.locator('.analytics-results').waitFor();await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');const received=response();await refreshData(page);await received;await page.getByRole('tab',{name:'Аудитория',exact:true}).click();};
  try {
   await goto(page,`http://127.0.0.1:${port}`);
   await page.getByLabel('Логин',{exact:true}).fill('fixture');await page.getByLabel('Пароль',{exact:true}).fill('fixture-missing-data-password');await page.getByRole('button',{name:'Войти',exact:true}).click();

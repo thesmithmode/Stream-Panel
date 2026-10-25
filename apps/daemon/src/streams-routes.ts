@@ -15,6 +15,7 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
     app.get("/api/v1/overview", () => db.call("channelOverview", configuration.value.excludedBotLogins));
     for(const path of ["/api/v1/analytics","/api/v1/analytics/clock","/api/v1/analytics/audience","/api/v1/analytics/clock-summary"])app.get(path, async (request) => {
         const q = object(request.query);
+        const panel=string(q.panel);if(panel&&!['dynamics','time','audience'].includes(panel))throw new Error('INVALID_ANALYTICS_PANEL');
         const sessionId = string(q.session), defaults = analyticsSettings(configuration.value.analyticsSettings);
         const source = string(q.source) || 'all', coreRule = string(q.coreRule) || defaults.coreRule;
         if (source !== 'all' && source !== 'twitch' && source !== 'youtube')
@@ -22,7 +23,7 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
         if (coreRule !== 'either' && coreRule !== 'both' && coreRule !== 'frequency')
             throw new Error('INVALID_ANALYTICS_FILTER');
         const result=await db.call(request.routeOptions.url==='/api/v1/analytics/clock'?"clockAudience":"analytics", {
-            ...(sessionId ? { sessionId } : {}), ...(string(q.mode)==='summary'?{summaryOnly:true}:{}),...(string(q.insights)==='1'?{includeInsights:true}:{}), fromMs: sessionId ? 0 : Number(q.from), toMs: sessionId ? Date.now() : Math.min(Number(q.to), Date.now()), source, category: string(q.category),
+            ...(sessionId ? { sessionId } : {}),...(panel?{panel:panel as 'dynamics'|'time'|'audience'}:{}),...(string(q.attendanceOnly)==='1'?{attendanceOnly:true}:{}), ...(string(q.mode)==='summary'?{summaryOnly:true}:{}),...(string(q.insights)==='1'?{includeInsights:true}:{}), fromMs: sessionId ? 0 : Number(q.from), toMs: sessionId ? Date.now() : Math.min(Number(q.to), Date.now()), source, category: string(q.category),
             ...(q.audienceOffset===undefined?{}:{audienceOffset:Number(q.audienceOffset)}),...(q.audienceSearch===undefined?{}:{audienceSearch:string(q.audienceSearch)}),...(q.audienceSort===undefined?{}:{audienceSort:string(q.audienceSort)}),...(q.audienceCoreOnly===undefined?{}:{audienceCoreOnly:string(q.audienceCoreOnly)==='1'}),
             ...(string(q.clockCompact)==='1'||request.routeOptions.url==='/api/v1/analytics/clock-summary'?{clockCompact:true,clockDay:string(q.clockDay)||'all',clockResolution:Number(q.clockResolution??15)}:{}),
             ...(q.clockMinute===undefined?{}:{clockMinute:Number(q.clockMinute),clockDay:string(q.clockDay)||'all',clockResolution:Number(q.clockResolution??60),clockOffset:Number(q.clockOffset??0),clockBatch:string(q.clockBatch)==='1'}),

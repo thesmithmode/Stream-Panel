@@ -476,6 +476,7 @@ export class DonationAlertsConnection {
       }
       skippedRows=await this.db.call('pendingDonationImportCount',this.recipient);
       if(this.stopped||generation!==this.generation)return;
+      this.status.lastSyncAt=Date.now();
       this.status.capabilities.history = complete
         ? skippedRows ? `Импорт неполный: пропущено записей ${skippedRows}` : "Импорт доступных страниц завершён"
         : "Импорт неполный (лимит/остановка)";

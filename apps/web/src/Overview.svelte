@@ -3,7 +3,8 @@
  import ActionMenu from "./ActionMenu.svelte";
  import SectionTabs from "./SectionTabs.svelte";
   import {untrack} from 'svelte';
-  import {ConnectionError} from "./request";
+  import {loadAnalytics} from './analytics-cache';
+ import {ConnectionError} from "./request";
   import StreamDonations from "./StreamDonations.svelte";
   import RecentEvents from './RecentEvents.svelte';
   import Insights from "./Insights.svelte";
@@ -56,7 +57,7 @@
     if(current!==lastAudienceSession){audienceData=null;metadata=[];lastAudienceSession=current;}
     if(!current){audienceData=null;audienceBusy=false;return;}
     const controller=new AbortController();
-    void Promise.all([api(`analytics?${new URLSearchParams({session:current,source:'all',timezone:'Europe/Moscow'})}`,undefined,controller.signal),api<Array<{at:number;title:string;categoryName:string}>>(`sessions/${current}/metadata`,undefined,controller.signal)]).then(([result,history])=>{
+    void Promise.all([loadAnalytics(getProfile(),new URLSearchParams({session:current,source:'all',category:'',timezone:'Europe/Moscow'}),false,controller.signal),api<Array<{at:number;title:string;categoryName:string}>>(`sessions/${current}/metadata`,undefined,controller.signal)]).then(([result,history])=>{
       if(id===audienceRequest){audienceData=result;metadata=history.filter((row,i)=>!i||row.title!==history[i-1]!.title||row.categoryName!==history[i-1]!.categoryName);}
     }).catch(error=>{if(id===audienceRequest&&!(error instanceof ConnectionError)){audienceError=(error as Error).message;}}).finally(()=>{if(id===audienceRequest)audienceBusy=false;});
     return()=>{audienceRequest++;controller.abort();};
