@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {performance} from 'node:perf_hooks';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import {mkdtemp,rm} from 'node:fs/promises';
@@ -17,6 +18,13 @@ function part(s:StreamStore,n:number){
  s.endSession(id,start+2*m);return id;
 }
 const options={fromMs:at,toMs:at+250*m,summaryOnly:true};
+// Preparation is an explicit API state; coverage and busy runners can exhaust a
+// processing slice even for a small fixture. Assertions need the completed report.
+function completedReport(store:StreamStore,query:Parameters<StreamStore['analytics']>[0]){
+ for(let attempt=0;attempt<1000;attempt++){const value=store.analytics(query);if(!value.preparing)return value;}
+ throw new Error('Grouping fixture did not finish preparing');
+}
+
 test('automatic continuation includes exactly 60 minutes and rejects a longer gap or another account',()=>{
  for(const [gap,account,expected]of [[59*m,'owner',true],[60*m,'owner',true],[60*m+1,'owner',false],[m,'other',false]] as const){
   const s=new StreamStore(':memory:');try{const id=s.observePlatformStream('twitch','owner','old',at,at,null,'')!;s.endSession(id,at+m);
@@ -36,21 +44,21 @@ test('manual grouping is reversible and preserves every original session, event 
  try{
   const a=part(s,0),b=part(s,1),raw=new Database(path);
   const snapshot=()=>Object.fromEntries(['sessions','events','event_sessions','platform_streams','presence_polls','presence_members','stream_samples'].map(table=>[table,raw.prepare(`SELECT * FROM ${table}`).all()]));
-  const before=snapshot();assert.equal(s.analytics(options).summary.streams,2);
+  const before=snapshot();assert.equal(completedReport(s,options).summary.streams,2);
   const root=grouping(s).mergeSessions([b,a]);assert.equal(root,a);assert.deepEqual(snapshot(),before);
   assert.equal(s.sessions().length,1);assert.equal(s.channelOverview().streams,1);
   const card=s.sessions()[0]!;assert.equal(card.messageCount,2);assert.equal(card.donationCount,2);assert.deepEqual(card.donationTotals,{RUB:'200'});assert.equal(card.durationMs,4*m);
   assert.deepEqual(card.breaks,[{from:at+2*m,to:at+120*m}]);
   assert.equal(s.summary(root,[],false).messages,2);assert.equal(s.donations(undefined,0,50,false,root).total,2);
   for(const summaryOnly of [false,true]){
-   const report=s.analytics({...options,summaryOnly});assert.equal(report.summary.streams,1);assert.equal(report.summary.messages,2);
+   const report=completedReport(s,{...options,summaryOnly});assert.equal(report.summary.streams,1);assert.equal(report.summary.messages,2);
    const viewer=report.audience.find(p=>p.name==='Viewer')!;assert.equal(viewer.attendanceSessionIds.length,1);assert.equal(viewer.attendanceRatio,1);
    assert.equal(report.streamComparison.length,1);assert.equal(report.streamComparison[0]!.durationMs,4*m);
   }
-  assert.equal(s.analytics({...options,sessionId:root}).summary.messages,2);
+  assert.equal(completedReport(s,{...options,sessionId:root}).summary.messages,2);
   const backup=join(dir,'copy.sqlite');await s.backup(backup);const restored=new StreamStore(backup);try{assert.equal(restored.sessions().length,1);assert.equal(restored.summary(root,[],false).messages,2);}finally{restored.close();}
   s.close();s=new StreamStore(path);assert.equal(s.sessions().length,1);
-  grouping(s).unmergeSessions(root);assert.equal(s.sessions().length,2);assert.equal(s.analytics(options).summary.streams,2);assert.deepEqual(snapshot(),before);
+  grouping(s).unmergeSessions(root);assert.equal(s.sessions().length,2);assert.equal(completedReport(s,options).summary.streams,2);assert.deepEqual(snapshot(),before);
   assert.deepEqual(raw.pragma('foreign_key_check'),[]);assert.equal(raw.pragma('integrity_check',{simple:true}),'ok');raw.close();
  }finally{s.close();await rm(dir,{recursive:true,force:true});}
 });
@@ -67,17 +75,17 @@ test('groups expand without nesting, and invalid selections are atomic',()=>{
 test('group writes and derived reads remain isolated between profiles in one SQLite file',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-group-profiles-')),path=join(dir,'db'),a=new StreamStore(path,'ruslan'),b=new StreamStore(path,'gulnaz');
  try{const x=part(a,0),y=part(a,1),foreign=part(b,0);assert.throws(()=>grouping(a).mergeSessions([x,foreign]));
-  grouping(a).mergeSessions([x,y]);assert.equal(a.sessions().length,1);assert.equal(b.sessions().length,1);assert.equal(b.sessions()[0]!.id,foreign);assert.equal(b.analytics(options).summary.messages,1);
+  grouping(a).mergeSessions([x,y]);assert.equal(a.sessions().length,1);assert.equal(b.sessions().length,1);assert.equal(b.sessions()[0]!.id,foreign);assert.equal(completedReport(b,options).summary.messages,1);
  }finally{a.close();b.close();await rm(dir,{recursive:true,force:true});}
 });
 test('late facts in a grouped child invalidate warmed history in another connection',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-group-cache-')),path=join(dir,'db'),writer=new StreamStore(path),reader=new StreamStore(path);
  try{
-  const a=part(writer,0),b=part(writer,1);assert.equal(reader.analytics(options).summary.streams,2);
-  grouping(writer).mergeSessions([a,b]);assert.equal(reader.analytics(options).summary.streams,1);assert.equal(reader.analytics(options).summary.messages,2);
+  const a=part(writer,0),b=part(writer,1);assert.equal(completedReport(reader,options).summary.streams,2);
+  grouping(writer).mergeSessions([a,b]);assert.equal(completedReport(reader,options).summary.streams,1);assert.equal(completedReport(reader,options).summary.messages,2);
   writer.ingest({source:'twitch',accountId:'owner',externalId:'late-message',type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:at+121*m,receivedAtMs:at+240*m,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{originChannelId:'owner'}});
-  assert.equal(reader.analytics(options).summary.messages,3);assert.equal(reader.analytics({...options,sessionId:b}).summary.messages,3);
-  grouping(writer).unmergeSessions(a);assert.equal(reader.analytics(options).summary.streams,2);assert.equal(reader.analytics(options).summary.messages,3);
+  assert.equal(completedReport(reader,options).summary.messages,3);assert.equal(completedReport(reader,{...options,sessionId:b}).summary.messages,3);
+  grouping(writer).unmergeSessions(a);assert.equal(completedReport(reader,options).summary.streams,2);assert.equal(completedReport(reader,options).summary.messages,3);
  }finally{writer.close();reader.close();await rm(dir,{recursive:true,force:true});}
 });
 test('group follower totals exclude subscriptions during an offline break',()=>{
@@ -110,7 +118,7 @@ test('YouTube inferred minutes and person activity stop at each physical broadca
   const root=grouping(s).mergeSessions(ids),youtube=String(s.persons().find(p=>p.display_name==='YouTubeViewer')!.id),twitch=String(s.persons().find(p=>p.display_name==='Viewer')!.id);
   assert.equal(s.personStats(youtube,root).estimatedChatMinutes,2);
   assert.equal(s.personActivity(twitch).visits.reduce((sum,v)=>sum+v.minutes,0),4);
-  assert.equal(s.analytics({...options,sessionId:root,youtubeAccount:'yt'}).audience.find(p=>p.id===youtube)!.estimatedChatMinutes,2);
+  assert.equal(completedReport(s,{...options,sessionId:root,youtubeAccount:'yt'}).audience.find(p=>p.id===youtube)!.estimatedChatMinutes,2);
  }finally{s.close();}
 });
 test('automatic continuation of a grouped tail keeps collection physical and the logical end state current',()=>{
@@ -130,7 +138,7 @@ test('a live tail can be merged with adjacent earlier parts without stopping col
   const root=s.mergeSessions([live,b,a]);assert.equal(root,a);assert.equal(s.sessions().length,1);assert.equal(s.sessions()[0]!.ended_at_ms,null);
   assert.equal(s.activeLogicalStream()!.id,live);assert.equal(s.sessions(live)[0]!.id,root);
   s.streamSample(live,start,'game','Game','Live',5);s.ingest({source:'twitch',accountId:'owner',externalId:'during-merge',type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:start+m,receivedAtMs:start+m,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{originChannelId:'owner'}});
-  assert.equal(s.summary(root,[],false).messages,3);assert.equal(s.analytics({...options,sessionId:live}).summary.messages,3);
+  assert.equal(s.summary(root,[],false).messages,3);assert.equal(completedReport(s,{...options,sessionId:live}).summary.messages,3);
   s.endSession(live,start+2*m);assert.equal(s.sessions()[0]!.ended_at_ms,start+2*m);assert.equal(s.sessions()[0]!.durationMs,6*m);
   s.unmergeSessions(root);assert.equal(s.sessions().length,3);
  }finally{s.close();}
@@ -140,6 +148,18 @@ test('estimated boundaries may overlap without counting airtime or viewers twice
   const first=s.startSession('owner','earlier',at,'platform',at);s.streamSample(first,at,'game','Game','Earlier',5);s.endSession(first,at+2*m);
   const next=s.startSession('owner','later',at+m+30000,'platform',at+m+30000);s.streamSample(next,at+m+30000,'game','Game','Later',5);s.endSession(next,at+3*m);
   const root=s.mergeSessions([first,next]),row=s.sessions(root)[0]!;assert.equal(row.durationMs,3*m);assert.equal(row.viewerPeak,5);assert.equal(row.viewerMean,5);
-  assert.equal(s.analytics({...options,sessionId:root}).streamComparison[0]!.durationMs,3*m);
+  assert.equal(completedReport(s,{...options,sessionId:root}).streamComparison[0]!.durationMs,3*m);
  }finally{s.close();}
+});
+
+test('grouping assertions wait through explicit preparation slices on a slow runner',()=>{
+ const store=new StreamStore(':memory:');const previous=Object.getOwnPropertyDescriptor(performance,'now');let clock=0;
+ try{
+  const a=part(store,0),b=part(store,1);
+  Object.defineProperty(performance,'now',{configurable:true,value:()=>clock+=300});
+  assert.equal(store.analytics(options).preparing,true);
+  assert.equal(completedReport(store,options).summary.streams,2);
+  store.mergeSessions([a,b]);assert.equal(completedReport(store,options).summary.messages,2);
+  store.unmergeSessions(a);assert.equal(completedReport(store,options).summary.streams,2);
+ }finally{if(previous)Object.defineProperty(performance,'now',previous);else Reflect.deleteProperty(performance,'now');store.close();}
 });
