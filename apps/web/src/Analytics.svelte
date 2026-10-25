@@ -223,7 +223,7 @@
 {/if}
 
 </div>
-<style>.timing-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}.timing-grid :global(.time-patterns){grid-column:1;grid-row:1}.timing-grid :global(.donation-patterns){grid-column:2;grid-row:1}.timing-grid :global(.discovery-grid){grid-column:1/-1}
+<style>.returning-audience>header>span{font-size:12px;color:var(--muted);white-space:nowrap}.regular-summary{font-size:12px;line-height:1.5}.regular-summary strong{font-size:inherit;font-weight:500}.analytics-controls>span{font-size:12px}.timing-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}.timing-grid :global(.time-patterns){grid-column:1;grid-row:1}.timing-grid :global(.donation-patterns){grid-column:2;grid-row:1}.timing-grid :global(.discovery-grid){grid-column:1/-1}
 @media(min-width:1101px){
  .timing-grid{grid-template-rows:repeat(6,auto) auto;row-gap:0;align-items:stretch}
  .timing-grid :global(.time-patterns),.timing-grid :global(.donation-patterns){display:grid;grid-template-rows:subgrid;grid-row:1/span 6;row-gap:0}
@@ -241,7 +241,7 @@
 .compact-audience-table>tbody>tr>td:first-child,.compact-audience-table>thead>tr>th:first-child{text-align:left}
 .compact-audience-table .audience-detail>td{text-align:left;padding:12px}
 .audience-detail :global(.analytics-person){border:0;margin:0}
-.analytics-toolbar .period-chips{gap:2px;padding:3px;flex-wrap:wrap}
+.analytics-toolbar .period-chips{gap:2px;padding:3px;flex-wrap:nowrap;min-width:0;overflow-x:auto;scrollbar-width:none}
 .analytics-toolbar .period-chips button{border-radius:6px;font-size:13px;min-width:max-content;flex:1 0 auto}
 .analytics-toolbar .period-chips button.active{background:var(--surface);color:var(--accent);font-weight:400}
 @media(max-width:720px){
@@ -259,7 +259,8 @@
  .analytics-toolbar .period-chips button{padding-inline:4px;font-size:12px}
 }
 .period-short{display:none}
-@media(max-width:380px){.period-full{display:none}.period-short{display:inline}.analytics-toolbar .filters-button{font-size:0;width:44px;min-width:44px;min-height:44px;padding:10px;gap:0;position:relative;align-self:start}.analytics-toolbar .filters-button :global(svg){display:block;width:18px;height:18px}.analytics-toolbar .filter-dot{position:absolute;top:6px;right:6px}}
+@media(max-width:380px){.period-full{display:none}.period-short{display:inline}}
+@media(max-width:600px){.analytics-toolbar .filters-button{font-size:0;width:44px;min-width:44px;min-height:44px;padding:10px;gap:0;position:relative;align-self:start}.analytics-toolbar .filters-button :global(svg){display:block;width:18px;height:18px}.analytics-toolbar .filter-dot{position:absolute;top:6px;right:6px}}
 .analytics-navigation :global(.section-tabs){margin:24px 0 12px;gap:24px;justify-content:flex-start;overflow-x:auto}
 .analytics-navigation :global(.section-tabs button){font-size:14px;min-height:44px}
 </style>
