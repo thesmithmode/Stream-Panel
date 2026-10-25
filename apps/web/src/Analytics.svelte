@@ -1,4 +1,5 @@
 <script lang="ts">
+ import {analyticsReport} from './analytics-load';
  import {cachedAnalytics,loadAnalytics,summaryQuery} from "./analytics-cache";
  import CategoryComparison from "./CategoryComparison.svelte";
  import SectionTabs from "./SectionTabs.svelte";
@@ -29,19 +30,20 @@
   let heatCurrency=$state("RUB");
   let heatCalculation=$state("average"),selectedHour=$state<{day:string;hour:number}|null>(null);
   let period=$state<number|'all'|'custom'>('all');
-  let buildProgress=$state(""),detailData=$state<any>(null),detailBusy=$state(false);
+  let detailData=$state<any>(null),detailBusy=$state(false);
   const reportScope=$derived(JSON.stringify([profile,period,period==='custom'?from:'',period==='custom'?to:'',source,category,timezone]));
   let loadedScope=$state('');
+  let refreshController:AbortController|undefined;
   let requestId=0, mounted=$state(false);
   $effect(()=>{
     const filters=[mounted,period,from,to,source,category,timezone].join("|");
     void filters;
     if(!mounted)return;
     busy=true;error="";
-    let cancelled=false;
+    const controller=new AbortController();let cancelled=false;
     const delay=untrack(()=>data===null?0:150);
-    const timer=window.setTimeout(()=>{if(!cancelled)untrack(()=>void refresh());},delay);
-    return ()=>{cancelled=true;window.clearTimeout(timer);requestId++;};
+    const timer=window.setTimeout(()=>{if(!cancelled)untrack(()=>void refresh(false,controller.signal));},delay);
+    return ()=>{cancelled=true;controller.abort();refreshController?.abort();window.clearTimeout(timer);requestId++;};
   });
   $effect(()=>{const saved=JSON.stringify(view);void saved;if(mounted)saveAnalyticsView(()=>localStorage,profile,view);});
   let audienceOffset=$state(0),pagedAudience=$state<any>(null),audienceBusy=$state(false),loadedAudienceQuery=$state('');
@@ -50,9 +52,7 @@
   async function reportPage(extra:Record<string,string|number>,signal?:AbortSignal,endpoint='analytics',filters=data?.filters){
     if(!filters)throw new Error('Отчёт ещё не загружен');
     const q=new URLSearchParams(Object.entries({...filters,from:filters.fromMs,to:filters.toMs,mode:'summary',insights:'1',...extra}).map(([key,value])=>[key,String(value)]));
-    let result=await api(`${endpoint}?${q}`,undefined,signal);
-    while(result.preparing&&!signal?.aborted){result=await api(`${endpoint}?${q}`,undefined,signal);}
-    return result;
+    return analyticsReport(signal=>api(`${endpoint}?${q}`,undefined,signal),signal??new AbortController().signal);
   }
   const visitorLoader=$derived.by(()=>{const filters=data?.filters;return (params:Record<string,string|number>,signal:AbortSignal)=>reportPage(params,signal,'analytics/clock',filters);});
   const clockLoader=$derived.by(()=>{const filters=data?.filters;return (params:Record<string,string|number>,signal:AbortSignal)=>reportPage(params,signal,'analytics/clock-summary',filters);});
@@ -103,12 +103,14 @@
     if(!person||!currentDay||!aggregate)return;
     const bounds=localDateWindow(currentDay,timezone),controller=new AbortController();detailBusy=true;
     const q=new URLSearchParams({from:String(bounds.from),to:String(bounds.to),source,category,timezone});
-    void api(`analytics?${q}`,undefined,controller.signal).then(result=>{if(!controller.signal.aborted)detailData=result;}).catch(e=>{if(!controller.signal.aborted)error=e.message;}).finally(()=>{if(!controller.signal.aborted)detailBusy=false;});
+    void analyticsReport(signal=>api(`analytics?${q}`,undefined,signal),controller.signal).then(result=>{if(!controller.signal.aborted)detailData=result;}).catch(e=>{if(!controller.signal.aborted)error=e.message;}).finally(()=>{if(!controller.signal.aborted)detailBusy=false;});
     return ()=>controller.abort();
   });
   function selectEntity(e:any){selected=e;day=new Date(e.intervals.at(-1)?.from??new Date(to).getTime()).toLocaleDateString('sv-SE',{timeZone:timezone});}
   function preset(days:number|'all'){period=days;liveEnd=true;const now=Date.now();from=localInput(days==='all'?0:now-days*86400000);to=localInput(now);}
-  async function refresh(force=false){
+  async function refresh(force=false,signal?:AbortSignal){
+    refreshController?.abort();refreshController=new AbortController();
+    signal=signal?AbortSignal.any([signal,refreshController.signal]):refreshController.signal;
     const scope=reportScope,id=++requestId;busy=true;error="";
 
     const fromMs=new Date(from).getTime(),toMs=new Date(to).getTime();
@@ -121,19 +123,19 @@
       const q=summaryQuery(fromMs,toMs,source,category,timezone,view.resolution,sort);
       const cached=cachedAnalytics(profile,q);
       if(cached&&id===requestId){data=cached;loadedScope=scope;loadedAudienceQuery=audienceQuery;}
-      const result=await loadAnalytics(profile,q,force);
-      buildProgress='';
+      const result=await loadAnalytics(profile,q,force,signal);
       if(id===requestId){const previousScope=loadedScope;if(result.filters&&(result.filters.category!==category||result.filters.source!==source||result.filters.timezone!==timezone))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');loadedScope=scope;loadedAudienceQuery=audienceQuery;
         if(JSON.stringify([scope,audienceOffset,search,view.sort,view.coreOnly])===audienceQuery)pagedAudience=null;
         if(JSON.stringify(data)!==JSON.stringify(result))data=Object.fromEntries(Object.entries(result).map(([key,value])=>[key,JSON.stringify(data?.[key])===JSON.stringify(value)?data[key]:value]));
         if(scope!==previousScope){selected=null;}}
-    }catch(e){if(id===requestId){error=(e as Error).message;}}
+    }catch(e){if(id===requestId&&!signal?.aborted){error=(e as Error).message;}}
     finally{if(id===requestId)busy=false;}
   }
   onMount(()=>{
     try{const saved=JSON.parse(localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved?.timezone)timezone=saved.timezone;}catch{/* private browser may deny storage */}
     view=loadAnalyticsView(()=>localStorage,profile);
-    mounted=true;const update=()=>{if(!document.hidden&&navigator.onLine&&!busy){if(liveEnd){const now=Date.now();if(typeof period==='number')from=localInput(now-period*86400000);const next=localInput(now);if(next===to)void refresh(true);else to=next;}else void refresh(true);}};window.addEventListener('sp:data-refresh',update);return ()=>{requestId++;window.removeEventListener('sp:data-refresh',update);};
+    const lifetime=new AbortController();
+    mounted=true;const update=()=>{if(!document.hidden&&navigator.onLine&&!busy){if(liveEnd){const now=Date.now();if(typeof period==='number')from=localInput(now-period*86400000);const next=localInput(now);if(next===to)void refresh(true,lifetime.signal);else to=next;}else void refresh(true,lifetime.signal);}};window.addEventListener('sp:data-refresh',update);return ()=>{lifetime.abort();requestId++;window.removeEventListener('sp:data-refresh',update);};
   });
 </script>
 {#snippet categoryFilter(_label:string)}{/snippet}
@@ -170,7 +172,7 @@
  </div></details>
  <div class="filter-actions"><button class="outline" onclick={()=>{category='';source='all';preset('all');}}>Сбросить фильтры</button><button class="primary" onclick={()=>filtersOpen=false}>Готово</button></div>
 </div></Sheet>
-{#if busy&&!data}<p class="small muted" role="status">{buildProgress||'Обновляем аналитику…'}</p>{/if}
+{#if busy&&!data}<p class="small muted" role="status">Обновляем аналитику…</p>{/if}
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 <div id="analytics-tabpanel" role="tabpanel" aria-label={section==='dynamics'?'Динамика':section==='time'?'Время':'Аудитория'}>
 {#if data}

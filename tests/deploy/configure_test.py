@@ -37,7 +37,7 @@ class ConfigureInitialTest(unittest.TestCase):
         self.installed_sbin.mkdir()
         subprocess.run(["sudo", "-n", "chown", "root:root", str(self.installed_sbin)], check=True)
         self.write_command("configure-bootstrap", "mkdir -p \"$TEST_CONFIG_DIR\"; test -e \"$TEST_CONFIG_DIR/server.env\" || printf 'STREAM_PANEL_BACKUP_KEY_FILE=%s/backup-key\\n' \"$TEST_DATA_DIR\" > \"$TEST_CONFIG_DIR/server.env\"")
-        self.write_command("configure-receive", "echo receive >> \"$TEST_COMMAND_LOG\"")
+        self.write_command("configure-receive", "cat > /dev/null; echo receive >> \"$TEST_COMMAND_LOG\"")
         self.write_command("ufw", """echo \"ufw $*\" >> \"$TEST_COMMAND_LOG\"
 if [[ $1 == status ]]; then printf '%s\\n' \"${MOCK_UFW_STATUS:-Status: inactive}\"; fi""")
         self.write_command("configure-systemctl", "echo \"systemctl $*\" >> \"$TEST_COMMAND_LOG\"")

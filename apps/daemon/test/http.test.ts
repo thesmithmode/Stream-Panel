@@ -34,7 +34,7 @@ test("mutation API rejects extra properties and number/boolean coercion before s
   const f = await fixture();
   try {
     for (const [url, payload] of [
-      ["/api/v1/sessions/start", { unexpected: true }],
+      ["/api/v1/sessions/missing/unmerge", { unexpected: true }],
       [
         "/api/v1/persons/merge",
         {
@@ -98,24 +98,10 @@ test("HTTP contracts: missing entities, conflicts, bounded grids, callback rejec
       400,
     );
     assert.equal((await post("/api/v1/sessions/missing/stop")).statusCode, 404);
-    const session = (await post("/api/v1/sessions/start")).json().id;
-    assert.equal((await post("/api/v1/sessions/start")).statusCode, 409);
-    assert.equal(
-      (await post(`/api/v1/sessions/${session}/stop`)).statusCode,
-      200,
-    );
-    const id = await (f.a.db.call(
-      "startSession",
-      "owner",
-      "stream",
-      Date.now(),
-      "platform",
-      Date.now(),
-    ) as Promise<string>);
-    assert.equal(
-      (await post(`/api/v1/sessions/${id}/stop`)).json().error,
-      "PLATFORM_SESSION_MANAGED_AUTOMATICALLY",
-    );
+    assert.equal((await post("/api/v1/sessions/start")).statusCode,404);
+    const id=await f.a.db.call('observePlatformStream','twitch','owner','stream',Date.now(),Date.now(),null,'Automatic');assert.ok(id);
+    assert.equal((await post(`/api/v1/sessions/${id}/stop`)).statusCode,404);
+    assert.equal((await f.a.db.call('sessions',id))[0]?.ended_at_ms,null,'retired manual routes cannot stop automatic collection');
     assert.equal((await get("/api/v1/events?from=bad&to=20")).statusCode, 400);
     assert.equal(
       (
