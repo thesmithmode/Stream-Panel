@@ -55,7 +55,7 @@ test('every chart category selector refreshes donations, time patterns and clock
   const oldWaiting=new Promise(resolve=>startedOld=resolve),oldGate=new Promise(resolve=>releaseOld=resolve);
   await page.route('**/api/v1/analytics?*',async route=>{if(new URL(route.request().url()).searchParams.get('category')==='game'){startedOld();await oldGate;}await route.continue().catch(error=>{if(!route.request().failure())throw error;});});
   await page.clock.setFixedTime(Date.now()+120000);
-  const oldCompleted=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/analytics'&&new URL(r.url()).searchParams.get('category')==='game');
+  const oldCompleted=page.waitForEvent('requestfailed',{predicate:r=>new URL(r.url()).pathname==='/api/v1/analytics'&&new URL(r.url()).searchParams.get('category')==='game'});
   await setFilter(page,'Категория Twitch','game');await oldWaiting;
   await setFilter(page,'Категория Twitch','talk');
   await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();releaseOld();await oldCompleted;await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();await page.unroute('**/api/v1/analytics?*');

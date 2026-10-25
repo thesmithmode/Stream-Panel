@@ -56,9 +56,8 @@ test(
       );
       await seed(a);
       await reload(page);
-      await page
-        .getByText("Нет данных", { exact: true })
-        .waitFor({ state: "hidden" });
+      await page.locator('.channel-metrics').getByText('Сообщения',{exact:true}).locator('..').getByText('8',{exact:true}).waitFor();
+      assert.equal(await page.locator('.channel-records').getByText('Средний онлайн',{exact:true}).locator('..').locator('strong').textContent(),'—','missing viewer measurements remain unknown while real totals load');
       const persons = await page.evaluate(() =>
         fetch("/api/v1/persons").then((r) => r.json()),
       );

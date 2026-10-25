@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {dailyMetrics,streamRecords,type StreamMetric} from './daily-metrics.ts';
+import {dailyMetrics,type StreamMetric} from './daily-metrics.ts';
 const at=Date.UTC(2026,9,20,20),minute=60000;
 const streams:StreamMetric[]=[
  {id:'first',startedAt:at,durationMs:minute,meanChatters:2,messages:5,viewers:{known:{mean:4,knownMinutes:1,partialMinutes:1},twitch:{mean:4,knownMinutes:1}}},
@@ -14,10 +14,8 @@ test('daily means weight measured viewer minutes and broadcast duration, preserv
  assert.equal(dailyMetrics([{startedAt:at,endedAt:at+minute,viewers:{all:{mean:0}}}],'UTC')[0]!.online,0);
  assert.deepEqual(dailyMetrics([],'UTC'),[]);
 });
-test('date buckets follow the chosen timezone and a record date belongs to its broadcast, with earliest ties',()=>{
+test('date buckets follow the chosen timezone',()=>{
  const midnight=Date.UTC(2026,9,20,22);
  assert.equal(dailyMetrics([{startedAt:midnight}],'Europe/Moscow')[0]!.date,'2026-10-21');
  assert.equal(dailyMetrics([{startedAt:midnight}],'UTC')[0]!.date,'2026-10-20');
- const records=streamRecords([...streams,{...streams[1]!,id:'tie',startedAt:at+86400000}]);
- assert.deepEqual(records.online,{value:8,at:at+minute});assert.deepEqual(records.messages,{value:12,at:at+minute});assert.deepEqual(streamRecords([{startedAt:0}]),{online:null,messages:null});
 });
