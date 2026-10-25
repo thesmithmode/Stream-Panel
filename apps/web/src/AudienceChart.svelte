@@ -17,7 +17,7 @@
  onDestroy(()=>onselection?.(false));
 </script>
 {#if showResolution}<label class="interval-control">Детализация графика<select bind:value={resolution}><option value={1}>1м</option><option value={5}>5м</option><option value={15}>15м</option></select></label>{/if}
-<TrendChart {points} {metric} {resolution} {showRegulars} {timezone} onselect={point=>{bucket=point;minute=null;}}/>
+<TrendChart {points} {metric} {resolution} {showRegulars} {timezone} selectedAt={bucket?.at??null} onselect={point=>{bucket=point;minute=null;}}/>
 {#if selected}
  <section class="bar-detail" aria-label="Детали выбранного столбца">
   <header><h3>{label(selected.at)}{selected.width>60000?` — ${label(selected.at+selected.width)}`:''} <Help id={`${id}-help`} label="О детализации минуты" text="Список показывает персональные сигналы в выбранном интервале: наблюдения чата Twitch или оценку по сообщениям YouTube. Счётчик площадки не раскрывает личности всех зрителей. Для широкого столбца высота — среднее, а список — уникальные участники; выберите отдельную минуту. В режиме сообщений история под графиком показывает реальные сообщения выбранного интервала. Группы отражают ядро по правилам выбранного периода и подписку по последним полученным данным; неизвестный статус не считается отсутствием подписки."/></h3><button class="outline small" onclick={()=>{bucket=null;minute=null;}}>Закрыть детализацию</button></header>

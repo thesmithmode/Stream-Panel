@@ -5,8 +5,8 @@
   import Help from './Help.svelte';
   const id=$props.id();
   import {timelineTicks} from './chart-detail';
-  let {points,metric,resolution=1,showRegulars=true,timezone='Europe/Moscow',onselect}:{points:ChartPoint[];metric:ChartMetric;resolution?:number;showRegulars?:boolean;timezone?:string;onselect?:(point:ReturnType<typeof chartSeries>[number])=>void}=$props();
-  let availableWidth=$state(800),pageOffset=$state(0);
+  let {points,metric,resolution=1,showRegulars=true,timezone='Europe/Moscow',selectedAt=null,onselect}:{points:ChartPoint[];metric:ChartMetric;resolution?:number;showRegulars?:boolean;timezone?:string;selectedAt?:number|null;onselect?:(point:ReturnType<typeof chartSeries>[number])=>void}=$props();
+  let availableWidth=$state(800),pageOffset=$state(0),focusedAt=$state<number|null>(null);
   const pages=$derived(chartPages(points,resolution));
   const visiblePoints=$derived(pages[pageOffset]??[]);
   $effect(()=>{if(pageOffset>=pages.length)pageOffset=0;});
@@ -34,6 +34,7 @@
     return `${label} · всего: ${num(point.value)}${regular}${groups}${partial}`;
   }
   const titles=$derived(new Map(buckets.map(point=>[point.at,title(point)])));
+  const highlighted=$derived(buckets.find(point=>point.at===(focusedAt??selectedAt)));
 </script>
 <div class="trend-chart" bind:clientWidth={availableWidth}>
   {#if !buckets.length}<p class="muted">Пока нет точек для графика</p>{:else}
@@ -49,7 +50,7 @@
         {@const regularHeight=p.value>0?barHeight*p.regularValue/p.value:0}
         {@const followerHeight=split&&p.value>0?barHeight*p.followerValue/p.value:0}
         {@const unknownHeight=split&&p.value>0?barHeight*(p.unknownValue??0)/p.value:0}
-        <g class="chart-bar" role="button" tabindex="0" aria-label={titles.get(p.at)} onclick={()=>onselect?.(p)} onkeydown={(event)=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();onselect?.(p);}}}>
+        <g class="chart-bar" role="button" tabindex="0" aria-label={titles.get(p.at)} aria-pressed={selectedAt===p.at} onfocus={()=>focusedAt=p.at} onblur={()=>focusedAt=null} onclick={()=>onselect?.(p)} onkeydown={(event)=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();onselect?.(p);}}}>
           <rect class="total-segment" x={32+(p.at-start)/(end-start)*(plotWidth-56)} y={p.known?250-barHeight:245} width={Math.max(.2,p.width/(end-start)*(plotWidth-56)*.9)} height={p.known?barHeight:5} class:unknown={!p.known} class:estimated={metric==='estimated'}><title>{titles.get(p.at)}</title></rect>
           {#if split&&p.known&&regularHeight>0}<rect class="regular-segment" x={32+(p.at-start)/(end-start)*(plotWidth-56)} y={250-regularHeight} width={Math.max(.2,p.width/(end-start)*(plotWidth-56)*.9)} height={regularHeight}><title>{titles.get(p.at)}</title></rect>{/if}
           {#if split&&p.known&&followerHeight>0}<rect class="follower-segment" x={32+(p.at-start)/(end-start)*(plotWidth-56)} y={250-regularHeight-followerHeight} width={Math.max(.2,p.width/(end-start)*(plotWidth-56)*.9)} height={followerHeight}><title>{titles.get(p.at)}</title></rect>{/if}
@@ -58,6 +59,10 @@
         </g>
       {/each}
       </g>
+      {#if highlighted}
+        <!-- Paint above all bars and outside their clip; CSS outlines on SVG groups are clipped. -->
+        <rect class="bar-highlight" x={32+(Math.max(start,highlighted.at)-start)/(end-start)*(plotWidth-56)+1} y="26" width={Math.max(1,(Math.min(end,highlighted.at+highlighted.width)-Math.max(start,highlighted.at))/(end-start)*(plotWidth-56)-2)} height="223" aria-hidden="true"/>
+      {/if}
       {#each ticks as at,i}
         {@const x=32+(at-start)/(end-start)*(plotWidth-56)}
         <line x1={x} y1="250" x2={x} y2="257" stroke="currentColor" opacity=".4" />
@@ -78,5 +83,6 @@
   .trend-plot{width:100%;min-width:0;}
   svg{overflow:hidden;height:auto;}
   .chart-bar{cursor:pointer;}
-  .chart-bar:focus{outline:2px solid currentColor;}
+  .chart-bar:focus{outline:none;}
+  .trend-chart rect.bar-highlight{fill:none;stroke:var(--text);stroke-width:2;vector-effect:non-scaling-stroke;pointer-events:none;}
 </style>
