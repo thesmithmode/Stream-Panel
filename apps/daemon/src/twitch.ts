@@ -621,7 +621,7 @@ export class TwitchConnection {
         cursor=string(object(result.pagination).cursor);if(!cursor){complete=true;break;}if(seen.has(cursor))throw new Error('FOLLOWERS_PAGINATION_LOOP');seen.add(cursor);
       }
       if(!current())return;await this.db.call('followingSnapshot','twitch',account,followers,complete,at,total);if(!current())return;
-      this.lastFollowersPollAt=at;this.status.capabilities.followers=complete?'Подписки проверены':'Получена часть подписок; отсутствие не считается отпиской';
+      this.lastFollowersPollAt=at;this.status.lastFollowersAt=at;this.status.capabilities.followers=complete?'Подписки проверены':'Получена часть подписок; отсутствие не считается отпиской';
     }catch{if(current())this.status.capabilities.followers='Не удалось проверить подписки; чат продолжает собираться';}
   }
   private async reconcile(): Promise<void> {
@@ -738,7 +738,7 @@ export class TwitchConnection {
           // Isolate from EventSub — do not rethrow into start()/reconnect.
         }
       }
-      if(current())await this.collectFollowers(accountId,current,this.now());
+      if(current()){this.status.lastSyncAt=this.now();await this.collectFollowers(accountId,current,this.now());}
       if (current() && this.reconcileError !== null) {
         if (this.eventSubReady && this.status.detail === this.reconcileError) {
           this.status.state = "connected";

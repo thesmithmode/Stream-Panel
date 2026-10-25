@@ -5,6 +5,8 @@ export interface ConnectionStatus {
     detail: string;
     account?: string;
     lastEventAt?: number;
+    lastSyncAt?:number;
+    lastFollowersAt?:number;
     capabilities: Record<string, string>;
 }
 export const object = (value: unknown): Record<string, unknown> => {

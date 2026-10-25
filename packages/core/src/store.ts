@@ -105,6 +105,15 @@ export class StreamStore {
     confirmedPresentIds?: string[],
   ) {return this.streams.observePlatformStream(platform,accountId,externalId,startedAtMs,observedAtMs,url,title,confirmedPresentIds);}
   activeLogicalStream() {return this.streams.activeLogicalStream();}
+  changeStamp(){return (this.db.prepare('SELECT coalesce(sum(revision),0) value FROM ui_revisions').get() as {value:number}).value;}
+  changes(sessionId?:string){
+    const versions=Object.fromEntries((this.db.prepare('SELECT domain,revision FROM ui_revisions').all() as {domain:string;revision:number}[]).map(r=>[r.domain,r.revision]));
+    const active=this.reads.prepare('SELECT id FROM sessions s WHERE ended_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) ORDER BY started_at_ms DESC LIMIT 1').get() as {id:string}|undefined;
+    const selected=sessionId?this.groups.root(sessionId):'';
+    const stream=selected?this.reads.prepare('SELECT s.id,s.ended_at_ms endedAt,coalesce(r.revision,0) revision FROM sessions s LEFT JOIN analytics_stream_revisions r ON r.session_id=s.id WHERE s.id=?').get(selected) as {id:string;endedAt:number|null;revision:number}|undefined:undefined;
+    return {versions,activeStream:active?.id??null,stream:stream??null};
+  }
+
   merge(
     sourceId: string,
     targetId: string,

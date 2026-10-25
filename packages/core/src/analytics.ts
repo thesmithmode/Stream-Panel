@@ -15,6 +15,8 @@ export interface AnalyticsOptions {
     category?: string;
     sessionId?: string;
     summaryOnly?: boolean;
+    panel?:'dynamics'|'time'|'audience';
+    attendanceOnly?:boolean;
     includeInsights?: boolean;
     insightSessionId?: string;
     audienceOffset?:number;

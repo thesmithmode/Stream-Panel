@@ -105,8 +105,8 @@ export class AnalyticsHistory {
             value={...value,clockSelection:{day,resolution},clockBuckets:(value.clockBuckets??[]).filter(b=>
                 (b.day===day&&b.resolution===resolution)||(b.resolution===60&&days.slice(3).includes(b.day)))};
         }
-        if(!workspace)return value;
-        const page=workspace.people.page(options.audienceOffset??0,options.audienceSearch??'',options.audienceSort??'core',options.audienceCoreOnly??false);
+        if(!workspace)return options.attendanceOnly?{...value,audience:value.audience.filter(person=>person.attendanceSessionIds.length>0)}:value;
+        const page=workspace.people.page(options.audienceOffset??0,options.audienceSearch??'',options.audienceSort??'core',options.audienceCoreOnly??false,100,options.attendanceOnly??false);
         return {...value,audience:page.items,...(workspace.people.size>100?{audiencePage:{total:page.total,offset:page.offset,limit:page.limit}}:{}),...(options.clockMinute!==undefined?{clockVisitors:workspace.clockPage(options.clockDay??'all',options.clockMinute,options.clockResolution??60,options.clockOffset??0)}:{})};
     }
     private clockResult(value:Report,workspace:AnalyticsWorkspace<Person>|undefined,options:AnalyticsOptions):ClockResponse{
@@ -289,7 +289,17 @@ export class AnalyticsHistory {
     }
     private annotationsRevision(){return [this.statement('SELECT * FROM person_preferences ORDER BY person_id').all(),this.statement('SELECT * FROM person_tags ORDER BY person_id,label').all(),this.statement("SELECT id,source,started_at_ms,ended_at_ms FROM collection_gaps WHERE source IN('twitch','youtube') ORDER BY id").all()];}
     query(options:AnalyticsOptions):Report{
-        return options.sessionId?this.sessionReport(options):this.resolve(options,options.summaryOnly??false);
+        const {panel,...query}=options;
+        const report=query.sessionId?this.sessionReport(query):this.resolve(query,query.summaryOnly??false);
+        if(!panel||report.preparing)return report;
+        return {...report,timeline:[],sessions:[],youtubeReport:null,
+          audience:panel==='dynamics'?[]:report.audience,
+          streamComparison:panel==='dynamics'?report.streamComparison:[],
+          insights:panel==='dynamics'?(report.insights??[]):[],
+          activityClock:panel==='time'?report.activityClock:[],activityWindows:panel==='time'?report.activityWindows:[],
+          clockBuckets:panel==='time'?(report.clockBuckets??[]):[],hours:panel==='time'?report.hours:[],
+          categories:panel==='dynamics'?report.categories:[],
+        };
     }
     private sessionReport(options:AnalyticsOptions):Report{
         const session=this.statement(`SELECT s.id,s.started_at_ms,s.ended_at_ms,coalesce(r.revision,0) AS revision FROM sessions s LEFT JOIN analytics_stream_revisions r ON r.session_id=s.id WHERE s.id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)`).get(options.sessionId) as Session|undefined;
@@ -319,8 +329,8 @@ export class AnalyticsHistory {
         const sessions = this.sessions(options);
         const live = sessions.some(session => session.ended_at_ms === null);
         const lastEnd = sessions.reduce((end, session) => Math.max(end, session.ended_at_ms ?? options.toMs), options.fromMs);
-        const {audienceOffset,audienceSearch,audienceSort,audienceCoreOnly,clockDay,clockMinute,clockResolution,clockOffset,clockBatch,clockCompact,...baseOptions}=options;
-        void audienceOffset;void audienceSearch;void audienceSort;void audienceCoreOnly;void clockDay;void clockMinute;void clockResolution;void clockOffset;void clockBatch;void clockCompact;
+        const {audienceOffset,audienceSearch,audienceSort,audienceCoreOnly,clockDay,clockMinute,clockResolution,clockOffset,clockBatch,clockCompact,attendanceOnly,...baseOptions}=options;
+        void audienceOffset;void audienceSearch;void audienceSort;void audienceCoreOnly;void clockDay;void clockMinute;void clockResolution;void clockOffset;void clockBatch;void clockCompact;void attendanceOnly;
         const canonical = { ...baseOptions,source:options.source??'all',category:options.category??'', fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
         const fingerprint = createHash('sha256').update(JSON.stringify([3,historical, Object.fromEntries(Object.entries(canonical).sort(([a],[b])=>a.localeCompare(b))), this.globalRevision(), sessions.map(s => [s.id, s.ended_at_ms === null ? 0 : s.revision]), this.annotationsRevision(), this.followerRevision()])).digest('hex');
         const liveRevision=JSON.stringify(sessions.filter(s=>s.ended_at_ms===null).map(s=>[s.id,s.revision]));
@@ -353,7 +363,7 @@ export class AnalyticsHistory {
             try{
                 const value=audienceAnalytics(this.db,options);
                 if(!live)this.remember(fingerprint,value);
-                return value;
+                return this.page(value,undefined,options);
             }catch(error){if(!(error instanceof Error)||error.message!=='ANALYTICS_RANGE_TOO_LARGE')throw error;}
         }
         const now = Date.now();

@@ -95,3 +95,9 @@ POST /persons {name} создаёт отдельную ручную карточ
 Viewer timeline points expose `viewersPartial` when an active platform lacks a count. `viewers` then contains the sum of available platform measurements; both missing remains null. Complete aggregate averages exclude partial points. A platform source filter leaves the other platform count null.
 
 Manual start/stop endpoints are retired (404). Platform discovery owns stream lifecycle; historical manual recordings remain readable and removable. `/overview` includes compact `records.online` and `records.messages` values with their first achievement timestamps. Unchanged stream records reuse revision-addressed derived cache entries.
+
+### Версии открытого экрана
+
+`GET /api/v1/changes?view=analytics&viewer=<browser-id>&session=<optional-id>` — авторизованный профильный запрос. Возвращает `versions` (activity, people, donations, follows, subscribers), `activeStream`, ревизию выбранного логического `stream`, `dataEpoch`, `configRevision`, `connectionRevision`, `checkedAt`, `sync` и `release`. Это метаданные, без отчёта и секретов. `viewer` ограничен 64 символами; только `view=analytics` продлевает интерес к предварительной обработке этого профиля.
+
+`GET /api/v1/analytics` принимает `panel=dynamics|time|audience` для сокращённого ответа и `attendanceOnly=1` для исключения людей без посещённых эфиров до пагинации. Параметры не меняют базовые расчёты отчёта. Без них прежний полный контракт сохранён.

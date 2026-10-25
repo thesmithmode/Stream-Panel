@@ -1,4 +1,4 @@
-import {type StoreRequest,type StoreResult,isStoreMethod,invalidatesCachedReads} from "./store-contract.js";
+import {type StoreRequest,type StoreResult,isStoreMethod} from "./store-contract.js";
 import {readCacheKey} from "./read-cache-key.js";
 import {StorageGuard} from "./storage-guard.js";
 import {ReadCache,cachedReads,uncachedReads} from "./read-cache.js";
@@ -70,10 +70,8 @@ export class StoreClient {
     if(cachedReads.has(method))return this.cache.read(readCacheKey(method,args),()=>this.execute<T>(method,...args),method==='analytics'?{ttlMs:86400000,compressed:true}:undefined);
     if(uncachedReads.has(method))return this.execute<T>(method,...args);
     if(method!=="close")await this.storage.check();
-    // These operations write operational state, not facts used by cached reports.
-    if(!invalidatesCachedReads(method,args))return this.execute<T>(method,...args);
-    this.cache.invalidate();
-    try{return await this.execute<T>(method,...args);}finally{this.cache.invalidate();}
+    // The worker invalidates every same-profile client only after facts actually change.
+    return this.execute<T>(method,...args);
   }
   private async execute<T = unknown>(method: string, ...args: unknown[]): Promise<T> {
     await this.ready;

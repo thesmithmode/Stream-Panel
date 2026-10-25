@@ -8,7 +8,7 @@ import { object, string } from "./provider-values.js";
 const scopes = ["https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/yt-analytics.readonly"];
 const videoParts='snippet,statistics,contentDetails,liveStreamingDetails,status,recordingDetails,topicDetails,localizations,paidProductPlacementDetails';
 export class YouTubeConnection {
-  status = { state: "disconnected", account: "", detail: "" };
+  status:{state:string;account:string;detail:string;lastSyncAt?:number;lastFollowersAt?:number} = { state: "disconnected", account: "", detail: "" };
   private pending: { state: string; verifier: string; expires: number; clientId: string; secret: string } | undefined;
   private generation = 0;
   private authAttempt = 0;
@@ -265,7 +265,7 @@ export class YouTubeConnection {
         cursor:(key,data)=>this.db.call('youtubeSnapshot',tokens.userId,key,data,this.now())});
     }catch{if(valid())await this.db.call('gap','youtube','publications_unavailable',this.now(),this.now());}
     if(!valid())return 300000;
-    this.status = { state: "connected", account: tokens.userId, detail: broadcasts.length ? "Чат активных эфиров собирается" : "Канал подключён; активных эфиров нет" };
+    this.status = { ...this.status,lastSyncAt:this.now(),state: "connected", account: tokens.userId, detail: broadcasts.length ? "Чат активных эфиров собирается" : "Канал подключён; активных эфиров нет" };
     return Math.min(interval, 3600000);
   }
   private async collectArchivedVideos(tokens:Tokens,ids:string[],valid:()=>boolean,at:number){
@@ -292,7 +292,7 @@ export class YouTubeConnection {
         page=string(result.nextPageToken);if(!page){complete=true;break;}if(seen.has(page))throw new Error('SUBSCRIBERS_PAGINATION_LOOP');seen.add(page);
       }
       if(!valid())return;await this.db.call('followingSnapshot','youtube',tokens.userId,followers,complete,at,subscriberTotal);if(!valid())return;
-      await this.db.call('youtubeSnapshot',tokens.userId,'cursor:followers',true,at);
+      await this.db.call('youtubeSnapshot',tokens.userId,'cursor:followers',true,at);if(valid())this.status.lastFollowersAt=at;
       // A private or API-limited YouTube subscription remains unknown, even after full pagination.
     }catch{if(valid())await this.db.call('gap','youtube','subscribers_unavailable',at,at);}
   }

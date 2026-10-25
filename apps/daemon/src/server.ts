@@ -1,3 +1,5 @@
+import {analyticsInterest} from './analytics-interest.js';
+import {createHash,randomUUID} from 'node:crypto';
 import {registerAnalyticsCompression} from './analytics-compression.js';
 import {registerRouteSchemas} from './route-schemas.js';
 import {registerPeopleRoutes} from './people-routes.js';
@@ -197,6 +199,14 @@ export async function createApplication(
   registerPeopleRoutes(app, db, configuration);
   registerDonationsRoutes(app, db, configuration);
   registerStreamsRoutes(app, db, configuration);
+  const dataEpoch=randomUUID();
+  const connectionRevision=()=>createHash('sha256').update(JSON.stringify([configuration.publicView(),...[twitch.status,youtube.status,da.status].map(({state,account,detail})=>({state,account,detail}))])).digest('hex');
+  const sync=()=>({twitch:{lastSyncAt:twitch.status.lastSyncAt??null,lastFollowersAt:twitch.status.lastFollowersAt??null,lastEventAt:twitch.status.lastEventAt??null},youtube:{lastSyncAt:youtube.status.lastSyncAt??null,lastFollowersAt:youtube.status.lastFollowersAt??null},donationalerts:{lastSyncAt:da.status.lastSyncAt??null,lastEventAt:da.status.lastEventAt??null}});
+  app.get('/api/v1/changes',async request=>{
+    const q=object(request.query);analyticsInterest(db,string(q.viewer),string(q.view)==='analytics');
+    return {...await db.call('changes',string(q.session)||undefined),dataEpoch,requestedSession:string(q.session)||null,checkedAt:Date.now(),connectionRevision:connectionRevision(),configRevision:createHash('sha256').update(JSON.stringify([configuration.value.analyticsSettings,configuration.value.excludedBotLogins,configuration.value.twitch?.userId,configuration.value.youtube?.userId])).digest('hex'),sync:sync(),release:process.env.STREAM_PANEL_RELEASE??'development'};
+  });
+
 
   app.get('/api/v1/settings',()=>analyticsSettings(configuration.value.analyticsSettings));
   app.post('/api/v1/settings',async request=>{
@@ -217,6 +227,7 @@ export async function createApplication(
     };
   });
   app.get("/api/v1/status", async (request) => ({
+    sync:sync(),
     storage:db.storageStatus(),
     database:db.queueStatus(),
     release:process.env.STREAM_PANEL_RELEASE??'development',

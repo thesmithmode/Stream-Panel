@@ -130,26 +130,17 @@ test("profile switch reloads all views, preserves other clients and remains visi
     }
     await h.app.listen({ host: "127.0.0.1", port: 47839 });
     browser = await launchBrowser();
-    const pages = [],warmups=[];
+    const pages = [];
     for (let i = 0; i < 2; i++) {
       const context = await browser.newContext(); contexts.push(context);
-      const page = await context.newPage(); pages.push(page);
-      const warmed=new Set();let finish;const ready=new Promise(resolve=>{finish=resolve;});warmups.push(ready);
-      page.on('response',async response=>{if(new URL(response.url()).pathname!=='/api/v1/analytics'||response.status()!==200)return;const data=await response.json();if(!data.preparing){warmed.add(response.request().headers()['x-stream-panel-profile']);if(warmed.size===2)finish();}});
+      const page = await context.newPage();page.setDefaultTimeout(8000);page.setDefaultNavigationTimeout(8000);pages.push(page);
       await goto(page, "http://127.0.0.1:47839");
       await page.getByLabel("Логин", { exact: true }).fill("ruslan");
       await page.getByLabel("Пароль", { exact: true }).fill("profile-browser-password");
       await page.getByRole("button", { name: "Войти", exact: true }).click();
       await page.getByRole("button",{name:"Люди",exact:true}).click();await page.locator(".person-row").filter({hasText:"Viewer ruslan"}).waitFor();
     }
-    await Promise.all(warmups);
     const [a, b] = pages;
-    let reloads=0;await a.route('**/api/v1/analytics?*',route=>{reloads++;return route.abort();});
-    for(const selected of ['gulnaz','ruslan']){
-      await a.getByLabel('Профиль',{exact:true}).selectOption(selected);await a.getByRole('button',{name:'Аналитика',exact:true}).click();await a.locator('.analytics-kpis').waitFor();assert.equal(await a.getByRole('alert').count(),0);assert.equal(reloads,0,'both profiles have reports ready before opening analytics');
-      await a.getByRole('button',{name:'Люди',exact:true}).click();await a.getByText(`Viewer ${selected}`,{exact:true}).first().waitFor();
-    }
-    await a.unroute('**/api/v1/analytics?*');
     await a.getByLabel("Профиль", { exact: true }).selectOption("gulnaz");
     await a.locator(".person-row").filter({hasText:"Viewer gulnaz"}).waitFor();
     assert.equal(await a.getByText("Message ruslan", { exact: true }).count(), 0);
@@ -183,11 +174,11 @@ test("profile switch reloads all views, preserves other clients and remains visi
     await a.getByLabel("Профиль", { exact: true }).waitFor();
     assert.equal(await a.getByLabel("Профиль", { exact: true }).inputValue(), "gulnaz");
     assert.equal(await a.getByRole("button", { name: "Выйти", exact: true }).count(),0);
-    let fakeRemaining=2;
-    await a.route('**/api/v1/status',async route=>{const response=await route.fetch();const data=await response.json();if(fakeRemaining-->0)data.release='a'.repeat(40);await route.fulfill({response,json:data});});
+    let switchedRelease=false;
+    await a.route('**/api/v1/changes?*',async route=>{const response=await route.fetch();const data=await response.json();const profile=route.request().headers()['x-stream-panel-profile'];if(profile==='gulnaz'||!switchedRelease){data.release='a'.repeat(40);if(profile==='ruslan')switchedRelease=true;}await route.fulfill({response,json:data});});
     await refreshData(a);await a.getByRole('button',{name:'Обновить панель',exact:true}).waitFor();
     await saveCoverage(a);await startCoverage(a);const nextDocument=a.waitForEvent('load');await a.getByLabel('Профиль',{exact:true}).selectOption('ruslan');await nextDocument;
-    await a.getByText('Viewer ruslan',{exact:true}).first().waitFor();assert.equal(await a.getByRole('button',{name:'Обновить панель',exact:true}).count(),0);await a.unroute('**/api/v1/status');
+    await a.getByText('Viewer ruslan',{exact:true}).first().waitFor();assert.equal(await a.getByRole('button',{name:'Обновить панель',exact:true}).count(),0);await a.unroute('**/api/v1/changes?*');
     await a.evaluate(async()=>{const {csrf}=await fetch("/api/v1/auth/me").then(r=>r.json());await fetch("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},body:"{}"});});
     await a.reload();
     await a.getByRole("heading", { name: "Вход в Stream Panel" }).waitFor();

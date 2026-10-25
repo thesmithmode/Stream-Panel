@@ -13,11 +13,12 @@ parentPort!.on('message',async({id,method,args,clientId=workerData.clientId?'':i
   const entry=stores.get(clientId);if(!entry)throw new Error('DB_WORKER_STOPPED');const {store}=entry;
   const fn=(store as unknown as Record<string,(...args:unknown[])=>unknown>)[method]!;
   const started=performance.now();
+  const stamp=invalidatesCachedReads(method,args)?store.changeStamp():null;
   let result:unknown;
   try{result=await fn.apply(store,args);}
   finally{
    // Clients of the same profile must observe writes before their next cache hit.
-   if(invalidatesCachedReads(method,args))for(const [id,peer] of stores)if(peer.profile===entry.profile)parentPort!.postMessage({clientId:id,invalidate:true});
+   if(stamp!==null&&store.changeStamp()!==stamp)for(const [id,peer] of stores)if(peer.profile===entry.profile)parentPort!.postMessage({clientId:id,invalidate:true});
   }
   const executionMs=performance.now()-started;
   if(method==='close')stores.delete(clientId);
