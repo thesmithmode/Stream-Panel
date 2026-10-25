@@ -21,3 +21,9 @@ not merely finding an unused exported name.
 
 Rollback: functional graph/filter fixes are the first commit. Styling and cleanup are
 subsequent commits so they can be reverted without undoing the functional fixes.
+
+Ownership after maintenance:
+- `ui-patterns.css` owns shared period controls, chart toolbars, panel controls and numeric alignment.
+- `TrendChart.svelte` owns its SVG, palette, selection overlay, caption and paging geometry. Global styles must not target its internal rectangles.
+- Screen components own screen-specific placement; `style.css` and `quiet-ui.css` retain legacy page styles until separately verified migration.
+- Functional caching/API/CI changes and style ownership cleanup are separate commits. This cleanup preserves computed layout at 320, 390 and 1280 px.
