@@ -9,7 +9,7 @@ import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';
 test('stream bar selection has four unclipped edges and survives focus changes',{timeout:60000},async()=>{
  const app=await application();let browser;
  try{
-  const id=await seed(app);await app.db.call('endSession',id,Date.now());
+  const id=await seed(app);await app.db.call('streamSample',id,Date.now()-300000,'game','Game','',9);await app.db.call('endSession',id,Date.now());
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:900}});page.setDefaultTimeout(8000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await goto(page,app.bootstrap());assert.equal(await page.title(),'Stream Panel');
@@ -31,6 +31,7 @@ test('stream bar selection has four unclipped edges and survives focus changes',
     await page.getByRole('button',{name:resolution,exact:true}).click();
     for(const metric of ['viewers','messages']){
      await page.getByLabel('Показатель графика стрима').selectOption(metric);
+     if(metric==='viewers')assert.deepEqual(await chart.locator('.count-axis-tick').allTextContents(),['0','2','4','6','8','10']);
      for(const index of [0,Math.floor(await bars.count()/2),await bars.count()-1]){
       const target=await bars.nth(index).evaluate(el=>{const box=el.getBBox(),svg=el.ownerSVGElement,clip=svg.querySelector('clipPath rect').getBBox();const point=new DOMPoint((Math.max(box.x,clip.x)+Math.min(box.x+box.width,clip.x+clip.width))/2,100).matrixTransform(svg.getScreenCTM());return {x:point.x,y:point.y};});
       await page.mouse.click(target.x,target.y);await detail.waitFor();await visibleOutline();assert.equal(await bars.nth(index).getAttribute('aria-pressed'),'true');

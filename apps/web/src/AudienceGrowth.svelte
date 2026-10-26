@@ -4,6 +4,7 @@
  import type {ViewerPlatform} from './daily-metrics';
  import {dailyMetrics,type StreamMetric} from './daily-metrics';
  import Help from './Help.svelte';
+ import {countAxis} from './chart-layout';
  let {platform=$bindable<ViewerPlatform>('all'),metric=$bindable<'online'|'active'>('online'),categoryFilter,streams,range,loadStreams,from=0,end=Date.now(),timezone='Europe/Moscow',onStream}:{platform?:ViewerPlatform;metric?:'online'|'active';categoryFilter:Snippet<[string]>;streams:StreamMetric[];range?:{first:number;total:number};loadStreams?:(params:Record<string,number>,signal:AbortSignal)=>Promise<any>;from?:number;end?:number;timezone?:string;onStream:(id:string)=>void}=$props();
  let availableWidth=$state(800),selected=$state(-1),page=$state(0);
  let remote=$state<StreamMetric[]>([]),loading=$state(false),failure=$state('');
@@ -28,8 +29,8 @@
  const current=$derived(displayed[selected]);
  const dateTicks=$derived(Array.from({length:Math.min(5,displayed.length)},(_,i)=>Math.round(i*(displayed.length-1)/Math.max(1,Math.min(5,displayed.length)-1))));
  const value=(row:typeof displayed[number])=>row.point?.[metric]??null;
- const maximum=$derived(Math.ceil(Math.max(1,...displayed.map(row=>value(row)??0))));
- const ticks=$derived(Array.from(new Set([0,Math.floor(maximum/2),maximum])));
+ const axis=$derived(countAxis(Math.max(0,...displayed.map(row=>value(row)??0))));
+ const maximum=$derived(axis.maximum),ticks=$derived(axis.ticks);
  const width=$derived(Math.max(280,availableWidth)),plotLeft=36;
  const barStep=$derived((width-plotLeft-12)/Math.max(1,displayed.length));
  const x=(i:number)=>plotLeft+barStep*(i+.5);

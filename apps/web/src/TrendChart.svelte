@@ -1,7 +1,7 @@
 <script lang="ts">
   import {num} from './format';
   import {chartSeries,isMessageMetric, type ChartMetric, type ChartPoint} from './chart-series';
-  import {chartLayout,chartPages} from './chart-layout';
+  import {chartLayout,chartPages,countAxis} from './chart-layout';
   import Help from './Help.svelte';
   const id=$props.id();
   import {timelineTicks} from './chart-detail';
@@ -12,7 +12,8 @@
   $effect(()=>{if(pageOffset>=pages.length)pageOffset=0;});
   const layout=$derived(chartLayout(visiblePoints[0]?.at??0,(visiblePoints.at(-1)?.at??0)+60000,availableWidth,resolution));
   const buckets=$derived(chartSeries(visiblePoints,metric,layout.resolution));
-  const maximum=$derived(Math.max(1,...buckets.map(p=>p.value)));
+  const axis=$derived(countAxis(Math.max(0,...buckets.map(p=>p.value))));
+  const maximum=$derived(axis.maximum);
   const start=$derived(visiblePoints[0]?.at??0),end=$derived((visiblePoints.at(-1)?.at??0)+60000);
   const ticks=$derived(timelineTicks(start,end));
   const plotWidth=$derived(layout.plotWidth);
@@ -42,8 +43,11 @@
 
     <div class="trend-plot"><svg viewBox={`0 0 ${plotWidth} 305`} style="width:100%;display:block" role="group" aria-label="График активности по выбранному периоду">
       <defs><clipPath id={`${id}-plot`}><rect x="32" y="25" width={plotWidth-56} height="225"/></clipPath></defs>
-      <line x1="32" y1="250" x2={plotWidth-24} y2="250" stroke="currentColor" opacity=".25" />
-      <text x="5" y="24" fill="currentColor" font-size="12">{Math.round(maximum)}</text><text x="8" y="250" fill="currentColor" font-size="12">0</text>
+      {#each axis.ticks as tick}
+        {@const y=250-tick/maximum*220}
+        <line x1="32" y1={y} x2={plotWidth-24} y2={y} stroke="currentColor" opacity={tick===0?'.25':'.12'} />
+        <text class="count-axis-tick" x="26" y={y+4} text-anchor="end" fill="currentColor" font-size="12">{num(tick,0)}</text>
+      {/each}
       <g clip-path={`url(#${id}-plot)`}>
       {#each buckets as p}
         {@const barHeight=height(p.value)}

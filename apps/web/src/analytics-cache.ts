@@ -4,7 +4,7 @@ import {clearSubscriberCache} from './subscriber-cache';
 // Shared across mounts. A profile is always part of the key and the request header.
 const snapshots=new Map<string,any>();
 const reports=new Map<string,{value?:any;until:number;pending:boolean;task:Promise<any>;controller:AbortController;users:number}>();
-export interface OverviewTotals {records?:{online:{value:number;at:number}|null;messages:{value:number;at:number}|null};streams:number;durationMinutes:number;attendees:number;messages:number;donations:number;totals:Record<string,string>}
+export interface OverviewTotals {records?:{online:{value:number;at:number}|null;messages:{value:number;at:number}|null;peakOnline?:{value:number;at:number}|null;peakChat?:{value:number;at:number}|null};streams:number;durationMinutes:number;attendees:number;messages:number;donations:number;totals:Record<string,string>}
 // Returning to Overview reuses its compact snapshot. Explicit/timed refresh still reads fresh data.
 const overviews=new Map<string,{until:number;pending:boolean;task:Promise<OverviewTotals>}>();
 export function loadOverview(profile:string,force=false){
