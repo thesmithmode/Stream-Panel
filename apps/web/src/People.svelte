@@ -250,7 +250,7 @@
     </div>
     {#if sortBy==='default'&&peopleTotal>50}<div class="people-pages" aria-label="Страницы людей">
       <button class="outline small" disabled={peopleLoading||peopleOffset===0} aria-label="Предыдущие люди" onclick={()=>peopleOffset=Math.max(0,peopleOffset-50)}>Назад</button>
-      <span class="small muted">{peopleOffset+1}–{Math.min(peopleOffset+50,peopleTotal)} из {peopleTotal}</span>
+      <span class="small muted">{peopleOffset+1}–{Math.min(peopleOffset+50,peopleTotal)} из {peopleTotal} записей</span>
       <button class="outline small" disabled={peopleLoading||peopleOffset+50>=peopleTotal} aria-label="Следующие люди" onclick={()=>peopleOffset+=50}>Далее</button>
     </div>{/if}
   </section>

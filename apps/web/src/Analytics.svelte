@@ -216,7 +216,7 @@
     </tr>{#if selected?.id===e.id}<tr class="audience-detail"><td colspan="5">{@render personDetail()}</td></tr>{/if}{/each}</tbody></table></div>
     {#if !visible.length}<p class="muted analytics-empty">Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.</p>{/if}
     {#if visible.length>200}<p class="small muted">Показаны первые 200; используйте поиск или меньший период.</p>{/if}
-  {#if data.audiencePage}<div class="analytics-controls"><button class="outline" disabled={audienceBusy||audienceOffset===0} onclick={()=>audienceOffset=Math.max(0,audienceOffset-100)}>Предыдущие участники</button><span>{audienceBusy?'Загрузка…':`Страница ${Math.floor(audienceOffset/100)+1}`}</span><button class="outline" disabled={audienceBusy||audienceOffset+100>=(pagedAudience?.audiencePage?.total??data.audiencePage.total)} onclick={()=>audienceOffset+=100}>Следующие участники</button></div>{/if}
+  {#if data.audiencePage}<div class="audience-pagination"><button class="outline" disabled={audienceBusy||audienceOffset===0} onclick={()=>audienceOffset=Math.max(0,audienceOffset-100)}>Назад</button><span>{audienceBusy?'Загрузка…':`Страница ${Math.floor(audienceOffset/100)+1}`}</span><button class="outline" disabled={audienceBusy||audienceOffset+100>=(pagedAudience?.audiencePage?.total??data.audiencePage.total)} onclick={()=>audienceOffset+=100}>Далее</button></div>{/if}
   </section>
   {/if}
 {/if}
@@ -228,7 +228,7 @@
 {/if}
 
 </div>
-<style>.returning-audience>header>span{font-size:12px;color:var(--muted);white-space:nowrap}.regular-summary{font-size:12px;line-height:1.5}.regular-summary strong{font-size:inherit;font-weight:500}.analytics-controls>span{font-size:12px}.timing-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}.timing-grid :global(.time-patterns){grid-column:1;grid-row:1}.timing-grid :global(.donation-patterns){grid-column:2;grid-row:1}.timing-grid :global(.discovery-grid){grid-column:1/-1}
+<style>.audience-pagination{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px}.audience-pagination button{flex:0 0 auto}.audience-pagination span{font-size:12px;color:var(--muted)}.returning-audience>header>span{font-size:12px;color:var(--muted);white-space:nowrap}.regular-summary{font-size:12px;line-height:1.5}.regular-summary strong{font-size:inherit;font-weight:500}.timing-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}.timing-grid :global(.time-patterns){grid-column:1;grid-row:1}.timing-grid :global(.donation-patterns){grid-column:2;grid-row:1}.timing-grid :global(.discovery-grid){grid-column:1/-1}
 @media(min-width:1101px){
  .timing-grid{grid-template-rows:repeat(6,auto) auto;row-gap:0;align-items:stretch}
  .timing-grid :global(.time-patterns),.timing-grid :global(.donation-patterns){display:grid;grid-template-rows:subgrid;grid-row:1/span 6;row-gap:0}
