@@ -18,6 +18,7 @@ interface PeopleMap {get(id:string):InsightPerson|undefined;set(id:string,value:
 interface Slot {key:string;label:string;visits:number;known:number;viewerSum:number;viewerMinutes:number;minutes:number;donorVisits:number;donors:string[];dates:string[];evidence:InsightEvidence[]}
 interface Category {name:string;visits:number;known:number;minutes:number;messages:number;viewerSum:number;viewerMinutes:number;evidence:InsightEvidence[]}
 interface Stream {id:string;at:number;end:number;day:string;title:string;known:boolean;messages:number;chatters:number;topMessages:number;mean:number|null;early:number|null;late:number|null;duration:number;categories:string[];closed:boolean;slots:string[];restarts:{before:number;returned:number;at:number}[]}
+export interface InsightState {slots:[string,Slot][];categories:[string,Category][];streams:Stream[];people:InsightPerson[]}
 const pct=(a:number,b:number)=>Math.round(a/b*100);
 const decimal=(n:number)=>n.toLocaleString('ru-RU',{maximumFractionDigits:1});
 const evidence=(s:Stream):InsightEvidence=>({sessionId:s.id,at:s.at,label:s.title});
@@ -86,6 +87,29 @@ export class InsightAccumulator {
    }
    row.recent.push({sessionId:s.id,at:s.at,label:s.title,observed:p.observedMinutes,messages:p.messages,donated});row.recent=row.recent.slice(-12);this.people.set(p.id,row);
   }
+ }
+ /** Neutral, associative state. Reusing it never replays old minute samples. */
+ snapshot():InsightState {return {slots:[...this.slots],categories:[...this.categories],streams:this.streams,people:[...this.people.values()]};}
+ append(state:InsightState){
+  const offset=this.streams.length;
+  for(const [key,input] of state.slots){const row=this.slots.get(key);if(!row){this.slots.set(key,structuredClone(input));continue;}
+   for(const field of ['visits','known','viewerSum','viewerMinutes','minutes','donorVisits'] as const)row[field]+=input[field];
+   row.donors=[...new Set([...row.donors,...input.donors])];row.dates=[...new Set([...row.dates,...input.dates])].slice(0,4);row.evidence=[...row.evidence,...input.evidence].slice(0,8);
+  }
+  for(const [key,input] of state.categories){const row=this.categories.get(key);if(!row){this.categories.set(key,structuredClone(input));continue;}
+   for(const field of ['visits','known','minutes','messages','viewerSum','viewerMinutes'] as const)row[field]+=input[field];row.evidence=[...row.evidence,...input.evidence].slice(0,8);
+  }
+  for(const input of state.people){const row=this.people.get(input.id);if(!row){this.people.set(input.id,{...structuredClone(input),firstIndex:input.firstIndex<0?-1:input.firstIndex+offset});continue;}
+   row.name=input.name;row.sources=[...new Set([...row.sources,...input.sources])];
+   if(input.firstIndex>=0){const first=input.firstIndex+offset;if(row.firstIndex<0){row.firstIndex=first;row.firstCategory=input.firstCategory;row.returned=input.returned;}else row.returned ||= first-row.firstIndex<=3;}
+   for(const field of ['visits','observed','messages','silent','donorVisits'] as const)row[field]+=input[field];
+   if(input.chatVisits!==undefined)row.chatVisits=(row.chatVisits??0)+input.chatVisits;
+   for(const field of ['chatEvidence','supportEvidence'] as const)if(input[field])row[field]=[...row[field]??[],...input[field]].slice(0,8);
+   for(const field of ['slots','categories'] as const)for(const [key,value] of Object.entries(input[field])){const prior=row[field][key];if(!prior){row[field][key]=structuredClone(value);continue;}prior.visits+=value.visits;prior.evidence=[...prior.evidence,...value.evidence].slice(0,8);if(value.donorVisits!==undefined)prior.donorVisits=(prior.donorVisits??0)+value.donorVisits;}
+   for(const [currency,n] of Object.entries(input.money))row.money[currency]=(BigInt(row.money[currency]??'0')+BigInt(n)).toString();
+   row.recent=[...row.recent,...input.recent].slice(-12);this.people.set(row.id,row);
+  }
+  this.streams.push(...state.streams);
  }
  *find():Generator<InsightCard|undefined>{
   const focus=this.streams.find(s=>s.id===this.focus),closed=this.streams.filter(s=>s.closed);

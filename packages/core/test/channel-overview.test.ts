@@ -44,3 +44,14 @@ test('overview counts a repeated chatter and linked YouTube account once, while 
   const overview=s.channelOverview();assert.equal(overview.attendees,2);assert.equal(overview.streams,2);assert.equal(overview.durationMinutes,60);assert.equal(overview.messages,7);
  }finally{s.close();}
 });
+
+test('late donations, notes and followers reuse the durable overview activity snapshot',()=>{
+ const s=new StreamStore(':memory:');try{
+  const at=Date.now()-3600000,id=s.startSession('owner','cached-overview',at,'platform',at);s.streamSample(id,at,'game','Game','',5);s.endSession(id,at+60000);
+  const person=String(s.createPerson('Donor').id),before=s.channelOverview();
+  (s as any).summary=()=>{throw Error('Historical activity was reread');};
+  s.createPersonNote(person,'note',at);s.followingSnapshot('twitch','owner',[],true,at);
+  s.createDonation({personId:person,amount:'11',currency:'RUB',occurredAtMs:at+30000,message:'Late',sourceName:'Cash'},Date.now());
+  const after=s.channelOverview();assert.equal(after.messages,before.messages);assert.equal(after.attendees,before.attendees);assert.deepEqual(after.totals,{RUB:'1100'});assert.equal(after.donations,1);
+ }finally{s.close();}
+});

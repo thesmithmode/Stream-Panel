@@ -18,7 +18,7 @@ test('compact participants expand inline without empty space, preserve sorting a
   people[0].intervals.push({from:base,to:base+60000,kind:'chat_proxy'});
   people[1].intervals=[{from:base-86400000,to:base+60000,kind:'observed'}];
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(7000);const errors=[];let empty=false;page.on('pageerror',e=>errors.push(e.message));
-  await page.route('**/api/v1/analytics?*',async route=>{const response=await route.fetch(),data=await response.json();await route.fulfill({response,json:{...data,audience:empty?[]:people}});});
+  await page.route('**/api/v1/analytics?*',async route=>{const response=await route.fetch({headers:{...route.request().headers(),'if-none-match':''}}),data=await response.json();await route.fulfill({response,headers:{...response.headers(),etag:''},json:{...data,audience:empty?[]:people}});});
   await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`[data-session-id="${sid}"] .stream-open`).click();await page.getByRole('tab',{name:'Участники',exact:true}).click();
   const rank=page.getByRole('region',{name:'Рейтинг участников'}),rows=rank.locator('.participant-row'),toggle=rank.getByRole('button',{name:'Интервалы AmaliyaMelina',exact:true}),details=rank.getByRole('region',{name:'Интервалы AmaliyaMelina',exact:true});
   await toggle.waitFor();assert.equal(await rows.count(),50);assert.equal(await rank.locator('.account-details,.accounts,.ranking-sort').count(),0);

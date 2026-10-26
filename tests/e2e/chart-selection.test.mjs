@@ -9,7 +9,7 @@ import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';
 test('stream bar selection has four unclipped edges and survives focus changes',{timeout:60000},async()=>{
  const app=await application();let browser;
  try{
-  const id=await seed(app);await app.db.call('endSession',id,Date.now());
+  const id=await seed(app);await app.db.call('streamSample',id,Date.now()-300000,'game','Game','',9);await app.db.call('endSession',id,Date.now());
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:900}});page.setDefaultTimeout(8000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await goto(page,app.bootstrap());assert.equal(await page.title(),'Stream Panel');
@@ -31,6 +31,7 @@ test('stream bar selection has four unclipped edges and survives focus changes',
     await page.getByRole('button',{name:resolution,exact:true}).click();
     for(const metric of ['viewers','messages']){
      await page.getByLabel('Показатель графика стрима').selectOption(metric);
+     if(metric==='viewers'){await page.waitForFunction(()=>[...document.querySelectorAll('.series-panel .count-axis-tick')].map(el=>el.textContent).join('|')==='0|2|4|6|8|10');assert.deepEqual(await chart.locator('.count-axis-tick').allTextContents(),['0','2','4','6','8','10']);}
      for(const index of [0,Math.floor(await bars.count()/2),await bars.count()-1]){
       const target=await bars.nth(index).evaluate(el=>{const box=el.getBBox(),svg=el.ownerSVGElement,clip=svg.querySelector('clipPath rect').getBBox();const point=new DOMPoint((Math.max(box.x,clip.x)+Math.min(box.x+box.width,clip.x+clip.width))/2,100).matrixTransform(svg.getScreenCTM());return {x:point.x,y:point.y};});
       await page.mouse.click(target.x,target.y);await detail.waitFor();await visibleOutline();assert.equal(await bars.nth(index).getAttribute('aria-pressed'),'true');
@@ -45,5 +46,23 @@ test('stream bar selection has four unclipped edges and survives focus changes',
   await page.keyboard.press('Enter');await detail.waitFor();assert.equal(await bars.first().getAttribute('aria-pressed'),'true');
   await page.keyboard.press('Tab');await visibleOutline();await page.keyboard.press('Space');await detail.waitFor();assert.equal(await bars.nth(1).getAttribute('aria-pressed'),'true');
   assert.deepEqual(errors,[]);await saveCoverage(page);
+ }finally{await browser?.close();await app.close();}
+});
+
+test('large count labels fit beside the stream plot on a narrow phone',{timeout:30000},async()=>{
+ const app=await application();let browser;
+ try{
+  const id=await seed(app);await app.db.call('endSession',id,Date.now());browser=await launchBrowser();
+  const page=await browser.newPage({viewport:{width:320,height:844}});
+  await page.route('**/api/v1/analytics**',async route=>{
+   const response=await route.fetch({headers:{...route.request().headers(),'if-none-match':''}}),data=await response.json();
+   for(const point of data.timeline??[]){point.viewers=1000000;point.twitchViewers=1000000;}
+   await route.fulfill({response,status:200,headers:{...response.headers(),etag:''},json:data});
+  });
+  await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`[data-session-id="${id}"] .stream-open`).click();
+  const labels=page.locator('.series-panel .count-axis-tick');await labels.last().waitFor();
+  assert.match(await labels.last().textContent(),/1\s000\s000/);
+  assert.equal(await labels.evaluateAll(rows=>rows.every(el=>{const box=el.getBBox(),plot=el.ownerSVGElement.querySelector('clipPath rect').getBBox();return box.x>=0&&box.x+box.width<plot.x;})),true);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });

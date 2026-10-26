@@ -1,3 +1,4 @@
+import {foldLeavesSql} from './history-tree-schema.js';
 import type {InsightPerson} from './insights.js';
 import type Database from 'better-sqlite3';
 import {randomUUID} from 'node:crypto';
@@ -41,6 +42,7 @@ export class AnalyticsWorkspace<P> {
  private category:string;
  private clock:string;
  private disposed=false;
+ private foldRoot:string|undefined;
  private clockCache=new Map<string,{pages:ReturnType<AnalyticsWorkspace<P>['clockPages']>;bytes:number}>();
  private clockBytes=0;
  constructor(private db:Database.Database,private readonly savedKey?:string){
@@ -51,20 +53,29 @@ export class AnalyticsWorkspace<P> {
    const name=`${this.prefix}_people`;
    db.exec(`CREATE TEMP VIEW ${name} AS SELECT id,value,seen FROM analytics_report_people WHERE cache_key='${savedKey}';
     CREATE TEMP VIEW ${this.clock} AS SELECT day,session,person,lo,hi FROM analytics_report_clock WHERE cache_key='${savedKey}'`);
+   const fold=db.prepare('SELECT root FROM analytics_report_fold_roots WHERE cache_key=?').get(savedKey) as {root:string}|undefined;
+   if(fold){db.exec(`DROP VIEW ${this.clock}`);this.foldClock(fold.root);}
    this.people=new DiskMap<P>(db,name,true);return;
   }
   this.people=db.transaction(()=>{const people=new DiskMap<P>(db,`${this.prefix}_people`);
   db.exec(`CREATE TEMP TABLE ${this.category}(category TEXT NOT NULL,person TEXT NOT NULL,PRIMARY KEY(category,person)) WITHOUT ROWID;
    CREATE TEMP TABLE ${this.clock}(day TEXT NOT NULL,session TEXT NOT NULL,person TEXT NOT NULL,lo INTEGER NOT NULL,hi INTEGER NOT NULL,PRIMARY KEY(day,session,person,lo)) WITHOUT ROWID`);return people;})();
  }
+ private foldClock(root:string){
+  if(!/^[a-f0-9]{64}$/.test(root))throw new Error('INVALID_ANALYTICS_CACHE_KEY');
+  this.foldRoot=root;this.db.exec(`CREATE TEMP VIEW ${this.clock} AS ${foldLeavesSql.replace('?',"'"+root+"'")} SELECT c.day,c.session,c.person,c.lo,c.hi FROM analytics_fold_clock c JOIN nodes n ON n.key=c.leaf`);
+ }
+ reductionRoot(){return this.foldRoot;}
+ useFold(root:string){this.db.exec(`DROP TABLE ${this.clock}`);this.foldClock(root);}
  /** Publish with the owning report in the same transaction. No JS copy of membership. */
  save(key:string){
   this.db.prepare(`INSERT INTO analytics_report_people SELECT ?,id,value,seen FROM ${this.people.table}`).run(key);
-  this.db.prepare(`INSERT INTO analytics_report_clock SELECT ?,day,session,person,lo,hi FROM ${this.clock}`).run(key);
+  if(this.foldRoot)this.db.prepare('INSERT INTO analytics_report_fold_roots VALUES(?,?)').run(key,this.foldRoot);
+  else this.db.prepare(`INSERT INTO analytics_report_clock SELECT ?,day,session,person,lo,hi FROM ${this.clock}`).run(key);
  }
  storageBytes(){
   const people=(this.db.prepare(`SELECT coalesce(sum(length(CAST(value AS BLOB))+length(id)+96),0) n FROM ${this.people.table}`).get() as {n:number}).n;
-  const clock=(this.db.prepare(`SELECT coalesce(sum(length(session)+length(person)+length(day)+128),0) n FROM ${this.clock}`).get() as {n:number}).n;
+  const clock=this.foldRoot?0:(this.db.prepare(`SELECT coalesce(sum(length(session)+length(person)+length(day)+128),0) n FROM ${this.clock}`).get() as {n:number}).n;
   return people+clock;
  }
  categoryPerson(category:string,person:string){this.db.prepare(`INSERT OR IGNORE INTO ${this.category} VALUES(?,?)`).run(category,person);}
@@ -125,5 +136,5 @@ export class AnalyticsWorkspace<P> {
   if(pages*Number(this.db.pragma('temp.page_size',{simple:true}))>512*1024*1024)throw new Error('ANALYTICS_WORKSPACE_LIMIT');
   if(this.db.name!==':memory:')for(const path of new Set([dirname(this.db.name),process.env.SQLITE_TMPDIR??tmpdir(),'/var/tmp'])){if(!existsSync(path))continue;const fs=statfsSync(path);if(fs.bavail*fs.bsize<1021024*1024)throw new Error('ANALYTICS_DISK_RESERVE');}
  }
- dispose(){if(!this.disposed){this.clockCache.clear();this.clockBytes=0;this.db.exec(this.savedKey?`DROP TABLE ${this.insightPeople.table};DROP VIEW ${this.people.table};DROP VIEW ${this.clock}`:`DROP TABLE ${this.insightPeople.table};DROP TABLE ${this.people.table};DROP TABLE ${this.category};DROP TABLE ${this.clock}`);this.disposed=true;}}
+ dispose(){if(!this.disposed){this.clockCache.clear();this.clockBytes=0;this.db.exec(this.savedKey?`DROP TABLE ${this.insightPeople.table};DROP VIEW ${this.people.table};DROP VIEW ${this.clock}`:`DROP TABLE ${this.insightPeople.table};DROP TABLE ${this.people.table};DROP TABLE ${this.category};DROP ${this.foldRoot?'VIEW':'TABLE'} ${this.clock}`);this.disposed=true;}}
 }

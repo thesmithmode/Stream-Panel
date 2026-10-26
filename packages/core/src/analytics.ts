@@ -9,6 +9,10 @@ import {streamMetrics} from './stream-metrics.js';
 import {windowsFromLinks,sessionBreaks} from './session-windows.js';
 import { botExclusionSet, isExcludedBot } from './bots.js';
 export interface AnalyticsOptions {
+    streamFrom?:number;streamTo?:number;streamOffset?:number;streamLimit?:number;
+    /** Internal fact projections; public routes never accept these flags. */
+    activityOnly?:boolean;
+    donationsOnly?:boolean;
     fromMs: number;
     toMs: number;
     source?: 'all' | 'twitch' | 'youtube';
@@ -208,7 +212,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         timeline.set(at, row);
     } return row; };
     if (source !== 'youtube') {
-        const intervals = db.prepare(`WITH raw AS(SELECT p.session_id,i.person_id,cast(max(p.started_at_ms,?,s.started_at_ms)/60000 AS INTEGER) AS lo,cast(min(p.completed_at_ms,?-1,coalesce(s.ended_at_ms,?)-1)/60000 AS INTEGER) AS hi FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id JOIN sessions s ON s.id=p.session_id WHERE p.status='complete' AND p.completed_at_ms>=? AND p.started_at_ms<? AND p.session_id IN(SELECT value FROM json_each(?))), prior AS(SELECT *,max(hi) OVER(PARTITION BY session_id,person_id ORDER BY lo,hi ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS previous_hi FROM raw WHERE hi>=lo),tagged AS(SELECT *,sum(CASE WHEN previous_hi IS NULL OR lo>previous_hi+1 THEN 1 ELSE 0 END) OVER(PARTITION BY session_id,person_id ORDER BY lo,hi) AS cluster FROM prior) SELECT session_id,person_id,min(lo)*60000 AS first_ms,(max(hi)+1)*60000 AS last_ms FROM tagged GROUP BY session_id,person_id,cluster LIMIT 50001`).all(from, to, to, from, to, sessionIds) as any[];
+        const intervals = options.donationsOnly?[]:db.prepare(`WITH raw AS(SELECT p.session_id,i.person_id,cast(max(p.started_at_ms,?,s.started_at_ms)/60000 AS INTEGER) AS lo,cast(min(p.completed_at_ms,?-1,coalesce(s.ended_at_ms,?)-1)/60000 AS INTEGER) AS hi FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id JOIN sessions s ON s.id=p.session_id WHERE p.status='complete' AND p.completed_at_ms>=? AND p.started_at_ms<? AND p.session_id IN(SELECT value FROM json_each(?))), prior AS(SELECT *,max(hi) OVER(PARTITION BY session_id,person_id ORDER BY lo,hi ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS previous_hi FROM raw WHERE hi>=lo),tagged AS(SELECT *,sum(CASE WHEN previous_hi IS NULL OR lo>previous_hi+1 THEN 1 ELSE 0 END) OVER(PARTITION BY session_id,person_id ORDER BY lo,hi) AS cluster FROM prior) SELECT session_id,person_id,min(lo)*60000 AS first_ms,(max(hi)+1)*60000 AS last_ms FROM tagged GROUP BY session_id,person_id,cluster LIMIT 50001`).all(from, to, to, from, to, sessionIds) as any[];
         if (intervals.length > 50000)
             throw new Error('ANALYTICS_RANGE_TOO_LARGE');
         for (const row of intervals) {
@@ -218,7 +222,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             const e = entity(row.person_id, name, 'twitch');
             e.intervals.push(...clip({ from: row.first_ms, to: row.last_ms, session: row.session_id, kind: 'observed' }));
         }
-        const messages = db.prepare(`SELECT i.person_id,es.session_id,min(e.occurred_at_ms) AS at,count(*) AS n,(SELECT c.category_id FROM stream_samples c WHERE c.session_id=es.session_id AND c.observed_at_ms<=e.occurred_at_ms ORDER BY c.observed_at_ms DESC LIMIT 1) AS cat FROM event_sessions es INDEXED BY event_sessions_session CROSS JOIN events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE e.type='chat.message' AND e.occurred_at_ms>=? AND e.occurred_at_ms<? AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id) AND es.session_id IN(SELECT value FROM json_each(?)) GROUP BY i.person_id,es.session_id,cast(e.occurred_at_ms/60000 AS INTEGER),cat LIMIT 50001`).all(from, to, sessionIds) as any[];
+        const messages = options.donationsOnly?[]:db.prepare(`SELECT i.person_id,es.session_id,min(e.occurred_at_ms) AS at,count(*) AS n,(SELECT c.category_id FROM stream_samples c WHERE c.session_id=es.session_id AND c.observed_at_ms<=e.occurred_at_ms ORDER BY c.observed_at_ms DESC LIMIT 1) AS cat FROM event_sessions es INDEXED BY event_sessions_session CROSS JOIN events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE e.type='chat.message' AND e.occurred_at_ms>=? AND e.occurred_at_ms<? AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id) AND es.session_id IN(SELECT value FROM json_each(?)) GROUP BY i.person_id,es.session_id,cast(e.occurred_at_ms/60000 AS INTEGER),cat LIMIT 50001`).all(from, to, sessionIds) as any[];
         if (messages.length > 50000)
             throw new Error('ANALYTICS_RANGE_TOO_LARGE');
         for (const row of messages) {
@@ -233,7 +237,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             minute(row.at).twitchMessages += row.n;
             addMessages(row.session_id, row.at, row.n, row.person_id, 'twitch');
         }
-        const tips = db.prepare(`SELECT i.person_id,es.session_id,e.occurred_at_ms AS at,json_extract(e.payload_json,'$.currency') AS currency,json_extract(e.payload_json,'$.amountMinor') AS amount FROM effective_events e JOIN identities i ON i.id=e.identity_id JOIN event_sessions es ON es.event_id=e.id WHERE e.type='donation' AND e.occurred_at_ms>=? AND e.occurred_at_ms<? AND es.session_id IN(SELECT value FROM json_each(?)) LIMIT 50001`).all(from, to, sessionIds) as any[];
+        const tips = options.activityOnly?[]:db.prepare(`SELECT i.person_id,es.session_id,e.occurred_at_ms AS at,json_extract(e.payload_json,'$.currency') AS currency,json_extract(e.payload_json,'$.amountMinor') AS amount FROM effective_events e JOIN identities i ON i.id=e.identity_id JOIN event_sessions es ON es.event_id=e.id WHERE e.type='donation' AND e.occurred_at_ms>=? AND e.occurred_at_ms<? AND es.session_id IN(SELECT value FROM json_each(?)) LIMIT 50001`).all(from, to, sessionIds) as any[];
         if (tips.length > 50000)
             throw new Error('ANALYTICS_RANGE_TOO_LARGE');
         for (const tip of tips) {
@@ -251,7 +255,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
 
         }
     }
-    if (source !== 'twitch' && options.youtubeAccount) {
+    if (!options.donationsOnly && source !== 'twitch' && options.youtubeAccount) {
         const personLinks=new Map((db.prepare('SELECT external_id,person_id FROM youtube_identities WHERE account_id=?').all(options.youtubeAccount) as {external_id:string;person_id:string}[]).map(row=>[row.external_id,row.person_id]));
         const excludedAuthors = new Set((db.prepare(`SELECT DISTINCT author_id FROM youtube_messages WHERE account_id=? AND (json_extract(payload_json,'$.authorDetails.isChatOwner')=1 OR lower(ltrim(trim(json_extract(payload_json,'$.authorDetails.displayName')),'@#')) IN(SELECT value FROM json_each(?)))`).all(options.youtubeAccount,botJson) as {author_id:string}[]).map(row=>row.author_id));
         const chats = db.prepare(`WITH scoped AS (
@@ -361,6 +365,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         messages: number;
         observedMinutes: number;
         observedKnownMinutes: number;
+        viewerTotal: number; viewerKnownMinutes: number; viewerPartialMinutes: number;
         estimatedChatMinutes: number;
         sessions: Set<string>;
         audience: Set<string>;
@@ -369,7 +374,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     for (const segment of selected) {
         let c = categories.get(segment.categoryId);
         if (!c) {
-            c = { id: segment.categoryId, name: segment.name, minutes: 0, messages: 0, observedMinutes: 0, observedKnownMinutes: 0, estimatedChatMinutes: 0, sessions: new Set(), audience: new Set(categoryAudience.get(segment.categoryId) ?? []), core: new Set([...(categoryAudience.get(segment.categoryId) ?? [])].filter(id => entities.get(id)?.core)) };
+            c = { id: segment.categoryId, name: segment.name, minutes: 0, messages: 0, observedMinutes: 0, observedKnownMinutes: 0, viewerTotal:0, viewerKnownMinutes:0, viewerPartialMinutes:0, estimatedChatMinutes: 0, sessions: new Set(), audience: new Set(categoryAudience.get(segment.categoryId) ?? []), core: new Set([...(categoryAudience.get(segment.categoryId) ?? [])].filter(id => entities.get(id)?.core)) };
             categories.set(segment.categoryId, c);
         }
         c.minutes += (segment.to - segment.from) / 60000;
@@ -403,7 +408,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             point.viewers = source === 'twitch' ? point.twitchViewers : source === 'youtube' ? point.youtubeViewers : known.length?known.reduce((sum,value)=>sum+value,0):null;
             point.viewersPartial = source === 'all' && known.length>0 && keys.some(key=>point[key as 'twitchViewers'|'youtubeViewers']===null);
         }
-    const coverage = db.prepare("SELECT session_id,started_at_ms AS first,completed_at_ms AS last FROM presence_polls WHERE status='complete' AND completed_at_ms>=? AND started_at_ms<? AND session_id IN(SELECT value FROM json_each(?))").all(from, to, sessionIds) as any[];
+    const coverage = options.donationsOnly?[]:db.prepare("SELECT session_id,started_at_ms AS first,completed_at_ms AS last FROM presence_polls WHERE status='complete' AND completed_at_ms>=? AND started_at_ms<? AND session_id IN(SELECT value FROM json_each(?))").all(from, to, sessionIds) as any[];
     for (const poll of coverage)
         for (const span of clip({ from: Math.floor(poll.first / 60000) * 60000, to: (Math.floor(poll.last / 60000) + 1) * 60000, session: poll.session_id, kind: 'observed' }))
             for (let at = Math.floor(span.from / 60000) * 60000; at < span.to; at += 60000) {
@@ -413,7 +418,10 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             }
     for (const segment of selected) {
         const c=categories.get(segment.categoryId)!;
-        for (let at=Math.floor(segment.from/60000)*60000;at<segment.to;at+=60000) if(timeline.get(at)?.presenceKnown) c.observedKnownMinutes+=Math.max(0,Math.min(at+60000,segment.to)-Math.max(at,segment.from))/60000;
+        for(let at=Math.floor(segment.from/60000)*60000;at<segment.to;at+=60000){const point=timeline.get(at),minutes=Math.max(0,Math.min(at+60000,segment.to)-Math.max(at,segment.from))/60000;
+          if(point?.presenceKnown)c.observedKnownMinutes+=minutes;
+          if(point?.viewers!=null){c.viewerTotal+=point.viewers*minutes;c.viewerKnownMinutes+=minutes;if(point.viewersPartial)c.viewerPartialMinutes+=minutes;}
+        }
     }
     for(const span of breaks)for(let at=Math.ceil(Math.max(from,span.from)/60000)*60000;at+60000<=Math.min(to,span.to);at+=60000){
         if(++expanded>2000000)throw new Error('ANALYTICS_RANGE_TOO_LARGE');
@@ -484,5 +492,5 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     });
     const report=source!=='twitch'&&options.youtubeAccount ? db.prepare("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {payload_json:string;updated_at_ms:number}|undefined : undefined;
     const youtubeReport=report ? {data:JSON.parse(report.payload_json),updatedAt:report.updated_at_ms} : null;
-    return { activityClock:clockActivity([...timeline.values()].map(point=>({...point,donations:minuteDonationCounts.get(point.at)??0,donationAmounts:minuteDonations.get(point.at)??{}})),selected,timezone), donationTiming:donationTiming(db,from,to,timezone,category),activityWindows:selected, patterns,composition,breaks, youtubeReport, streamComparison, availableCategories: [...new Map(segments.filter(s=>s.categoryId&&s.name!=='Категория неизвестна').map(s => [s.categoryId, { id: s.categoryId, name: s.name }])).values()], filters: { fromMs: from, toMs: to, source, category, minSessions, minMinutes, minMessages, regularThresholdPercent, coreRule: rule, chatWindowMinutes: window, timezone }, summary: { entities: audience.length, attendees: attendees.length, regulars, regularShare: audience.length?regulars/audience.length:null, core: audience.filter(e => e.core).length, streams: new Set(selected.map(x => x.session)).size, chatters:audience.filter(e=>e.messages>0).length, messages: audience.reduce((sum, e) => sum + e.messages, 0) }, audience, categories: [...categories.values()].filter(c=>c.id&&c.name!=='Категория неизвестна').map(c => ({ ...c, donationCount:categoryDonationCounts.get(c.id)??0,donationTotals:categoryDonations.get(c.id)??{},donationsPerHourMinor:currencyRates(categoryDonations.get(c.id)??{},Math.round(c.minutes*60000)),sessions: c.sessions.size, audience: c.audience.size, core: c.core.size, messagesPerHour: c.minutes ? c.messages * 60 / c.minutes : 0, observedPerMinute: c.minutes ? c.observedMinutes / c.minutes : 0, observedPerKnownMinute: c.observedKnownMinutes ? c.observedMinutes / c.observedKnownMinutes : null, coverageRatio: c.minutes ? c.observedKnownMinutes/c.minutes : null })), timeline: [...timeline.values()].sort((a, b) => a.at - b.at), hours: [...hourly.values()].map(cell=>({...cell,donationsPerHourMinor:currencyRates(cell.donationTotals,Math.round(cell.sampleMinutes*60000))})).sort((a, b) => ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(a.day) - ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(b.day) || a.hour - b.hour), sessions, excluded: [...excluded] };
+    return { activityClock:clockActivity([...timeline.values()].map(point=>({...point,donations:minuteDonationCounts.get(point.at)??0,donationAmounts:minuteDonations.get(point.at)??{}})),selected,timezone), donationTiming:donationTiming(db,from,to,timezone,category),activityWindows:selected, patterns,composition,breaks, youtubeReport, streamComparison, availableCategories: [...new Map(segments.filter(s=>s.categoryId&&s.name!=='Категория неизвестна').map(s => [s.categoryId, { id: s.categoryId, name: s.name }])).values()], filters: { fromMs: from, toMs: to, source, category, minSessions, minMinutes, minMessages, regularThresholdPercent, coreRule: rule, chatWindowMinutes: window, timezone }, summary: { entities: audience.length, attendees: attendees.length, regulars, regularShare: audience.length?regulars/audience.length:null, core: audience.filter(e => e.core).length, streams: new Set(selected.map(x => x.session)).size, chatters:audience.filter(e=>e.messages>0).length, messages: audience.reduce((sum, e) => sum + e.messages, 0) }, audience, categories: [...categories.values()].filter(c=>c.id&&c.name!=='Категория неизвестна').map(c => ({ ...c, donationCount:categoryDonationCounts.get(c.id)??0,donationTotals:categoryDonations.get(c.id)??{},donationsPerHourMinor:currencyRates(categoryDonations.get(c.id)??{},Math.round(c.minutes*60000)),meanOnline:c.viewerKnownMinutes?c.viewerTotal/c.viewerKnownMinutes:null,viewerCoverageRatio:c.minutes?c.viewerKnownMinutes/c.minutes:null,sessions: c.sessions.size, audience: c.audience.size, core: c.core.size, messagesPerHour: c.minutes ? c.messages * 60 / c.minutes : 0, observedPerMinute: c.minutes ? c.observedMinutes / c.minutes : 0, observedPerKnownMinute: c.observedKnownMinutes ? c.observedMinutes / c.observedKnownMinutes : null, coverageRatio: c.minutes ? c.observedKnownMinutes/c.minutes : null })), timeline: [...timeline.values()].sort((a, b) => a.at - b.at), hours: [...hourly.values()].map(cell=>({...cell,donationsPerHourMinor:currencyRates(cell.donationTotals,Math.round(cell.sampleMinutes*60000))})).sort((a, b) => ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(a.day) - ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(b.day) || a.hour - b.hour), sessions, excluded: [...excluded] };
 }

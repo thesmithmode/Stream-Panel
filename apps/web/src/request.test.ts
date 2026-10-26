@@ -34,3 +34,11 @@ test('a supplied navigation signal retains its own request deadline',async(t)=>{
  const fetcher=async(_url:unknown,init?:RequestInit)=>{calls++;return new Promise<Response>((_resolve,reject)=>{init!.signal!.addEventListener('abort',()=>reject(init!.signal!.reason),{once:true});});};
  await assert.rejects(requestJson('/slow',{signal:external.signal},fetcher as typeof fetch,async()=>{}),ConnectionError);assert.equal(calls,3);assert.equal(external.signal.aborted,false);
 });
+
+test('conditional reads reuse the exact profile snapshot on 304 and publish validators only after successful JSON',async()=>{
+ const cached={value:3};let notified=0;
+ const result=await requestJson('/report',{conditional:{etag:'"v1"',value:cached},onResponse:()=>notified++},async()=>new Response(null,{status:304}));
+ assert.equal(result,cached);assert.equal(notified,0);
+ await requestJson('/report',{onResponse:(response,value)=>{assert.equal(response.headers.get('etag'),'"v2"');assert.deepEqual(value,{value:4});notified++;}},async()=>new Response('{"value":4}',{headers:{etag:'"v2"'}}));
+ assert.equal(notified,1);
+});

@@ -1,3 +1,4 @@
+import {analyticsRevisionSchema} from './analytics-revisions.js';
 import {changeRevisionSchema} from './change-revisions.js';
 // Migration 1. All times are UTC epoch milliseconds; names are never unique identifiers.
 
@@ -321,13 +322,15 @@ CREATE VIEW IF NOT EXISTS follower_observations AS SELECT c.id,p.source,p.accoun
 PRAGMA user_version=17;
 `;
 
+export const analyticsStreamCacheSchema=`CREATE TABLE IF NOT EXISTS analytics_stream_cache(session_id TEXT NOT NULL,cache_key TEXT NOT NULL,revision INTEGER NOT NULL,global_revision INTEGER NOT NULL,payload BLOB NOT NULL,updated_at_ms INTEGER NOT NULL,PRIMARY KEY(session_id,cache_key)) STRICT;`;
+
 /** Closed-stream reports are derived and invalidated by factual mutations. */
 export const schemaV18=`
 CREATE TABLE IF NOT EXISTS analytics_stream_revisions(session_id TEXT PRIMARY KEY,revision INTEGER NOT NULL) STRICT;
 INSERT OR IGNORE INTO analytics_stream_revisions SELECT id,0 FROM sessions;
 CREATE TABLE IF NOT EXISTS analytics_global_revision(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL) STRICT;
 INSERT OR IGNORE INTO analytics_global_revision VALUES(1,0);
-CREATE TABLE IF NOT EXISTS analytics_stream_cache(session_id TEXT NOT NULL,cache_key TEXT NOT NULL,revision INTEGER NOT NULL,global_revision INTEGER NOT NULL,payload BLOB NOT NULL,updated_at_ms INTEGER NOT NULL,PRIMARY KEY(session_id,cache_key)) STRICT;
+${analyticsStreamCacheSchema}
 CREATE TRIGGER IF NOT EXISTS analytics_sessions_insert AFTER INSERT ON sessions BEGIN
    INSERT INTO analytics_stream_revisions VALUES(NEW.id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
   END;
@@ -583,7 +586,7 @@ CREATE INDEX IF NOT EXISTS youtube_publications_time ON youtube_publications(acc
 INSERT OR IGNORE INTO subscriber_counts SELECT p.source,p.account_id,c.observed_at_ms,json_extract(p.payload_json,'$.total') FROM provider_snapshots p JOIN follower_checks c ON c.snapshot_id=p.id WHERE p.key='followers' AND p.source='twitch' AND json_type(p.payload_json,'$.total')='integer' AND json_extract(p.payload_json,'$.total')>=0;
 PRAGMA user_version=25;
 `;
-export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24,schemaV25,changeRevisionSchema] as const;
+export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24,schemaV25,changeRevisionSchema,analyticsRevisionSchema] as const;
 export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;
 
 
