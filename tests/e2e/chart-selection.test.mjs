@@ -48,3 +48,21 @@ test('stream bar selection has four unclipped edges and survives focus changes',
   assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });
+
+test('large count labels fit beside the stream plot on a narrow phone',{timeout:30000},async()=>{
+ const app=await application();let browser;
+ try{
+  const id=await seed(app);await app.db.call('endSession',id,Date.now());browser=await launchBrowser();
+  const page=await browser.newPage({viewport:{width:320,height:844}});
+  await page.route('**/api/v1/analytics**',async route=>{
+   const response=await route.fetch({headers:{...route.request().headers(),'if-none-match':''}}),data=await response.json();
+   for(const point of data.timeline??[]){point.viewers=1000000;point.twitchViewers=1000000;}
+   await route.fulfill({response,status:200,headers:{...response.headers(),etag:''},json:data});
+  });
+  await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`[data-session-id="${id}"] .stream-open`).click();
+  const labels=page.locator('.series-panel .count-axis-tick');await labels.last().waitFor();
+  assert.match(await labels.last().textContent(),/1\s000\s000/);
+  assert.equal(await labels.evaluateAll(rows=>rows.every(el=>{const box=el.getBBox(),plot=el.ownerSVGElement.querySelector('clipPath rect').getBBox();return box.x>=0&&box.x+box.width<plot.x;})),true);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await saveCoverage(page);
+ }finally{await browser?.close();await app.close();}
+});

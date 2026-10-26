@@ -23,3 +23,6 @@ export function countAxis(maximum:number){
  const high=Math.ceil(peak/step)*step;
  return {maximum:high,ticks:Array.from({length:Math.round(high/step)+1},(_,i)=>i*step)};
 }
+
+/** Reserve label space before drawing so large counts cannot overlap or be clipped. */
+export const countAxisInset=(maximum:number,minimum=32)=>Math.max(minimum,maximum.toLocaleString('ru-RU',{maximumFractionDigits:0}).length*7+8);
