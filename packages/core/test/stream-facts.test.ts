@@ -75,3 +75,18 @@ test('changed streams take priority over initial backfill and serial batches dra
   assert.equal(s.advanceAnalytics(q).pending,0);
  }finally{s.close();}
 });
+
+test('former bot aliases invalidate financial facts only for associated streams and restore totals when removed',()=>{
+ const s=new StreamStore(':memory:');try{const id=stream(s),other=s.startSession('owner','unrelated',at+86400000,'platform',at+86400000);s.endSession(other,at+86400000+minute);
+  const q={fromMs:0,toMs:at+2*86400000,sessionId:id,ownerId:'owner'},person=s.analytics(q).audience[0]!.id;
+  s.createDonation({personId:person,amount:'11',currency:'RUB',occurredAtMs:at+minute,message:'',sourceName:'Cash'},at+minute);s.analytics(q);
+  const db=(s as any).db,identity=db.prepare("SELECT id FROM identities WHERE source='twitch' AND external_id='viewer'").get().id;
+  const before=db.prepare('SELECT * FROM analytics_fact_versions WHERE session_id=?').get(other);
+  const compare=()=>{const actual=s.analytics(q),expected=audienceAnalytics((s as any).reads,q);assert.deepEqual(actual.categories,expected.categories);assert.deepEqual(actual.audience.map(p=>[p.id,p.donations]),expected.audience.map(p=>[p.id,p.donations]));};
+  db.prepare('INSERT INTO identity_aliases VALUES(?,?,?,?,?)').run(identity,'Nightbot','nightbot',at,at);compare();assert.equal(s.analytics(q).audience.length,0);
+  db.prepare('UPDATE identity_aliases SET candidate_key=? WHERE identity_id=? AND name=?').run('viewer',identity,'Nightbot');compare();assert.equal(s.analytics(q).audience.length,1);
+  db.prepare('UPDATE identity_aliases SET candidate_key=? WHERE identity_id=? AND name=?').run('nightbot',identity,'Nightbot');compare();
+  db.prepare('DELETE FROM identity_aliases WHERE identity_id=? AND name=?').run(identity,'Nightbot');compare();assert.equal(s.analytics(q).categories[0]!.donationTotals.RUB,'1100');
+  assert.deepEqual(db.prepare('SELECT * FROM analytics_fact_versions WHERE session_id=?').get(other),before);
+ }finally{s.close();}
+});
