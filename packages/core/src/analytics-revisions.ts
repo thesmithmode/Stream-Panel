@@ -1,3 +1,4 @@
+import {historyTreeSchema} from './history-tree-schema.js';
 // Version only facts belonging to the affected physical stream. The existing
 // revision remains available to older consumers and rollback checkpoints.
 const bump=(sessions:string,domain:'activity'|'money'='activity')=>`INSERT INTO analytics_fact_versions(session_id,${domain}) SELECT id,1 FROM (${sessions}) WHERE id IS NOT NULL ON CONFLICT(session_id) DO UPDATE SET ${domain}=${domain}+1;`;
@@ -36,5 +37,6 @@ ${(['identity_aliases','youtube_identity_aliases'] as const).flatMap(table=>oper
 ${operations.map(op=>{const rows=op==='INSERT'?['NEW']:op==='DELETE'?['OLD']:['OLD','NEW'];return `CREATE TRIGGER IF NOT EXISTS fact_anonymous_${op.toLowerCase()} ${op==='DELETE'?'BEFORE':'AFTER'} ${op} ON anonymous_donors BEGIN ${rows.map(r=>bump(`SELECT es.session_id id FROM event_sessions es JOIN events e ON e.id=es.event_id WHERE e.source='donationalerts' AND e.type='donation' AND e.identity_id IS NULL AND e.account_id=${r}.account_id`,'money')).join('\n')} END;`;}).join('\n')}
 ${operations.map(op=>{const rows=op==='INSERT'?['NEW']:op==='DELETE'?['OLD']:['OLD','NEW'];return `CREATE TRIGGER IF NOT EXISTS fact_groups_${op.toLowerCase()} ${op==='DELETE'?'BEFORE':'AFTER'} ${op} ON session_groups BEGIN ${rows.map(r=>bump(`SELECT ${r}.member_id id UNION SELECT ${r}.group_id`)).join('\n')} END;`;}).join('\n')}
 ${operations.map(op=>{const rows=op==='INSERT'?['NEW']:op==='DELETE'?['OLD']:['OLD','NEW'];return `CREATE TRIGGER IF NOT EXISTS fact_tombstones_${op.toLowerCase()} AFTER ${op} ON session_tombstones BEGIN ${bump(rows.map(r=>`SELECT ${r}.session_id id`).join(' UNION '))} END;`;}).join('\n')}
+${historyTreeSchema}
 PRAGMA user_version=27;
 `;

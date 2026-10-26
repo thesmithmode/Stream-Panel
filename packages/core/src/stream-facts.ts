@@ -1,3 +1,4 @@
+import {botExclusionSet} from './bots.js';
 import type Database from 'better-sqlite3';
 import {createHash} from 'node:crypto';
 import {statfsSync} from 'node:fs';
@@ -27,15 +28,24 @@ export class StreamFacts {
   try{report=this.db.transaction(()=>{
    const {q,key,complete}=this.scope(options,id,start,end),{activity,money}=this.versions(id);
    const base=this.load('analytics_stream_facts',id,key,activity,()=>audienceAnalytics(this.db,{...q,activityOnly:true}),complete);
-   const finance=this.load('analytics_money_facts',id,key,money,()=>audienceAnalytics(this.db,{...q,donationsOnly:true}),complete);
+   const moneyKey=createHash('sha256').update(JSON.stringify([key,base.activityWindows])).digest('hex');
+   const finance=this.load('analytics_money_facts',id,moneyKey,money,()=>audienceAnalytics(this.db,{...q,donationsOnly:true}),complete);
    const value=combine(base,finance);this.snapshots.set(value,{activity,key,complete});return value;
+  })();}finally{this.staged=undefined;}
+  for(const write of writes)write();return report;
+ }
+ /** Activity-only consumers (records) never load or invalidate financial projections. */
+ activity(options:AnalyticsOptions,id:string,start:number,end:number|null):Report{
+  const writes:(()=>void)[]=[];this.staged=writes;let report:Report;
+  try{report=this.db.transaction(()=>{const {q,key,complete}=this.scope(options,id,start,end);
+   return this.load('analytics_stream_facts',id,key,this.versions(id).activity,()=>audienceAnalytics(this.db,{...q,activityOnly:true}),complete);
   })();}finally{this.staged=undefined;}
   for(const write of writes)write();return report;
  }
  private scope(options:AnalyticsOptions,id:string,start:number,end:number|null){
   const q={...options,sessionId:id,fromMs:Math.max(options.fromMs,start),toMs:Math.min(options.toMs,end??options.toMs)};
   const members=this.db.prepare('SELECT member_id FROM session_groups WHERE group_id=? ORDER BY member_id').all(id);
-  const fields={format:3,members,from:q.fromMs,to:end===null&&q.toMs>=Date.now()-120000?'live':q.toMs,source:q.source??'all',category:q.category??'',timezone:q.timezone??'Europe/Moscow',chatWindowMinutes:q.chatWindowMinutes??5,excluded:[...(q.excludedLogins??[])].sort(),owner:q.ownerId??'',youtube:q.youtubeAccount??'',minSessions:q.minSessions??3,minMinutes:q.minMinutes??30,minMessages:q.minMessages??5,regularThresholdPercent:q.regularThresholdPercent??80,coreRule:q.coreRule??'either'};
+  const fields={format:3,members,from:q.fromMs,to:end===null&&q.toMs>=Date.now()-120000?'live':q.toMs,source:q.source??'all',category:q.category??'',timezone:q.timezone??'Europe/Moscow',chatWindowMinutes:q.chatWindowMinutes??5,excluded:[...botExclusionSet(q.excludedLogins??[])].sort(),owner:q.ownerId??'',youtube:q.youtubeAccount??'',minSessions:q.minSessions??3,minMinutes:q.minMinutes??30,minMessages:q.minMessages??5,regularThresholdPercent:q.regularThresholdPercent??80,coreRule:q.coreRule??'either'};
   return {q,key:createHash('sha256').update(JSON.stringify(fields)).digest('hex'),complete:end!==null&&q.fromMs===start&&q.toMs===end};
 
  }

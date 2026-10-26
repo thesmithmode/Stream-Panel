@@ -63,6 +63,9 @@ jobs:
           test "$(cat artifacts/build.sha)" = "$GITHUB_SHA"
           tar -xzf artifacts/build.tar.gz
       - run: node scripts/test-with-coverage.mjs ${{ matrix.segment }}
+      - name: Verify incremental history on 10,000 streams
+        if: matrix.segment == 'unit'
+        run: node --max-old-space-size=128 scripts/benchmark-analytics-load.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

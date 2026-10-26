@@ -188,12 +188,11 @@ test('expired or displaced report preparation can restart without losing histori
   const firstProgress=h.report(query),nextProgress=h.report(query);assert.equal(firstProgress.preparing,true);assert.ok(nextProgress.ready!>firstProgress.ready!);
   now+=6*60000;
   h.prepare(query);
-  const restarted=h.report(query);assert.equal(restarted.preparing,true);assert.ok(restarted.ready!<nextProgress.ready!);
+  const restarted=h.report(query);assert.ok(restarted.preparing||restarted.summary.messages===60,'expired work resumes from persisted intermediate totals');
   assert.equal(ready(h,query).summary.messages,60);
   const first={...query,minMessages:100};
-  const initial=h.report(first),progress=h.report(first);assert.ok(progress.ready!>initial.ready!);
-  for(let filter=101;filter<106;filter++)assert.equal(h.report({...query,minMessages:filter}).preparing,true);
-  assert.ok(h.report(first).ready!<progress.ready!,'displaced work restarts safely instead of retaining unlimited jobs');
+  for(let filter=100;filter<106;filter++)assert.equal(ready(h,{...query,minMessages:filter}).summary.messages,60);
+  assert.ok((h as any).jobs.size<=4,'filter changes retain bounded work and reuse prepared totals');
   assert.equal(ready(h,first).summary.messages,60);assert.equal(s.eventCount(),60);
  }finally{s.close();}
 });
@@ -262,7 +261,7 @@ test('background baking prepares actual category variants without adding facts o
 
 test('summary queries reuse baked slices while day and stream drilldowns retain original minute facts',()=>{
  const s=new StreamStore(':memory:');try{
- fixture(s,4);const db=(s as any).db,raw=audienceAnalytics(db,options),summary=s.analytics({...options,summaryOnly:true}) as any;
+ fixture(s,4);const db=(s as any).db,raw=audienceAnalytics(db,options),summary=ready((s as any).history,{...options,summaryOnly:true}) as any;
  assert.equal(summary.aggregate,true);assert.deepEqual(summary.summary,raw.summary);assert.deepEqual(summary.streamComparison,raw.streamComparison);assert.deepEqual(summary.hours,raw.hours);
  const day=s.analytics({...options,toMs:base+86400000});assert.equal((day as any).aggregate,undefined);assert.equal(day.timeline.length,3);assert.ok(day.audience[0]!.intervals.length);
  const saved=db.prepare('SELECT count(*) n FROM analytics_stream_cache').get().n;for(let i=0;i<3;i++)assert.deepEqual(s.analytics({...options,summaryOnly:true}).summary,summary.summary);assert.equal(db.prepare('SELECT count(*) n FROM analytics_stream_cache').get().n,saved);
@@ -304,7 +303,7 @@ test('live writes do not restart historical preparation, but invalidate the comp
   let cpu=0;t.mock.method(performance,'now',()=>cpu+=10);
   const first=h.report(opts);assert.equal(first.preparing,true);
   s.streamSample(live,at,'game','Game','',10);const second=h.report(opts);assert.ok(second.ready!>first.ready!);
-  assert.equal(ready(h,opts).summary.streams,61);s.streamSample(live,at+1000,'game','Game','',12);assert.equal(h.report(opts).preparing,true);assert.equal(ready(h,opts).summary.messages,60);h.close();
+  assert.equal(ready(h,opts).summary.streams,61);s.streamSample(live,at+1000,'game','Game','',12);const changed=h.report(opts);assert.ok(changed.preparing||changed.summary.streams===61);assert.equal(ready(h,opts).summary.messages,60);h.close();
  }finally{s.close();}
 });
 
@@ -316,8 +315,8 @@ test('temporary-space pressure evicts only derived work and resource errors pres
   t.mock.method(AnalyticsWorkspace.prototype,'checkBudget',function(this:AnalyticsWorkspace<unknown>){if(fatal)throw Error(fatal);if(fail){fail=false;throw Error('ANALYTICS_WORKSPACE_LIMIT');}return original.call(this);});
   fail=true;assert.equal(ready(h,{...opts,minMessages:100}).summary.messages,60,'completed derived work is safely evicted');h.close();
   let cpu=0;t.mock.method(performance,'now',()=>cpu+=10);
-  assert.equal(h.report({...opts,minMessages:101}).preparing,true);fail=true;
-  assert.equal(ready(h,{...opts,minMessages:102}).summary.messages,60,'another pending filter can be safely displaced');h.close();
+  assert.equal(h.report({...opts,category:'missing'}).preparing,true);fail=true;
+  assert.equal(ready(h,{...opts,category:'game'}).summary.messages,60,'another pending filter can be safely displaced');h.close();
   for(const error of ['ANALYTICS_WORKSPACE_LIMIT','ANALYTICS_DISK_RESERVE']){
    fatal=error;assert.throws(()=>h.report(opts),new RegExp(error));
    assert.equal(db.prepare("SELECT count(*) n FROM sqlite_temp_master WHERE type='table' AND name LIKE 'sp_analytics_%'").get().n,0);

@@ -61,7 +61,7 @@ export class StreamStore {
       migrateDatabase(this.db);
     this.history=new AnalyticsHistory(this.reads);
     this.overviewActivity=new AnalyticsReportCache(this.reads);
-    this.records=new ChannelRecords(this.reads,(id,bots)=>this.streams.sessions(id,0,1,bots)[0]);
+    this.records=new ChannelRecords(this.reads,(id,bots)=>({...this.streams.sessions(id,0,1,bots)[0],...this.history.recordMetrics(id,JSON.parse(bots) as string[])}));
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
       this.db.transaction(() => {this.collapseDuplicateDaDonors();this.reconcileNicknameLinks();}).immediate();
     } catch (error) {
@@ -336,7 +336,7 @@ export class StreamStore {
 
   clockAudience(options:AnalyticsOptions){return this.history.clockAudience(options);}
   advanceAnalytics(options:AnalyticsOptions){return this.history.advance(options);}
-  warmAnalytics(options:AnalyticsOptions,bakeCategories=false){return this.history.warm(options,bakeCategories);}
+  warmAnalytics(options:AnalyticsOptions,bakeCategories=false){const result=this.history.warm(options,bakeCategories);if(!result.preparing)this.channelOverview(options.excludedLogins);return result;}
 
   youtubeQuota(day: string, profile: string, cost = 1): boolean {
     if (!/^\d{2}\/\d{2}\/\d{4}$/.test(day) || !profile || !Number.isInteger(cost) || cost < 1 || cost > 4000) throw new Error("INVALID_QUOTA");

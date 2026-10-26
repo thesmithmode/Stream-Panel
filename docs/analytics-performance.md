@@ -22,9 +22,17 @@ donations and audit records remain authoritative and unchanged.
 - Heavy analytics uses one shared worker per physical database, separate from the
   collection/ordinary-read worker. Each worker has a 128 MiB old-generation limit.
   Overall service memory remains governed by the existing 512 MiB systemd limit.
-- Period reports assemble cached contributions and retain exact unique membership.
-  They can still require background assembly after changes; this does not reread
-  historical attendance unless that stream's activity facts/settings changed.
+- Period reports use a persisted chronological reduction tree. A corrected or new
+  stream replaces its leaf and ancestors; unchanged subtrees retain their computed
+  contributions. Moving windows reuse full subtrees and clip only their boundaries.
+  Participant sets stay deduplicated; numerators/exposure remain separate for means.
+- Clock membership is stored once per leaf and shared by report generations, rather
+  than copied for each day/resolution. Current labels, followers and core rules are
+  applied to the reduced statistics. Neutral insight and daily states do not replay
+  historical minute samples. Garbage collection preserves published/in-flight roots.
+- Overview records include simultaneous viewer/chat peaks with observation dates.
+  They persist independently of money/followers/notes and are prepared in the same
+  background pass; only factual activity changes revisit their associated streams.
 
 Browser snapshots remain profile-scoped. Dynamics transfers the displayed month;
 older months and seven-row return comparisons load on demand. Time transfers clock
@@ -45,14 +53,18 @@ Measured during this change on 10,000 finished streams split across two profiles
 
 | Measurement | Result |
 | --- | ---: |
-| Initial fact/report preparation | 82.0 s |
-| Cached profile report p95 | 0.95 ms |
-| Collection-worker metadata p95 during preparation | 56.0 ms |
-| Largest displayed-month response | 30,790 bytes |
-| Observed whole-process RSS, including workers | 260.4 MiB |
+| Initial fact/report preparation | 101.9 s |
+| Cached profile report p95 (worker RPC) | 1.15 ms |
+| Collection-worker metadata p95 during preparation | 56.3 ms |
+| Largest displayed-month response | 30,269 bytes |
+| Changed historical stream, including refreshed report | 759 ms |
+| Late donation, including refreshed report | 784 ms |
+| Both profile reports after worker restart | 525 ms |
+| Observed whole-process RSS, including workers | 297.2 MiB |
 
 This scalability fixture has one recorded minute and one viewer sample per stream,
-without chat/presence. It measures queue/cache scaling, not the cost of importing
+without initial chat/presence; correction phases add one message and a late cash tip.
+It measures queue/cache scaling, not the cost of importing
 10,000 long, busy broadcasts. Separate correctness tests compare chat, presence,
 weighted means, money corrections, links, clipped periods and restart behavior with
 raw calculations. Initial preparation cost depends on actual recorded activity.
