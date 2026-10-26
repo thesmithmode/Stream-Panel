@@ -17,7 +17,7 @@ export function loadOverview(profile:string,force=false){
  if(prior&&(prior.pending||(!force&&prior.until>Date.now())))return prior.task;
  const entry:{value?:OverviewTotals;until:number;pending:boolean;task:Promise<OverviewTotals>}={...(prior?.value?{value:prior.value}:{}),until:0,pending:true,task:undefined as unknown as Promise<OverviewTotals>};
  const snapshot=JSON.stringify([profile,getDataRevision(profile)]);
- entry.task=api<OverviewTotals>('overview',undefined,undefined,profile).then(value=>{entry.value=value;entry.pending=false;overviewSnapshots.delete(snapshot);overviewSnapshots.set(snapshot,value);while(overviewSnapshots.size>8)overviewSnapshots.delete(overviewSnapshots.keys().next().value!);entry.until=getServerRevision(profile,'overview')?Infinity:Date.now()+60000;return value;}).catch(error=>{if(overviews.get(id)===entry)overviews.delete(id);throw error;});
+ entry.task=api<OverviewTotals>('overview',undefined,undefined,profile).then(value=>{entry.value=value;entry.pending=false;if(overviews.get(id)===entry&&id===JSON.stringify([profile,getDataRevision(profile),getServerRevision(profile,'overview')])){overviewSnapshots.delete(snapshot);overviewSnapshots.set(snapshot,value);while(overviewSnapshots.size>8)overviewSnapshots.delete(overviewSnapshots.keys().next().value!);}entry.until=getServerRevision(profile,'overview')?Infinity:Date.now()+60000;return value;}).catch(error=>{if(overviews.get(id)===entry)overviews.delete(id);throw error;});
  overviews.delete(id);overviews.set(id,entry);
  while(overviews.size>8)overviews.delete(overviews.keys().next().value!);
  return entry.task;
