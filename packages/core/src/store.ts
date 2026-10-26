@@ -1,3 +1,4 @@
+import {AnalyticsReportCache} from './analytics-report-cache.js';
 import {ChannelRecords} from './channel-records.js';
 import {SubscriberHistory,type SubscriberQuery,type Publication} from './subscriber-history.js';
 import {SessionGroups,logicalReadDatabase} from "./session-groups.js";
@@ -16,7 +17,7 @@ import {personActivity} from "./person-activity.js";
 import {DonationLedger,type DonationInput} from "./donations.js";
 import { type AnalyticsOptions } from "./analytics.js";
 import Database from "better-sqlite3";
-import { randomUUID } from "node:crypto";
+import { createHash,randomUUID } from "node:crypto";
 import { openProfileDatabase } from "./profile-db.js";
 import {
   candidateKey,
@@ -36,6 +37,7 @@ import { type PresencePoll } from "./presence.js";
 export class StreamStore {
   private history:AnalyticsHistory;
   private records:ChannelRecords;
+  private overviewActivity:AnalyticsReportCache<{messages:number;attendees:number}>;
   private readonly reads:Database.Database;
   private readonly groups:SessionGroups;
   private readonly db: Database.Database;
@@ -58,6 +60,7 @@ export class StreamStore {
     try {
       migrateDatabase(this.db);
     this.history=new AnalyticsHistory(this.reads);
+    this.overviewActivity=new AnalyticsReportCache(this.reads);
     this.records=new ChannelRecords(this.reads,(id,bots)=>this.streams.sessions(id,0,1,bots)[0]);
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
       this.db.transaction(() => {this.collapseDuplicateDaDonors();this.reconcileNicknameLinks();}).immediate();
@@ -106,11 +109,16 @@ export class StreamStore {
   ) {return this.streams.observePlatformStream(platform,accountId,externalId,startedAtMs,observedAtMs,url,title,confirmedPresentIds);}
   activeLogicalStream() {return this.streams.activeLogicalStream();}
   changeStamp(){return (this.db.prepare('SELECT coalesce(sum(revision),0) value FROM ui_revisions').get() as {value:number}).value;}
+  matchingStream(startedAt:number,latest=false){
+    if(!Number.isSafeInteger(startedAt)||startedAt<0)throw new Error('INVALID_STREAM_DATE');
+    const where=latest?'':"AND date(s.started_at_ms/1000,'unixepoch','+3 hours')=date(?/1000,'unixepoch','+3 hours')";
+    return (this.reads.prepare(`SELECT s.id FROM sessions s WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) ${where} ORDER BY ${latest?'s.started_at_ms DESC':"abs(s.started_at_ms-?),s.started_at_ms"},s.id LIMIT 1`).get(...(latest?[]:[startedAt,startedAt])) as {id:string}|undefined)?.id??null;
+  }
   changes(sessionId?:string){
     const versions=Object.fromEntries((this.db.prepare('SELECT domain,revision FROM ui_revisions').all() as {domain:string;revision:number}[]).map(r=>[r.domain,r.revision]));
     const active=this.reads.prepare('SELECT id FROM sessions s WHERE ended_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) ORDER BY started_at_ms DESC LIMIT 1').get() as {id:string}|undefined;
     const selected=sessionId?this.groups.root(sessionId):'';
-    const stream=selected?this.reads.prepare('SELECT s.id,s.ended_at_ms endedAt,coalesce(r.revision,0) revision FROM sessions s LEFT JOIN analytics_stream_revisions r ON r.session_id=s.id WHERE s.id=?').get(selected) as {id:string;endedAt:number|null;revision:number}|undefined:undefined;
+    const stream=selected?this.reads.prepare('SELECT s.id,s.ended_at_ms endedAt,coalesce((SELECT sum(v.activity+v.money) FROM analytics_fact_versions v WHERE v.session_id=s.id OR v.session_id IN(SELECT member_id FROM session_groups WHERE group_id=s.id)),0) revision FROM sessions s WHERE s.id=?').get(selected) as {id:string;endedAt:number|null;revision:number}|undefined:undefined;
     return {versions,activeStream:active?.id??null,stream:stream??null};
   }
 
@@ -303,23 +311,31 @@ export class StreamStore {
     this.db.prepare("INSERT INTO stream_samples SELECT x.session_id,?,x.category_id,x.category_name,x.title,NULL,? FROM stream_samples x JOIN sessions s ON s.id=x.session_id WHERE s.ended_at_ms IS NULL AND x.twitch_viewers IS NOT NULL AND x.observed_at_ms<=? AND x.observed_at_ms>=? ORDER BY x.observed_at_ms DESC LIMIT 1 ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET youtube_viewers=excluded.youtube_viewers").run(at,viewers,at,at-180000);
   }
   channelOverview(excludedBotLogins:readonly string[]=[]){
-    const summary=this.summary(undefined,excludedBotLogins);
     const sessions=this.reads.prepare("SELECT id,started_at_ms AS start,ended_at_ms AS end FROM sessions s WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)").all() as {id:string;start:number;end:number|null}[];
     const excluded=this.botJson(excludedBotLogins);
-    const attendees=(this.reads.prepare(`SELECT count(*) AS n FROM (
-      SELECT i.person_id FROM presence_members m JOIN presence_polls p ON p.id=m.poll_id JOIN identities i ON i.id=m.identity_id WHERE p.status='complete' AND ${this.notBotClause('i')} AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=p.session_id)
-      UNION SELECT value FROM json_each(?)
-    )`).get(excluded,JSON.stringify((summary.participants as {personId:string}[]).map(p=>p.personId))) as {n:number}).n;
+    const revision=this.reads.prepare("SELECT revision FROM ui_revisions WHERE domain='analyticsActivity'").get();
+    const scope=createHash('sha256').update('overview-activity:'+excluded).digest('hex'),key=createHash('sha256').update(JSON.stringify([scope,revision])).digest('hex');
+    let activity=this.overviewActivity.get(key);
+    if(!activity){
+      const summary=this.summary(undefined,excludedBotLogins);
+      const attendees=(this.reads.prepare(`SELECT count(*) AS n FROM (
+        SELECT i.person_id FROM presence_members m JOIN presence_polls p ON p.id=m.poll_id JOIN identities i ON i.id=m.identity_id WHERE p.status='complete' AND ${this.notBotClause('i')} AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=p.session_id)
+        UNION SELECT value FROM json_each(?)
+      )`).get(excluded,JSON.stringify((summary.participants as {personId:string}[]).map(p=>p.personId))) as {n:number}).n;
+      activity={messages:Number(summary.messages),attendees};this.overviewActivity.save(key,scope,activity);
+    }
+    const donations=(this.reads.prepare("SELECT count(*) n FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE e.type='donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))").get(excluded) as {n:number}).n;
     const links=this.reads.prepare('SELECT session_id,started_at_ms,ended_at_ms FROM platform_streams').all() as {session_id:string;started_at_ms:number;ended_at_ms:number|null}[];
     const windowsBySession=new Map<string,typeof links>();for(const link of links){const list=windowsBySession.get(link.session_id)??[];list.push(link);windowsBySession.set(link.session_id,list);}
     const now=Date.now(),totals30=donationTotals(this.reads,now-30*86400000,now,excluded);
-    return {records:this.records.read(excluded),totals30,streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+windowsFromLinks(windowsBySession.get(s.id)??[],s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees,messages:summary.messages,totals:summary.totals,donations:summary.donations};
+    return {records:this.records.read(excluded),totals30,streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+windowsFromLinks(windowsBySession.get(s.id)??[],s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees:activity.attendees,messages:activity.messages,totals:donationTotals(this.reads,undefined,undefined,excluded),donations};
   }
   analytics(options: AnalyticsOptions):ReturnType<AnalyticsHistory['query']> {
     return this.history.query(options.sessionId?{...options,sessionId:this.groups.root(options.sessionId)}:options);
   }
 
   clockAudience(options:AnalyticsOptions){return this.history.clockAudience(options);}
+  advanceAnalytics(options:AnalyticsOptions){return this.history.advance(options);}
   warmAnalytics(options:AnalyticsOptions,bakeCategories=false){return this.history.warm(options,bakeCategories);}
 
   youtubeQuota(day: string, profile: string, cost = 1): boolean {

@@ -34,8 +34,8 @@ test('every chart category selector refreshes donations, time patterns and clock
   let progressSent=false;
   await page.route('**/api/v1/analytics?*',async route=>{
    if(!progressSent&&new URL(route.request().url()).searchParams.get('category')==='game'){
-    progressSent=true;const response=await route.fetch(),data=await response.json();
-    await route.fulfill({response,json:{...data,preparing:true,ready:0,total:1,donationTiming:{...data.donationTiming,count:0}}});
+    progressSent=true;const response=await route.fetch({headers:{...route.request().headers(),'if-none-match':''}}),data=await response.json();
+    await route.fulfill({response,headers:{...response.headers(),etag:''},json:{...data,preparing:true,ready:0,total:1,donationTiming:{...data.donationTiming,count:0}}});
    }else await route.continue();
   });
   const selects=['Категория Twitch'];

@@ -1,21 +1,29 @@
 <script lang="ts">
+ import {localDateWindow} from './time-audience';
  import type {Snippet} from 'svelte';
  import type {ViewerPlatform} from './daily-metrics';
  import {dailyMetrics,type StreamMetric} from './daily-metrics';
  import Help from './Help.svelte';
- let {categoryFilter,streams,from=0,end=Date.now(),timezone='Europe/Moscow',onStream}:{categoryFilter:Snippet<[string]>;streams:StreamMetric[];from?:number;end?:number;timezone?:string;onStream:(id:string)=>void}=$props();
- let platform=$state<ViewerPlatform>('all'),metric=$state<'online'|'active'>('online'),availableWidth=$state(800),selected=$state(-1),page=$state(0);
- const points=$derived(dailyMetrics(streams,timezone,platform));
+ let {platform=$bindable<ViewerPlatform>('all'),metric=$bindable<'online'|'active'>('online'),categoryFilter,streams,range,loadStreams,from=0,end=Date.now(),timezone='Europe/Moscow',onStream}:{platform?:ViewerPlatform;metric?:'online'|'active';categoryFilter:Snippet<[string]>;streams:StreamMetric[];range?:{first:number;total:number};loadStreams?:(params:Record<string,number>,signal:AbortSignal)=>Promise<any>;from?:number;end?:number;timezone?:string;onStream:(id:string)=>void}=$props();
+ let availableWidth=$state(800),selected=$state(-1),page=$state(0);
+ let remote=$state<StreamMetric[]>([]),loading=$state(false),failure=$state('');
+ const points=$derived(dailyMetrics(page>0?remote:streams,timezone,platform));
  const dateKey=(at:number)=>new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).format(at);
  const lastDay=$derived(dateKey(end-1));
- const firstDay=$derived(dateKey(Math.max(from,streams.reduce((first,s)=>Math.min(first,s.startedAt),end-1))));
+ const firstDay=$derived(dateKey(Math.max(from,range?.first??streams.reduce((first,s)=>Math.min(first,s.startedAt),end-1))));
  const utcDay=(date:string)=>Date.parse(`${date}T00:00:00Z`);
  const span=$derived(Math.max(1,Math.round((utcDay(lastDay)-utcDay(firstDay))/86400000)+1));
  const pageCount=$derived(Math.ceil(span/30));
- $effect(()=>{void from;void end;void timezone;void firstDay;page=0;});
+ $effect(()=>{void from;void lastDay;void timezone;void firstDay;page=0;});
  const dates=$derived(Array.from({length:Math.min(30,Math.max(0,span-page*30))},(_,i)=>new Date(utcDay(lastDay)-(page*30+Math.min(30,span-page*30)-1-i)*86400000).toISOString().slice(0,10)));
  const displayed=$derived(dates.map(date=>({date,point:points.find(p=>p.date===date)})));
  const keys=$derived(dates.join('|'));
+ $effect(()=>{const currentPage=page,currentKeys=keys,loader=loadStreams,tz=timezone;void currentKeys;if(!currentPage||!loader){remote=[];return;}
+  const controller=new AbortController();loading=true;failure='';
+  const from=localDateWindow(dates[0]!,tz).from,to=localDateWindow(dates.at(-1)!,tz).to;
+  void loader({streamFrom:from,streamTo:to},controller.signal).then(result=>{if(!controller.signal.aborted)remote=result.streamComparison??[];}).catch(e=>{if(!controller.signal.aborted)failure=e.message;}).finally(()=>{if(!controller.signal.aborted)loading=false;});
+  return()=>controller.abort();
+ });
  $effect(()=>{void keys;selected=displayed.findLastIndex(row=>!!row.point);});
  const current=$derived(displayed[selected]);
  const dateTicks=$derived(Array.from({length:Math.min(5,displayed.length)},(_,i)=>Math.round(i*(displayed.length-1)/Math.max(1,Math.min(5,displayed.length)-1))));
@@ -39,8 +47,9 @@
  <select aria-label="Показатель динамики" bind:value={metric}><option value="online">Средний онлайн</option><option value="active">Сообщения в час</option></select>
  {#if metric==='online'}<select aria-label="Источник динамики" bind:value={platform}><option value="all">Вместе</option><option value="twitch">Twitch</option><option value="youtube">YouTube</option></select>{/if}
  </div>
- {#if !streams.length}<p class="growth-caption muted">Нужны собранные эфиры.</p>{:else}
+ {#if !(range?.total??streams.length)}<p class="growth-caption muted">Нужны собранные эфиры.</p>{:else}
  <div class="growth-range"><button class="text-button" aria-label="Предыдущие дни" disabled={page+1>=pageCount} onclick={()=>page++}>‹</button><span>{shortDate(dates[0]!)}–{shortDate(dates.at(-1)!)}{metric==='active'?' · сообщений/ч':''}</span><button class="text-button" aria-label="Следующие дни" disabled={page===0} onclick={()=>page--}>›</button></div>
+ {#if loading}<p class="growth-caption muted" role="status">Загрузка дней…</p>{/if}{#if failure}<p role="alert">{failure}</p>{/if}
  <div class="growth-plot" bind:clientWidth={availableWidth}><svg viewBox={`0 0 ${width} 190`} role="group" aria-label={`${label} по дням`}>
  {#each ticks as tick}<line x1={plotLeft} x2={width-12} y1={y(tick)} y2={y(tick)} stroke="currentColor" opacity=".12"/><text x="1" y={y(tick)-6} fill="currentColor" font-size="10">{format(tick)}</text>{/each}
  {#each displayed as row,i}<g role="button" tabindex="0" data-missing={value(row)===null} aria-label={title(row)} aria-pressed={selected===i} onclick={()=>selected=i} onkeydown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selected=i;}}}>

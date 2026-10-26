@@ -13,7 +13,7 @@ import {assertUiLayout} from '../helpers/ui-layout.mjs';
 import {launchBrowser} from '../helpers/browser.mjs';
 import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';
 const minute=60000;
-test('analytics browser shows core defaults, categories, scoped accounts, minute evidence, automatic filters and responsive charts',{timeout:90000},async()=>{
+for(const selectedProfile of ['ruslan','gulnaz'])test(`analytics browser ${selectedProfile}: core, categories, minute evidence, filters and responsive charts`,{timeout:90000},async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-analytics-ui-'));
  const port=await new Promise(resolve=>{const s=net.createServer();s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p));});});
  const origin=`http://127.0.0.1:${port}`,accounts=new AccountStore(join(dir,'data.sqlite'));
@@ -39,8 +39,8 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
  for(const profile of ['ruslan','gulnaz'])await h.runtimes.get(profile).db.call('followingSnapshot','youtube','yt-owner',[{id:'yt-regular',name:`YT ${profile}`,followedAtMs:null}],true,Date.now(),1);
  const browser=await launchBrowser();
  try{
-  for(const profile of ['ruslan','gulnaz']){
-   const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
+  for(const profile of [selectedProfile]){
+   const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));await page.route('**/api/v1/analytics?*',route=>route.continue({headers:{...route.request().headers(),'if-none-match':''}}));
    const waitReport=(query={})=>page.waitForResponse(async r=>{const u=new URL(r.url());return u.pathname==='/api/v1/analytics'&&r.request().headers()['x-stream-panel-profile']===profile&&r.status()===200&&Object.entries(query).every(([k,v])=>u.searchParams.get(k)===String(v))&&!(await r.json()).preparing;});
    const selectFilter=async(label,value,query)=>{const response=waitReport(query);await setFilter(page,label,value);await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');await refreshData(page);return (await response).json();};
    await goto(page,origin);await page.getByLabel('Логин',{exact:true}).fill(profile);await page.getByLabel('Пароль',{exact:true}).fill(`${profile}-analytics-password`);await page.getByRole('button',{name:'Войти',exact:true}).click();
@@ -48,7 +48,7 @@ test('analytics browser shows core defaults, categories, scoped accounts, minute
    assert.equal(await page.getByLabel('Начало периода').isVisible(),false);assert.equal(await page.locator('.chart-category select').count(),0,'one category control replaces repeated chart filters');
    assert.equal(await page.locator('.youtube-report').count(),0);
    assert.equal(await page.getByText('Таблица сравнения стримов',{exact:true}).count(),0);assert.equal(await page.getByRole('heading',{name:'YouTube · итоги канала',exact:true}).count(),0);
-   await page.locator('summary').filter({hasText:'Возвращаемость по эфирам'}).click();await page.locator('.comparison-charts').waitFor();await page.locator('.category-comparison').waitFor();assert.ok(await page.locator('.category-comparison .category-row').count()>0);await page.getByRole('button',{name:'Участники',exact:true}).click();assert.equal(await page.locator('.category-comparison table').count(),0);for(const width of [320,1280]){await page.setViewportSize({width,height:900});await page.locator('.category-comparison').scrollIntoViewIfNeeded();await assertUiLayout(page);await page.locator('.category-comparison').screenshot({path:`/tmp/categories-${width}.png`});}
+   await page.locator('summary').filter({hasText:'Возвращаемость по эфирам'}).click();await page.locator('.comparison-charts').waitFor();await page.locator('.category-comparison').waitFor();assert.ok(await page.locator('.category-comparison .category-row').count()>0);assert.equal(await page.getByLabel('Метрика категорий').inputValue(),'meanOnline');await page.getByLabel('Метрика категорий').selectOption('observedPerKnownMinute');assert.equal(await page.locator('.category-comparison table').count(),0);for(const width of [320,1280]){await page.setViewportSize({width,height:900});await page.locator('.category-comparison').scrollIntoViewIfNeeded();await assertUiLayout(page);await page.locator('.category-comparison').screenshot({path:`/tmp/categories-${width}.png`});}
    const timeResponse=waitReport({panel:'time'});await page.getByRole('tab',{name:'Время',exact:true}).click();analyticsData={...analyticsData,...await (await timeResponse).json()};await clockSettings(page);const activity=page.locator('.activity-clock');
    await activity.getByText('00:00',{exact:true}).waitFor();await activity.getByText('24:00',{exact:true}).waitFor();
    for(const [step,count] of [['1',1440],['5',288],['15',96],['30',48],['60',24]]){await activity.getByLabel('Шаг графика').selectOption(step);assert.equal(await activity.locator('svg g').count(),count);}

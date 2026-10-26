@@ -8,12 +8,12 @@ const serverVersions=new Map<string,Record<string,string>>();
 export const getServerRevision=(profile:string,scope='report')=>serverVersions.get(profile)?.[scope]??'';
 export const bumpReadRevision=(profile:string)=>revisions.set(profile,getDataRevision(profile)+1);
 export function setServerVersions(profile:string,change:{versions:Record<string,number>;stream:{id:string;revision:number;endedAt:number|null}|null;configRevision?:string;dataEpoch?:string;checkedAt?:number;activeStream?:string|null;requestedSession?:string|null}){
- const config=[change.configRevision,change.dataEpoch],tick=change.activeStream?Math.floor((change.checkedAt??0)/60000):null;
+ const config=[change.configRevision,change.dataEpoch];
  const v=change.versions,values=serverVersions.get(profile)??{};
- values.report=JSON.stringify([v.activity,v.people,v.donations,v.follows,config,tick]);
- values.overview=JSON.stringify([v.activity,v.people,v.donations,config,tick]);
- values.subscribers=JSON.stringify([v.activity,v.subscribers,v.follows,config,tick]);
- if(change.stream){const value=JSON.stringify([change.stream,v.people,v.donations,v.follows,config,change.activeStream===change.stream.id?tick:null]);values['stream:'+change.stream.id]=value;if(change.requestedSession)values['stream:'+change.requestedSession]=value;}
+ values.report=JSON.stringify([v.activity,v.people,v.donations,v.follows,config]);
+ values.overview=JSON.stringify([v.activity,v.people,v.donations,config]);
+ values.subscribers=JSON.stringify([v.activity,v.subscribers,v.follows,config]);
+ if(change.stream){const value=JSON.stringify([change.stream,v.follows,config]);values['stream:'+change.stream.id]=value;if(change.requestedSession)values['stream:'+change.requestedSession]=value;}
  else if(change.requestedSession)values['stream:'+change.requestedSession]=JSON.stringify([null,config]);
  serverVersions.set(profile,values);
 }
@@ -27,18 +27,28 @@ export async function importBackup(file:File,key:string){
   if(file.size>64*1024*1024*1024)throw new Error('BACKUP_SIZE_LIMIT');
   return requestJson('/api/v1/backups/restore',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-CSRF-Token':csrf,'X-Stream-Panel-Profile':getProfile(),...(key?{'X-Backup-Key':key}:{})},body:file,signal:new AbortController().signal,timeoutMs:30*60*1000});
 }
+const validators=new Map<string,{etag:string;value:unknown;bytes:number}>();
+let validatorBytes=0;
 export async function api<T = any>(path: string, body?: unknown, signal?: AbortSignal, profile: string = getProfile()): Promise<T> {
+  const conditionalKey=JSON.stringify([profile,path]),retained=body===undefined?validators.get(conditionalKey):undefined;
   const result=await requestJson<T>(`/api/v1/${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers:
       body === undefined
-        ? { "X-Stream-Panel-Profile": profile }
+        ? { "X-Stream-Panel-Profile": profile,...(retained?{"If-None-Match":retained.etag}:{}) }
         : { "Content-Type": "application/json", "X-CSRF-Token": csrf, "X-Stream-Panel-Profile": profile },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(retained?{conditional:{etag:retained.etag,value:retained.value as T}}:{}),
+    onResponse:(response,value)=>{const etag=response.headers.get('etag');if(!etag||body!==undefined)return;
+      const bytes=JSON.stringify(value).length*2;if(bytes>4*1024*1024)return;
+      validatorBytes-=validators.get(conditionalKey)?.bytes??0;validators.delete(conditionalKey);
+      while(validators.size>=16||validatorBytes+bytes>8*1024*1024){const oldest=validators.keys().next().value!;validatorBytes-=validators.get(oldest)!.bytes;validators.delete(oldest);}
+      validators.set(conditionalKey,{etag,value,bytes});validatorBytes+=bytes;
+    },
     ...(signal ? {signal} : {}),
   });
 
-  if(body!==undefined)revisions.set(profile,getDataRevision(profile)+1);
+  if(body!==undefined){revisions.set(profile,getDataRevision(profile)+1);for(const [key,value] of validators)if(JSON.parse(key)[0]===profile){validators.delete(key);validatorBytes-=value.bytes;}}
   return result;
 }
 export function money(minor: string, currency: string) {

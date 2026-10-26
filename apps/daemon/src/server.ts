@@ -1,4 +1,3 @@
-import {analyticsInterest} from './analytics-interest.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {registerAnalyticsCompression} from './analytics-compression.js';
 import {registerRouteSchemas} from './route-schemas.js';
@@ -203,7 +202,7 @@ export async function createApplication(
   const connectionRevision=()=>createHash('sha256').update(JSON.stringify([configuration.publicView(),...[twitch.status,youtube.status,da.status].map(({state,account,detail})=>({state,account,detail}))])).digest('hex');
   const sync=()=>({twitch:{lastSyncAt:twitch.status.lastSyncAt??null,lastFollowersAt:twitch.status.lastFollowersAt??null,lastEventAt:twitch.status.lastEventAt??null},youtube:{lastSyncAt:youtube.status.lastSyncAt??null,lastFollowersAt:youtube.status.lastFollowersAt??null},donationalerts:{lastSyncAt:da.status.lastSyncAt??null,lastEventAt:da.status.lastEventAt??null}});
   app.get('/api/v1/changes',async request=>{
-    const q=object(request.query);analyticsInterest(db,string(q.viewer),string(q.view)==='analytics');
+    const q=object(request.query);
     return {...await db.call('changes',string(q.session)||undefined),dataEpoch,requestedSession:string(q.session)||null,checkedAt:Date.now(),connectionRevision:connectionRevision(),configRevision:createHash('sha256').update(JSON.stringify([configuration.value.analyticsSettings,configuration.value.excludedBotLogins,configuration.value.twitch?.userId,configuration.value.youtube?.userId])).digest('hex'),sync:sync(),release:process.env.STREAM_PANEL_RELEASE??'development'};
   });
 

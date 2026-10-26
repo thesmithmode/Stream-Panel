@@ -490,7 +490,8 @@ test('small rolling reports defer clock membership and keep exact clipped metric
  }finally{s.close();}
 });
 
-test('background category catch-up advances once per call and never revisits completed reports',()=>{
+test('background category catch-up advances once per call and never revisits completed reports',t=>{
+ t.mock.method(performance,'now',()=>0);
  const s=new StreamStore(':memory:');try{
   fixture(s,3);const h=(s as any).history as AnalyticsHistory,seen:string[]=[];
   const report=(h as any).warmReport.bind(h);(h as any).warmReport=(opts:any)=>{seen.push(opts.category);return report(opts);};
@@ -519,7 +520,7 @@ test('closed stream reports survive changing request times and restart, while re
   s.setPersonMetadata(first.audience[0]!.id,['tag'],false,s.personRevision(first.audience[0]!.id));assert.deepEqual(h.query(opts),audienceAnalytics(db,opts));
   s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Renamed',followedAtMs:base}],true,opts.toMs);assert.deepEqual(h.query(opts),audienceAnalytics(db,opts));
   assert.throws(()=>h.query({...opts,toMs:base}),/INVALID_ANALYTICS_FILTER/);
-  const live=s.startSession('owner','live',options.toMs,'platform',options.toMs);const liveOpts={...opts,sessionId:live,toMs:options.toMs+minute};h.query(liveOpts);const liveReads=facts;h.query(liveOpts);assert.ok(facts>liveReads,'live streams do not reuse closed-stream projections');
+  const live=s.startSession('owner','live',options.toMs,'platform',options.toMs);const liveOpts={...opts,sessionId:live,toMs:options.toMs+minute};h.query(liveOpts);const liveReads=facts;h.query(liveOpts);assert.equal(facts,liveReads,'unchanged live facts reuse their projection');s.streamSample(live,options.toMs,'game','Game','',2);assert.equal(h.query(liveOpts).streamComparison[0]!.viewers.known.mean,2,'new live facts invalidate the projection');
  }finally{s.close();}
 });
 
