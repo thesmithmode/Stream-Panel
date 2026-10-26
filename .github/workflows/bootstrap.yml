@@ -23,10 +23,7 @@ jobs:
           set -euo pipefail
           sha=$(git rev-parse HEAD)
           test "$sha" = "$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha')"
-          ci_run=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&per_page=20" --jq '.workflow_runs | map(select(.conclusion == "success" and .head_branch == "main")) | first | .id // empty')
-          test -n "$ci_run"
-          printf 'STREAM_PANEL_CI_RUN=%s\n' "$ci_run" >> "$GITHUB_ENV"
-          printf 'STREAM_PANEL_RELEASE=%s\n' "$sha" >> "$GITHUB_ENV"
+          node scripts/select-ci-bundle.mjs "$REPO" "$sha"
       - uses: actions/download-artifact@v4
         with:
           name: server-bundle

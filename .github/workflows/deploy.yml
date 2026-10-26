@@ -31,10 +31,13 @@ jobs:
           sha=$(git rev-parse HEAD)
           main_sha=$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha')
           test "$sha" = "$main_sha" || { echo 'Commit superseded on main'; exit 1; }
-          ci_run=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&per_page=20" --jq '.workflow_runs | map(select(.conclusion == "success" and .head_branch == "main")) | first | .id // empty')
-          test -n "$ci_run"
-          printf 'STREAM_PANEL_CI_RUN=%s\n' "$ci_run" >> "$GITHUB_ENV"
-          printf 'STREAM_PANEL_RELEASE=%s\n' "$sha" >> "$GITHUB_ENV"
+          node scripts/select-ci-bundle.mjs "$REPO" "$sha"
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-bundle
+          path: artifacts
+          github-token: ${{ github.token }}
+          run-id: ${{ env.STREAM_PANEL_CI_RUN }}
       - name: Update trusted deployment receiver without restarting collection
         env:
           BOOTSTRAP_KEY: ${{ secrets.STREAM_PANEL_BOOTSTRAP_KEY }}
@@ -93,12 +96,6 @@ jobs:
           printf '%s' "$SUPABASE_KEY" > "$task_dir/payload/supabase-key"
           tar -czf "$task_dir/payload.tgz" -C "$task_dir/payload" .
           ssh -i "$task_dir/key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$task_dir/known-hosts" -o ConnectTimeout=15 "root@$DEPLOY_HOST" 'set -eu; umask 077; task_dir=$(mktemp -d /tmp/sp-cloud-config.XXXXXXXX); trap '\''rm -rf "$task_dir"'\'' EXIT; tar -xzf - -C "$task_dir"; python3 "$task_dir/configure-cloud.py" "$task_dir"' < "$task_dir/payload.tgz"
-      - uses: actions/download-artifact@v4
-        with:
-          name: server-bundle
-          path: artifacts
-          github-token: ${{ github.token }}
-          run-id: ${{ env.STREAM_PANEL_CI_RUN }}
       - name: Send immutable release over restricted SSH
         env:
           DEPLOY_HOST: ${{ secrets.STREAM_PANEL_DEPLOY_HOST }}

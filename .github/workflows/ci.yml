@@ -68,7 +68,7 @@ jobs:
         with:
           name: coverage-${{ matrix.segment }}
           path: coverage/
-          retention-days: 7
+          retention-days: 1
   operations:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
@@ -114,12 +114,13 @@ jobs:
           grep -qx 'scripts/verify-cache.mjs' artifacts/server.contents
           grep -qx 'scripts/verify-donations.mjs' artifacts/server.contents
       - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
         with:
           name: server-bundle
           path: |
             artifacts/server.header
             artifacts/server.tar.gz
-          retention-days: 30
+          retention-days: 7
           if-no-files-found: error
   check:
     name: Combined quality gate
@@ -147,4 +148,4 @@ jobs:
           path: |
             coverage/coverage-final.json
             coverage/coverage-summary.json
-          retention-days: 7
+          retention-days: 1
