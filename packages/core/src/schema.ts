@@ -322,13 +322,15 @@ CREATE VIEW IF NOT EXISTS follower_observations AS SELECT c.id,p.source,p.accoun
 PRAGMA user_version=17;
 `;
 
+export const analyticsStreamCacheSchema=`CREATE TABLE IF NOT EXISTS analytics_stream_cache(session_id TEXT NOT NULL,cache_key TEXT NOT NULL,revision INTEGER NOT NULL,global_revision INTEGER NOT NULL,payload BLOB NOT NULL,updated_at_ms INTEGER NOT NULL,PRIMARY KEY(session_id,cache_key)) STRICT;`;
+
 /** Closed-stream reports are derived and invalidated by factual mutations. */
 export const schemaV18=`
 CREATE TABLE IF NOT EXISTS analytics_stream_revisions(session_id TEXT PRIMARY KEY,revision INTEGER NOT NULL) STRICT;
 INSERT OR IGNORE INTO analytics_stream_revisions SELECT id,0 FROM sessions;
 CREATE TABLE IF NOT EXISTS analytics_global_revision(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL) STRICT;
 INSERT OR IGNORE INTO analytics_global_revision VALUES(1,0);
-CREATE TABLE IF NOT EXISTS analytics_stream_cache(session_id TEXT NOT NULL,cache_key TEXT NOT NULL,revision INTEGER NOT NULL,global_revision INTEGER NOT NULL,payload BLOB NOT NULL,updated_at_ms INTEGER NOT NULL,PRIMARY KEY(session_id,cache_key)) STRICT;
+${analyticsStreamCacheSchema}
 CREATE TRIGGER IF NOT EXISTS analytics_sessions_insert AFTER INSERT ON sessions BEGIN
    INSERT INTO analytics_stream_revisions VALUES(NEW.id,1) ON CONFLICT(session_id) DO UPDATE SET revision=revision+1;
   END;

@@ -152,21 +152,22 @@ test('full restore streams through production frontend, restarts safely and acti
  }finally{for(const child of children)child.child.kill();await Promise.all(children.map(child=>child.exit));await rm(dir,{recursive:true,force:true});}
 });
 
-test('startup leaves unviewed profile analytics idle without changing recorded facts',{timeout:15000},async()=>{
+test('startup warms both profiles without changing recorded facts',{timeout:20000},async()=>{
  const {StreamStore}=await import('../../dist/packages/core/src/store.js'),{AccountStore}=await import('../../dist/apps/daemon/src/auth.js'),{default:Database}=await import('better-sqlite3');
  const dir=await mkdtemp(join(tmpdir(),'sp-analytics-startup-')),path=join(dir,'data.sqlite'),port=await freePort(),at=Date.now()-3600000;let c;
  try{
  const accounts=new AccountStore(path);try{for(const profile of ['ruslan','gulnaz'])await accounts.createUser(profile,profile,profile,'fixture-startup-password');}finally{accounts.close();}
  for(const profile of ['ruslan','gulnaz']){const s=new StreamStore(path,profile),id=s.startSession('owner','closed',at,'platform',at);s.endSession(id,at+60000);s.close();}
  c=start(dir,port);await c.ready();const db=new Database(path,{readonly:true});
- try{await new Promise(r=>setTimeout(r,100));for(const p of ['ruslan','gulnaz'])assert.equal(db.prepare(`SELECT count(*) n FROM p_${p}_analytics_stream_cache`).get().n,0,'unviewed profiles must not warm at startup');
+ try{const deadline=Date.now()+7000;while(['ruslan','gulnaz'].some(p=>db.prepare(`SELECT count(*) n FROM p_${p}_analytics_stream_cache`).get().n===0)){assert.ok(Date.now()<deadline,'both profiles must warm without a viewer lease');await new Promise(r=>setTimeout(r,20));}
+ for(const p of ['ruslan','gulnaz'])assert.equal(db.prepare(`SELECT count(*) n FROM p_${p}_analytics_stream_cache`).get().n,1);
  for(const p of ['ruslan','gulnaz'])assert.equal(db.prepare(`SELECT count(*) n FROM p_${p}_sessions`).get().n,1);
  }finally{db.close();}
  assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status,200);c.child.kill('SIGTERM');assert.equal((await c.exit).code,0);
  }finally{if(c){c.child.kill();await c.exit;}await rm(dir,{recursive:true,force:true});}
 });
 
-test('an unused damaged derived cache does not block server readiness or cause speculative failures',{timeout:15000},async()=>{
+test('a missing expendable stream cache repairs itself without blocking server readiness or factual collection',{timeout:15000},async()=>{
  const {StreamStore}=await import('../../dist/packages/core/src/store.js'),{default:Database}=await import('better-sqlite3');
  const dir=await mkdtemp(join(tmpdir(),'sp-warm-isolation-')),path=join(dir,'data.sqlite'),port=await freePort();let c;
  try{const at=Date.now()-3600000,s=new StreamStore(path,'gulnaz'),id=s.startSession('owner','closed',at,'platform',at);s.endSession(id,at+60000);s.close();

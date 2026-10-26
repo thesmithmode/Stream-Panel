@@ -1,3 +1,4 @@
+import {analyticsStreamCacheSchema} from './schema.js';
 import {StreamFacts} from './stream-facts.js';
 import {latestFollowerChecksSql,latestFollowerSnapshotsSql} from './follower-queries.js';
 import {dateTimeFormatter} from './date-time-formatter.js';
@@ -104,6 +105,7 @@ export class AnalyticsHistory {
         maxCompletedBytes?: number;
         maxReportBytes?: number;
     } = {}) {
+        db.exec(analyticsStreamCacheSchema);
         this.reportCache=new AnalyticsReportCache(db,cachePolicy.maxReportBytes);this.facts=new StreamFacts(db,cachePolicy);
         if(db.pragma('temp_store',{simple:true})!==1)db.pragma('temp_store=FILE');
         db.pragma('temp.cache_size=-2048');
