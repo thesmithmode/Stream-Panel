@@ -11,10 +11,12 @@ type DayRow = Report['timeline'][number] & {
     ytN: number;
 };
 type SignalField = 'observed' | 'estimated' | 'participants' | 'regularObserved' | 'regularEstimated' | 'regularParticipants' | 'followerObserved' | 'followerEstimated' | 'followerParticipants';
+export type TimelineState = {rows: DayRow[]; people: [string, [number, number[]][]][]};
 type MessageField = 'regularMessages' | 'regularTwitchMessages' | 'regularYoutubeMessages' | 'followerMessages' | 'followerTwitchMessages' | 'followerYoutubeMessages';
 /** Daily means preserve duration weighting; message counts remain sums. */
 export class HistoryTimeline {
     private rows = new Map<number, DayRow>();
+    private personDays = new Map<string, Map<number, number[]>>();
     private dates = new Map<string, number>();
     private formatter: Intl.DateTimeFormat;
     constructor(private timezone: string, private people: Pick<ReadonlyMap<string, {
@@ -58,49 +60,66 @@ export class HistoryTimeline {
             row.viewersPartial ||= point.viewersPartial ?? false;
         }
         for (const person of report.audience) {
-            const global = this.people.get(person.id), role = global?.core ? 'regular' : global?.follower ? 'follower' : null;
-            if (!role)
-                continue;
+            const cells=this.personDays.get(person.id)??new Map<number,number[]>();
+            this.personDays.set(person.id,cells);
+            const cell=(at:number)=>{const day=this.day(at);let row=cells.get(day);if(!row){row=[0,0,0,0,0,0];cells.set(day,row);}return row;};
             const seen = new Set<string>();
             for (const span of person.intervals)
                 for (let at = Math.floor(span.from / 60000) * 60000; at < span.to; at += 60000) {
                     const weight = weights.get(at) ?? 0;
                     if (!weight)
                         continue;
-                    const row = this.rows.get(this.day(at))!;
+                    const row = cell(at);
                     const kind = span.kind === 'observed' ? 'Observed' : 'Estimated', key = kind + ':' + at;
                     if (!seen.has(key)) {
                         seen.add(key);
                         if (kind === 'Estimated' || byMinute.get(at)?.presenceKnown)
-                            row[(role + kind) as SignalField] += weight;
+                            row[kind==='Observed'?0:1]! += weight;
                     }
                     if (!seen.has('all:' + at)) {
                         seen.add('all:' + at);
-                        row[(role + 'Participants') as SignalField] += weight;
+                        row[2]! += weight;
                     }
                 }
             for (const signal of person.messageCounts) {
                 const row = this.rows.get(this.day(signal.at));
                 if (!row)
                     continue;
-                row[(role + 'Messages') as MessageField] += signal.count;
-                row[(role + (signal.source === 'twitch' ? 'TwitchMessages' : 'YoutubeMessages')) as MessageField] += signal.count;
+                const counts=cell(signal.at);counts[3]!+=signal.count;counts[signal.source==='twitch'?4:5]!+=signal.count;
             }
         }
     }
+    snapshot():TimelineState {return {rows:[...this.rows.values()],people:[...this.personDays].map(([id,rows])=>[id,[...rows]])};}
+    append(state:TimelineState){
+        for(const input of state.rows){const prior=this.rows.get(input.at);if(!prior){this.rows.set(input.at,{...input});continue;}
+            for(const key of ['n','known','tw','twN','yt','ytN','messages','twitchMessages','youtubeMessages','observed','estimated','participants'] as const)prior[key]+=input[key];
+            prior.viewersPartial=!!(prior.viewersPartial||input.viewersPartial);
+        }
+        for(const [id,rows] of state.people){const cells=this.personDays.get(id)??new Map<number,number[]>();this.personDays.set(id,cells);
+            for(const [at,values] of rows){const prior=cells.get(at);if(prior)values.forEach((n,i)=>prior[i]!+=n);else cells.set(at,[...values]);}
+        }
+    }
     values(): Report['timeline'] {
+        const roles=new Map<number,number[]>();
+        for(const [id,cells] of this.personDays){const person=this.people.get(id),offset=person?.core?0:person?.follower?6:-1;if(offset<0)continue;
+            for(const [at,values] of cells){const row=roles.get(at)??Array<number>(12).fill(0);roles.set(at,row);values.forEach((n,i)=>row[offset+i]!+=n);}
+        }
         return [...this.rows.values()].sort((a, b) => a.at - b.at).map(row => {
-            const { n, known, tw, twN, yt, ytN, ...base } = row;
+            const { n, known, tw, twN, yt, ytN, ...neutral } = row;
+            const base={...neutral},counts=roles.get(row.at)??Array<number>(12).fill(0);
+            for(const [offset,role] of [[0,'regular'],[6,'follower']] as const){
+                for(const [i,kind] of ['Observed','Estimated','Participants','Messages','TwitchMessages','YoutubeMessages'].entries())base[(role+kind) as SignalField|MessageField]=counts[offset+i]!;
+            }
             const twitchViewers = twN ? tw / twN : null, youtubeViewers = ytN ? yt / ytN : null;
             const point = { ...base, presenceKnown: row.known > 0, twitchViewers, youtubeViewers, viewers: twitchViewers === null && youtubeViewers === null ? null : (twitchViewers ?? 0) + (youtubeViewers ?? 0) };
             for (const role of ['', 'regular', 'follower'])
                 for (const kind of ['Observed', 'Estimated', 'Participants']) {
                     const field = (role ? role + kind : kind[0]!.toLowerCase() + kind.slice(1)) as SignalField;
-                    point[field] = row[field] / (kind === 'Observed' ? known || 1 : n || 1);
+                    point[field] = base[field] / (kind === 'Observed' ? known || 1 : n || 1);
                 }
-            point.unknownMessages = Math.max(0, row.messages - row.regularMessages - row.followerMessages);
-            point.unknownTwitchMessages = Math.max(0, row.twitchMessages - row.regularTwitchMessages - row.followerTwitchMessages);
-            point.unknownYoutubeMessages = Math.max(0, row.youtubeMessages - row.regularYoutubeMessages - row.followerYoutubeMessages);
+            point.unknownMessages = Math.max(0, base.messages - base.regularMessages - base.followerMessages);
+            point.unknownTwitchMessages = Math.max(0, base.twitchMessages - base.regularTwitchMessages - base.followerTwitchMessages);
+            point.unknownYoutubeMessages = Math.max(0, base.youtubeMessages - base.regularYoutubeMessages - base.followerYoutubeMessages);
             return point;
         });
     }

@@ -61,7 +61,6 @@
   const allowedProfiles = $derived<readonly Profile[]>(user?.allowedProfiles ?? ["ruslan", "gulnaz"]);
   $effect(()=>{if(!authorized)clearAnalyticsCache();});
   let changes=$state<Changes|null>(null);
-  const viewer=crypto.randomUUID();
   const accessibleProfile = (next: Profile): Profile => allowedProfiles.includes(next) ? next : allowedProfiles[0]!;
   let sessionPage=$state(0);
   let selectedSessions=$state<string[]>([]);
@@ -118,7 +117,7 @@
     const controller=new AbortController();
     const deadline=setTimeout(()=>controller.abort(new ConnectionError()),12000);
     const task=(async()=>{
-      const next=await api<Changes>(`changes?${new URLSearchParams({view:tab,viewer,...(sessionFilter?{session:sessionFilter}:{})})}`,undefined,controller.signal);
+      const next=await api<Changes>(`changes?${new URLSearchParams(sessionFilter?{session:sessionFilter}:{})}`,undefined,controller.signal);
       if(current!==epoch)return;
       const previous=changes,changed=!previous||screenVersion(tab as View,sessionFilter,previous)!==screenVersion(tab as View,sessionFilter,next);
       const connectionsChanged=!previous||previous.connectionRevision!==next.connectionRevision;
@@ -169,10 +168,18 @@
   }
   async function switchProfile(next: Profile) {
     if (!allowedProfiles.includes(next) || next === profile) return;
-    epoch++;if(tab==="stream")tab="sessions"; setProfile(next); profile = next;
+    const current=epoch,selectedProfile=profile;
+    const stream=tab==='stream'?sessions.find(s=>s.id===sessionFilter):undefined;
+    let destination:string|null=null;
+    try{if(stream){
+      const latest=await api<string|null>('sessions/match?startedAt=0&latest=1',undefined,undefined,profile);
+      destination=await api<string|null>(`sessions/match?${new URLSearchParams({startedAt:String(stream.started_at_ms),latest:latest===stream.id?'1':'0'})}`,undefined,undefined,next);
+    }}catch(e){if(current===epoch)reportFailure(e);return;}
+    if(current!==epoch||profile!==selectedProfile)return;
+    epoch++;if(tab==='stream'&&!destination)tab='sessions';setProfile(next);profile=next;
     status = null; sessions = []; personId = sessionFilter = ""; error = "";
     summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
-    clearScope();saveRoute();await action(async () => {});
+    sessionFilter=destination??"";clearScope();saveRoute();await action(async () => {});
     if(outdated)location.reload();
   }
   onMount(() => {

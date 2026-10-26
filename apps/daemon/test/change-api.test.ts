@@ -4,7 +4,6 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createApplication} from '../src/server.js';
-import {analyticsViewed} from '../src/analytics-interest.js';
 test('screen versions require authentication, expose no credentials and scope warming to the current screen',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'change-api-')),a=await createApplication(dir,47831,false);
  try{
@@ -15,9 +14,9 @@ test('screen versions require authentication, expose no credentials and scope wa
   const headers={...host,cookie:String(login.headers['set-cookie']).split(';')[0]!};
   a.configuration.value.daAccessToken='private-fixture-token';
   const read=async(view:string)=>(await a.app.inject({url:'/api/v1/changes?viewer=fixture-browser&view='+view,headers})).json();
-  const first=await read('overview');assert.equal(first.activeStream,null);assert.equal(analyticsViewed(a.db),false);assert.ok(first.dataEpoch);assert.ok(first.sync);assert.ok(!JSON.stringify(first).includes('private-fixture-token'));
-  await read('analytics');assert.equal(analyticsViewed(a.db),true);
-  await read('people');assert.equal(analyticsViewed(a.db),false);
+  const first=await read('overview');assert.equal(first.activeStream,null);assert.ok(first.dataEpoch);assert.ok(first.sync);assert.ok(!JSON.stringify(first).includes('private-fixture-token'));
+  await read('analytics');
+  await read('people');
   await a.db.call('createPerson','New person');const next=await read('overview');assert.ok(next.versions.people>first.versions.people);assert.equal(next.dataEpoch,first.dataEpoch);assert.equal(next.connectionRevision,first.connectionRevision);
  }finally{await a.app.close();await rm(dir,{recursive:true,force:true});}
 });

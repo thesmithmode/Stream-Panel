@@ -50,8 +50,16 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - name: Use the runner browser or install Chromium
         if: matrix.segment == 'e2e'
+        run: |
+          if command -v google-chrome >/dev/null; then
+            browser=$(command -v google-chrome)
+            "$browser" --version
+            printf 'STREAM_PANEL_TEST_CHROMIUM=%s\n' "$browser" >> "$GITHUB_ENV"
+          else
+            pnpm exec playwright install --with-deps chromium
+          fi
       - run: pnpm check:web
         if: matrix.segment == 'unit'
       - uses: actions/download-artifact@v4
@@ -63,12 +71,15 @@ jobs:
           test "$(cat artifacts/build.sha)" = "$GITHUB_SHA"
           tar -xzf artifacts/build.tar.gz
       - run: node scripts/test-with-coverage.mjs ${{ matrix.segment }}
+      - name: Verify incremental history on 10,000 streams
+        if: matrix.segment == 'unit'
+        run: node --max-old-space-size=128 scripts/benchmark-analytics-load.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage-${{ matrix.segment }}
           path: coverage/
-          retention-days: 7
+          retention-days: 1
   operations:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
@@ -114,12 +125,13 @@ jobs:
           grep -qx 'scripts/verify-cache.mjs' artifacts/server.contents
           grep -qx 'scripts/verify-donations.mjs' artifacts/server.contents
       - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
         with:
           name: server-bundle
           path: |
             artifacts/server.header
             artifacts/server.tar.gz
-          retention-days: 30
+          retention-days: 7
           if-no-files-found: error
   check:
     name: Combined quality gate
@@ -147,4 +159,4 @@ jobs:
           path: |
             coverage/coverage-final.json
             coverage/coverage-summary.json
-          retention-days: 7
+          retention-days: 1

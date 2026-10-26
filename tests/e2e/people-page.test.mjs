@@ -13,23 +13,23 @@ test('people browse beyond 500 records, preserve a selected card and search acro
   page.on('pageerror',error=>errors.push(error.message));
   page.on('request',request=>{if(new URL(request.url()).pathname==='/api/v1/persons')unpagedReads.push(request.url());});
   await goto(page,app.bootstrap());await page.getByRole('button',{name:'Люди',exact:true}).click();
-  await page.getByLabel('Страницы людей').getByText('1–50 из 501',{exact:true}).waitFor();
+  await page.getByLabel('Страницы людей').getByText('1–50 из 501 записей',{exact:true}).waitFor();
   assert.equal(await page.locator('.person-row').count(),50);
   assert.deepEqual(unpagedReads,[],'browsing a page must not also load the unpaged directory');
   await page.getByLabel('Viewer 000',{exact:true}).click();await page.getByRole('heading',{name:'Viewer 000',exact:true}).waitFor();
   await page.getByRole('button',{name:'Следующие люди'}).click();
-  await page.getByLabel('Страницы людей').getByText('51–100 из 501',{exact:true}).waitFor();
+  await page.getByLabel('Страницы людей').getByText('51–100 из 501 записей',{exact:true}).waitFor();
   await page.getByLabel('Viewer 050',{exact:true}).waitFor();
   await page.getByRole('heading',{name:'Viewer 000',exact:true}).waitFor();
   await page.getByLabel('Поиск человека').fill('Viewer 500');
   await page.getByLabel('Viewer 500',{exact:true}).waitFor();
   assert.equal(await page.locator('.person-row').count(),1);
   await page.getByLabel('Поиск человека').fill('');
-  await page.getByLabel('Страницы людей').getByText('1–50 из 501',{exact:true}).waitFor();
+  await page.getByLabel('Страницы людей').getByText('1–50 из 501 записей',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Следующие люди'}).click();
-  await page.getByLabel('Страницы людей').getByText('51–100 из 501',{exact:true}).waitFor();
+  await page.getByLabel('Страницы людей').getByText('51–100 из 501 записей',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Предыдущие люди'}).click();
-  await page.getByLabel('Страницы людей').getByText('1–50 из 501',{exact:true}).waitFor();
+  await page.getByLabel('Страницы людей').getByText('1–50 из 501 записей',{exact:true}).waitFor();
   for(const height of [720,1000]){
    await page.setViewportSize({width:1280,height});await page.locator('.people-list').evaluate(el=>el.scrollTop=el.scrollHeight);
    const boxes=await page.evaluate(()=>{const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return {top:r.top,bottom:r.bottom}};return {last:rect('.person-row:last-child'),list:rect('.people-list'),pages:rect('.people-pages'),height:innerHeight}});

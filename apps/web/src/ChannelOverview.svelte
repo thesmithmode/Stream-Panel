@@ -28,7 +28,7 @@
  </section>
  <h2 class="records-heading">Рекорды за эфир</h2>
  <section class="metrics channel-records" aria-label="Рекорды канала">
-  {#each [['online','Средний онлайн'],['messages','Сообщения']] as [key,label]}{@const record=data.records?.[key as 'online'|'messages']}
+  {#each [['online','Средний онлайн'],['messages','Сообщения'],['peakOnline','Пик зрителей'],['peakChat','Пик участников чата']] as [key,label]}{@const record=data.records?.[key as 'online'|'messages'|'peakOnline'|'peakChat']}
    <div class="metric"><div><span>{label}</span><strong>{record?num(record.value):'—'}</strong><small>{record?recordDate(record.at):'Нет данных'}</small></div></div>
   {/each}
  </section>

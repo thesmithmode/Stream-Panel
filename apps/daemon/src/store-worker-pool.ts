@@ -4,8 +4,8 @@ import {resolve} from 'node:path';
 type Entry={worker:Worker;references:number};
 const files=new Map<string,Entry>();
 /** One queue per physical SQLite file. Connections, stores and RPC replies stay client-scoped. */
-export function acquireStoreWorker(path:string,profile?:string){
- const clientId=randomUUID(),key=path===':memory:'?clientId:resolve(path);
+export function acquireStoreWorker(path:string,profile?:string,lane='facts'){
+ const clientId=randomUUID(),key=path===':memory:'?clientId:`${resolve(path)}:${lane}`;
  let entry=files.get(key);const first=!entry;
  if(!entry){
   const worker=new Worker(new URL('./db-worker.js',import.meta.url),{workerData:{path,profile,clientId},resourceLimits:{maxOldGenerationSizeMb:128,maxYoungGenerationSizeMb:8}});

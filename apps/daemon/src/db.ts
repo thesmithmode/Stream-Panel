@@ -6,6 +6,8 @@ import type { Worker } from "node:worker_threads";
 import {acquireStoreWorker} from "./store-worker-pool.js";
 export class StoreClient {
   private worker: Worker;
+  private analyticsClient:StoreClient|undefined;
+  private analyticsRestart:Promise<StoreClient>|undefined;
   private lease:ReturnType<typeof acquireStoreWorker>;
   private detach=()=>{};
   private stopTask:Promise<void>|undefined;
@@ -14,7 +16,7 @@ export class StoreClient {
   setStorageCleanup(cleanup:()=>Promise<void>){this.storage.setCleanup(cleanup);}
   storageStatus(){return this.storage.status();}
   private readonly timings = new Map<string, {calls:number;maxQueueMs:number;maxExecutionMs:number}>();
-  queueStatus(){return {pending:this.pending.size,operations:Object.fromEntries(this.timings)};}
+  queueStatus():{pending:number;operations:Record<string,{calls:number;maxQueueMs:number;maxExecutionMs:number}>}{const analytics=this.analyticsClient?.queueStatus();return {pending:this.pending.size+(analytics?.pending??0),operations:{...Object.fromEntries(this.timings),...analytics?.operations}};}
   private sequence = 0;
   private dead = false;
   private stopping=false;
@@ -26,13 +28,13 @@ export class StoreClient {
     { resolve: (value: unknown, executionMs?:number) => void; reject: (error: Error) => void }
   >();
   readonly ready: Promise<void>;
-  constructor(path: string, profile?: string, private readonly requestTimeoutMs=60000) {
+  constructor(private readonly path: string, private readonly profile?: string, private readonly requestTimeoutMs=60000,private readonly lane='facts') {
     this.storage=new StorageGuard(path);
-    this.lease=acquireStoreWorker(path,profile);this.worker=this.lease.worker;
+    this.lease=acquireStoreWorker(path,profile,lane);this.worker=this.lease.worker;
     this.ready = new Promise((resolve, reject) => {
       const onMessage=(message:{clientId?:string;ready?:boolean;error?:string;invalidate?:boolean;id:number;result?:unknown;executionMs?:number}) => {
         if(message.clientId!==this.lease.clientId)return;
-        if(message.invalidate){this.cache.invalidate();return;}
+        if(message.invalidate){this.cache.invalidate();this.analyticsClient?.cache.invalidate();return;}
         if (message.ready) {
           if(message.error)reject(new Error(message.error));else resolve();
           return;
@@ -66,12 +68,27 @@ export class StoreClient {
     const [method,...args]=request;
     if(!isStoreMethod(method))throw new Error("UNKNOWN_OPERATION");
     await this.ready;
-    if(this.dead)throw new Error("DB_WORKER_STOPPED");
+    if(this.dead||(this.stopping&&method!=="close"))throw new Error("DB_WORKER_STOPPED");
+    if(this.lane==='facts'&&this.path!==':memory:'&&['analytics','clockAudience','warmAnalytics','advanceAnalytics','channelOverview'].includes(method)){
+      const analytics=await this.analyticalClient();
+      return analytics.call(...request);
+    }
     if(cachedReads.has(method))return this.cache.read(readCacheKey(method,args),()=>this.execute<T>(method,...args),method==='analytics'?{ttlMs:86400000,compressed:true}:undefined);
     if(uncachedReads.has(method))return this.execute<T>(method,...args);
     if(method!=="close")await this.storage.check();
     // The worker invalidates every same-profile client only after facts actually change.
     return this.execute<T>(method,...args);
+  }
+  private async analyticalClient():Promise<StoreClient>{
+    const current=this.analyticsClient;
+    if(!current)return this.analyticsClient=new StoreClient(this.path,this.profile,this.requestTimeoutMs,'analytics');
+    if(!current.dead)return current;
+    if(!this.analyticsRestart)this.analyticsRestart=(async()=>{
+      await current.stop();
+      if(this.stopping)throw new Error("DB_WORKER_STOPPED");
+      return this.analyticsClient=new StoreClient(this.path,this.profile,this.requestTimeoutMs,'analytics');
+    })().finally(()=>{this.analyticsRestart=undefined;});
+    return this.analyticsRestart;
   }
   private async execute<T = unknown>(method: string, ...args: unknown[]): Promise<T> {
     await this.ready;
@@ -111,6 +128,8 @@ export class StoreClient {
   private async stopClient(): Promise<void> {
     this.stopping=true;
     this.cache.close();
+    await this.analyticsRestart?.catch(()=>{});
+    await this.analyticsClient?.stop();
     try { if(!this.dead)await this.call("close"); }
     finally {this.dead=true;this.detach();await this.lease.release();}
   }

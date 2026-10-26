@@ -17,10 +17,10 @@ test('large report pages, searches and clock visitor pages remain complete and r
  try{
   await goto(page,origin);assert.ok(await page.title());await page.getByLabel('Логин',{exact:true}).fill('fixture');await page.getByLabel('Пароль',{exact:true}).fill('fixture-paging-password');await page.getByRole('button',{name:'Войти',exact:true}).click();await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('tab',{name:'Аудитория',exact:true}).click();
   const audience=page.getByRole('heading',{name:'Возвращаемость участников',exact:true}).locator('../..');
-  await audience.getByRole('button',{name:'Следующие участники',exact:true}).waitFor();await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===100);
+  await audience.getByRole('button',{name:'Далее',exact:true}).waitFor();await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===100);
   const initialReports=reportRequests.length;
-  await audience.getByRole('button',{name:'Следующие участники',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===25);
-  await audience.getByRole('button',{name:'Предыдущие участники',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===100);
+  await audience.getByRole('button',{name:'Далее',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===25);
+  await audience.getByRole('button',{name:'Назад',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===100);
   await page.getByLabel('Поиск участника').fill('viewer124');await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===1);assert.equal(await audience.getByRole('button',{name:'viewer124',exact:true}).count(),1);
   await audience.getByLabel('Сортировка').selectOption('messages');await page.getByLabel('Только ядро',{exact:true}).check();await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===0);await page.getByLabel('Только ядро',{exact:true}).uncheck();await page.getByLabel('Поиск участника').fill('');await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===100);
   assert.equal(reportRequests.length,initialReports,'audience paging and search must not download the full report again');
