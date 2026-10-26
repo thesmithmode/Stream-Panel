@@ -38,6 +38,13 @@ Browser snapshots remain profile-scoped. Dynamics transfers the displayed month;
 older months and seven-row return comparisons load on demand. Time transfers clock
 summaries and loads visitor pages separately. Private ETags permit unchanged reads
 without retransmitting bodies. All existing unprojected API responses remain available.
+The shell retains up to 24 visited screen scopes, so returning to a cached screen
+or profile renders its reports before the changes request completes. Navigation
+revalidates without bumping the mutation revision or blocking the profile selector;
+manual refresh and mutations still invalidate reads. Overview and stream charts
+restore their cached values synchronously. Snapshots are memory-only, are cleared
+on logout, and never substitute another profile's data. A first visit or full browser
+reload still needs authentication and the initial server response.
 
 Category online uses measured viewer-minutes divided by known sampled minutes.
 Known zero counts; missing data does not count as zero. Chat presence and video

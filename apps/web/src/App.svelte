@@ -1,6 +1,6 @@
 <script lang="ts">
   import {screenVersion,refreshInterval,type Changes} from './refresh-policy';
-  import {setServerVersions,bumpReadRevision} from './api';
+  import {setServerVersions,bumpReadRevision,getDataRevision} from './api';
   import {clearAnalyticsCache} from "./analytics-cache";
   import Sheet from "./Sheet.svelte";
   import DonationTotal from "./DonationTotal.svelte";
@@ -59,17 +59,35 @@
   let username = $state(""), password = $state(""), user = $state<any>(null);
   let profile = $state<Profile>(getProfile());
   const allowedProfiles = $derived<readonly Profile[]>(user?.allowedProfiles ?? ["ruslan", "gulnaz"]);
-  $effect(()=>{if(!authorized)clearAnalyticsCache();});
+  $effect(()=>{if(!authorized){clearAnalyticsCache();screens.clear();}});
   let changes=$state<Changes|null>(null);
   const accessibleProfile = (next: Profile): Profile => allowedProfiles.includes(next) ? next : allowedProfiles[0]!;
   let sessionPage=$state(0);
   let selectedSessions=$state<string[]>([]);
   let epoch = 0;
-  let scopeReady=$state(false),connectionLost=$state(false);
+  let scopeReady=$state(false),connectionLost=$state(false),scopeMount=$state(0);
   let outdated=$state(false);
   let refreshTask:{epoch:number;task:Promise<void>;controller:AbortController}|null=null;
+  // Retain the shell as well as the reports: remounting a cached report must not
+  // wait for changes/status first. Revalidate in the background on every visit.
+  const screens=new Map<string,{revision:number;status:any;changes:Changes|null;sessions:Session[];summary:Summary}>();
+  const screenKey=()=>JSON.stringify([profile,tab,sessionFilter,sessionPage]);
+  function rememberScreen(){
+    const key=screenKey();screens.delete(key);screens.set(key,{revision:getDataRevision(profile),status,changes,sessions,summary});
+    while(screens.size>24)screens.delete(screens.keys().next().value!);
+  }
   function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
-  function clearScope(){changes=null;selectedSessions=[];sessionPage=0;refreshTask?.controller.abort();busy=false;scopeReady=false;summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};}
+  function clearScope(){
+    scopeMount++;
+    changes=null;selectedSessions=[];sessionPage=0;refreshTask?.controller.abort();busy=false;scopeReady=false;summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};
+    const saved=screens.get(screenKey());
+    if(saved&&saved.revision===getDataRevision(profile)){
+      ({status,changes,sessions,summary}=saved);scopeReady=true;
+    }else if(status?.profile===profile&&viewRequests(tab as View,sessionFilter).length===1){
+      // This screen has no shell reads beyond the already authenticated status.
+      scopeReady=true;
+    }
+  }
   function restoreRoute(){const route=readRoute(location.search,getProfile()),selected=accessibleProfile(route.profile),denied=selected!==route.profile;epoch++;tab=denied&&route.view==='stream'?'sessions':route.view;sessionFilter=denied?'':route.session;personId=denied?'':route.person;setProfile(selected);profile=selected;clearScope();}
   function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}connectionLost=!navigator.onLine;if(document.hidden||!navigator.onLine)return;error=authMessage((e as Error).message);}
 
@@ -131,29 +149,30 @@
       if(status)status={...status,sync:next.sync};
       outdated=isOutdatedRelease(next.release);
       sessions=values.sessions??sessions;selectedSessions=selectedSessions.filter(id=>sessions.some(s=>s.id===id));summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';
+      rememberScreen();
       if(changed||fresh)window.dispatchEvent(new Event('sp:data-refresh'));
       if(subscribersChanged||fresh)window.dispatchEvent(new Event('sp:subscribers-refresh'));
       window.dispatchEvent(new Event('sp:clock-refresh'));
     })();refreshTask={epoch:current,task,controller};
     try{await task;}finally{clearTimeout(deadline);if(refreshTask?.task===task)refreshTask=null;}
   }
-  async function action(fn: () => Promise<void>) {
+  async function action(fn: () => Promise<void>,fresh=true) {
     const current = epoch;
-    busy = true;
+    if(fresh)busy = true;
     error = "";
     try {
       await fn();
-      if(current===epoch)await refresh(true);
+      if(current===epoch)await refresh(fresh);
     } catch (e) {
       if(current===epoch)reportFailure(e);
     } finally {
-      if (current === epoch) busy = false;retryInitialization();
+      if (current === epoch&&fresh) busy = false;retryInitialization();
     }
   }
   function navigate(next:string,person='') {
     if(next==='analytics'){if(tab!=='analytics')analyticsBack=tab==='stream'?'sessions':tab;analyticsSection='dynamics';}
     moreOpen=false;epoch++;if(next!=='stream')sessionFilter='';tab=next;personId=person;clearScope();saveRoute();
-    window.scrollTo({top:0,behavior:'instant'});void action(async()=>{});
+    window.scrollTo({top:0,behavior:'instant'});void action(async()=>{},false);
   }
   function openPerson(id:string){navigate('people',id);}
   async function mergeSelected(){
@@ -179,7 +198,7 @@
     epoch++;if(tab==='stream'&&!destination)tab='sessions';setProfile(next);profile=next;
     status = null; sessions = []; personId = sessionFilter = ""; error = "";
     summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
-    sessionFilter=destination??"";clearScope();saveRoute();await action(async () => {});
+    sessionFilter=destination??"";clearScope();saveRoute();await action(async () => {},false);
     if(outdated)location.reload();
   }
   onMount(() => {
@@ -218,7 +237,7 @@
       if (new URLSearchParams(location.hash.slice(1)).has("key"))
         void initialize();
     };
-    const back=()=>{if(new URLSearchParams(location.hash.slice(1)).has('key')){void initialize();return;}restoreRoute();void action(async()=>{});};
+    const back=()=>{if(new URLSearchParams(location.hash.slice(1)).has('key')){void initialize();return;}restoreRoute();void action(async()=>{},false);};
     const visibility=()=>{if(!document.hidden)update();};
     document.addEventListener("visibilitychange",visibility);
     const offline=()=>connectionLost=true;window.addEventListener('offline',offline);window.addEventListener('popstate',back);window.addEventListener('online',update);window.addEventListener('focus',update);
@@ -263,7 +282,7 @@
       {#if status?.storage?.freeBytes!==null&&status?.storage?.freeBytes<status?.storage?.reserveBytes}<p class="notice" role="status">{status.storage.freeBytes<(status.storage.minFreeBytes??16777216)?'Критически мало места: запись временно остановлена, чтобы не повредить БД. Проверьте «Настройки».':'На сервере мало свободного места. Панель очищает старые копии; сбор данных продолжается. Проверьте «Настройки». '}</p>{/if}
       {#if outdated}<div role="status" class="notice">Доступна новая версия панели для обоих профилей. <button class="outline small" onclick={()=>location.reload()}>Обновить панель</button></div>{/if}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}
-      {#key `${profile}:${tab}:${sessionFilter}`}
+      {#key `${profile}:${tab}:${sessionFilter}:${scopeMount}`}
       {#if !scopeReady}<div class="panel empty" role="status">Загружаем данные…</div>{:else}
       {#if tab === "people"}<div
             class="session-picker"
