@@ -66,3 +66,12 @@ test('collection can write during a consistent analytics read without publishing
   assert.equal(s.analytics(query).streamComparison[0]!.viewers.known.mean,9);
  }finally{peer?.close();s.close();rmSync(dir,{recursive:true,force:true});}
 });
+test('changed streams take priority over initial backfill and serial batches drain durable work',()=>{
+ const s=new StreamStore(':memory:');try{
+  const older=stream(s),changed=stream(s,at+86400000),db=(s as any).db;db.prepare('UPDATE analytics_jobs SET priority=0,requested_at_ms=0').run();
+  s.streamSample(changed,at+86400000,'game','Game','Title',9);
+  const q={fromMs:0,toMs:at+3*86400000,ownerId:'owner'};(s as any).history.advanceOne(q);
+  assert.equal(db.prepare('SELECT count(*) n FROM analytics_jobs WHERE session_id=?').get(changed).n,0);assert.equal(db.prepare('SELECT count(*) n FROM analytics_jobs WHERE session_id=?').get(older).n,1);
+  assert.equal(s.advanceAnalytics(q).pending,0);
+ }finally{s.close();}
+});

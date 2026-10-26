@@ -24,7 +24,7 @@ try{
  clients.push(...profiles.map(p=>new StoreClient(path,p)));
  await Promise.all(clients.map(c=>c.ready));
  const q={fromMs:0,toMs:Date.now(),ownerId:'owner',summaryOnly:true,includeInsights:true,clockCompact:true,panel:'dynamics'};
- let peak=process.memoryUsage().rss;const observe=()=>{peak=Math.max(peak,process.memoryUsage().rss);};
+ let peak=process.memoryUsage().rss;const observe=()=>{peak=Math.max(peak,process.memoryUsage().rss,process.resourceUsage().maxRSS*1024);};
  const backfill=performance.now(),collector=[];let jobs=0;
  for(const client of clients){let result;do{
   const work=client.call('advanceAnalytics',q),t=performance.now();
@@ -36,7 +36,7 @@ try{
  let responseBytes=0;
  for(let i=0;i<40;i++){const client=clients[i%clients.length],t=performance.now(),report=await client.call('analytics',q);times.push(performance.now()-t);responseBytes=Math.max(responseBytes,Buffer.byteLength(JSON.stringify(report)));observe();}
  const percentile=(values,p)=>[...values].sort((a,b)=>a-b)[Math.ceil(values.length*p)-1];
- const result={streams:count,profiles:profiles.length,fixture:'one recorded minute and one viewer sample per finished stream; no chat/presence',backfillMs:Math.round(backfillMs),jobs,p95Ms:percentile(times,.95),collectorP95Ms:percentile(collector,.95),responseBytes,peakRssMiB:peak/1048576};
+ const result={streams:count,profiles:profiles.length,fixture:'one recorded minute and one viewer sample per finished stream; no chat/presence',backfillMs:Math.round(backfillMs),batches:jobs,p95Ms:percentile(times,.95),collectorP95Ms:percentile(collector,.95),responseBytes,peakRssMiB:peak/1048576};
  console.log(JSON.stringify(result,null,2));
  assert.ok(result.p95Ms<=300,`Cached API p95 ${result.p95Ms} exceeds 300ms`);
  assert.ok(result.peakRssMiB<512,`Whole-process RSS ${result.peakRssMiB} exceeds service memory limit`);

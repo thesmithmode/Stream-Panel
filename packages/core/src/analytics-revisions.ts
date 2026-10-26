@@ -8,10 +8,11 @@ export const analyticsRevisionSchema=`
 INSERT OR IGNORE INTO ui_revisions(domain) VALUES('analyticsActivity');
 CREATE TABLE IF NOT EXISTS analytics_fact_versions(session_id TEXT PRIMARY KEY,activity INTEGER NOT NULL DEFAULT 0,money INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;
 INSERT OR IGNORE INTO analytics_fact_versions SELECT id,1,1 FROM sessions;
-CREATE TABLE IF NOT EXISTS analytics_jobs(session_id TEXT PRIMARY KEY,requested_at_ms INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,retry_at_ms INTEGER NOT NULL DEFAULT 0,error TEXT NOT NULL DEFAULT '') WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS analytics_jobs(session_id TEXT PRIMARY KEY,requested_at_ms INTEGER NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,retry_at_ms INTEGER NOT NULL DEFAULT 0,error TEXT NOT NULL DEFAULT '',priority INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS analytics_jobs_order ON analytics_jobs(priority DESC,requested_at_ms,session_id,retry_at_ms);
 INSERT OR IGNORE INTO analytics_jobs(session_id) SELECT id FROM sessions;
-CREATE TRIGGER IF NOT EXISTS analytics_jobs_insert AFTER INSERT ON analytics_fact_versions BEGIN INSERT INTO analytics_jobs(session_id) VALUES(NEW.session_id) ON CONFLICT(session_id) DO UPDATE SET retry_at_ms=0,error=''; END;
-CREATE TRIGGER IF NOT EXISTS analytics_jobs_update AFTER UPDATE ON analytics_fact_versions BEGIN INSERT INTO analytics_jobs(session_id) VALUES(NEW.session_id) ON CONFLICT(session_id) DO UPDATE SET retry_at_ms=0,error=''; END;
+CREATE TRIGGER IF NOT EXISTS analytics_jobs_insert AFTER INSERT ON analytics_fact_versions BEGIN INSERT INTO analytics_jobs(session_id,requested_at_ms,priority) VALUES(NEW.session_id,CAST(unixepoch('subsec')*1000 AS INTEGER),1) ON CONFLICT(session_id) DO UPDATE SET priority=1,attempts=0,retry_at_ms=0,error=''; END;
+CREATE TRIGGER IF NOT EXISTS analytics_jobs_update AFTER UPDATE ON analytics_fact_versions BEGIN INSERT INTO analytics_jobs(session_id,requested_at_ms,priority) VALUES(NEW.session_id,CAST(unixepoch('subsec')*1000 AS INTEGER),1) ON CONFLICT(session_id) DO UPDATE SET priority=1,attempts=0,retry_at_ms=0,error=''; END;
 CREATE TRIGGER IF NOT EXISTS fact_activity_version AFTER UPDATE ON analytics_fact_versions WHEN OLD.activity IS NOT NEW.activity BEGIN UPDATE ui_revisions SET revision=revision+1 WHERE domain='analyticsActivity'; END;
 CREATE TRIGGER IF NOT EXISTS fact_activity_created AFTER INSERT ON analytics_fact_versions WHEN NEW.activity>0 BEGIN UPDATE ui_revisions SET revision=revision+1 WHERE domain='analyticsActivity'; END;
 ${(['sessions','stream_samples','platform_streams','presence_polls'] as const).flatMap(table=>operations.map(op=>{

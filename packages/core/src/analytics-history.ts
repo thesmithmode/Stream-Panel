@@ -275,9 +275,14 @@ export class AnalyticsHistory {
         if(session.ended_at_ms===null){while(this.liveStreams.size>=12)this.liveStreams.delete(this.liveStreams.keys().next().value!);this.liveStreams.set(key,{revision,report});}return report;
     }
     private warmedRevision='';
-    /** One durable, coalesced stream job per turn; yield between jobs to protect collection. */
+    /** Bounded serial batches avoid an idle delay for every historical stream. */
     advance(options:AnalyticsOptions){
-        const job=this.statement(`SELECT j.session_id,j.attempts FROM analytics_jobs j WHERE retry_at_ms<=? ORDER BY requested_at_ms,session_id LIMIT 1`).get(Date.now()) as {session_id:string;attempts:number}|undefined;
+        const start=performance.now();let result:{pending:number};
+        do{result=this.advanceOne(options);}while(result.pending&&performance.now()-start<200);
+        return result;
+    }
+    private advanceOne(options:AnalyticsOptions){
+        const job=this.statement(`SELECT j.session_id,j.attempts FROM analytics_jobs j WHERE retry_at_ms<=? ORDER BY priority DESC,requested_at_ms,session_id LIMIT 1`).get(Date.now()) as {session_id:string;attempts:number}|undefined;
         if(!job)return {pending:0};
         const session=this.statement(`SELECT s.id,s.started_at_ms,s.ended_at_ms,coalesce((SELECT sum(v.activity+v.money) FROM analytics_fact_versions v WHERE v.session_id=s.id OR v.session_id IN(SELECT member_id FROM session_groups WHERE group_id=s.id)),0) revision,(SELECT json_group_array(member_id) FROM session_groups WHERE group_id=s.id) members FROM sessions s WHERE s.id=coalesce((SELECT group_id FROM session_groups WHERE member_id=?),?) AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)`).get(job.session_id,job.session_id) as Session|undefined;
         if(!session){this.statement('DELETE FROM analytics_jobs WHERE session_id=?').run(job.session_id);return {pending:1};}

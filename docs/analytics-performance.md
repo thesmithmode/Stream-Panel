@@ -16,8 +16,9 @@ donations and audit records remain authoritative and unchanged.
   clips retain at most four variants per stream/table. Writes preserve a 1 GiB disk
   reserve; individual decoded projections are bounded to 16 MiB.
 - Each dirty stream has one durable job. Jobs survive restart, coalesce repeated
-  writes, and back off after failures. Both profiles catch up serially; the scheduler
-  yields between jobs and advances existing bounded report preparation.
+  writes, and back off after failures. Both profiles catch up serially in batches of up to 200 ms between jobs;
+  the scheduler yields between batches, prioritizes changed streams over initial
+  backfill, and advances existing bounded report preparation.
 - Heavy analytics uses one shared worker per physical database, separate from the
   collection/ordinary-read worker. Each worker has a 128 MiB old-generation limit.
   Overall service memory remains governed by the existing 512 MiB systemd limit.
