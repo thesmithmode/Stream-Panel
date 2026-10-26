@@ -15,15 +15,18 @@ export function startAnalyticsWarmer(runtimes:()=>Iterable<Runtime>,enabled:()=>
    try{
     const cfg=runtime.configuration.value;
     const change=await runtime.db.call('changes');
+    if(stopped)break;
     const signature=JSON.stringify([change.versions.activity,change.versions.people,change.versions.donations,change.versions.follows,cfg.analyticsSettings,cfg.excludedBotLogins,cfg.twitch?.userId,cfg.youtube?.userId]);
     if(versions.get(runtime.db)===signature)continue;
     const options={...analyticsSettings(cfg.analyticsSettings),fromMs:0,toMs:Date.now(),excludedLogins:cfg.excludedBotLogins,ownerId:cfg.twitch?.userId??'',youtubeAccount:cfg.youtube?.userId??cfg.youtubeAccountId??''};
     const queued=await runtime.db.call('advanceAnalytics',options);
+    if(stopped)break;
     if(queued.pending){preparing=true;continue;}
     const result=await runtime.db.call('warmAnalytics',options,false);
+    if(stopped)break;
     preparing ||= result.preparing;
     if(!result.preparing)versions.set(runtime.db,signature);
-   }catch{onError();}
+   }catch{if(!stopped)onError();}
   }
   if(!stopped)timer=setTimeout(()=>void run(),preparing?250:60000);
  };

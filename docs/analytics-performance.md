@@ -45,11 +45,11 @@ Measured during this change on 10,000 finished streams split across two profiles
 
 | Measurement | Result |
 | --- | ---: |
-| Initial fact/report preparation | 82.9 s |
-| Cached profile report p95 | 0.65 ms |
-| Collection-worker metadata p95 during preparation | 9.59 ms |
-| Largest displayed-month response | 30,655 bytes |
-| Observed whole-process RSS, including workers | 238.3 MiB |
+| Initial fact/report preparation | 82.0 s |
+| Cached profile report p95 | 0.95 ms |
+| Collection-worker metadata p95 during preparation | 56.0 ms |
+| Largest displayed-month response | 30,790 bytes |
+| Observed whole-process RSS, including workers | 260.4 MiB |
 
 This scalability fixture has one recorded minute and one viewer sample per stream,
 without chat/presence. It measures queue/cache scaling, not the cost of importing

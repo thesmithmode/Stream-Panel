@@ -21,3 +21,9 @@ test('a failing viewed profile does not block peers; stopping an in-flight warm 
  const stop=startAnalyticsWarmer(()=>[broken,active,active] as any,()=>true,()=>failures++);
  await settle();assert.equal(failures,1);assert.equal(calls,1);t.mock.timers.tick(60000);await settle();assert.equal(calls,1);stop();release({preparing:true});await settle();t.mock.timers.tick(60000);await settle();assert.equal(calls,1);t.mock.timers.reset();
 });
+test('shutdown cancels pending preparation without reporting a database failure or starting another operation',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});let reject!:(error:Error)=>void,calls=0,failures=0;
+ const runtime={configuration:{value:{excludedBotLogins:[]}},db:{call:()=>{calls++;return new Promise((_,failed)=>{reject=failed;});}}};
+ const stop=startAnalyticsWarmer(()=>[runtime] as any,()=>true,()=>failures++);stop();reject(new Error('DB_WORKER_STOPPED'));await settle();t.mock.timers.tick(60000);await settle();
+ assert.equal(calls,1);assert.equal(failures,0);t.mock.timers.reset();
+});
