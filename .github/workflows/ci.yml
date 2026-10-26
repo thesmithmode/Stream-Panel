@@ -50,8 +50,16 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - name: Use the runner browser or install Chromium
         if: matrix.segment == 'e2e'
+        run: |
+          if command -v google-chrome >/dev/null; then
+            browser=$(command -v google-chrome)
+            "$browser" --version
+            printf 'STREAM_PANEL_TEST_CHROMIUM=%s\n' "$browser" >> "$GITHUB_ENV"
+          else
+            pnpm exec playwright install --with-deps chromium
+          fi
       - run: pnpm check:web
         if: matrix.segment == 'unit'
       - uses: actions/download-artifact@v4
