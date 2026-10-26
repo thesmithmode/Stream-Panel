@@ -1,4 +1,4 @@
-import {navigate} from '../helpers/navigation.mjs';
+import {navigate,refreshData} from '../helpers/navigation.mjs';
 import {acceptConfirmation} from '../helpers/confirmation.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -81,7 +81,7 @@ test("stream history shows only confirmed Twitch and YouTube links from the plat
     assert.equal((await a.db.call("sessions")).some(s=>s.id===manualId),false);
     assert.equal((await a.db.call("sessions")).some(s=>s.id===bothId),true);
     await page.route('**/api/v1/sessions',async route=>{const response=await route.fetch();const rows=await response.json();await route.fulfill({response,json:rows.map(({durationMs,breaks,confirmedUrls,viewerMean,viewerPeak,donationTotals,donationCount,...legacy})=>legacy)});});
-    await navigate(page,'Обзор');await page.getByRole('button',{name:'Стримы',exact:true}).click();await bothRow.waitFor();await bothRow.locator('.stream-actions summary').click();assert.equal(await bothRow.locator('.stream-actions').getByRole('link').count(),0);assert.ok((await bothRow.textContent()).includes('Средние зрители—'));assert.ok((await bothRow.textContent()).includes('Донатов: 0'));
+    await navigate(page,'Обзор');await page.getByRole('button',{name:'Стримы',exact:true}).click();await bothRow.waitFor();await refreshData(page);await page.waitForFunction(()=>document.querySelectorAll('.stream-card .stream-actions a').length===0);await bothRow.locator('.stream-actions summary').click();assert.equal(await bothRow.locator('.stream-actions').getByRole('link').count(),0);assert.ok((await bothRow.textContent()).includes('Средние зрители—'));assert.ok((await bothRow.textContent()).includes('Донатов: 0'));
     assert.deepEqual(errors, []);
     await saveCoverage(page);
     await context.close();

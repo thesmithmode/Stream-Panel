@@ -1,12 +1,12 @@
 <script lang="ts">
- import {onMount} from 'svelte';
+ import {onMount,untrack} from 'svelte';
  import {money} from './api';
- import {loadOverview,type OverviewTotals} from './analytics-cache';
+ import {cachedOverview,loadOverview,type OverviewTotals} from './analytics-cache';
  import {num} from './format';
  import {ConnectionError} from './request';
  import {formatDuration,formatHours} from './duration';
  let {connect,profile,timezone='Europe/Moscow'}:{connect:()=>void;profile:string;timezone?:string}=$props();
- let data=$state<OverviewTotals|null>(null),error=$state('');
+ let data=$state<OverviewTotals|null>(untrack(()=>cachedOverview(profile)??null)),error=$state('');
  const recordDate=(at:number)=>new Date(at).toLocaleDateString('ru-RU',{timeZone:timezone});
  onMount(()=>{
   let alive=true,pending=false;

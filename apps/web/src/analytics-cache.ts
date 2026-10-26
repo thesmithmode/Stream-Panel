@@ -6,12 +6,18 @@ const snapshots=new Map<string,any>();
 const reports=new Map<string,{value?:any;until:number;pending:boolean;task:Promise<any>;controller:AbortController;users:number}>();
 export interface OverviewTotals {records?:{online:{value:number;at:number}|null;messages:{value:number;at:number}|null;peakOnline?:{value:number;at:number}|null;peakChat?:{value:number;at:number}|null};streams:number;durationMinutes:number;attendees:number;messages:number;donations:number;totals:Record<string,string>}
 // Returning to Overview reuses its compact snapshot. Explicit/timed refresh still reads fresh data.
-const overviews=new Map<string,{until:number;pending:boolean;task:Promise<OverviewTotals>}>();
+const overviews=new Map<string,{value?:OverviewTotals;until:number;pending:boolean;task:Promise<OverviewTotals>}>();
+const overviewSnapshots=new Map<string,OverviewTotals>();
+export function cachedOverview(profile:string){
+ const id=JSON.stringify([profile,getDataRevision(profile),getServerRevision(profile,'overview')]);
+ return overviews.get(id)?.value??overviewSnapshots.get(JSON.stringify([profile,getDataRevision(profile)]));
+}
 export function loadOverview(profile:string,force=false){
  const id=JSON.stringify([profile,getDataRevision(profile),getServerRevision(profile,'overview')]),prior=overviews.get(id);
  if(prior&&(prior.pending||(!force&&prior.until>Date.now())))return prior.task;
- const entry={until:0,pending:true,task:undefined as unknown as Promise<OverviewTotals>};
- entry.task=api<OverviewTotals>('overview',undefined,undefined,profile).then(value=>{entry.pending=false;entry.until=getServerRevision(profile,'overview')?Infinity:Date.now()+60000;return value;}).catch(error=>{if(overviews.get(id)===entry)overviews.delete(id);throw error;});
+ const entry:{value?:OverviewTotals;until:number;pending:boolean;task:Promise<OverviewTotals>}={...(prior?.value?{value:prior.value}:{}),until:0,pending:true,task:undefined as unknown as Promise<OverviewTotals>};
+ const snapshot=JSON.stringify([profile,getDataRevision(profile)]);
+ entry.task=api<OverviewTotals>('overview',undefined,undefined,profile).then(value=>{entry.value=value;entry.pending=false;overviewSnapshots.delete(snapshot);overviewSnapshots.set(snapshot,value);while(overviewSnapshots.size>8)overviewSnapshots.delete(overviewSnapshots.keys().next().value!);entry.until=getServerRevision(profile,'overview')?Infinity:Date.now()+60000;return value;}).catch(error=>{if(overviews.get(id)===entry)overviews.delete(id);throw error;});
  overviews.delete(id);overviews.set(id,entry);
  while(overviews.size>8)overviews.delete(overviews.keys().next().value!);
  return entry.task;
@@ -27,7 +33,7 @@ function snapshotKey(profile:string,q:URLSearchParams){
 }
 function key(profile:string,q:URLSearchParams){return JSON.stringify([snapshotKey(profile,q),getDataRevision(profile),getServerRevision(profile,q.get('session')?'stream:'+q.get('session'):'report')]);}
 export function cachedAnalytics(profile:string,q:URLSearchParams){return reports.get(key(profile,q))?.value??snapshots.get(snapshotKey(profile,q));}
-export function clearAnalyticsCache(){for(const entry of reports.values())entry.controller.abort();reports.clear();snapshots.clear();overviews.clear();clearSubscriberCache();}
+export function clearAnalyticsCache(){for(const entry of reports.values())entry.controller.abort();reports.clear();snapshots.clear();overviews.clear();overviewSnapshots.clear();clearSubscriberCache();}
 export function loadAnalytics(profile:string,q:URLSearchParams,force=false,signal?:AbortSignal){
  if(signal?.aborted)return Promise.reject(signal.reason);
  const id=key(profile,q),prior=reports.get(id);
