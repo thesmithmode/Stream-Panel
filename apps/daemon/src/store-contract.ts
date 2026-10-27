@@ -31,6 +31,7 @@ export const storeOperations={
   ingestLiveDonation:"write",
   sessions:"cached",
   matchingStream:"read",
+  streamMatchContext:"read",
   mergeSessions:"write",
   unmergeSessions:"write",
   platformStreams:"read",

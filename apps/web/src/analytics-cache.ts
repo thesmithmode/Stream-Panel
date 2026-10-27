@@ -1,3 +1,4 @@
+import {clearScreenData} from './screen-data';
 import {api,getDataRevision,getServerRevision} from './api';
 import {analyticsReport,useReport,type SharedReport} from './analytics-load';
 import {clearSubscriberCache} from './subscriber-cache';
@@ -25,22 +26,24 @@ export function loadOverview(profile:string,force=false){
 function snapshotKey(profile:string,q:URLSearchParams){
  const params=new URLSearchParams(q);
  // The landing report moves with the clock, while its historical facts stay the same.
- if(Math.abs(Number(params.get('to'))-Date.now())<120000){
-  if(params.get('from')==='0')params.delete('to');
-  else for(const days of [7,30])if(Math.abs(Number(params.get('to'))-Number(params.get('from'))-days*86400000)<120000){params.delete('from');params.delete('to');params.set('period',String(days));break;}
+ if(params.has('_period')){
+  const period=params.get('_period');params.delete('_period');
+  if(period==='all')params.delete('to');
+  else if(period==='7'||period==='30'){params.delete('from');params.delete('to');params.set('period',period);}
  }
  params.sort();return JSON.stringify([profile,params.toString()]);
 }
-function key(profile:string,q:URLSearchParams){return JSON.stringify([snapshotKey(profile,q),getDataRevision(profile),getServerRevision(profile,q.get('session')?'stream:'+q.get('session'):'report')]);}
+function key(profile:string,q:URLSearchParams){return JSON.stringify([snapshotKey(profile,q),(['7','30'].includes(q.get('_period')??'')?[q.get('from'),q.get('to')]:null),getDataRevision(profile),getServerRevision(profile,q.get('session')?'stream:'+q.get('session'):'report')]);}
 export function cachedAnalytics(profile:string,q:URLSearchParams){return reports.get(key(profile,q))?.value??snapshots.get(snapshotKey(profile,q));}
-export function clearAnalyticsCache(){for(const entry of reports.values())entry.controller.abort();reports.clear();snapshots.clear();overviews.clear();overviewSnapshots.clear();clearSubscriberCache();}
+export function clearAnalyticsCache(){clearScreenData();for(const entry of reports.values())entry.controller.abort();reports.clear();snapshots.clear();overviews.clear();overviewSnapshots.clear();clearSubscriberCache();}
 export function loadAnalytics(profile:string,q:URLSearchParams,force=false,signal?:AbortSignal){
  if(signal?.aborted)return Promise.reject(signal.reason);
  const id=key(profile,q),prior=reports.get(id);
  if(prior&&!prior.controller.signal.aborted&&(prior.pending||(!force&&prior.until>Date.now())))return useReport(prior,signal);
  const entry:SharedReport<any>&{value?:any;until:number}={value:prior?.value,until:0,pending:true,users:0,controller:new AbortController(),task:undefined as unknown as Promise<any>};
  entry.task=(async()=>{
-  const result=await analyticsReport(signal=>api(`analytics?${q}`,undefined,signal,profile),entry.controller.signal);
+  const request=new URLSearchParams(q);request.delete('_period');
+  const result=await analyticsReport(signal=>api(`analytics?${request}`,undefined,signal,profile),entry.controller.signal);
   if(result.filters&&['category','source','timezone'].some(field=>result.filters[field]!==q.get(field)))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');
   entry.pending=false;entry.value=result;const snapshot=snapshotKey(profile,q);snapshots.delete(snapshot);snapshots.set(snapshot,result);while(snapshots.size>8)snapshots.delete(snapshots.keys().next().value!);entry.until=getServerRevision(profile,q.get('session')?'stream:'+q.get('session'):'report')?Infinity:Date.now()+60000;return result;
  })().catch(error=>{if(reports.get(id)===entry)reports.delete(id);throw error;});

@@ -55,3 +55,14 @@ test('late donations, notes and followers reuse the durable overview activity sn
   const after=s.channelOverview();assert.equal(after.messages,before.messages);assert.equal(after.attendees,before.attendees);assert.deepEqual(after.totals,{RUB:'1100'});assert.equal(after.donations,1);
  }finally{s.close();}
 });
+
+test('online-only updates reuse overview attendance while real presence changes invalidate it',()=>{
+ const s=new StreamStore(':memory:');try{
+  const at=Date.now()-3600000,id=s.startSession('owner','overview-cache',at,'platform',at);
+  s.streamSample(id,at,'g','Game','',2);
+  let reads=0;const original=s.summary.bind(s);s.summary=(...args:Parameters<typeof s.summary>)=>{reads++;return original(...args);};
+  const first=s.channelOverview();assert.equal(reads,1);
+  s.streamSample(id,at,'g','Game','',8);const next=s.channelOverview();assert.equal(reads,1);assert.equal(next.attendees,first.attendees);assert.equal(next.records.peakOnline?.value,8);
+  s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+60000,status:'complete',userIds:['viewer']});assert.equal(s.channelOverview().attendees,1);assert.equal(reads,2);
+ }finally{s.close();}
+});

@@ -1,4 +1,5 @@
 <script lang="ts">
+ import {screenData} from './screen-data';
  import AudioDonation from './AudioDonation.svelte';
  import {isAudioDonation} from './labels';
  import {onMount,untrack} from 'svelte';
@@ -14,9 +15,9 @@
  let generation=0,editorGeneration=0;
  let connection=$state('');
  const showAll=$derived(!sessionId);
- async function refresh(){const ticket=++generation;loading=true;try{const [result,status]=await Promise.all([api(`donations?${showAll?'':`session=${encodeURIComponent(sessionId!)}&`}offset=${offset}&limit=10`),api('status')]);if(ticket===generation){rows=result.items;total=result.total;loaded=true;statisticsCount=result.statisticsCount??result.total;connection=status.donationalerts.state;error='';}}catch(e){if(ticket===generation)error=(e as Error).message;}finally{if(ticket===generation)loading=false;}}
+ async function refresh(force=false){const ticket=++generation;loading=true;try{const result=await screenData(`donations?${showAll?'':`session=${encodeURIComponent(sessionId!)}&`}offset=${offset}&limit=10`,'donations',undefined,force);if(ticket===generation){rows=result.items;total=result.total;loaded=true;statisticsCount=result.statisticsCount??result.total;error='';}}catch(e){if(ticket===generation)error=(e as Error).message;}finally{if(ticket===generation)loading=false;}}
  $effect(()=>{sessionId;offset;showAll;untrack(()=>void refresh());return()=>{generation++;};});
- onMount(()=>{const update=()=>void refresh();window.addEventListener('sp:data-refresh',update);return()=>{editorGeneration++;window.removeEventListener('sp:data-refresh',update);};});
+ onMount(()=>{let alive=true;void api('status').then(status=>{if(alive)connection=status.donationalerts.state;}).catch(()=>{});const update=(event:Event)=>void refresh(!(event instanceof CustomEvent)||!event.detail?.validated||!!event.detail.force);window.addEventListener('sp:data-refresh',update);return()=>{alive=false;editorGeneration++;window.removeEventListener('sp:data-refresh',update);};});
  async function edit(row:Donation){const ticket=++editorGeneration;editing=row;recipient=row.personId??'';candidates=[];people=[];search='';finding=true;error='';try{const [suggested,all]=await Promise.all([api<Candidate[]>(`donations/${encodeURIComponent(row.id)}/candidates`),api<Person[]>('persons')]);if(ticket===editorGeneration){candidates=suggested;people=all.filter(p=>!p.is_bot);}}catch(e){if(ticket===editorGeneration)error=(e as Error).message;}finally{if(ticket===editorGeneration)finding=false;}}
  $effect(()=>{const term=search.trim();if(!editing||!term)return;let cancelled=false;const timer=setTimeout(()=>void api<Person[]>(`persons?search=${encodeURIComponent(term)}`).then(result=>{if(!cancelled)people=result.filter(p=>!p.is_bot);}).catch(e=>{if(!cancelled)error=e.message;}),200);return()=>{cancelled=true;clearTimeout(timer);};});
  async function assign(){if(!editing||!recipient)return;busy=true;error='';try{await api(`donations/${encodeURIComponent(editing.id)}/assign`,{personId:recipient,revision:editing.revision});editing=null;editorGeneration++;await refresh();await changed();}catch(e){error=(e as Error).message==='DONATION_CONFLICT'?'Привязка уже изменилась. Закройте форму и откройте донат снова.':(e as Error).message;await refresh();}finally{busy=false;}}

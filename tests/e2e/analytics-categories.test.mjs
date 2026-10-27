@@ -1,4 +1,4 @@
-import {setFilter,clockSettings} from '../helpers/navigation.mjs';
+import {setFilter,clockSettings,refreshData} from '../helpers/navigation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {application} from '../helpers/application.mjs';
@@ -54,17 +54,21 @@ test('every chart category selector refreshes donations, time patterns and clock
   let releaseOld,startedOld;
   const oldWaiting=new Promise(resolve=>startedOld=resolve),oldGate=new Promise(resolve=>releaseOld=resolve);
   await page.route('**/api/v1/analytics?*',async route=>{if(new URL(route.request().url()).searchParams.get('category')==='game'){startedOld();await oldGate;}await route.continue().catch(error=>{if(!route.request().failure())throw error;});});
+  // Network fault checks explicitly invalidate reads; elapsed time no longer expires static reports.
+  await refreshData(page);await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');
   await page.clock.setFixedTime(Date.now()+120000);
   const oldCompleted=page.waitForEvent('requestfailed',{predicate:r=>new URL(r.url()).pathname==='/api/v1/analytics'&&new URL(r.url()).searchParams.get('category')==='game'});
   await setFilter(page,'Категория Twitch','game');await oldWaiting;
   await setFilter(page,'Категория Twitch','talk');
   await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();releaseOld();await oldCompleted;await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();await page.unroute('**/api/v1/analytics?*');
+  await refreshData(page);await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');
   await page.route('**/api/v1/analytics?*',route=>new URL(route.request().url()).searchParams.get('category')==='509658'?route.fulfill({json:unfiltered}):route.continue());
   await setFilter(page,'Категория Twitch','509658');
   await page.getByRole('alert').filter({hasText:'Сервер вернул данные для других фильтров'}).waitFor();assert.equal(await page.locator('.activity-clock .clock-plot').isVisible(),true);
   await page.unroute('**/api/v1/analytics?*');await setFilter(page,'Категория Twitch','talk');
   await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();
   assert.equal(await page.getByLabel('Категория Twitch').inputValue(),'talk');
+  await refreshData(page);await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');
   await page.clock.setFixedTime(Date.now()+240000);
   await page.route('**/api/v1/analytics?*',route=>new URL(route.request().url()).searchParams.get('category')==='game'?route.fulfill({status:503,json:{}}):route.continue());
   await setFilter(page,'Категория Twitch','game');
