@@ -115,6 +115,16 @@ export async function createHostedApplication(
     if(result.statusCode!==200)return reply.code(result.statusCode).type('application/json').send(result.body);
     return {csrf:user.csrf,user:publicUser(user),status:statusView(result.json(),user,profile)};
   });
+  app.get('/api/v1/sessions/match-profile',async(request,reply)=>{
+    const user=accounts.session(request.headers.cookie);if(!user)return reply.code(401).send({error:'LOGIN_REQUIRED'});
+    const q=request.query as {profile?:string;session?:string},source=selectedProfile(request,user.profile),target=q.profile as Profile;
+    if(!profiles.includes(target)||!canAccessProfile(user.profile,source)||!canAccessProfile(user.profile,target))return reply.code(403).send({error:'PROFILE_FORBIDDEN'});
+    if(typeof q.session!=='string'||!q.session)return reply.code(400).send({error:'INVALID_SESSION'});
+    const db=runtimes.get(source)!.db;
+    const stream=await db.call('streamMatchContext',q.session) as {startedAt:number;latest:boolean}|null;if(!stream)return reply.type('application/json').send('null');
+    const match=await runtimes.get(target)!.db.call('matchingStream',stream.startedAt,stream.latest);
+    return reply.type('application/json').send(JSON.stringify(match));
+  });
   app.post("/api/v1/auth/logout", async (request, reply) => {
     const user = accounts.session(request.headers.cookie);
     if (!user) return reply.code(401).send({ error: "LOGIN_REQUIRED" });

@@ -139,7 +139,7 @@
       if(current!==epoch)return;
       const previous=changes,changed=!previous||screenVersion(tab as View,sessionFilter,previous)!==screenVersion(tab as View,sessionFilter,next);
       const connectionsChanged=!previous||previous.connectionRevision!==next.connectionRevision;
-      const subscribersChanged=!previous||previous.versions.subscribers!==next.versions.subscribers||previous.versions.follows!==next.versions.follows||previous.versions.activity!==next.versions.activity;
+      const subscribersChanged=!previous||previous.versions.subscribers!==next.versions.subscribers||previous.versions.follows!==next.versions.follows;
       setServerVersions(profile,next);changes=next;
       if(fresh&&scopeReady)bumpReadRevision(profile);
       const requests=viewRequests(tab as View,sessionFilter).filter(([key])=>key==='status'?connectionsChanged||fresh||!scopeReady:changed||fresh||!scopeReady);
@@ -150,7 +150,8 @@
       outdated=isOutdatedRelease(next.release);
       sessions=values.sessions??sessions;selectedSessions=selectedSessions.filter(id=>sessions.some(s=>s.id===id));summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';
       rememberScreen();
-      if(changed||fresh)window.dispatchEvent(new Event('sp:data-refresh'));
+      if(changed||fresh)window.dispatchEvent(new CustomEvent('sp:data-refresh',{detail:{validated:true,force:fresh}}));
+      if(!previous||previous.versions.activity!==next.versions.activity)window.dispatchEvent(new Event('sp:stream-bands-refresh'));
       if(subscribersChanged||fresh)window.dispatchEvent(new Event('sp:subscribers-refresh'));
       window.dispatchEvent(new Event('sp:clock-refresh'));
     })();refreshTask={epoch:current,task,controller};
@@ -191,8 +192,10 @@
     const stream=tab==='stream'?sessions.find(s=>s.id===sessionFilter):undefined;
     let destination:string|null=null;
     try{if(stream){
+      try{destination=await api<string|null>(`sessions/match-profile?${new URLSearchParams({session:stream.id,profile:next})}`,undefined,undefined,profile);}
+      catch(e){if(!['NOT_FOUND','HTTP_404'].includes((e as Error).message))throw e;
       const latest=await api<string|null>('sessions/match?startedAt=0&latest=1',undefined,undefined,profile);
-      destination=await api<string|null>(`sessions/match?${new URLSearchParams({startedAt:String(stream.started_at_ms),latest:latest===stream.id?'1':'0'})}`,undefined,undefined,next);
+      destination=await api<string|null>(`sessions/match?${new URLSearchParams({startedAt:String(stream.started_at_ms),latest:latest===stream.id?'1':'0'})}`,undefined,undefined,next);}
     }}catch(e){if(current===epoch)reportFailure(e);return;}
     if(current!==epoch||profile!==selectedProfile)return;
     epoch++;if(tab==='stream'&&!destination)tab='sessions';setProfile(next);profile=next;

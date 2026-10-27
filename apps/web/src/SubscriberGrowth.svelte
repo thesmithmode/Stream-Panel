@@ -1,4 +1,5 @@
 <script lang="ts">
+ import {api,getServerRevision} from './api';
  import {onMount,untrack} from 'svelte';
  import {subscriberScope,subscriberPeriod,clearSubscriberCache,type SubscriberView as View} from './subscriber-cache';
  import {localDateWindow} from './time-audience';
@@ -14,10 +15,33 @@
  let data=$state<View|null>(null),selection=$state<Publication|null>(null);
  let selectedPoint=$state<{source:string;at:number;total:number}|null>(null),selectedStream=$state<{id:string;start:number;end:number}|null>(null);
  let context='',revision=0;
+ let bands=$state<{scope:string;to:number;twitch:View['twitch']['streams'];youtube:View['youtube']['streams']}|null>(null);
+ let bandController:AbortController|undefined;
+ const bandScope=()=>JSON.stringify([profile,timezone,days,day]);
+ async function refreshBands(){
+  bandController?.abort();
+  const controller=bandController=new AbortController(),scope=bandScope();
+  const q=subscriberScope(profile,days,day,timezone),version=getServerRevision(profile,'bands');
+  try{
+   const reports=await Promise.all(sources.map(source=>api<View['twitch']>(
+    `analytics/subscriber-streams?${new URLSearchParams({source,from:String(q.from),to:String(Math.min(q.to,Date.now()))})}`,
+    undefined,controller.signal,profile)));
+   if(controller.signal.aborted||scope!==bandScope()||version!==getServerRevision(profile,'bands'))return;
+   bands={scope,to:reports[0]!.to,twitch:reports[0]!.streams,youtube:reports[1]!.streams};
+   const entry=subscriberPeriod(q);
+   if(entry.value){
+    entry.value={...entry.value,
+     twitch:{...entry.value.twitch,streams:reports[0]!.streams,to:reports[0]!.to},
+     youtube:{...entry.value.youtube,streams:reports[1]!.streams,to:reports[1]!.to}};
+    entry.activityRevision=version;
+   }
+  }catch{/* Keep the last bands on temporary network loss. */}
+ }
+
  const window=$derived.by(()=>{const end=localDateWindow(day,timezone).to;return {from:localDateWindow(new Date(Date.parse(day)-86400000*(days-1)).toISOString().slice(0,10),timezone).from,to:end};});
  const view=$derived(data??{...window,day,days,timezone});
  const plotWidth=$derived(Math.max(280,width)),left=38,right=38;
- const plotTo=$derived(data?.twitch.to??window.to);
+ const plotTo=$derived(bands?.scope===bandScope()?bands.to:data?.twitch.to??window.to);
  const x=(at:number)=>left+(Math.max(view.from,Math.min(plotTo,at))-view.from)/Math.max(1,plotTo-view.from)*(plotWidth-left-right);
  const series=$derived(sources.map(source=>({source,report:data?.[source],points:subscriberSteps(data?.[source].counts??[],data?.[source].follows??[],source,view.from),scale:subscriberScale(data?.[source].counts??[])})));
  const totals=$derived(series.flatMap(s=>s.points.map(p=>p.total)));
@@ -26,7 +50,7 @@
  const axisNumber=(n:number)=>new Intl.NumberFormat('ru-RU',{notation:n>=10000?'compact':'standard',maximumFractionDigits:1}).format(n);
  const youtubePoints=$derived(series[1]!.points);
  const publications=$derived((data?.youtube.publications??[]).filter(item=>subscriberValueAt(youtubePoints,item.publishedAt)!==null));
- const streams=$derived(subscriberStreamBands(data?.twitch.streams??[],data?.youtube.streams??[],view.from,plotTo));
+ const streams=$derived(subscriberStreamBands(bands?.scope===bandScope()?bands.twitch:data?.twitch.streams??[],bands?.scope===bandScope()?bands.youtube:data?.youtube.streams??[],view.from,plotTo));
  const label=(at:number,date=false)=>new Intl.DateTimeFormat('ru-RU',{timeZone:view.timezone,...(date?{day:'2-digit',month:'2-digit'}:{hour:'2-digit',minute:'2-digit'})}).format(at);
  const dateRange=$derived(`${label(view.from,true)}–${label(view.to-1,true)}`);
  const kind=(item:Publication)=>item.kind==='shorts'?'Shorts':item.kind==='video'?'Видео':'Тип уточняется';
@@ -34,11 +58,13 @@
  function load(refresh=false){
   const currentContext=JSON.stringify([profile,timezone]);
   if(context!==currentContext){data=null;context=currentContext;}
-  if(refresh)clearSubscriberCache(profile);
+  if(refresh){clearSubscriberCache(profile);bands=null;}
+
   const current=++revision;
   error='';
   const apply=(result:View)=>{if(data?.days!==result.days||data?.day!==result.day){selection=null;selectedStream=null;selectedPoint=null;}data=result;};
   const entry=subscriberPeriod(subscriberScope(profile,days,day,timezone));
+  if(entry.value&&entry.activityRevision!==getServerRevision(profile,'bands'))void refreshBands();
   // A ready period swaps synchronously; an in-flight one keeps the entire previous view.
   loading=!entry.value;
   if(entry.value)apply(entry.value);
@@ -47,7 +73,7 @@
   void subscriberPeriod(subscriberScope(profile,days===7?30:7,day,timezone)).promise.catch(()=>{});
  }
  $effect(()=>{void profile;void days;void day;void timezone;if(!ready)return;untrack(()=>load());});
- onMount(()=>{ready=true;const refresh=()=>load(true);globalThis.window.addEventListener('sp:subscribers-refresh',refresh);return()=>{revision++;globalThis.window.removeEventListener('sp:subscribers-refresh',refresh);};});
+ onMount(()=>{ready=true;const refresh=()=>load(true);const updateBands=()=>void refreshBands();globalThis.window.addEventListener('sp:stream-bands-refresh',updateBands);globalThis.window.addEventListener('sp:subscribers-refresh',refresh);return()=>{bandController?.abort();globalThis.window.removeEventListener('sp:stream-bands-refresh',updateBands);revision++;globalThis.window.removeEventListener('sp:subscribers-refresh',refresh);};});
 </script>
 <section class="panel chart-panel subscriber-growth" aria-busy={loading} style:--subscriber-color="var(--accent)">
  <header><div class="subscriber-heading"><h2>Подписчики</h2><Help id="subscriber-growth" label="О графике подписчиков" text="Левая фиолетовая шкала — Twitch, правая красная — YouTube. Шкалы независимы; сравнивайте значения по цвету площадки. Серые полосы — одновременные эфиры, цветные — эфир только одной площадки. Круг — Shorts, ромб — видео; публикации до первого замера YouTube скрыты. Между замерами показано последнее известное число; до первого замера история неизвестна. YouTube не сообщает точное время каждой подписки; с 1000 подписчиков счётчик округляется."/></div></header>
