@@ -42,7 +42,7 @@
     if(!mounted)return;
     busy=true;error="";
     const controller=new AbortController();let cancelled=false;
-    const delay=untrack(()=>data===null?0:150);
+    const delay=0;
     const timer=window.setTimeout(()=>{if(!cancelled)untrack(()=>void refresh(false,controller.signal));},delay);
     return ()=>{cancelled=true;controller.abort();refreshController?.abort();window.clearTimeout(timer);requestId++;};
   });
@@ -123,7 +123,7 @@
       // search or core-only after an auto-refresh cannot hide participants.
       const offset=0,term='',sort=view.sort,core=false;
       const audienceQuery=JSON.stringify([scope,offset,term,sort,core]);
-      const panel=section;const q=summaryQuery(fromMs,toMs,source,category,timezone,view.resolution,sort);q.set('panel',panel);q.set('attendanceOnly','1');
+      const panel=section;const q=summaryQuery(fromMs,toMs,source,category,timezone,view.resolution,sort);q.set('panel',panel);q.set('attendanceOnly','1');if(liveEnd&&period!=='custom')q.set('_period',String(period));
       const cached=cachedAnalytics(profile,q);
       if(cached&&id===requestId){data=cached;loadedPanel=panel;loadedScope=scope;loadedAudienceQuery=audienceQuery;}
       const result=await loadAnalytics(profile,q,force,signal);
@@ -138,7 +138,7 @@
     try{const saved=JSON.parse(localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved?.timezone)timezone=saved.timezone;}catch{/* private browser may deny storage */}
     view=loadAnalyticsView(()=>localStorage,profile);
     const context=readAnalyticsContext();
-    if(context){({from,to,source,category,timezone,period,liveEnd}=context);view=analyticsView(context.view);}
+    if(context){({from,to,source,category,timezone,period,liveEnd}=context);view=analyticsView(context.view);if(liveEnd){const now=Date.now();to=localInput(now);if(typeof period==='number')from=localInput(now-period*86400000);}}
     const lifetime=new AbortController();
     mounted=true;const update=()=>{if(!document.hidden&&navigator.onLine&&!busy){if(liveEnd){const now=Date.now();if(typeof period==='number')from=localInput(now-period*86400000);const next=localInput(now);if(next===to)void refresh(true,lifetime.signal);else to=next;}else void refresh(true,lifetime.signal);}};const clock=()=>{if(period!=='all')update();};window.addEventListener('sp:clock-refresh',clock);window.addEventListener('sp:data-refresh',update);return ()=>{lifetime.abort();requestId++;window.removeEventListener('sp:data-refresh',update);window.removeEventListener('sp:clock-refresh',clock);};
   });

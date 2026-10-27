@@ -12,7 +12,10 @@ export function setServerVersions(profile:string,change:{versions:Record<string,
  const v=change.versions,values=serverVersions.get(profile)??{};
  values.report=JSON.stringify([v.activity,v.people,v.donations,v.follows,config]);
  values.overview=JSON.stringify([v.activity,v.people,v.donations,config]);
- values.subscribers=JSON.stringify([v.activity,v.subscribers,v.follows,config]);
+ values.subscribers=JSON.stringify([v.subscribers,v.follows,config]);
+ values.bands=JSON.stringify([v.activity,config]);
+ values.people=JSON.stringify([v.people,v.activity,v.donations,v.follows,config]);
+ values.donations=JSON.stringify([v.donations,v.people,config]);
  if(change.stream){const value=JSON.stringify([change.stream,v.follows,config]);values['stream:'+change.stream.id]=value;if(change.requestedSession)values['stream:'+change.requestedSession]=value;}
  else if(change.requestedSession)values['stream:'+change.requestedSession]=JSON.stringify([null,config]);
  serverVersions.set(profile,values);

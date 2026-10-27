@@ -7,11 +7,11 @@ import { analyticsSettings } from './analytics-settings.js';
 type Store = StorePort<'matchingStream' | 'subscriberHistory' | 'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteManualSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'streamMetadata' | 'summary'>;
 export function registerStreamsRoutes(app: FastifyInstance, db: Store, configuration: ConfigurationPort) {
     app.get('/api/v1/events/recent',request=>{const q=object(request.query);return db.call('recentEvents',Number(q.offset??0),Number(q.limit??100),{...(string(q.session)?{session:string(q.session)}:{}),...(string(q.person)?{person:string(q.person)}:{}),messagesOnly:string(q.messages)==='1'});});
-    app.get('/api/v1/analytics/subscribers',request=>{
+    for(const path of ['/api/v1/analytics/subscribers','/api/v1/analytics/subscriber-streams'])app.get(path,request=>{
       const q=object(request.query),source=string(q.source);
       if(source!=='twitch'&&source!=='youtube')throw new Error('INVALID_SUBSCRIBER_WINDOW');
       const account=source==='twitch'?configuration.value.twitch?.userId??'':configuration.value.youtube?.userId??configuration.value.youtubeAccountId??'';
-      return db.call('subscriberHistory',{source,account,from:Number(q.from),to:Math.min(Number(q.to),Date.now())});
+      return db.call('subscriberHistory',{source,account,...(request.routeOptions.url?.endsWith('/subscriber-streams')?{streamsOnly:true}:{}),from:Number(q.from),to:Math.min(Number(q.to),Date.now())});
     });
     app.get("/api/v1/overview", async (request,reply) => conditionalResponse(request,reply,await db.call("channelOverview", configuration.value.excludedBotLogins)));
     for(const path of ["/api/v1/analytics","/api/v1/analytics/clock","/api/v1/analytics/audience","/api/v1/analytics/clock-summary"])app.get(path, async (request,reply) => {
@@ -40,7 +40,7 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
             return conditionalResponse(request,reply,{filters:result.filters,audience:result.audience,audiencePage:result.audiencePage});
         return conditionalResponse(request,reply,result);
     });
-    app.get('/api/v1/sessions/match',request=>{const q=object(request.query);return db.call('matchingStream',Number(q.startedAt),string(q.latest)==='1');});
+    app.get('/api/v1/sessions/match',async(request,reply)=>{const q=object(request.query);return reply.type('application/json').send(JSON.stringify(await db.call('matchingStream',Number(q.startedAt),string(q.latest)==='1')));});
     app.get("/api/v1/sessions", async (request) => db.call("sessions", string(object(request.query).session) || undefined, Number(object(request.query).offset ?? 0), Number(object(request.query).limit ?? 100), configuration.value.excludedBotLogins));
     app.get("/api/v1/sessions/:id/followers", async (request) => db.call("followingAnalytics", string(object(request.params).id)));
     app.get("/api/v1/sessions/:id/metadata", async (request) => db.call('streamMetadata', string(object(request.params).id)));

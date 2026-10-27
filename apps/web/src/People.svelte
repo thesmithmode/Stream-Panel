@@ -1,4 +1,5 @@
 <script lang="ts">
+  import {screenData} from './screen-data';
   import SectionTabs from "./SectionTabs.svelte";
   import {latestRequest} from './latest-request';
   import {platformClass} from './period';
@@ -85,20 +86,21 @@
   );
   const visible=$derived(sortBy==='default'?rows:rows.filter(person=>person.display_name.toLocaleLowerCase('ru-RU').includes(search.trim().toLocaleLowerCase('ru-RU'))));
   const personTabs=[["overview","Обзор"],["activity","Активность"],["messages","Сообщения"],["donations","Донаты"],["notes","Заметки"],["accounts","Аккаунты"]] as const;
-  let directoryScroll=0;
+  let directoryScroll=0,forceDirectory=false;
   function clearSelection(){selectedId='';detail=null;stats=null;detailLoading=false;showFollowing=false;}
   async function backToDirectory(){clearSelection();onSelect('');await tick();window.scrollTo({top:directoryScroll});}
   async function openPerson(id:string){directoryScroll=window.scrollY;await select(id);if(matchMedia('(max-width:900px)').matches)window.scrollTo({top:0});}
   function sourcesLabel(sources:string|null){return (sources?.split(',')??[]).map(source=>({twitch:'Twitch',youtube:'YouTube',donationalerts:'DonationAlerts'}[source.trim()]??source.trim())).join(' · ');}
-  $effect(()=>{if(detailTab==='accounts'&&detail)untrack(()=>void loadAudit().catch(e=>error=e.message));});
+  $effect(()=>{if(detailTab==='accounts'&&detail)untrack(()=>{void loadAudit().catch(e=>error=e.message);const id=detail.id;void api<string[]>(`persons/${id}/candidates`).then(value=>{if(selectedId===id)candidates=value;}).catch(e=>error=e.message);});});
   $effect(()=>{search;period;sortBy;peopleOffset=0;});
   $effect(() => {
     const term=search.trim(), offset=peopleOffset, currentPeriod=period;void rankRefresh;
+    const forced=forceDirectory;forceDirectory=false;
     if(sortBy!=='default'){peopleLoading=false;return;}
     peopleLoading=true;
     const timer=setTimeout(()=>{
       const query=new URLSearchParams({search:term,period:currentPeriod,offset:String(offset),limit:'50'});
-      void directory.run(signal=>api<{items:Person[];total:number}>(`persons/page?${query}`,undefined,signal),result=>{
+      void directory.run(signal=>screenData<{items:Person[];total:number}>(`persons/page?${query}`,'people',signal,forced),result=>{
         pageRows=result.items;peopleTotal=result.total;peopleLoading=false;peopleLoaded=true;
         if(offset>=result.total&&offset>0)peopleOffset=Math.max(0,Math.floor(Math.max(0,result.total-1)/50)*50);
       },failure=>{error=failure.message;peopleLoading=false;});
@@ -147,13 +149,13 @@
     detail = null;
     detailLoading = true;
     try {
-      const [person, matches,metrics] = await Promise.all([api(`persons/${id}?events=false`),api<string[]>(`persons/${id}/candidates`),api<PersonStats>(`persons/${id}/stats${period ? `?period=${period}` : ""}`)]);
+      const [person,metrics] = await Promise.all([api(`persons/${id}?events=false`),api<PersonStats>(`persons/${id}/stats${period ? `?period=${period}` : ""}`)]);
       if (selectedId !== id) return;
       detail = person;
       name = detail.display_name;
       selectedIdentities = [];
       target = "";
-      candidates = matches;
+      candidates = [];
       stats=metrics;
     } catch (e) {
       if (selectedId === id) error = (e as Error).message;
@@ -197,7 +199,7 @@
   });
   import { onMount } from "svelte";
   onMount(() => {
-    const update=()=>{rankRefresh++;if(selectedId)void refreshPerson(selectedId,false).catch(e=>error=e.message);};
+    const update=(event:Event)=>{forceDirectory=!(event instanceof CustomEvent)||!event.detail?.validated||!!event.detail.force;rankRefresh++;if(selectedId)void refreshPerson(selectedId,false).catch(e=>error=e.message);};
     window.addEventListener('sp:data-refresh',update);
     return()=>window.removeEventListener('sp:data-refresh',update);
   });
@@ -235,7 +237,7 @@
         <span class="small muted"
           >{search.trim()?'Попробуйте другое имя.':'Аккаунты и донаты появятся после подключения.'}</span
         >
-      </div>{/if}{#each visible as person}<button
+      </div>{/if}{#each visible as person (person.id)}<button
         class:chosen={selectedId === person.id}
         class="person-row"
         aria-label={person.display_name}
@@ -398,7 +400,7 @@
       {:else if detailTab==='donations'}
        <button class="outline small" aria-expanded={showDonorLinks} onclick={()=>showDonorLinks=!showDonorLinks}>{showDonorLinks?'Скрыть привязку':'Привязать донаты по нику'}</button>
        {#if showDonorLinks}<DonorLinks personId={detail.id} onChange={()=>refreshPerson(detail.id)} />{/if}
-       <PersonDonations personId={detail.id} revision={detail.revision} people={availablePeople} onChange={()=>refreshPerson(detail.id)} />
+       {#key detail.id}<PersonDonations personId={detail.id} revision={detail.revision} people={availablePeople} onChange={()=>refreshPerson(detail.id)} />{/key}
       {:else if detailTab==='notes'}
        <PersonMetadata personId={detail.id} onChange={()=>refreshPerson(detail.id)} />
        <PersonNotes personId={detail.id} />

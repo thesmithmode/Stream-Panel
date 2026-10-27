@@ -87,3 +87,23 @@ main SHA and retry deployment. Previously deleted artifacts are not deleted agai
 Preserve the existing receiver's release/database rollback checkpoints. Returning to
 a release with an older supported schema requires its matching database checkpoint;
 do not simply point old application code at a newer-schema database.
+
+## Read-path refinements
+
+Migration 28 adds a separate durable attendance revision for Overview. Viewer samples
+no longer invalidate its historical message/participant totals; chat, presence,
+identity/bot membership changes and deletions still invalidate them. Existing source
+rows and the fact-cache layout are retained.
+
+Browser reports use explicit live-period identities rather than comparing dates to
+wall time. Rolling 7/30-day reads keep exact moving bounds for freshness while their
+last snapshot remains visible. Sidebar tabs no longer wait through a 150 ms debounce.
+People and donation lists use a bounded profile/domain/version cache (4 MiB total,
+1 MiB per value), cleared on logout; editor state is never cached. Donation rows do
+not wait for connection status. Merge candidates load only in Accounts.
+
+Subscriber totals have independent versions. Activity updates fetch a compact stream
+band projection instead of reloading both subscriber periods; background period
+preloading is preserved. Hosted stream profile matching uses one authorized request,
+checks access to both profiles and returns an explicit JSON string/null. Local
+collectors retain the legacy matching fallback.

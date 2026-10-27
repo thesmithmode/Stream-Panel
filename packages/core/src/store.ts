@@ -109,6 +109,11 @@ export class StreamStore {
   ) {return this.streams.observePlatformStream(platform,accountId,externalId,startedAtMs,observedAtMs,url,title,confirmedPresentIds);}
   activeLogicalStream() {return this.streams.activeLogicalStream();}
   changeStamp(){return (this.db.prepare('SELECT coalesce(sum(revision),0) value FROM ui_revisions').get() as {value:number}).value;}
+  streamMatchContext(sessionId:string){
+    const id=this.groups.root(sessionId);
+    const row=this.reads.prepare(`SELECT s.started_at_ms startedAt,s.id=(SELECT x.id FROM sessions x WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=x.id) ORDER BY x.started_at_ms DESC,x.id LIMIT 1) latest FROM sessions s WHERE s.id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)`).get(id) as {startedAt:number;latest:number}|undefined;
+    return row?{startedAt:row.startedAt,latest:!!row.latest}:null;
+  }
   matchingStream(startedAt:number,latest=false){
     if(!Number.isSafeInteger(startedAt)||startedAt<0)throw new Error('INVALID_STREAM_DATE');
     const where=latest?'':"AND date(s.started_at_ms/1000,'unixepoch','+3 hours')=date(?/1000,'unixepoch','+3 hours')";
@@ -313,8 +318,8 @@ export class StreamStore {
   channelOverview(excludedBotLogins:readonly string[]=[]){
     const sessions=this.reads.prepare("SELECT id,started_at_ms AS start,ended_at_ms AS end FROM sessions s WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)").all() as {id:string;start:number;end:number|null}[];
     const excluded=this.botJson(excludedBotLogins);
-    const revision=this.reads.prepare("SELECT revision FROM ui_revisions WHERE domain='analyticsActivity'").get();
-    const scope=createHash('sha256').update('overview-activity:'+excluded).digest('hex'),key=createHash('sha256').update(JSON.stringify([scope,revision])).digest('hex');
+    const revision=this.reads.prepare("SELECT revision FROM ui_revisions WHERE domain='overviewAttendance'").get();
+    const scope=createHash('sha256').update('overview-attendance-v2:'+excluded).digest('hex'),key=createHash('sha256').update(JSON.stringify([scope,revision])).digest('hex');
     let activity=this.overviewActivity.get(key);
     if(!activity){
       const summary=this.summary(undefined,excludedBotLogins);
