@@ -165,3 +165,17 @@ test('linked Twitch and YouTube category durations retain their signal kind inst
   assert.equal(data.audience[0]!.observedMinutes,0);assert.equal(data.audience[0]!.estimatedChatMinutes,2);
  }finally{s.close();}
 });
+
+test('core combines linked platform activity and ignores old minute and message rules',()=>{
+ const s=new StreamStore(':memory:');try{
+  const sid=s.observePlatformStream('youtube','channel','video',at,at,null,'Stream')!;
+  s.observePlatformStream('twitch','owner','stream',at,at,null,'Stream');
+  const tw=twitch(s);
+  s.recordPoll(sid,'owner',{startedAtMs:at,completedAtMs:at+minute,status:'complete',userIds:['viewer']});
+  s.youtubeMessages('channel','chat',[message('yt-combined','author','YouTube name',at+10*minute)]);
+  const yt=s.persons().find(p=>p.id!==tw)!;s.merge(String(yt.id),tw,s.personRevision(String(yt.id)),s.personRevision(tw),at+minute);
+  s.endSession(sid,at+30*minute);
+  const report=s.analytics({fromMs:at,toMs:at+30*minute,youtubeAccount:'channel',regularThresholdPercent:100,minSessions:99,minMinutes:999,minMessages:999,coreRule:'both'});
+  assert.equal(report.audience.find(p=>p.id===tw)!.core,true);
+ }finally{s.close();}
+});

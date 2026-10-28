@@ -36,7 +36,7 @@ test('analytics keeps owners/bots out, unions linked identities, splits categori
         s.endSession(second, end, 'observed');
         const result = s.analytics(opts), regular = result.audience.find(x => x.id === a.personId)!, yt = result.audience.find(x => x.source === 'youtube')!;
         assert.equal(result.summary.entities, 2);
-        assert.equal(result.summary.core, 1);
+        assert.equal(result.summary.core, 2);
         assert.equal(regular.observedMinutes, 7);
         assert.equal(regular.visits, 3);
         assert.equal(regular.messages, 3);
@@ -50,8 +50,8 @@ test('analytics keeps owners/bots out, unions linked identities, splits categori
         assert.equal(s.analytics({ ...opts, source: 'twitch' }).audience.length, 1);
         assert.equal(s.analytics({ ...opts, source: 'youtube' }).audience.length, 1);
         assert.equal(s.analytics({ ...opts, category: 'talk' }).audience[0]?.observedMinutes, 2);
-        assert.equal(s.analytics({ ...opts, coreRule: 'both', minMessages: 10 }).summary.core, 0);
-        assert.equal(s.analytics({ ...opts, coreRule: 'frequency', minSessions: 1, minMinutes: 1000 }).summary.core, 1);
+        assert.equal(s.analytics({ ...opts, coreRule: 'both', minMessages: 10 }).summary.core, 2);
+        assert.equal(s.analytics({ ...opts, coreRule: 'frequency', minSessions: 1, minMinutes: 1000 }).summary.core, 2);
         assert.equal(s.analytics({ ...opts, source: 'youtube', chatWindowMinutes: 1 }).audience[0]?.estimatedChatMinutes, 2);
         assert.equal(s.analytics({ ...opts, category: 'missing' }).summary.entities, 0);
         assert.ok(result.hours.some(x => x.hour === 15));
@@ -281,17 +281,17 @@ test('regular audience uses attendance share, excludes donation-only profiles an
    s.endSession(sid,start+3*minute,'observed');
   }
   const query={...opts,regularThresholdPercent:60},result=s.analytics(query);
-  assert.equal(result.summary.regulars,2);assert.equal(result.summary.attendees,5);assert.equal(result.summary.regularShare,2/6);
+  assert.equal(result.summary.regulars,3);assert.equal(result.summary.attendees,5);assert.equal(result.summary.regularShare,.5);
   assert.equal(result.audience.find(e=>e.name==='Two thirds')!.attendanceRatio,2/3);
   assert.equal(result.audience.find(e=>e.name==='Donor only')!.regular,false);
   assert.equal(result.streamComparison[0]!.audience,5);assert.equal(result.streamComparison[0]!.newInPeriod,5);
   assert.equal(result.categories[0]!.audience,5);
   const first=result.timeline.find(p=>p.at===base)!;
   assert.equal(first.observed,3);assert.equal(first.regularObserved,2);
-  assert.equal(first.estimated,2);assert.equal(first.regularEstimated,0);
-  assert.equal(first.messages,4);assert.equal(first.regularMessages,1);
-  assert.equal(s.analytics({...query,regularThresholdPercent:100}).summary.regulars,1);
-  assert.equal(s.analytics({...query,regularThresholdPercent:0}).summary.regulars,2);
+  assert.equal(first.estimated,2);assert.equal(first.regularEstimated,1);
+  assert.equal(first.messages,4);assert.equal(first.regularMessages,2);
+  assert.equal(s.analytics({...query,regularThresholdPercent:100}).summary.regulars,2);
+  assert.equal(s.analytics({...query,regularThresholdPercent:0}).summary.regulars,5);
   const exact=s.analytics({...query,regularThresholdPercent:100*2/3});
   assert.equal(exact.audience.find(e=>e.name==='Two thirds')!.regular,true);
   assert.equal(s.analytics({...query,category:'absent'}).summary.regularShare,null);
