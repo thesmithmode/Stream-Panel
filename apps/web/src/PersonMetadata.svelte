@@ -26,7 +26,7 @@
 </script>
 
 <section aria-label="Метки человека">
-  <h3>Метки <Help id="person-core-help" label="Как определяется ядро" text="Для автоматического ядра эфир засчитывается при наблюдаемом присутствии не менее 20% его длительности, суммарно за все заходы. Учитываются также остальные правила посещаемости и активности за выбранный период. Оценка по сообщениям YouTube не подтверждает просмотр. Ручная отметка действует во всех отчётах профиля. Владельцы и боты исключаются независимо от отметки." /></h3>
+  <h3>Метки <Help id="person-core-help" label="Как определяется ядро" text="Для автоматического ядра эфир засчитывается при суммарной активности не менее 20% его длительности. Активность связанных площадок объединяется; применяется настроенный порог доли таких эфиров. Ручная отметка действует во всех отчётах профиля. Владельцы и боты исключаются независимо от отметки." /></h3>
   <label>Ядро аудитории<select aria-label="Ядро аудитории" bind:value={core} disabled={busy||!metadata}><option value="auto">Определять автоматически</option><option value="include">Включить в ядро</option><option value="exclude">Исключить из ядра</option></select></label>
   <label>Новый тег<div class="inline"><input bind:value={tag} maxlength="64" disabled={busy||!metadata} onkeydown={e=>{if(e.key==='Enter'){e.preventDefault();addTag();}}}/><button class="outline" disabled={busy||!metadata||!tag.trim()||tags.length>=50} onclick={addTag}>Добавить тег</button></div></label>
   <div class="tags">{#each tags as label}<span>{label}<button class="text-button" aria-label={`Удалить тег ${label}`} disabled={busy} onclick={()=>tags=tags.filter(t=>t!==label)}><Icon name="trash" size={14}/></button></span>{/each}</div>

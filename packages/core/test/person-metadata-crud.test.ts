@@ -44,7 +44,7 @@ test('one core classification drives minute stacks, categories and stream compar
   const id=s.ingest(event('viewer',at)).personId!;
   s.recordPoll(sid,'channel',{startedAtMs:at,completedAtMs:at+m,status:'complete',userIds:['viewer']});s.endSession(sid,at+2*m);
   const query={fromMs:at,toMs:at+2*m,minSessions:2,minMinutes:30,minMessages:5};
-  assert.equal(s.analytics(query).summary.core,0);
+  assert.equal(s.analytics(query).summary.core,1);
   s.setPersonMetadata(id,['Friend'],true,s.personRevision(id));
   const included=s.analytics(query),row=included.audience[0]!;
   assert.equal(row.core,true);assert.equal(row.regular,true);assert.deepEqual(row.tags,['Friend']);

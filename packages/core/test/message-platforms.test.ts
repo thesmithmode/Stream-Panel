@@ -10,12 +10,14 @@ test('messages split by platform and mutually exclusive core, subscribers, non-s
    let person='';for(let i=0;i<n;i++)person=s.ingest({source:'twitch',accountId:'owner',externalId:`${id}-${i}`,type:'chat.message',actor:{externalId:id,displayName:id},occurredAtMs:at+m,receivedAtMs:at+m,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:id}}).personId!;
    return person;
   };
-  const core=twitch('core',2),follower=twitch('follower',3);twitch('casual',4);
+  const core=twitch('core',2),follower=twitch('follower',3),casual=twitch('casual',4);
+  s.setPersonMetadata(follower,[],false,s.personRevision(follower));s.setPersonMetadata(casual,[],false,s.personRevision(casual));
   s.setPersonMetadata(core,[],true,s.personRevision(core));
   s.followingSnapshot('twitch','owner',[{id:'core',name:'core',followedAtMs:null},{id:'follower',name:'follower',followedAtMs:null}],true,at+2*m);
   s.youtubeMessages('ytowner','chat',[{id:'ytcore',snippet:{type:'textMessageEvent',publishedAt:new Date(at+m).toISOString(),displayMessage:'core'},authorDetails:{channelId:'ytcore',displayName:'ytcore'}},{id:'ytf',snippet:{type:'textMessageEvent',publishedAt:new Date(at+m).toISOString(),displayMessage:'subscriber'},authorDetails:{channelId:'ytf',displayName:'ytf'}},{id:'ytunknown',snippet:{type:'textMessageEvent',publishedAt:new Date(at+m).toISOString(),displayMessage:'private'},authorDetails:{channelId:'ytunknown',displayName:'ytunknown'}}]);
   const ytcore=String(s.persons().find(x=>x.display_name==='ytcore')!.id);
   s.setPersonMetadata(ytcore,[],true,s.personRevision(ytcore));
+  const ytf=String(s.persons().find(x=>x.display_name==='ytf')!.id);s.setPersonMetadata(ytf,[],false,s.personRevision(ytf));
   s.followingSnapshot('youtube','ytowner',[{id:'ytf',name:'ytf',followedAtMs:null}],true,at+2*m);
   // A Twitch follower merged with a private YouTube account is still unknown on YouTube.
   const unknown=String(s.persons().find(x=>x.display_name==='ytunknown')!.id);

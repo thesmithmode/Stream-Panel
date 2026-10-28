@@ -271,6 +271,7 @@ test('summary queries reuse baked slices while day and stream drilldowns retain 
 test('follower corrections sharing a provider timestamp invalidate completed reports',()=>{
  const s=new StreamStore(':memory:');try{
  fixture(s,1);const db=(s as any).db,h=new AnalyticsHistory(db);
+ const viewer=String(s.persons().find(p=>p.display_name==='Viewer')!.id);s.setPersonMetadata(viewer,[],false,s.personRevision(viewer));
  s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:base}],true,base);
  assert.equal(h.query(options).composition.followers,1);
  s.followingSnapshot('twitch','owner',[],true,base);
