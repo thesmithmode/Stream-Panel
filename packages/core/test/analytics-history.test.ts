@@ -586,3 +586,20 @@ test('7 and 30 day windows reuse decoded durable reports across minute shifts in
   }
  }finally{s.close();}
 });
+
+test('cached reports count only streams with sufficient observed time for core',()=>{
+ const s=new StreamStore(':memory:');try{
+  for(let i=0;i<2;i++){
+   const at=base+i*86400000,sid=s.startSession('owner',`core-${i}`,at,'platform',at);
+   s.recordPoll(sid,'owner',{startedAtMs:at,completedAtMs:at+minute,status:'complete',userIds:['short','exact'],userNames:{short:'Short',exact:'Exact'}});
+   s.recordPoll(sid,'owner',{startedAtMs:at+10*minute,completedAtMs:at+11*minute,status:'complete',userIds:['exact']});
+   s.endSession(sid,at+20*minute);
+  }
+  const q={...options,coreRule:'frequency' as const,regularThresholdPercent:100},db=(s as any).db,h=new AnalyticsHistory(db);
+  for(const report of [audienceAnalytics(db,q),ready(h,q),ready(new AnalyticsHistory(db),q)]){
+   assert.equal(report.audience.find((p:any)=>p.name==='Short')!.core,false);
+   assert.equal(report.audience.find((p:any)=>p.name==='Exact')!.core,true);
+   assert.equal(report.audience.find((p:any)=>p.name==='Short')!.attendanceRatio,1);
+  }
+ }finally{s.close();}
+});
