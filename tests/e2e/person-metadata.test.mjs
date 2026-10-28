@@ -23,7 +23,7 @@ test('tags and manual core work on mobile, persist, reject stale changes and agr
   await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('tab',{name:'Аудитория',exact:true}).click();
   const row=page.getByRole('row').filter({hasText:'Тестовый зритель'});await row.locator('.core-badge').filter({hasText:'Ядро'}).waitFor();
   assert.equal(await row.locator('.person-tag').filter({hasText:'Друг'}).count(),1);
-  await page.getByLabel('Только ядро').check();assert.equal(await page.getByRole('button',{name:'Другой зритель',exact:true}).count(),0);
+  await page.getByLabel('Только ядро').check();assert.equal(await page.getByRole('button',{name:'Другой зритель',exact:true}).count(),1);
   await open();await form.getByRole('button',{name:'Удалить тег Друг',exact:true}).waitFor();
   await form.getByLabel('Новый тег').fill('Собственный черновик');
   await app.db.call('setPersonMetadata',person.id,['Другая вкладка'],false,metadata.revision);

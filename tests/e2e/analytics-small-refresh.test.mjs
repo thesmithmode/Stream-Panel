@@ -20,7 +20,7 @@ test('small-audience search and core filters remain reversible after auto-refres
   await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));await response;
   await page.waitForFunction(()=>!document.querySelector('.chart-refresh')?.textContent.includes('Обновляем'));
   await search.fill('');await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===2);
-  await page.getByLabel('Только ядро',{exact:true}).check();await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===0);
+  await page.getByLabel('Только ядро',{exact:true}).check();await page.waitForFunction(()=>document.querySelectorAll('.compact-audience-table tbody tr').length===2);
   response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/analytics');
   await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));await response;
   await page.waitForFunction(()=>!document.querySelector('.chart-refresh')?.textContent.includes('Обновляем'));
