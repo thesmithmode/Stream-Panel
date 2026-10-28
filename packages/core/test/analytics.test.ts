@@ -50,7 +50,7 @@ test('analytics keeps owners/bots out, unions linked identities, splits categori
         assert.equal(s.analytics({ ...opts, source: 'twitch' }).audience.length, 1);
         assert.equal(s.analytics({ ...opts, source: 'youtube' }).audience.length, 1);
         assert.equal(s.analytics({ ...opts, category: 'talk' }).audience[0]?.observedMinutes, 2);
-        assert.equal(s.analytics({ ...opts, coreRule: 'both', minMessages: 10 }).summary.core, 0);
+        assert.equal(s.analytics({ ...opts, coreRule: 'both', minMessages: 10 }).summary.core, 2);
         assert.equal(s.analytics({ ...opts, coreRule: 'frequency', minSessions: 1, minMinutes: 1000 }).summary.core, 2);
         assert.equal(s.analytics({ ...opts, source: 'youtube', chatWindowMinutes: 1 }).audience[0]?.estimatedChatMinutes, 2);
         assert.equal(s.analytics({ ...opts, category: 'missing' }).summary.entities, 0);
@@ -291,7 +291,7 @@ test('regular audience uses attendance share, excludes donation-only profiles an
   assert.equal(first.estimated,2);assert.equal(first.regularEstimated,1);
   assert.equal(first.messages,4);assert.equal(first.regularMessages,2);
   assert.equal(s.analytics({...query,regularThresholdPercent:100}).summary.regulars,2);
-  assert.equal(s.analytics({...query,regularThresholdPercent:0}).summary.regulars,3);
+  assert.equal(s.analytics({...query,regularThresholdPercent:0}).summary.regulars,5);
   const exact=s.analytics({...query,regularThresholdPercent:100*2/3});
   assert.equal(exact.audience.find(e=>e.name==='Two thirds')!.regular,true);
   assert.equal(s.analytics({...query,category:'absent'}).summary.regularShare,null);
@@ -405,4 +405,22 @@ test('all viewers retain each known platform minute and mark missing counts as p
   assert.equal(s.analytics({...opts,source:'twitch'}).timeline.find(p=>p.at===base+2*minute)?.youtubeViewers,null);
   assert.equal(s.analytics(opts).hours[0]?.viewerSamples,1);
  }finally{s.close();}
+});
+
+test('core requires 20 percent observed across visits while attendance remains unchanged',()=>{
+ const s=new StreamStore(':memory:');
+ try {
+  const sid=recordedStream(s,'channel','core-watch',base,'platform',base);
+  s.recordPoll(sid,'channel',{startedAtMs:base,completedAtMs:base+minute,status:'complete',userIds:['short','exact'],userNames:{short:'Short',exact:'Exact'}});
+  s.recordPoll(sid,'channel',{startedAtMs:base+10*minute,completedAtMs:base+11*minute,status:'complete',userIds:['exact']});
+  s.endSession(sid,base+20*minute,'observed');
+  const query={...opts,minSessions:1,coreRule:'frequency' as const,regularThresholdPercent:100};
+  const report=s.analytics(query);
+  const short=report.audience.find(p=>p.name==='Short')!,exact=report.audience.find(p=>p.name==='Exact')!;
+  assert.equal(short.attendanceRatio,1);assert.equal(short.core,false);
+  assert.equal(exact.attendanceRatio,1);assert.equal(exact.core,true);
+  assert.deepEqual(exact.coreSessionIds,[sid]);
+  const clipped=s.analytics({...query,fromMs:base,toMs:base+3*minute});
+  assert.equal(clipped.audience.find(p=>p.name==='Exact')!.core,true);
+ } finally {s.close();}
 });

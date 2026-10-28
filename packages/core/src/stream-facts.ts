@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {statfsSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {gzipSync,gunzipSync} from 'node:zlib';
-import {audienceAnalytics,unionSpans,type AnalyticsOptions} from './analytics.js';
+import {audienceAnalytics,type AnalyticsOptions} from './analytics.js';
 import {timePatterns} from './time-patterns.js';
 import {latestFollowerSnapshotsSql} from './follower-queries.js';
 type Report=ReturnType<typeof audienceAnalytics>;
@@ -45,7 +45,7 @@ export class StreamFacts {
  private scope(options:AnalyticsOptions,id:string,start:number,end:number|null){
   const q={...options,sessionId:id,fromMs:Math.max(options.fromMs,start),toMs:Math.min(options.toMs,end??options.toMs)};
   const members=this.db.prepare('SELECT member_id FROM session_groups WHERE group_id=? ORDER BY member_id').all(id);
-  const fields={format:3,members,from:q.fromMs,to:end===null&&q.toMs>=Date.now()-120000?'live':q.toMs,source:q.source??'all',category:q.category??'',timezone:q.timezone??'Europe/Moscow',chatWindowMinutes:q.chatWindowMinutes??5,excluded:[...botExclusionSet(q.excludedLogins??[])].sort(),owner:q.ownerId??'',youtube:q.youtubeAccount??'',minSessions:q.minSessions??3,minMinutes:q.minMinutes??30,minMessages:q.minMessages??5,regularThresholdPercent:q.regularThresholdPercent??80,coreRule:q.coreRule??'either'};
+  const fields={format:5,members,from:q.fromMs,to:end===null&&q.toMs>=Date.now()-120000?'live':q.toMs,source:q.source??'all',category:q.category??'',timezone:q.timezone??'Europe/Moscow',chatWindowMinutes:q.chatWindowMinutes??5,excluded:[...botExclusionSet(q.excludedLogins??[])].sort(),owner:q.ownerId??'',youtube:q.youtubeAccount??'',minSessions:q.minSessions??3,minMinutes:q.minMinutes??30,minMessages:q.minMessages??5,regularThresholdPercent:q.regularThresholdPercent??80,coreRule:q.coreRule??'either'};
   return {q,key:createHash('sha256').update(JSON.stringify(fields)).digest('hex'),complete:end!==null&&q.fromMs===start&&q.toMs===end};
 
  }
@@ -86,8 +86,8 @@ export class StreamFacts {
    for(const r of this.db.prepare(`SELECT DISTINCT person_id FROM ${table} WHERE account_id=? AND external_id IN(SELECT value FROM json_each(?))`).all(snapshot.account_id,followers) as {person_id:string}[]){following.add(r.person_id);platformFollowers[snapshot.source]?.add(r.person_id);}
    if(snapshot.source==='twitch'&&info.complete)for(const r of this.db.prepare("SELECT DISTINCT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id NOT IN(SELECT value FROM json_each(?))").all(snapshot.account_id,followers) as {person_id:string}[]){negative.add(r.person_id);platformNegative.twitch!.add(r.person_id);}
   }
-  const audience=value.audience.map(p=>{const override=preferences.get(p.id),f=value.filters,long=unionSpans(p.intervals.map(s=>({...s,kind:'observed' as const}))).reduce((sum,s)=>sum+(s.to-s.from)/60000,0)>=f.minMinutes,chatty=p.messages>=f.minMessages;
-   const automatic=p.attendanceSessionIds.length>=f.minSessions&&p.attendanceSessionIds.length>0&&p.attendanceSessionIds.length/value.summary.streams*100+1e-10>=f.regularThresholdPercent&&(f.coreRule==='frequency'||(f.coreRule==='both'?long&&chatty:long||chatty));
+  const audience=value.audience.map(p=>{const override=preferences.get(p.id),f=value.filters;
+   const automatic=p.coreSessionIds.length>0&&p.coreSessionIds.length/value.summary.streams*100+1e-10>=f.regularThresholdPercent;
    const core=override==null?automatic:override===1;
    return {...p,name:names.get(p.id)??p.name,tags:tags.filter(t=>t.person_id===p.id).map(t=>t.label),manualCore:override==null?null:override===1,core,regular:core,follower:following.has(p.id)?true:negative.has(p.id)&&!p.sources.includes('youtube')?false:null};});
   const attendees=audience.filter(p=>p.attendanceSessionIds.length),core=audience.filter(p=>p.core).length;

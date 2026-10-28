@@ -271,6 +271,7 @@ test('summary queries reuse baked slices while day and stream drilldowns retain 
 test('follower corrections sharing a provider timestamp invalidate completed reports',()=>{
  const s=new StreamStore(':memory:');try{
  fixture(s,1);const db=(s as any).db,h=new AnalyticsHistory(db);
+ const viewer=String(s.persons().find(p=>p.display_name==='Viewer')!.id);s.setPersonMetadata(viewer,[],false,s.personRevision(viewer));
  s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:base}],true,base);
  assert.equal(h.query(options).composition.followers,1);
  s.followingSnapshot('twitch','owner',[],true,base);
@@ -583,6 +584,23 @@ test('7 and 30 day windows reuse decoded durable reports across minute shifts in
    assert.equal(reads,1,'only first shifted request decodes the durable payload');
    db.exec('DELETE FROM analytics_reports');(h as any).aggregate=aggregate;
    const rebuilt=ready(h,opts);assert.deepEqual(rebuilt.summary,original.summary);assert.deepEqual(rebuilt.audience,original.audience);h.close();
+  }
+ }finally{s.close();}
+});
+
+test('cached reports count only streams with sufficient observed time for core',()=>{
+ const s=new StreamStore(':memory:');try{
+  for(let i=0;i<2;i++){
+   const at=base+i*86400000,sid=s.startSession('owner',`core-${i}`,at,'platform',at);
+   s.recordPoll(sid,'owner',{startedAtMs:at,completedAtMs:at+minute,status:'complete',userIds:['short','exact'],userNames:{short:'Short',exact:'Exact'}});
+   s.recordPoll(sid,'owner',{startedAtMs:at+10*minute,completedAtMs:at+11*minute,status:'complete',userIds:['exact']});
+   s.endSession(sid,at+20*minute);
+  }
+  const q={...options,coreRule:'frequency' as const,regularThresholdPercent:100},db=(s as any).db,h=new AnalyticsHistory(db);
+  for(const report of [audienceAnalytics(db,q),ready(h,q),ready(new AnalyticsHistory(db),q)]){
+   assert.equal(report.audience.find((p:any)=>p.name==='Short')!.core,false);
+   assert.equal(report.audience.find((p:any)=>p.name==='Exact')!.core,true);
+   assert.equal(report.audience.find((p:any)=>p.name==='Short')!.attendanceRatio,1);
   }
  }finally{s.close();}
 });

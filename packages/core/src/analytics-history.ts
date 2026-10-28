@@ -48,6 +48,7 @@ type ClockResponse={filters:Report['filters'];clockVisitors?:ReturnType<Analytic
 type Person = Report['audience'][number] & {
     sessionCount: number;
     attendanceCount: number;
+    coreAttendanceCount: number;
     activityMinutes: number;
     detailAvailable?: boolean;
 };
@@ -155,7 +156,7 @@ export class AnalyticsHistory {
    WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND s.started_at_ms<? AND coalesce(s.ended_at_ms,?)>? ${options.sessionId?'AND s.id=?':''} ORDER BY s.started_at_ms,s.id`).all(options.toMs, options.toMs, options.fromMs,...(options.sessionId?[options.sessionId]:[])) as Session[];
     }
     private key(options: AnalyticsOptions, session: Session): string {
-        const fields = { format: 10,members:session.members??null, from: Math.max(options.fromMs, session.started_at_ms), to: session.ended_at_ms===null&&options.toMs>=Date.now()-120000?'live':Math.min(options.toMs, session.ended_at_ms??options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: [...(options.excludedLogins ?? [])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
+        const fields = { format: 11,members:session.members??null, from: Math.max(options.fromMs, session.started_at_ms), to: session.ended_at_ms===null&&options.toMs>=Date.now()-120000?'live':Math.min(options.toMs, session.ended_at_ms??options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: [...(options.excludedLogins ?? [])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
         return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
     }
     private followerRevision(){
@@ -360,7 +361,7 @@ export class AnalyticsHistory {
         if(session.ended_at_ms===null)return this.facts.present(this.streamReport(options),options);
         const canonical={...options,fromMs:Math.max(options.fromMs,session.started_at_ms),toMs:Math.min(options.toMs,session.ended_at_ms)};
         validateAnalyticsOptions(canonical);
-        const scope='session:'+createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.entries(canonical).sort(([a],[b])=>a.localeCompare(b))))).digest('hex');
+        const scope='session-v2:'+createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.entries(canonical).sort(([a],[b])=>a.localeCompare(b))))).digest('hex');
         const key=createHash('sha256').update(JSON.stringify([scope,session.revision])).digest('hex');
         const retained=this.completed.get(key);
         if(retained){this.completed.delete(key);this.completed.set(key,retained);return this.facts.present(structuredClone(retained.value),options);}
@@ -385,7 +386,7 @@ export class AnalyticsHistory {
         const {panel,streamFrom,streamTo,streamOffset,streamLimit,audienceOffset,audienceSearch,audienceSort,audienceCoreOnly,clockDay,clockMinute,clockResolution,clockOffset,clockBatch,clockCompact,attendanceOnly,...baseOptions}=options;
         void panel;void streamFrom;void streamTo;void streamOffset;void streamLimit;void audienceOffset;void audienceSearch;void audienceSort;void audienceCoreOnly;void clockDay;void clockMinute;void clockResolution;void clockOffset;void clockBatch;void clockCompact;void attendanceOnly;
         const canonical = { ...baseOptions,source:options.source??'all',category:options.category??'', fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
-        const fingerprint = createHash('sha256').update(JSON.stringify([5,historical, Object.fromEntries(Object.entries({...canonical,toMs:live?'live':canonical.toMs}).sort(([a],[b])=>a.localeCompare(b))), 0, sessions.map(s => [s.id,s.members, s.ended_at_ms === null ? 0 : s.revision]), this.annotationsRevision(), this.followerRevision()])).digest('hex');
+        const fingerprint = createHash('sha256').update(JSON.stringify([7,historical, Object.fromEntries(Object.entries({...canonical,toMs:live?'live':canonical.toMs}).sort(([a],[b])=>a.localeCompare(b))), 0, sessions.map(s => [s.id,s.members, s.ended_at_ms === null ? 0 : s.revision]), this.annotationsRevision(), this.followerRevision()])).digest('hex');
         const liveRevision=JSON.stringify(sessions.filter(s=>s.ended_at_ms===null).map(s=>[s.id,s.revision]));
         const projectionKey=options.panel&&!clockOnly?JSON.stringify([fingerprint,liveRevision,this.statement("SELECT revision FROM ui_revisions WHERE domain='donations'").get(),options.panel,options.clockDay,options.clockResolution,options.clockCompact,options.audienceOffset,options.audienceSearch,options.audienceSort,options.audienceCoreOnly,options.attendanceOnly,options.streamFrom,options.streamTo,options.streamOffset,options.streamLimit]):'';
         if(projectionKey){const hit=this.projections.get(projectionKey);if(hit)return structuredClone({...hit.value,filters:{...hit.value.filters,fromMs:options.fromMs,toMs:options.toMs}});}
@@ -504,8 +505,8 @@ export class AnalyticsHistory {
         }[]).map(p => [p.person_id, p.manual_core]));
         for (const person of people.values()) {
             person.source = person.sources.includes('twitch') ? 'twitch' : 'youtube';
-            const attendance = person.attendanceCount, ratio = selectedStreams ? attendance / selectedStreams : 0, long = person.activityMinutes >= (options.minMinutes ?? 30), chatty = person.messages >= (options.minMessages ?? 5), rule = options.coreRule ?? 'either';
-            const automatic = attendance > 0 && attendance >= (options.minSessions ?? 3) && ratio * 100 + 1e-10 >= (options.regularThresholdPercent ?? 80) && (rule === 'frequency' || (rule === 'both' ? long && chatty : long || chatty));
+            const attendance = person.attendanceCount, ratio = selectedStreams ? attendance / selectedStreams : 0;
+            const automatic = person.coreAttendanceCount > 0 && person.coreAttendanceCount / selectedStreams * 100 + 1e-10 >= (options.regularThresholdPercent ?? 80);
             const override = preferences.get(person.id);
             person.manualCore = override == null ? null : override === 1;
             person.core = person.manualCore ?? automatic;
@@ -621,7 +622,7 @@ export class AnalyticsHistory {
             for (const person of report.audience) {
                 let row = people.get(person.id);
                 if (!row) {
-                    row = { ...person, sessionCount: 0, attendanceCount: 0, sessionIds: [], attendanceSessionIds: [], intervals: [], messageMinutes: [], messageCounts: [], messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, donations: {}, visits: 0, activityMinutes: 0, arrivalHours: [] };
+                    row = { ...person, sessionCount: 0, attendanceCount: 0, coreAttendanceCount: 0, sessionIds: [], attendanceSessionIds: [], intervals: [], messageMinutes: [], messageCounts: [], messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, donations: {}, visits: 0, activityMinutes: 0, arrivalHours: [] };
 
                 }
                 row.messages += person.messages;
@@ -638,6 +639,7 @@ export class AnalyticsHistory {
                 row.accounts = [...new Map([...row.accounts, ...person.accounts].map((a) => [a.source + ':' + a.name, a])).values()];
                 row.sessionCount += person.sessionIds.length;
                 row.attendanceCount += person.attendanceSessionIds.length;
+                row.coreAttendanceCount += person.coreSessionIds.length;
                 row.sessionIds = [...row.sessionIds, ...person.sessionIds].slice(-100);
                 row.attendanceSessionIds = [...row.attendanceSessionIds, ...person.attendanceSessionIds].slice(-100);
                 sumMoney(row.donations, person.donations);
@@ -706,8 +708,8 @@ export class AnalyticsHistory {
         }[]).map(p => [p.person_id, p.manual_core]));
         for (const person of people.values()) {
             person.source = person.sources.includes('twitch') ? 'twitch' : 'youtube';
-            const attendance = person.attendanceCount, ratio = selectedStreams ? attendance / selectedStreams : 0, long = person.activityMinutes >= (options.minMinutes ?? 30), chatty = person.messages >= (options.minMessages ?? 5), rule = options.coreRule ?? 'either';
-            const automatic = attendance > 0 && attendance >= (options.minSessions ?? 3) && ratio * 100 + 1e-10 >= (options.regularThresholdPercent ?? 80) && (rule === 'frequency' || (rule === 'both' ? long && chatty : long || chatty));
+            const attendance = person.attendanceCount, ratio = selectedStreams ? attendance / selectedStreams : 0;
+            const automatic = person.coreAttendanceCount > 0 && person.coreAttendanceCount / selectedStreams * 100 + 1e-10 >= (options.regularThresholdPercent ?? 80);
             const override = preferences.get(person.id);
             person.manualCore = override == null ? null : override === 1;
             person.core = person.manualCore ?? automatic;

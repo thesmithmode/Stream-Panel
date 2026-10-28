@@ -61,6 +61,7 @@ type Entity = {
     sessionIds: Set<string>;
     attendanceSessionIds: Set<string>;
     regular: boolean;
+    coreSessionIds: string[];
     intervals: Span[];
     donations: Record<string, string>;
     core: boolean;
@@ -123,7 +124,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     }[];
     const entities = new Map<string, Entity>();
     const entity = (id: string, name: string, platform: 'twitch' | 'youtube') => { let e = entities.get(id); if (!e) {
-        e = { id, name, source: platform, sources:[platform], messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, sessionIds: new Set(), attendanceSessionIds: new Set(), regular: false, intervals: [], donations: {}, core: false, tags:[], manualCore:null, follower:null,arrivalHours:[] };
+        e = { id, name, source: platform, sources:[platform], messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, sessionIds: new Set(), attendanceSessionIds: new Set(), coreSessionIds: [], regular: false, intervals: [], donations: {}, core: false, tags:[], manualCore:null, follower:null,arrivalHours:[] };
         entities.set(id, e);
     } else if(!e.sources.includes(platform)) e.sources.push(platform); return e; };
     const allowed = new Map(people.map(p => [p.id, p.display_name]));
@@ -158,6 +159,36 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         }
         if (end > start)
             segments.push({ session: s.id, categoryId: id, name, from: start, to: end });
+    }
+    // Core uses the full stream and combines activity across linked platforms.
+    const coreDurations = new Map<string, number>();
+    const fullWindows = new Map<string, {from:number;to:number}[]>();
+    for (const s of sessions) {
+        const end = s.ended_at_ms ?? to;
+        const spans = windows(s.id, s.started_at_ms, end);
+        fullWindows.set(s.id, spans);
+        coreDurations.set(s.id, spans.reduce((n, span) => n + span.to - span.from, 0));
+    }
+    const corePresence = new Map<string, Span[]>();
+    if (!options.donationsOnly) {
+        const rows = db.prepare(`WITH raw AS (SELECT p.session_id,i.person_id,cast(max(p.started_at_ms,s.started_at_ms)/60000 AS INTEGER) lo,cast(min(p.completed_at_ms,coalesce(s.ended_at_ms,?)-1)/60000 AS INTEGER) hi FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id JOIN sessions s ON s.id=p.session_id WHERE p.status='complete' AND p.session_id IN(SELECT value FROM json_each(?))), prior AS (SELECT *,max(hi) OVER(PARTITION BY session_id,person_id ORDER BY lo,hi ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) previous_hi FROM raw WHERE hi>=lo), tagged AS (SELECT *,sum(CASE WHEN previous_hi IS NULL OR lo>previous_hi+1 THEN 1 ELSE 0 END) OVER(PARTITION BY session_id,person_id ORDER BY lo,hi) cluster FROM prior) SELECT session_id,person_id,min(lo)*60000 started_at_ms,(max(hi)+1)*60000 completed_at_ms FROM tagged GROUP BY session_id,person_id,cluster LIMIT 50001`).all(to,sessionIds) as {session_id:string;person_id:string;started_at_ms:number;completed_at_ms:number}[];
+        if (rows.length > 50000) throw new Error('ANALYTICS_RANGE_TOO_LARGE');
+        for (const row of rows) {
+            const spans=corePresence.get(row.person_id) ?? [];
+            for (const w of fullWindows.get(row.session_id) ?? []) {
+                // Presence polls represent whole sampled minutes, as in the report above.
+                const from=Math.max(w.from,row.started_at_ms);
+                const to=Math.min(w.to,row.completed_at_ms);
+                if (to>from) spans.push({from,to,session:row.session_id,kind:'observed'});
+            }
+            corePresence.set(row.person_id,spans);
+        }
+    }
+    if (!options.donationsOnly && options.youtubeAccount && sessions.length) {
+        const first=Math.min(...sessions.map(s=>s.started_at_ms)), last=Math.max(...sessions.map(s=>s.ended_at_ms ?? to));
+        const rows=db.prepare(`WITH scoped AS (SELECT m.author_id,m.published_at_ms,(SELECT ps.session_id FROM platform_streams ps JOIN sessions s ON s.id=ps.session_id WHERE ps.platform='youtube' AND ps.account_id=m.account_id AND ps.started_at_ms<=m.published_at_ms AND coalesce(ps.ended_at_ms,s.ended_at_ms,?)>m.published_at_ms ORDER BY ps.started_at_ms DESC LIMIT 1) sid FROM youtube_messages m WHERE m.account_id=? AND m.author_id!=? AND m.author_id!='' AND m.published_at_ms>=? AND m.published_at_ms<? AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')) SELECT y.person_id,scoped.sid,scoped.published_at_ms FROM scoped JOIN youtube_identities y ON y.account_id=? AND y.external_id=scoped.author_id WHERE scoped.sid IN(SELECT value FROM json_each(?)) LIMIT 50001`).all(last,options.youtubeAccount,options.youtubeAccount,first,last,options.youtubeAccount,sessionIds) as {person_id:string;sid:string;published_at_ms:number}[];
+        if(rows.length>50000)throw new Error('ANALYTICS_RANGE_TOO_LARGE');
+        for(const row of rows){const spans=corePresence.get(row.person_id)??[];for(const w of fullWindows.get(row.sid)??[]){const from=Math.max(w.from,row.published_at_ms),end=Math.min(w.to,row.published_at_ms+window*60000);if(end>from)spans.push({from,to:end,session:row.sid,kind:'observed'});}corePresence.set(row.person_id,spans);}
     }
     const breaks=sessions.flatMap(s=>sessionBreaks(windows(s.id,s.started_at_ms,Math.min(to,s.ended_at_ms??to))).map(span=>({...span,session:s.id})));
     const liveSegments=segments.flatMap(segment=>windows(segment.session,segment.from,segment.to).map(span=>({...segment,...span})));
@@ -318,15 +349,16 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             if(span.kind==='observed')e.observedMinutes+=duration;else e.estimatedChatMinutes+=duration;
             e.sessionIds.add(span.session);
         }
-        const activityMinutes=unionSpans(e.intervals.map(span=>({...span,kind:'observed' as const}))).reduce((sum,span)=>sum+(span.to-span.from)/60000,0);
         const arrivals=new Map<string,{day:string;hour:number;visits:number}>();
         for(const span of unionSpans(e.intervals.map(span=>({...span,kind:'observed' as const})))){
           const parts=clock.formatToParts(span.from),day=parts.find(x=>x.type==='weekday')!.value,hour=Number(parts.find(x=>x.type==='hour')!.value),key=`${day}:${hour}`;
           const arrival=arrivals.get(key)??{day,hour,visits:0};arrival.visits++;arrivals.set(key,arrival);
         }
         e.arrivalHours=[...arrivals.values()].sort((a,b)=>b.visits-a.visits||a.hour-b.hour);
-        const long=activityMinutes>=minMinutes,chatty=e.messages>=minMessages;
-        const automatic=e.attendanceSessionIds.size>=minSessions && e.attendanceSessionIds.size>0 && e.attendanceSessionIds.size/selectedStreamCount*100+1e-10>=regularThresholdPercent && (rule==='frequency'||(rule==='both'?long&&chatty:long||chatty));
+        const coreTime = new Map<string,number>();
+        for (const span of unionSpans(corePresence.get(e.id) ?? [])) coreTime.set(span.session,(coreTime.get(span.session) ?? 0)+span.to-span.from);
+        e.coreSessionIds = [...e.attendanceSessionIds].filter(id => (coreDurations.get(id) ?? 0)>0 && (coreTime.get(id) ?? 0)*5 >= coreDurations.get(id)!);
+        const automatic=e.coreSessionIds.length>0 && e.coreSessionIds.length/selectedStreamCount*100+1e-10>=regularThresholdPercent;
         const override=preferences.get(e.id);
         e.manualCore=override==null?null:override===1;
         e.core=e.manualCore??automatic;

@@ -5,7 +5,7 @@ import {mergeClockActivity} from './clock-activity.js';
 import type {TimeAudienceSummary} from './time-audience.js';
 
 type Report=ReturnType<typeof audienceAnalytics>;
-export type HistoryPerson=Report['audience'][number]&{sessionCount:number;attendanceCount:number;activityMinutes:number;detailAvailable?:boolean};
+export type HistoryPerson=Report['audience'][number]&{sessionCount:number;attendanceCount:number;coreAttendanceCount:number;activityMinutes:number;detailAvailable?:boolean};
 export interface HistoryFold {
  sample:Report;
  selectedStreams:number;
@@ -25,7 +25,7 @@ const categoryFields=['minutes','messages','observedMinutes','observedKnownMinut
 const hourFields=['knownViewersTotal','knownViewerSamples','viewerPartialMinutes','observed','estimated','messages','sampleMinutes','observedKnownMinutes','viewersTotal','viewerSamples','donationCount'] as const;
 /** Prepare expensive minute/interval inputs once. Parents consume only sufficient statistics. */
 export function streamFold(report:Report&{clockBuckets?:TimeAudienceSummary[]},timezone:string,insights?:InsightState):HistoryFold {
- const people=report.audience.map(p=>({...p,donations:{...p.donations},arrivalHours:p.arrivalHours.map(a=>({...a})),sessionCount:p.sessionIds.length,attendanceCount:p.attendanceSessionIds.length,
+ const people=report.audience.map(p=>({...p,donations:{...p.donations},arrivalHours:p.arrivalHours.map(a=>({...a})),sessionCount:p.sessionIds.length,attendanceCount:p.attendanceSessionIds.length,coreAttendanceCount:p.coreSessionIds.length,
   observedMinutes:p.intervals.filter(i=>i.kind==='observed').reduce((n,i)=>n+(i.to-i.from)/60000,0),
   estimatedChatMinutes:p.intervals.filter(i=>i.kind!=='observed').reduce((n,i)=>n+(i.to-i.from)/60000,0),
   activityMinutes:unionSpans(p.intervals.map(i=>({...i,kind:'observed' as const}))).reduce((n,i)=>n+(i.to-i.from)/60000,0),
@@ -42,7 +42,7 @@ export function streamFold(report:Report&{clockBuckets?:TimeAudienceSummary[]},t
 export function mergeHistory(left:HistoryFold,right:HistoryFold,timezone:string):HistoryFold {
  const people=new Map(left.people.map(p=>[p.id,p]));
  for(const p of right.people){const row=people.get(p.id);if(!row){people.set(p.id,p);continue;}
-  for(const field of ['messages','visits','observedMinutes','estimatedChatMinutes','activityMinutes','sessionCount','attendanceCount'] as const)row[field]+=p[field];
+  for(const field of ['messages','visits','observedMinutes','estimatedChatMinutes','activityMinutes','sessionCount','attendanceCount','coreAttendanceCount'] as const)row[field]+=p[field];
   row.sources=[...new Set([...row.sources,...p.sources])];row.accounts=[...new Map([...row.accounts,...p.accounts].map(a=>[a.source+':'+a.name,a])).values()];
   for(const field of ['sessionIds','attendanceSessionIds','intervals','messageMinutes'] as const)(row[field] as unknown[])=[...row[field],...p[field]].slice(-100);
   money(row.donations,p.donations);
