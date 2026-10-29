@@ -69,6 +69,22 @@ jobs:
           printf '%s\n' "$BOOTSTRAP_KEY" > "$task_dir/key"
           printf '%s\n' "$KNOWN_HOSTS" > "$task_dir/known-hosts"
           ssh -i "$task_dir/key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$task_dir/known-hosts" -o ConnectTimeout=15 "root@$DEPLOY_HOST" 'bash -s' < ops/install-redis.sh
+      - name: Install on-server stream liveness watchdog
+        env:
+          BOOTSTRAP_KEY: ${{ secrets.STREAM_PANEL_BOOTSTRAP_KEY }}
+          DEPLOY_HOST: ${{ secrets.STREAM_PANEL_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.STREAM_PANEL_DEPLOY_PORT }}
+          KNOWN_HOSTS: ${{ secrets.STREAM_PANEL_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ && "$DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]]
+          task_dir=$(mktemp -d)
+          trap 'rm -rf "$task_dir"' EXIT
+          printf '%s\n' "$BOOTSTRAP_KEY" > "$task_dir/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$task_dir/known-hosts"
+          tar -czf "$task_dir/payload.tgz" -C ops install-watchdog.sh stream-watchdog.py
+          ssh -i "$task_dir/key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$task_dir/known-hosts" -o ConnectTimeout=15 "root@$DEPLOY_HOST" 'set -eu; umask 077; task_dir=$(mktemp -d /tmp/sp-watchdog.XXXXXXXX); trap '\''rm -rf "$task_dir"'\'' EXIT; tar -xzf - -C "$task_dir"; bash "$task_dir/install-watchdog.sh" "$task_dir/stream-watchdog.py"' < "$task_dir/payload.tgz"
       - name: Configure existing private cloud storage when credentials are available
         env:
           BOOTSTRAP_KEY: ${{ secrets.STREAM_PANEL_BOOTSTRAP_KEY }}
