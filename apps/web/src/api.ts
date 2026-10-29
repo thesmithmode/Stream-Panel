@@ -1,3 +1,5 @@
+import {rememberResponse} from './response-equality';
+export {sameResponse,mergeResponseBlocks} from './response-equality';
 import { createProfileSelection } from "./profile";
 
 import {requestJson} from "./request";
@@ -42,8 +44,8 @@ export async function api<T = any>(path: string, body?: unknown, signal?: AbortS
         : { "Content-Type": "application/json", "X-CSRF-Token": csrf, "X-Stream-Panel-Profile": profile },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     ...(retained?{conditional:{etag:retained.etag,value:retained.value as T}}:{}),
-    onResponse:(response,value)=>{const etag=response.headers.get('etag');if(!etag||body!==undefined)return;
-      const bytes=JSON.stringify(value).length*2;if(bytes>4*1024*1024)return;
+    onResponse:(response,value)=>{const etag=response.headers.get('etag');if(!etag||body!==undefined)return;rememberResponse(value,etag,response.headers.get('x-stream-panel-blocks'));
+      const reported=Number(response.headers.get('x-stream-panel-bytes'));const bytes=reported>0&&Number.isSafeInteger(reported)?reported*2:JSON.stringify(value).length*2;if(bytes>4*1024*1024)return;
       validatorBytes-=validators.get(conditionalKey)?.bytes??0;validators.delete(conditionalKey);
       while(validators.size>=16||validatorBytes+bytes>8*1024*1024){const oldest=validators.keys().next().value!;validatorBytes-=validators.get(oldest)!.bytes;validators.delete(oldest);}
       validators.set(conditionalKey,{etag,value,bytes});validatorBytes+=bytes;

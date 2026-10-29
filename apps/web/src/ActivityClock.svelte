@@ -27,7 +27,8 @@
  const attendance=$derived(summarySelection||displayedSummary.length?displayedSummary.filter(b=>b.day===day&&b.resolution===step):timeAudience(windows,people,timezone,step,day).map(b=>({...b,streams:b.streams.size,people:[]})));
  const currencies=$derived([...new Set(rows.flatMap(row=>Object.keys(row.donationAmounts??{})))].sort());
  const activeCurrency=$derived(currencies.includes(currency)?currency:currencies[0]??'RUB');
- const buckets=$derived((metric==='activeAudience'?Array.from({length:1440/step},(_,i)=>{const minute=i*step,b=attendance.find(b=>b.minute===minute);return {minute,value:b?.averageAudience??null,duration:b?.airtimeMs??0,total:b?.personTimeMs??0};}):metric==='donations'?clockDonationSeries(rows,activeCurrency,step,day):clockActivitySeries(rows,metric,step,day,true)));
+ const attendanceByMinute=$derived(new Map(attendance.map(b=>[b.minute,b])));
+ const buckets=$derived((metric==='activeAudience'?Array.from({length:1440/step},(_,i)=>{const minute=i*step,b=attendanceByMinute.get(minute);return {minute,value:b?.averageAudience??null,duration:b?.airtimeMs??0,total:b?.personTimeMs??0};}):metric==='donations'?clockDonationSeries(rows,activeCurrency,step,day):clockActivitySeries(rows,metric,step,day,true)));
  const start=0,span=1440,ticks=[0,360,720,1080,1440],timeGrid=[180,360,540,720,900,1080,1260];
  const levels=$derived(clockAxis(Math.max(0,...buckets.map(b=>b.value??0))));
  const maximum=$derived(levels.at(-1)!);

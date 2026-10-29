@@ -14,7 +14,8 @@ test("Overview insights render loading, empty, error and person paths; expand in
     page.setDefaultTimeout(10000);
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    let requestCount = 0;
+    let requestCount = 0,releaseInitial;
+    const initialLoading=new Promise(resolve=>{releaseInitial=resolve;});
     let personId = "";
     const insightUrls = [];
     await page.route("**/api/v1/status", (route) => route.fulfill({ json: {
@@ -29,7 +30,7 @@ test("Overview insights render loading, empty, error and person paths; expand in
       requestCount++;
       insightUrls.push(route.request().url());
       if (requestCount === 1) {
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        await initialLoading;
         await route.fulfill({ json: {preparing:true,comparisonToMs:12345} });
       } else if(requestCount===2){
         await route.fulfill({json:{insights:[]}});
@@ -55,7 +56,7 @@ test("Overview insights render loading, empty, error and person paths; expand in
     const trigger = page.getByRole("button", { name: "Инсайты", exact: true });
     await trigger.click();
     const insightDialog = page.locator(".insight-body");
-    await page.locator(".insight-body").getByText("Ищем закономерности…", { exact: true }).waitFor();
+    await page.locator(".insight-body").getByText("Ищем закономерности…", { exact: true }).waitFor();releaseInitial();
     await page.getByText("Заметных особенностей этого эфира пока не найдено.", { exact: true }).waitFor();
     await page.locator(".insights-section").getByRole("button",{name:"Инсайты",exact:true}).click();
     assert.equal(await insightDialog.count(), 0);
