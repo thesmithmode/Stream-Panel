@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import {matchKey} from './domain.js';
 import {ProviderStorage} from './provider-storage.js';
 import {CURRENT_SCHEMA_VERSION,schemaMigrations} from './schema.js';
+import {SHARED_IDENTITY_VERSION,sharedIdentityTables} from './shared-identity-schema.js';
 
 /** The profile database adapter owns version storage; every migration is atomic. */
 export function migrateDatabase(db:Database.Database):void {
@@ -22,6 +23,7 @@ export function migrateDatabase(db:Database.Database):void {
     // This shared quota table is independent of profile versions and must also
     // be present when opening an already migrated database.
     if(target===13)db.exec('CREATE TABLE IF NOT EXISTS sp_youtube_quota (day TEXT NOT NULL, profile TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(day,profile)) WITHOUT ROWID');
+    if(target===SHARED_IDENTITY_VERSION)db.exec(sharedIdentityTables);
     if(version>=target)continue;
     db.transaction(()=>{
       if(target===16)new ProviderStorage(db).migrate();

@@ -37,7 +37,10 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   await page.getByRole('tab',{name:'Участники',exact:true}).click();const rank=page.getByRole('region',{name:'Рейтинг участников'});
   await rank.getByRole('button',{name:'Silent Viewer',exact:true}).waitFor();
   assert.equal(await rank.locator('tbody td:nth-child(2) strong').first().textContent(),'5 мин');
-  assert.equal(await rank.locator('.account-details,.accounts').count(),0,'account aliases do not duplicate the participant name');
+  assert.equal(await rank.locator('.account-details,.accounts').count(),0,'account aliases do not need a disclosure');
+  const talkative=rank.locator('.participant-row').filter({has:page.getByRole('button',{name:'Talkative Viewer',exact:true})});
+  assert.equal(await talkative.locator('.platform-nicks span').textContent(),'Talkative Twitch','a renamed group shows its platform nickname');
+  assert.equal(await talkative.locator('.platform-nicks span').evaluate(el=>getComputedStyle(el).color),'rgb(169, 112, 255)');
   assert.equal(await rank.getByRole('button',{name:'Talkative Viewer',exact:true}).evaluate(el=>getComputedStyle(el).color),'rgb(169, 112, 255)','renamed Twitch participants keep their platform color');
   await assertUiLayout(page);
   assert.equal(await page.locator('.stream-feed').count(),0);

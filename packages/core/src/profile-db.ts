@@ -7,6 +7,8 @@ import {schemaMigrations} from "./schema.js";
 const identifiers = new Set(
   [...schemaMigrations.join('\n').matchAll(/CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|VIEW|TRIGGER)\s+(?:IF NOT EXISTS\s+)?(\w+)/gi)].map((m) => m[1]!),
 );
+/** The physical connection behind a profile view; shared `sp_*` tables are reached through it. */
+export const rawConnection = Symbol("rawConnection");
 export function openProfileDatabase(path: string, profile?: string): Database.Database {
   if (profile !== undefined && !/^[a-z][a-z0-9_]{0,31}$/.test(profile))
     throw new Error("INVALID_PROFILE");
@@ -14,11 +16,16 @@ export function openProfileDatabase(path: string, profile?: string): Database.Da
   if (profile === undefined) return db;
   db.pragma("busy_timeout = 5000");
   db.exec("CREATE TABLE IF NOT EXISTS sp_profile_schema (profile TEXT PRIMARY KEY, version INTEGER NOT NULL) STRICT");
+  return profileView(db, profile);
+}
+/** Profile-scoped view over an existing connection, so cross-profile work stays in one transaction. */
+export function profileView(db: Database.Database, profile: string): Database.Database {
   const prefix = `p_${profile}_`;
   const rewrite = (sql: string) => sql.replace(/'(?:''|[^'])*'|\b[a-z_][a-z0-9_]*\b/gi,
     (token) => identifiers.has(token.toLowerCase()) ? prefix + token : token);
   return new Proxy(db, {
     get(target, property) {
+      if (property === rawConnection) return target;
       if (property === "prepare") return (sql: string) => target.prepare(rewrite(sql));
       if (property === "exec") return (sql: string) => {
         let version: number | undefined;
