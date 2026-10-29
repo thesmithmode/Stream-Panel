@@ -69,7 +69,7 @@ export class StoreClient {
     if(!isStoreMethod(method))throw new Error("UNKNOWN_OPERATION");
     await this.ready;
     if(this.dead||(this.stopping&&method!=="close"))throw new Error("DB_WORKER_STOPPED");
-    if(this.lane==='facts'&&this.path!==':memory:'&&['analytics','clockAudience','warmAnalytics','advanceAnalytics','channelOverview'].includes(method)){
+    if(this.lane==='facts'&&this.path!==':memory:'&&['analytics','personAnalytics','clockAudience','warmAnalytics','advanceAnalytics','channelOverview'].includes(method)){
       const analytics=await this.analyticalClient();
       return analytics.call(...request);
     }

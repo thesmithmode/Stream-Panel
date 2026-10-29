@@ -1,3 +1,5 @@
+import {readActivityInput,type ActivityInput} from './activity-input.js';
+import {classifyCore} from './core-classification.js';
 import {botExclusionSet} from './bots.js';
 import type Database from 'better-sqlite3';
 import {createHash} from 'node:crypto';
@@ -11,6 +13,7 @@ type Report=ReturnType<typeof audienceAnalytics>;
 /** Durable fact projections are independent of expendable rendered responses. */
 export class StreamFacts {
  private readonly db:Database.Database;
+ private presentations=new WeakMap<Report,{signature:string;value:Report}>();
  private staged:(()=>void)[]|undefined;
  private snapshots=new WeakMap<Report,{activity:number;key:string;complete:boolean}>();
  constructor(db:Database.Database,private readonly policy:{availableBytes?:()=>number;maxTotalBytes?:number}={}){
@@ -27,7 +30,7 @@ export class StreamFacts {
   const writes:(()=>void)[]=[];this.staged=writes;let report:Report;
   try{report=this.db.transaction(()=>{
    const {q,key,complete}=this.scope(options,id,start,end),{activity,money}=this.versions(id);
-   const base=this.load('analytics_stream_facts',id,key,activity,()=>audienceAnalytics(this.db,{...q,activityOnly:true}),complete);
+   const base=this.load('analytics_stream_facts',id,key,activity,()=>audienceAnalytics(this.db,{...q,activityInput:this.intervals(options,id,start,end),activityOnly:true}),complete);
    const moneyKey=createHash('sha256').update(JSON.stringify([key,base.activityWindows])).digest('hex');
    const finance=this.load('analytics_money_facts',id,moneyKey,money,()=>audienceAnalytics(this.db,{...q,donationsOnly:true}),complete);
    const value=combine(base,finance);this.snapshots.set(value,{activity,key,complete});return value;
@@ -38,14 +41,24 @@ export class StreamFacts {
  activity(options:AnalyticsOptions,id:string,start:number,end:number|null):Report{
   const writes:(()=>void)[]=[];this.staged=writes;let report:Report;
   try{report=this.db.transaction(()=>{const {q,key,complete}=this.scope(options,id,start,end);
-   return this.load('analytics_stream_facts',id,key,this.versions(id).activity,()=>audienceAnalytics(this.db,{...q,activityOnly:true}),complete);
+   return this.load('analytics_stream_facts',id,key,this.versions(id).activity,()=>audienceAnalytics(this.db,{...q,activityInput:this.intervals(options,id,start,end),activityOnly:true}),complete);
   })();}finally{this.staged=undefined;}
   for(const write of writes)write();return report;
+ }
+ private intervals(options:AnalyticsOptions,id:string,start:number,end:number|null):ActivityInput[]{
+  const finish=end??options.toMs;
+  const members=this.db.prepare('SELECT member_id FROM session_groups WHERE group_id=? ORDER BY member_id').all(id);
+  const key=createHash('sha256').update(JSON.stringify(['activity-input-1',members,start,finish,options.youtubeAccount??'',options.chatWindowMinutes??5])).digest('hex');
+  const revision=this.versions(id).activity;
+  const row=this.db.prepare('SELECT payload FROM analytics_activity_details WHERE session_id=? AND settings_key=? AND revision=?').get(id,key,revision) as {payload:Buffer}|undefined;
+  if(row)try{return JSON.parse(gunzipSync(row.payload,{maxOutputLength:16*1024*1024}).toString()) as ActivityInput[];}catch{/* Derived inputs can be reconstructed. */}
+  const value=readActivityInput(this.db,[id],finish,options.youtubeAccount,options.chatWindowMinutes??5);
+  this.save('analytics_activity_details',id,key,revision,value,end!==null);return value;
  }
  private scope(options:AnalyticsOptions,id:string,start:number,end:number|null){
   const q={...options,sessionId:id,fromMs:Math.max(options.fromMs,start),toMs:Math.min(options.toMs,end??options.toMs)};
   const members=this.db.prepare('SELECT member_id FROM session_groups WHERE group_id=? ORDER BY member_id').all(id);
-  const fields={format:5,members,from:q.fromMs,to:end===null&&q.toMs>=Date.now()-120000?'live':q.toMs,source:q.source??'all',category:q.category??'',timezone:q.timezone??'Europe/Moscow',chatWindowMinutes:q.chatWindowMinutes??5,excluded:[...botExclusionSet(q.excludedLogins??[])].sort(),owner:q.ownerId??'',youtube:q.youtubeAccount??'',minSessions:q.minSessions??3,minMinutes:q.minMinutes??30,minMessages:q.minMessages??5,regularThresholdPercent:q.regularThresholdPercent??80,coreRule:q.coreRule??'either'};
+  const fields={format:6,members,from:q.fromMs,to:end===null&&q.toMs>=Date.now()-120000?'live':q.toMs,source:q.source??'all',category:q.category??'',timezone:q.timezone??'Europe/Moscow',chatWindowMinutes:q.chatWindowMinutes??5,excluded:[...botExclusionSet(q.excludedLogins??[])].sort(),owner:q.ownerId??'',youtube:q.youtubeAccount??'',regularThresholdPercent:q.regularThresholdPercent??80};
   return {q,key:createHash('sha256').update(JSON.stringify(fields)).digest('hex'),complete:end!==null&&q.fromMs===start&&q.toMs===end};
 
  }
@@ -75,6 +88,8 @@ export class StreamFacts {
  }
  /** Apply current metadata without reading historical attendance. */
  present<T extends Report>(value:T,options?:AnalyticsOptions):T{
+  const signature=JSON.stringify([this.db.prepare("SELECT domain,revision FROM ui_revisions WHERE domain IN('people','follows','analyticsPresentation') ORDER BY domain").all(),options?.source,options?.youtubeAccount,options?.youtubeAccount?this.db.prepare("SELECT updated_at_ms,payload_json FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount):null]);
+  const cached=this.presentations.get(value);if(cached?.signature===signature)return structuredClone(cached.value) as T;
   const ids=JSON.stringify(value.audience.map(p=>p.id));
   const names=new Map((this.db.prepare('SELECT id,display_name FROM persons WHERE id IN(SELECT value FROM json_each(?))').all(ids) as {id:string;display_name:string}[]).map(p=>[p.id,p.display_name]));
   const preferences=new Map((this.db.prepare('SELECT person_id,manual_core FROM person_preferences WHERE person_id IN(SELECT value FROM json_each(?))').all(ids) as {person_id:string;manual_core:number|null}[]).map(p=>[p.person_id,p.manual_core]));
@@ -87,8 +102,7 @@ export class StreamFacts {
    if(snapshot.source==='twitch'&&info.complete)for(const r of this.db.prepare("SELECT DISTINCT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id NOT IN(SELECT value FROM json_each(?))").all(snapshot.account_id,followers) as {person_id:string}[]){negative.add(r.person_id);platformNegative.twitch!.add(r.person_id);}
   }
   const audience=value.audience.map(p=>{const override=preferences.get(p.id),f=value.filters;
-   const automatic=p.coreSessionIds.length>0&&p.coreSessionIds.length/value.summary.streams*100+1e-10>=f.regularThresholdPercent;
-   const core=override==null?automatic:override===1;
+   const core=classifyCore(p.coreSessionIds.length,value.summary.streams,f.regularThresholdPercent,override==null?null:override===1);
    return {...p,name:names.get(p.id)??p.name,tags:tags.filter(t=>t.person_id===p.id).map(t=>t.label),manualCore:override==null?null:override===1,core,regular:core,follower:following.has(p.id)?true:negative.has(p.id)&&!p.sources.includes('youtube')?false:null};});
   const attendees=audience.filter(p=>p.attendanceSessionIds.length),core=audience.filter(p=>p.core).length;
   const composition={core:attendees.filter(p=>p.core).length,followers:attendees.filter(p=>!p.core&&p.follower===true).length,nonFollowers:attendees.filter(p=>!p.core&&p.follower===false).length,unknown:attendees.filter(p=>!p.core&&p.follower===null).length,twitch:attendees.filter(p=>p.sources.includes('twitch')).length,youtube:attendees.filter(p=>p.sources.includes('youtube')).length,both:attendees.filter(p=>p.sources.length>1).length};
@@ -100,7 +114,8 @@ export class StreamFacts {
    for(const message of person.messageCounts){const point=minutes.get(message.at);if(!point)continue;const platform=message.source==='twitch'?'Twitch':'Youtube',group=person.core?'regular':platformFollowers[message.source]?.has(person.id)?'follower':!platformNegative[message.source]?.has(person.id)?'unknown':null;if(group){point[`${group}Messages`]+=message.count;point[`${group}${platform}Messages`]+=message.count;}}
   }
   const channel=options?.source!=='twitch'&&options?.youtubeAccount?this.db.prepare("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {payload_json:string;updated_at_ms:number}|undefined:undefined;
-  return {...value,...(options?{youtubeReport:channel?{data:JSON.parse(channel.payload_json),updatedAt:channel.updated_at_ms}:null}:{}),audience,composition,timeline,summary:{...value.summary,core,regulars:core,regularShare:audience.length?core/audience.length:null},categories:value.categories.map(c=>({...c,core:audience.filter(p=>p.core&&(p.intervals.some(s=>value.activityWindows.some(w=>w.categoryId===c.id&&w.session===s.session&&w.from<s.to&&w.to>s.from))||p.messageMinutes.some(m=>value.activityWindows.some(w=>w.categoryId===c.id&&w.session===m.session&&m.at>=w.from&&m.at<w.to)))).length})),streamComparison:value.streamComparison.map(s=>({...s,core:audience.filter(p=>p.core&&p.attendanceSessionIds.includes(s.id)).length}))};
+  const presented={...value,...(options?{youtubeReport:channel?{data:JSON.parse(channel.payload_json),updatedAt:channel.updated_at_ms}:null}:{}),audience,composition,timeline,summary:{...value.summary,core,regulars:core,regularShare:audience.length?core/audience.length:null},categories:value.categories.map(c=>({...c,core:audience.filter(p=>p.core&&(p.intervals.some(s=>value.activityWindows.some(w=>w.categoryId===c.id&&w.session===s.session&&w.from<s.to&&w.to>s.from))||p.messageMinutes.some(m=>value.activityWindows.some(w=>w.categoryId===c.id&&w.session===m.session&&m.at>=w.from&&m.at<w.to)))).length})),streamComparison:value.streamComparison.map(s=>({...s,core:audience.filter(p=>p.core&&p.attendanceSessionIds.includes(s.id)).length}))};
+  this.presentations.set(value,{signature,value:presented});return structuredClone(presented) as T;
  }
 }
 function combine(activity:Report,finance:Report):Report{

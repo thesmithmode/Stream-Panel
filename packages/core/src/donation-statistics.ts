@@ -9,6 +9,9 @@ export function donationWindow(from?:number,to?:number){
  if(from!==undefined&&to!==undefined&&to<=from)throw new Error('INVALID_DONATION_WINDOW');
  const clauses:string[]=[],args:number[]=[];if(from!==undefined&&from>0){clauses.push('e.occurred_at_ms>=?');args.push(from);}if(to!==undefined){clauses.push(from===undefined||from===0?'(e.occurred_at_ms<? OR e.occurred_at_ms IS NULL)':'e.occurred_at_ms<?');args.push(to);}return {sql:clauses.join(' AND ')||'1',args};
 }
+export function emptyDonationTiming(category=''){
+ return {count:0,unknownCount:0,totals:{} as Record<string,string>,hours:[] as {day:string;hour:number;donationCount:number;donationTotals:Record<string,string>}[],basis:category?'Донаты во время эфиров выбранной категории; категория YouTube совпадает с Twitch.':'Все донаты профиля с подтверждённым временем; донаты вне эфиров тоже учитываются.'};
+}
 export function donationTiming(db:Database.Database,from:number,to:number,timezone:string,category=''){
  const window=donationWindow(from,to),clock=dateTimeFormatter('ru-RU',{timeZone:timezone,weekday:'short',hour:'2-digit',hourCycle:'h23'});
  // Match the category at the donation's exact timestamp, before minute aggregation.

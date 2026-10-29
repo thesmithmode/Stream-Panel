@@ -115,7 +115,7 @@ test('empty/default analytics is safe; too many sessions or expanded minutes req
 test('analytics rejects oversized query result sets before expanding dashboard data',()=>{
  const store=new StreamStore(':memory:');
  const cases=[
-  ['WITH raw AS(',{fromMs:base,toMs:end}],
+  ['WITH raw AS',{fromMs:base,toMs:end}],
   ['SELECT i.person_id,es.session_id,min(e.occurred_at_ms)',{fromMs:base,toMs:end}],
   ['SELECT i.person_id,es.session_id,e.occurred_at_ms AS at',{fromMs:base,toMs:end}],
   ['WITH scoped AS (',{fromMs:base,toMs:end,youtubeAccount:'yt-owner'}],
