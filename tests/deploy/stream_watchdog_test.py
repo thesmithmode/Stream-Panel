@@ -4,8 +4,8 @@ spec=importlib.util.spec_from_file_location('watchdog',pathlib.Path(__file__).re
 w=importlib.util.module_from_spec(spec);spec.loader.exec_module(w)
 NOW=1_800_000_000_000
 MIN=60000
-def snapshot(live_at=None,heartbeat_at=NOW-30000,running=True,profile='ruslan'):
- return {'live':live_at is not None,'profiles':{profile:{'live':[] if live_at is None else [{'platform':'twitch','observedAt':live_at}],'heartbeat':None if heartbeat_at is None else {'at':heartbeat_at,'running':running}}}}
+def snapshot(live_at=None,heartbeat_at=NOW-30000,running=True,profile='ruslan',panel=False):
+ return {'live':live_at is not None,'panelActive':panel,'profiles':{profile:{'live':[] if live_at is None else [{'platform':'twitch','observedAt':live_at}],'heartbeat':None if heartbeat_at is None else {'at':heartbeat_at,'running':running}}}}
 class WatchdogTests(unittest.TestCase):
  def setUp(self):
   self.folder=tempfile.TemporaryDirectory();root=pathlib.Path(self.folder.name)
@@ -25,6 +25,12 @@ class WatchdogTests(unittest.TestCase):
   self.assertEqual(self.run_once(snapshot(heartbeat_at=None),now=NOW+5*MIN),'skip')
   self.assertEqual(self.run_once(snapshot(heartbeat_at=NOW+6*60*MIN-1000),now=NOW+6*60*MIN),'ok')
   self.assertEqual(self.restarts,[])
+ def test_panel_in_use_checks_every_fifteen_minutes(self):
+  self.assertEqual(self.run_once(snapshot(panel=True)),'ok')
+  self.assertEqual(self.run_once(snapshot(panel=True),now=NOW+10*MIN,healthy=False),'skip')
+  self.assertEqual(self.run_once(snapshot(panel=True),now=NOW+15*MIN,healthy=False),'restart')
+  self.assertEqual(self.run_once(snapshot(panel=False,heartbeat_at=NOW+30*MIN-1000),now=NOW+30*MIN),'skip')
+  self.assertEqual(self.restarts,[NOW+15*MIN])
  def test_failed_health_during_stream_restarts_within_one_tick(self):
   self.assertEqual(self.run_once(snapshot(live_at=NOW-MIN),healthy=False),'restart')
   self.assertEqual(self.restarts,[NOW])
@@ -61,6 +67,12 @@ class WatchdogTests(unittest.TestCase):
    CREATE TABLE p_ruslan_platform_streams(platform TEXT,account_id TEXT,external_id TEXT,session_id TEXT,started_at_ms INTEGER,ended_at_ms INTEGER,last_observed_at_ms INTEGER);
    CREATE TABLE p_ruslan_collector_state(id INTEGER PRIMARY KEY,last_seen_ms INTEGER,running INTEGER);
    CREATE TABLE p_gulnaz_collector_state(id INTEGER PRIMARY KEY,last_seen_ms INTEGER,running INTEGER);''')
+  self.assertFalse(w.read_snapshot(path,NOW)['panelActive'])
+  db.execute('CREATE TABLE sp_panel_activity(id INTEGER PRIMARY KEY,last_seen_ms INTEGER NOT NULL)')
+  db.execute('INSERT INTO sp_panel_activity VALUES(1,?)',(NOW-21*MIN,));db.commit()
+  self.assertFalse(w.read_snapshot(path,NOW)['panelActive'])
+  db.execute('UPDATE sp_panel_activity SET last_seen_ms=?',(NOW-19*MIN,));db.commit()
+  self.assertTrue(w.read_snapshot(path,NOW)['panelActive'])
   db.execute("INSERT INTO p_ruslan_platform_streams VALUES('twitch','a','1','s',0,NULL,?)",(NOW-MIN,))
   db.execute("INSERT INTO p_ruslan_platform_streams VALUES('youtube','a','2','s',0,NULL,?)",(NOW-13*60*MIN,))
   db.execute("INSERT INTO p_ruslan_platform_streams VALUES('twitch','a','3','s',0,?,?)",(NOW,NOW))

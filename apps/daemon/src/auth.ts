@@ -22,6 +22,7 @@ export class AccountStore {
   private db: Database.Database;
   private attempts = new Map<string, { count: number; until: number }>();
   private pending = 0;
+  private activityWrittenAt = -Infinity;
   constructor(path: string, private now: () => number = Date.now) {
     this.db = new Database(path);
     this.db.pragma("busy_timeout = 5000");
@@ -39,6 +40,9 @@ export class AccountStore {
         csrf TEXT NOT NULL, expires_at_ms INTEGER NOT NULL
       ) STRICT;
       CREATE INDEX IF NOT EXISTS sp_auth_expiry ON sp_auth_sessions(expires_at_ms);
+      CREATE TABLE IF NOT EXISTS sp_panel_activity (
+        id INTEGER PRIMARY KEY CHECK(id=1), last_seen_ms INTEGER NOT NULL
+      ) STRICT;
     `);
   }
   users(): { profile: Profile; username: string; displayName: string }[] {
@@ -87,7 +91,16 @@ export class AccountStore {
     const row = this.db.prepare(`SELECT u.profile, u.username, u.display_name AS displayName, s.csrf, s.token_hash AS tokenHash
       FROM sp_auth_sessions s JOIN sp_users u ON u.profile=s.profile
       WHERE s.token_hash=? AND s.expires_at_ms>?`).get(digest(token), this.now()) as UserSession | undefined;
+    if (row) this.recordActivity();
     return row ?? null;
+  }
+  /** "Someone is in the panel" signal for the server watchdog; at most one write per minute, never blocks auth. */
+  private recordActivity(): void {
+    const now = this.now();
+    if (now - this.activityWrittenAt < 60000) return;
+    this.activityWrittenAt = now;
+    try { this.db.prepare("INSERT INTO sp_panel_activity VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET last_seen_ms=max(last_seen_ms, excluded.last_seen_ms)").run(now); }
+    catch { /* Activity is advisory only. */ }
   }
   validCsrf(session: UserSession, token: unknown): boolean {
     if (typeof token !== "string") return false;

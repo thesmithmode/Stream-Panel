@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import Database from "better-sqlite3";
 import { AccountStore } from "../src/auth.js";
 
 test("password sessions persist, expire and revoke without exposing hashes or accepting forged cookies", async () => {
@@ -37,5 +38,30 @@ test("password sessions persist, expire and revoke without exposing hashes or ac
     await assert.rejects(auth.login("ruslan", "correct-long-password", "blocked"), /LOGIN_RATE_LIMIT/);
     now += 900001;
     assert.ok(await auth.login("ruslan", "correct-long-password", "blocked"));
+  } finally { auth.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test("authenticated requests record throttled panel activity for the server watchdog", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sp-auth-activity-"));
+  const path = join(dir, "data.sqlite");
+  let now = 1000;
+  const auth = new AccountStore(path, () => now);
+  const seen = () => {
+    const db = new Database(path, { readonly: true });
+    try { return (db.prepare("SELECT last_seen_ms AS at FROM sp_panel_activity").get() as { at: number } | undefined)?.at; }
+    finally { db.close(); }
+  };
+  try {
+    await auth.createUser("ruslan", "ruslan", "Руслан", "correct-long-password");
+    const login = await auth.login("ruslan", "correct-long-password", "ip");
+    assert.ok(login);
+    assert.equal(auth.session("sp_session=" + "0".repeat(64)), null);
+    assert.equal(seen(), undefined);
+    auth.session(`sp_session=${login.token}`);
+    assert.equal(seen(), 1000);
+    now += 59000; auth.session(`sp_session=${login.token}`);
+    assert.equal(seen(), 1000);
+    now += 1000; auth.session(`sp_session=${login.token}`);
+    assert.equal(seen(), 61000);
   } finally { auth.close(); await rm(dir, { recursive: true, force: true }); }
 });
