@@ -1,3 +1,5 @@
+import {analyticsPresentationSchema} from './change-revisions.js';
+import {classifyCore,coreSessions,normalizeCoreOptions} from './core-classification.js';
 import {HistoryTree} from './history-tree.js';
 import {streamFold} from './history-fold.js';
 import {analyticsStreamCacheSchema} from './schema.js';
@@ -16,7 +18,7 @@ import {serialize} from 'node:v8';
 import { statfsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { audienceAnalytics, validateAnalyticsOptions, unionSpans, type AnalyticsOptions } from './analytics.js';
+import { audienceAnalytics, analyticsMetadata, validateAnalyticsOptions, unionSpans, type AnalyticsOptions } from './analytics.js';
 import { timeAudience, matchesActivityDay, type TimeAudienceSummary } from './time-audience.js';
 import { timePatterns } from './time-patterns.js';
 import { currencyRates } from './rates.js';
@@ -105,16 +107,19 @@ export class AnalyticsHistory {
     constructor(private readonly db: Database.Database, private readonly cachePolicy: {
         availableBytes?: () => number;
         maxBytes?: number;
+        /** @deprecated Alias for maxStreamCacheBytes; excludes durable full-stream facts. */
         maxTotalBytes?: number;
+        maxStreamCacheBytes?:number;
         maxCompletedBytes?: number;
         maxReportBytes?: number;
     } = {}) {
         db.exec(analyticsStreamCacheSchema);
+        if(!db.prepare("SELECT revision FROM ui_revisions WHERE domain='analyticsPresentation'").get())db.transaction(()=>db.exec(analyticsPresentationSchema)).immediate();
         this.reportCache=new AnalyticsReportCache(db,cachePolicy.maxReportBytes);this.facts=new StreamFacts(db,cachePolicy);this.tree=new HistoryTree(db,cachePolicy);
         if(db.pragma('temp_store',{simple:true})!==1)db.pragma('temp_store=FILE');
         db.pragma('temp.cache_size=-2048');
     }
-    close(){this.projections.clear();this.projectionBytes=0;this.liveStreams.clear();for(const job of this.jobs.values())job.workspace.dispose();this.jobs.clear();for(const entry of this.completed.values())entry.workspace?.dispose();this.completed.clear();this.completedBytes=0;}
+    close(){this.addresses.clear();this.projections.clear();this.projectionBytes=0;this.liveStreams.clear();for(const job of this.jobs.values())job.workspace.dispose();this.jobs.clear();for(const entry of this.completed.values())entry.workspace?.dispose();this.completed.clear();this.completedBytes=0;}
     private page(value:Report,workspace:AnalyticsWorkspace<Person>|undefined,options:AnalyticsOptions):Report{
         // Project before cloning or crossing the worker boundary. The complete cached
         // report stays available for every day/resolution and legacy API clients.
@@ -156,7 +161,7 @@ export class AnalyticsHistory {
    WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND s.started_at_ms<? AND coalesce(s.ended_at_ms,?)>? ${options.sessionId?'AND s.id=?':''} ORDER BY s.started_at_ms,s.id`).all(options.toMs, options.toMs, options.fromMs,...(options.sessionId?[options.sessionId]:[])) as Session[];
     }
     private key(options: AnalyticsOptions, session: Session): string {
-        const fields = { format: 11,members:session.members??null, from: Math.max(options.fromMs, session.started_at_ms), to: session.ended_at_ms===null&&options.toMs>=Date.now()-120000?'live':Math.min(options.toMs, session.ended_at_ms??options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: [...(options.excludedLogins ?? [])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
+        const fields = { format: 12,members:session.members??null, from: Math.max(options.fromMs, session.started_at_ms), to: session.ended_at_ms===null&&options.toMs>=Date.now()-120000?'live':Math.min(options.toMs, session.ended_at_ms??options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: [...(options.excludedLogins ?? [])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
         return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
     }
     private followerRevision(){
@@ -210,7 +215,7 @@ export class AnalyticsHistory {
     }
     /** Derived reports may be evicted; facts and late corrections remain authoritative. */
     private trimCache(protectedSession: string, protectedKey: string): boolean {
-        const limit = this.cachePolicy.maxTotalBytes ?? 128 * 1024 * 1024;
+        const limit = this.cachePolicy.maxStreamCacheBytes ?? this.cachePolicy.maxTotalBytes ?? 128 * 1024 * 1024;
         let total = (this.statement('SELECT coalesce(sum(length(payload)),0) AS bytes FROM analytics_stream_cache').get() as {bytes:number}).bytes, evicted = false;
         while (total > limit) {
             // Bound JS allocations even when years of reports are present.
@@ -239,10 +244,10 @@ export class AnalyticsHistory {
         if (available < 1024 * 1024 * 1024)
             return false;
         const payload = gzipSync(serialized);
-        if (payload.byteLength > (this.cachePolicy.maxTotalBytes ?? 128 * 1024 * 1024)) return false;
+        if (payload.byteLength > (this.cachePolicy.maxStreamCacheBytes ?? this.cachePolicy.maxTotalBytes ?? 128 * 1024 * 1024)) return false;
         if (!allowEviction) {
             const retained = (this.statement('SELECT coalesce(sum(length(payload)),0) AS bytes FROM analytics_stream_cache WHERE NOT(session_id=? AND (cache_key=? OR revision<>? OR global_revision<>?))').get(session.id, this.key(options, session), session.revision, global) as {bytes:number}).bytes;
-            if (retained + payload.byteLength > (this.cachePolicy.maxTotalBytes ?? 128 * 1024 * 1024)) return false;
+            if (retained + payload.byteLength > (this.cachePolicy.maxStreamCacheBytes ?? this.cachePolicy.maxTotalBytes ?? 128 * 1024 * 1024)) return false;
         }
         return this.db.transaction(() => {
             this.statement('DELETE FROM analytics_stream_cache WHERE session_id=? AND (revision<>? OR global_revision<>?)').run(session.id, session.revision, global);
@@ -338,7 +343,7 @@ export class AnalyticsHistory {
         this.warming=undefined;
         return {preparing:this.warmedRevision!==revision,ready:1,total:1};
     }
-    private annotationsRevision(){return [this.statement('SELECT * FROM person_preferences ORDER BY person_id').all(),this.statement('SELECT * FROM person_tags ORDER BY person_id,label').all(),this.statement("SELECT id,source,started_at_ms,ended_at_ms FROM collection_gaps WHERE source IN('twitch','youtube') ORDER BY id").all()];}
+    private annotationsRevision(){return this.statement("SELECT revision FROM ui_revisions WHERE domain='analyticsPresentation'").get();}
     private projection(report:Report,options:AnalyticsOptions):Report{
         if(!options.panel||report.preparing)return report;
         const panel=options.panel,all=report.streamComparison;
@@ -356,15 +361,16 @@ export class AnalyticsHistory {
         return options.sessionId?this.projection(this.sessionReport(options),options):this.resolve(options,options.summaryOnly??false);
     }
     private sessionReport(options:AnalyticsOptions):Report{
+        validateAnalyticsOptions(options);options=normalizeCoreOptions(options);
         const session=this.statement(`SELECT s.id,s.started_at_ms,s.ended_at_ms,coalesce((SELECT sum(v.activity+v.money) FROM analytics_fact_versions v WHERE v.session_id=s.id OR v.session_id IN(SELECT member_id FROM session_groups WHERE group_id=s.id)),0) AS revision,(SELECT json_group_array(member_id) FROM session_groups WHERE group_id=s.id) members FROM sessions s WHERE s.id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)`).get(options.sessionId) as Session|undefined;
         if(!session)return audienceAnalytics(this.db,options);
         if(session.ended_at_ms===null)return this.facts.present(this.streamReport(options),options);
         const canonical={...options,fromMs:Math.max(options.fromMs,session.started_at_ms),toMs:Math.min(options.toMs,session.ended_at_ms)};
         validateAnalyticsOptions(canonical);
-        const scope='session-v2:'+createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.entries(canonical).sort(([a],[b])=>a.localeCompare(b))))).digest('hex');
+        const scope='session-v3:'+createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.entries(canonical).sort(([a],[b])=>a.localeCompare(b))))).digest('hex');
         const key=createHash('sha256').update(JSON.stringify([scope,session.revision])).digest('hex');
         const retained=this.completed.get(key);
-        if(retained){this.completed.delete(key);this.completed.set(key,retained);return this.facts.present(structuredClone(retained.value),options);}
+        if(retained){this.completed.delete(key);this.completed.set(key,retained);return this.facts.present(retained.value,options);}
         const saved=this.reportCache.get(key);
         const value=saved??this.facts.read(canonical,session.id,session.started_at_ms,session.ended_at_ms);
         if(!saved&&(this.cachePolicy.availableBytes?.()??Infinity)>=1024*1024*1024)this.reportCache.save(key,scope,value);
@@ -372,6 +378,7 @@ export class AnalyticsHistory {
         return this.facts.present(value,options);
     }
     report(options:AnalyticsOptions):Report{return this.resolve(options,true);}
+    private addresses=new Map<string,{sessions:Session[];canonical:AnalyticsOptions;fingerprint:string;liveRevision:string}>();
     private resolve(options:AnalyticsOptions,historical:boolean,clockOnly?:false):Report;
     private resolve(options:AnalyticsOptions,historical:boolean,clockOnly:true):ClockResponse;
     private resolve(options: AnalyticsOptions,historical:boolean,clockOnly=false):Report|ClockResponse {
@@ -380,14 +387,21 @@ export class AnalyticsHistory {
         if (!Number.isSafeInteger(options.fromMs) || options.fromMs < 0 || !Number.isSafeInteger(options.toMs) || options.toMs <= options.fromMs)
             throw new Error('INVALID_ANALYTICS_FILTER');
         validateAnalyticsOptions(options);
-        const sessions = this.sessions(options);
+        options=normalizeCoreOptions(options);
+        const {panel:ap,streamFrom:sf,streamTo:st,streamOffset:so,streamLimit:sl,audienceOffset:ao,audienceSearch:asearch,audienceSort:asort,audienceCoreOnly:ac,clockDay:cd,clockMinute:cm,clockResolution:cr,clockOffset:co,clockBatch:cb,clockCompact:cc,attendanceOnly:att,...addressOptions}=options;
+        void ap;void sf;void st;void so;void sl;void ao;void asearch;void asort;void ac;void cd;void cm;void cr;void co;void cb;void cc;void att;
+        const version=this.statement("SELECT domain,revision FROM ui_revisions WHERE domain IN('analyticsActivity','donations','follows','analyticsPresentation') ORDER BY domain").all();
+        const addressKey=JSON.stringify([historical,addressOptions,version,this.statement('SELECT revision FROM analytics_global_revision').get()]);
+        const address=this.addresses.get(addressKey);
+        const sessions = address?.sessions??this.sessions(options);
         const live = sessions.some(session => session.ended_at_ms === null);
         const lastEnd = sessions.reduce((end, session) => Math.max(end, session.ended_at_ms ?? options.toMs), options.fromMs);
         const {panel,streamFrom,streamTo,streamOffset,streamLimit,audienceOffset,audienceSearch,audienceSort,audienceCoreOnly,clockDay,clockMinute,clockResolution,clockOffset,clockBatch,clockCompact,attendanceOnly,...baseOptions}=options;
         void panel;void streamFrom;void streamTo;void streamOffset;void streamLimit;void audienceOffset;void audienceSearch;void audienceSort;void audienceCoreOnly;void clockDay;void clockMinute;void clockResolution;void clockOffset;void clockBatch;void clockCompact;void attendanceOnly;
-        const canonical = { ...baseOptions,source:options.source??'all',category:options.category??'', fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
-        const fingerprint = createHash('sha256').update(JSON.stringify([7,historical, Object.fromEntries(Object.entries({...canonical,toMs:live?'live':canonical.toMs}).sort(([a],[b])=>a.localeCompare(b))), 0, sessions.map(s => [s.id,s.members, s.ended_at_ms === null ? 0 : s.revision]), this.annotationsRevision(), this.followerRevision()])).digest('hex');
-        const liveRevision=JSON.stringify(sessions.filter(s=>s.ended_at_ms===null).map(s=>[s.id,s.revision]));
+        const canonical = address?.canonical??{ ...baseOptions,source:options.source??'all',category:options.category??'', fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
+        const fingerprint = address?.fingerprint??createHash('sha256').update(JSON.stringify([8,historical, Object.fromEntries(Object.entries({...canonical,toMs:live?'live':canonical.toMs}).sort(([a],[b])=>a.localeCompare(b))), 0, sessions.map(s => [s.id,s.members, s.ended_at_ms === null ? 0 : s.revision]), this.annotationsRevision(), this.followerRevision()])).digest('hex');
+        const liveRevision=address?.liveRevision??JSON.stringify(sessions.filter(s=>s.ended_at_ms===null).map(s=>[s.id,s.revision]));
+        if(!address){if(this.addresses.size>=16)this.addresses.delete(this.addresses.keys().next().value!);this.addresses.set(addressKey,{sessions,canonical,fingerprint,liveRevision});}
         const projectionKey=options.panel&&!clockOnly?JSON.stringify([fingerprint,liveRevision,this.statement("SELECT revision FROM ui_revisions WHERE domain='donations'").get(),options.panel,options.clockDay,options.clockResolution,options.clockCompact,options.audienceOffset,options.audienceSearch,options.audienceSort,options.audienceCoreOnly,options.attendanceOnly,options.streamFrom,options.streamTo,options.streamOffset,options.streamLimit]):'';
         if(projectionKey){const hit=this.projections.get(projectionKey);if(hit)return structuredClone({...hit.value,filters:{...hit.value.filters,fromMs:options.fromMs,toMs:options.toMs}});}
         const output=(value:Report)=>{if(projectionKey&&!value.preparing)this.rememberProjection(projectionKey,value);return value;};
@@ -400,7 +414,7 @@ export class AnalyticsHistory {
             if(clockOnly)return this.clockResult({...cached.value,filters:{...cached.value.filters,fromMs:options.fromMs,toMs:options.toMs}},workspace,options);
             this.completed.delete(fingerprint);this.completed.set(fingerprint,cached);
             const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as { payload_json: string; updated_at_ms: number } | undefined : undefined;
-            return output(structuredClone(this.page({ ...cached.value, filters: { ...cached.value.filters, fromMs: options.fromMs, toMs: options.toMs }, youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, donationTiming: donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow', options.category) },workspace,options)));
+            return output(structuredClone(this.page({ ...cached.value, filters: { ...cached.value.filters, fromMs: options.fromMs, toMs: options.toMs }, youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, donationTiming: options.panel==='audience'?cached.value.donationTiming:donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow', options.category) },workspace,options)));
             }finally{if(cached.savedKey)workspace?.dispose();}
         }
         const saved=!live&&historical?this.reportCache.get(fingerprint):undefined;
@@ -414,7 +428,7 @@ export class AnalyticsHistory {
                 const value={...saved,filters:{...saved.filters,fromMs:options.fromMs,toMs:options.toMs}};
                 if(clockOnly)return this.clockResult(value,workspace,options);
                 const youtube=options.source!=='twitch'&&options.youtubeAccount?this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {payload_json:string;updated_at_ms:number}|undefined:undefined;
-                return output(this.page({...value,youtubeReport:youtube?{data:JSON.parse(youtube.payload_json),updatedAt:youtube.updated_at_ms}:null,donationTiming:donationTiming(this.db,options.fromMs,options.toMs,options.timezone??'Europe/Moscow',options.category)},workspace,options));
+                return output(this.page({...value,youtubeReport:youtube?{data:JSON.parse(youtube.payload_json),updatedAt:youtube.updated_at_ms}:null,donationTiming:options.panel==='audience'?saved.donationTiming:donationTiming(this.db,options.fromMs,options.toMs,options.timezone??'Europe/Moscow',options.category)},workspace,options));
             }finally{workspace.dispose();}
         }
         if(!historical&&sessions.length<=200){
@@ -430,7 +444,7 @@ export class AnalyticsHistory {
         if (!job) {
             // Each browser/filter keeps its own progress, with a bounded LRU budget.
             while (this.jobs.size >= 4) {const key=this.jobs.keys().next().value!;this.jobs.get(key)!.workspace.dispose();this.jobs.delete(key);}
-            const validation=audienceAnalytics(this.db,{...options,fromMs:options.toMs-1,toMs:options.toMs});
+            const validation=analyticsMetadata(options);
             const workspace=new AnalyticsWorkspace<Person>(this.db);
             job = { iterator: this.aggregate(options, sessions, validation,workspace), touchedAt: now,workspace,liveRevision,validation };
         }
@@ -499,6 +513,36 @@ export class AnalyticsHistory {
         const activityClock=new Map(fold.activityClock.map(c=>[`${c.day}:${c.minute}`,c]));
         const insightBuilder=options.includeInsights?new InsightAccumulator(workspace.insightPeople,timezone,options.insightSessionId):undefined;
         if(insightBuilder&&fold.insights)insightBuilder.append(fold.insights);
+        const {summary,composition}=yield* this.finalizePeople(options,selectedStreams,people,sessions.length);
+        const daily=new HistoryTimeline(timezone,people);daily.append(fold.daily);
+        const seen=new Set<string>();
+        const streams=fold.streams.map(({row,visitors})=>{
+            const newInPeriod=visitors.filter(id=>!seen.has(id)).length;visitors.forEach(id=>seen.add(id));
+            return {...row,core:visitors.filter(id=>people.get(id)?.core).length,newInPeriod,returning:visitors.length-newInPeriod};
+        });
+        this.checkWorkspace(workspace);this.tree.collect([...this.jobs.values()].map(j=>j.workspace.reductionRoot()).concat([...this.completed.values()].map(c=>c.workspace?.reductionRoot())).filter((key):key is string=>!!key));
+        const insights:InsightCard[]=[];
+        if(insightBuilder)for(const card of insightBuilder.find()){
+            if(card)insights.push(card);
+            if(performance.now()-sliceStart>250){yield {preparing:true,ready:processed,total:sessions.length*2};sliceStart=performance.now();}
+        }
+        insights.sort((a,b)=>b.score-a.score||(a.personName??'').localeCompare(b.personName??'','ru',{numeric:true})||a.id.localeCompare(b.id));
+        const audience=people.page().items;
+        const outputCategories=[...categoryRows.values()].map(row=>({...row,...workspace.categoryCounts(row.id),meanOnline:row.viewerKnownMinutes?row.viewerTotal/row.viewerKnownMinutes:null,viewerCoverageRatio:row.minutes?row.viewerKnownMinutes/row.minutes:null,donationsPerHourMinor:currencyRates(row.donationTotals,Math.round(row.minutes*60000)),messagesPerHour:row.minutes?row.messages*60/row.minutes:0,observedPerMinute:row.minutes?row.observedMinutes/row.minutes:0,observedPerKnownMinute:row.observedKnownMinutes?row.observedMinutes/row.observedKnownMinutes:null,coverageRatio:row.minutes?row.observedKnownMinutes/row.minutes:null}));
+        for(const row of clockRows.values()){
+            // Exact membership is retained in the workspace, not duplicated into
+            // every resolution/day bucket. Resolve only the selected interval.
+            row.peopleDeferred=true;
+            row.averageAudience=row.airtimeMs?row.personTimeMs/row.airtimeMs:null;
+        }
+        const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {
+            payload_json: string;
+            updated_at_ms: number;
+        } | undefined : undefined;
+        return { ...sample,insights:options.includeInsights?insights:[], activityClock:[...activityClock.values()], youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, aggregate: true, filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs }, activityWindows: [], timeline: daily.values(), breaks: [], sessions: [sessions[0]!], audience, categories: outputCategories, availableCategories: [...categories.values()], streamComparison: streams, clockBuckets: [...clockRows.values()], hours: [...hours.values()], patterns: timePatterns([...hours.values()]), summary,composition,donationTiming:donationTiming(this.db,options.fromMs,options.toMs,options.timezone??'Europe/Moscow',options.category)};
+    }
+    private *finalizePeople(options:AnalyticsOptions,selectedStreams:number,people:AnalyticsWorkspace<Person>['people'],total:number){
+        let sliceStart=performance.now();const processed=total;
         const preferences = new Map((this.statement('SELECT person_id,manual_core FROM person_preferences').all() as {
             person_id: string;
             manual_core: number | null;
@@ -506,16 +550,15 @@ export class AnalyticsHistory {
         for (const person of people.values()) {
             person.source = person.sources.includes('twitch') ? 'twitch' : 'youtube';
             const attendance = person.attendanceCount, ratio = selectedStreams ? attendance / selectedStreams : 0;
-            const automatic = person.coreAttendanceCount > 0 && person.coreAttendanceCount / selectedStreams * 100 + 1e-10 >= (options.regularThresholdPercent ?? 80);
             const override = preferences.get(person.id);
             person.manualCore = override == null ? null : override === 1;
-            person.core = person.manualCore ?? automatic;
+            person.core = classifyCore(person.coreAttendanceCount,selectedStreams,options.regularThresholdPercent??80,person.manualCore);
             person.regular = person.core;
             person.attendanceRatio = ratio;
             person.sessionRatio = selectedStreams ? person.sessionCount / selectedStreams : 0;
             person.observedMinutesPerSession = attendance ? person.observedMinutes / attendance : 0;
             person.detailAvailable=true;people.set(person.id,person);
-            if(performance.now()-sliceStart>250){yield {preparing:true,ready:processed,total:sessions.length*2};sliceStart=performance.now();}
+            if(performance.now()-sliceStart>250){yield {preparing:true as const,ready:processed,total:total*2};sliceStart=performance.now();}
         }
         const current = this.statement(latestFollowerSnapshotsSql).all() as {
             source: string;
@@ -547,35 +590,10 @@ export class AnalyticsHistory {
             }[]).map(t => t.label);
             people.set(person.id,person);summary.core+=Number(person.core);summary.chatters+=Number(person.messages>0);summary.messages+=person.messages;
             if(person.attendanceSessionIds.length){summary.attendees++;composition.core+=Number(person.core);composition.followers+=Number(!person.core&&person.follower===true);composition.nonFollowers+=Number(!person.core&&person.follower===false);composition.unknown+=Number(!person.core&&person.follower===null);composition.twitch+=Number(person.sources.includes('twitch'));composition.youtube+=Number(person.sources.includes('youtube'));composition.both+=Number(person.sources.length>1);}
-            if(performance.now()-sliceStart>250){yield {preparing:true,ready:processed,total:sessions.length*2};sliceStart=performance.now();}
+            if(performance.now()-sliceStart>250){yield {preparing:true as const,ready:processed,total:total*2};sliceStart=performance.now();}
         }
         summary.regulars=summary.core;summary.regularShare=summary.entities?summary.core/summary.entities:null;
-        const daily=new HistoryTimeline(timezone,people);daily.append(fold.daily);
-        const seen=new Set<string>();
-        const streams=fold.streams.map(({row,visitors})=>{
-            const newInPeriod=visitors.filter(id=>!seen.has(id)).length;visitors.forEach(id=>seen.add(id));
-            return {...row,core:visitors.filter(id=>people.get(id)?.core).length,newInPeriod,returning:visitors.length-newInPeriod};
-        });
-        this.checkWorkspace(workspace);this.tree.collect([...this.jobs.values()].map(j=>j.workspace.reductionRoot()).concat([...this.completed.values()].map(c=>c.workspace?.reductionRoot())).filter((key):key is string=>!!key));
-        const insights:InsightCard[]=[];
-        if(insightBuilder)for(const card of insightBuilder.find()){
-            if(card)insights.push(card);
-            if(performance.now()-sliceStart>250){yield {preparing:true,ready:processed,total:sessions.length*2};sliceStart=performance.now();}
-        }
-        insights.sort((a,b)=>b.score-a.score||(a.personName??'').localeCompare(b.personName??'','ru',{numeric:true})||a.id.localeCompare(b.id));
-        const audience=people.page().items;
-        const outputCategories=[...categoryRows.values()].map(row=>({...row,...workspace.categoryCounts(row.id),meanOnline:row.viewerKnownMinutes?row.viewerTotal/row.viewerKnownMinutes:null,viewerCoverageRatio:row.minutes?row.viewerKnownMinutes/row.minutes:null,donationsPerHourMinor:currencyRates(row.donationTotals,Math.round(row.minutes*60000)),messagesPerHour:row.minutes?row.messages*60/row.minutes:0,observedPerMinute:row.minutes?row.observedMinutes/row.minutes:0,observedPerKnownMinute:row.observedKnownMinutes?row.observedMinutes/row.observedKnownMinutes:null,coverageRatio:row.minutes?row.observedKnownMinutes/row.minutes:null}));
-        for(const row of clockRows.values()){
-            // Exact membership is retained in the workspace, not duplicated into
-            // every resolution/day bucket. Resolve only the selected interval.
-            row.peopleDeferred=true;
-            row.averageAudience=row.airtimeMs?row.personTimeMs/row.airtimeMs:null;
-        }
-        const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {
-            payload_json: string;
-            updated_at_ms: number;
-        } | undefined : undefined;
-        return { ...sample,insights:options.includeInsights?insights:[], activityClock:[...activityClock.values()], youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, aggregate: true, filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs }, activityWindows: [], timeline: daily.values(), breaks: [], sessions: [sessions[0]!], audience, categories: outputCategories, availableCategories: [...categories.values()], streamComparison: streams, clockBuckets: [...clockRows.values()], hours: [...hours.values()], patterns: timePatterns([...hours.values()]), summary,composition,donationTiming:donationTiming(this.db,options.fromMs,options.toMs,options.timezone??'Europe/Moscow',options.category)};
+        return {summary,composition};
     }
     private *legacyAggregate(options: AnalyticsOptions, sessions: Session[], validation: ReturnType<typeof audienceAnalytics>,workspace:AnalyticsWorkspace<Person>): Generator<Progress, Report, void> {
         let sliceStart = performance.now();
@@ -622,7 +640,7 @@ export class AnalyticsHistory {
             for (const person of report.audience) {
                 let row = people.get(person.id);
                 if (!row) {
-                    row = { ...person, sessionCount: 0, attendanceCount: 0, coreAttendanceCount: 0, sessionIds: [], attendanceSessionIds: [], intervals: [], messageMinutes: [], messageCounts: [], messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, donations: {}, visits: 0, activityMinutes: 0, arrivalHours: [] };
+                    row = { ...person, sessionCount: 0, attendanceCount: 0, coreAttendanceCount: 0, coreSessionIds: [], sessionIds: [], attendanceSessionIds: [], intervals: [], messageMinutes: [], messageCounts: [], messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, donations: {}, visits: 0, activityMinutes: 0, arrivalHours: [] };
 
                 }
                 row.messages += person.messages;
@@ -639,7 +657,7 @@ export class AnalyticsHistory {
                 row.accounts = [...new Map([...row.accounts, ...person.accounts].map((a) => [a.source + ':' + a.name, a])).values()];
                 row.sessionCount += person.sessionIds.length;
                 row.attendanceCount += person.attendanceSessionIds.length;
-                row.coreAttendanceCount += person.coreSessionIds.length;
+                Object.assign(row,coreSessions([...row.coreSessionIds,...person.coreSessionIds],row.coreAttendanceCount+person.coreSessionIds.length));
                 row.sessionIds = [...row.sessionIds, ...person.sessionIds].slice(-100);
                 row.attendanceSessionIds = [...row.attendanceSessionIds, ...person.attendanceSessionIds].slice(-100);
                 sumMoney(row.donations, person.donations);
@@ -702,57 +720,7 @@ export class AnalyticsHistory {
         }
         if (!sample)
             return {...audienceAnalytics(this.db, options),...(options.includeInsights?{insights:[]}: {})};
-        const preferences = new Map((this.statement('SELECT person_id,manual_core FROM person_preferences').all() as {
-            person_id: string;
-            manual_core: number | null;
-        }[]).map(p => [p.person_id, p.manual_core]));
-        for (const person of people.values()) {
-            person.source = person.sources.includes('twitch') ? 'twitch' : 'youtube';
-            const attendance = person.attendanceCount, ratio = selectedStreams ? attendance / selectedStreams : 0;
-            const automatic = person.coreAttendanceCount > 0 && person.coreAttendanceCount / selectedStreams * 100 + 1e-10 >= (options.regularThresholdPercent ?? 80);
-            const override = preferences.get(person.id);
-            person.manualCore = override == null ? null : override === 1;
-            person.core = person.manualCore ?? automatic;
-            person.regular = person.core;
-            person.attendanceRatio = ratio;
-            person.sessionRatio = selectedStreams ? person.sessionCount / selectedStreams : 0;
-            person.observedMinutesPerSession = attendance ? person.observedMinutes / attendance : 0;
-            person.detailAvailable=true;people.set(person.id,person);
-            if(performance.now()-sliceStart>250){yield {preparing:true,ready:processed,total:sessions.length*2};sliceStart=performance.now();}
-        }
-        const current = this.statement(latestFollowerSnapshotsSql).all() as {
-            source: string;
-            account_id: string;
-            payload_json: string;
-        }[];
-        const followers = new Set<string>(), negative = new Set<string>();
-        for (const snapshot of current) {
-            const info = JSON.parse(snapshot.payload_json), ids = JSON.stringify(info.followers.map((f: {
-                id: string;
-            }) => f.id));
-            const members = snapshot.source === 'youtube' ? this.statement('SELECT person_id FROM youtube_identities WHERE account_id=? AND external_id IN(SELECT value FROM json_each(?))').all(snapshot.account_id, ids) : this.statement("SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id IN(SELECT value FROM json_each(?))").all(snapshot.account_id, ids);
-            for (const row of members as {
-                person_id: string;
-            }[])
-                followers.add(row.person_id);
-            if (snapshot.source === 'twitch' && info.complete)
-                for (const row of this.statement("SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id NOT IN(SELECT value FROM json_each(?))").all(snapshot.account_id, ids) as {
-                    person_id: string;
-                }[])
-                    negative.add(row.person_id);
-        }
-        const summary={entities:people.size,attendees:0,regulars:0,regularShare:null as number|null,core:0,streams:selectedStreams,chatters:0,messages:0};
-        const composition={core:0,followers:0,nonFollowers:0,unknown:0,twitch:0,youtube:0,both:0};
-        for (const person of people.values()) {
-            person.follower = followers.has(person.id) ? true : negative.has(person.id) && !person.sources.includes('youtube') ? false : null;
-            person.tags = (this.statement(`WITH RECURSIVE owners(id) AS(SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT t.label FROM person_tags t JOIN owners o ON o.id=t.person_id ORDER BY t.label`).all(person.id) as {
-                label: string;
-            }[]).map(t => t.label);
-            people.set(person.id,person);summary.core+=Number(person.core);summary.chatters+=Number(person.messages>0);summary.messages+=person.messages;
-            if(person.attendanceSessionIds.length){summary.attendees++;composition.core+=Number(person.core);composition.followers+=Number(!person.core&&person.follower===true);composition.nonFollowers+=Number(!person.core&&person.follower===false);composition.unknown+=Number(!person.core&&person.follower===null);composition.twitch+=Number(person.sources.includes('twitch'));composition.youtube+=Number(person.sources.includes('youtube'));composition.both+=Number(person.sources.length>1);}
-            if(performance.now()-sliceStart>250){yield {preparing:true,ready:processed,total:sessions.length*2};sliceStart=performance.now();}
-        }
-        summary.regulars=summary.core;summary.regularShare=summary.entities?summary.core/summary.entities:null;
+        const {summary,composition}=yield* this.finalizePeople(options,selectedStreams,people,sessions.length);
         const daily = new HistoryTimeline(options.timezone ?? 'Europe/Moscow', people);
         const streamsById = new Map(streams.map(stream => [stream.id, stream]));
         for (const session of sessions) {

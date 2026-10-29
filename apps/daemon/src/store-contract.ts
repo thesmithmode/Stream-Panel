@@ -46,6 +46,8 @@ export const storeOperations={
   updateChatterNames:"write",
   persons:"cached",
   personsPage:"cached",
+  personOptions:"cached",
+  personAnalytics:"cached",
   createPerson:"write",
   donorNicknames:"cached",
   donorBindings:"cached",

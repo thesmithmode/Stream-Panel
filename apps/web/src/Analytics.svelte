@@ -5,7 +5,7 @@
  import CategoryComparison from "./CategoryComparison.svelte";
  import SectionTabs from "./SectionTabs.svelte";
   import { onMount, untrack } from "svelte";
-  import { api, date, money } from "./api";
+  import { api, date, money, sameResponse,mergeResponseBlocks } from "./api";
   import {analyticsView,loadAnalyticsView,saveAnalyticsView} from "./analytics-view";
   import Insights from "./Insights.svelte";
   import Help from "./Help.svelte";
@@ -26,7 +26,7 @@
   const localInput=(at:number)=>{const d=new Date(at);return new Date(at-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
   let from=$state(localInput(0)),to=$state(localInput(Date.now())),source=$state("all"),category=$state("");
   let timezone=$state(untrack(()=>defaultTimezone));
-  let search=$state(""),liveEnd=$state(true),data=$state<any>(null),error=$state(""),busy=$state(false),selected=$state<any>(null),day=$state("");
+  let search=$state(""),liveEnd=$state(true),data=$state.raw<any>(null),error=$state(""),busy=$state(false),selected=$state<any>(null),day=$state("");
   $effect(()=>{void section;selected=null;});
   let heatCurrency=$state("RUB");
   let heatCalculation=$state("average"),selectedHour=$state<{day:string;hour:number}|null>(null);
@@ -106,7 +106,7 @@
     if(!person||!currentDay||!aggregate)return;
     const bounds=localDateWindow(currentDay,timezone),controller=new AbortController();detailBusy=true;
     const q=new URLSearchParams({from:String(bounds.from),to:String(bounds.to),source,category,timezone});
-    void analyticsReport(signal=>api(`analytics?${q}`,undefined,signal),controller.signal).then(result=>{if(!controller.signal.aborted)detailData=result;}).catch(e=>{if(!controller.signal.aborted)error=e.message;}).finally(()=>{if(!controller.signal.aborted)detailBusy=false;});
+    void analyticsReport(signal=>api(`persons/${encodeURIComponent(person)}/analytics?${q}`,undefined,signal),controller.signal).then(result=>{if(!controller.signal.aborted)detailData=result;}).catch(e=>{if(!controller.signal.aborted)error=e.message;}).finally(()=>{if(!controller.signal.aborted)detailBusy=false;});
     return ()=>controller.abort();
   });
   function selectEntity(e:any){selected=e;day=new Date(e.intervals.at(-1)?.from??new Date(to).getTime()).toLocaleDateString('sv-SE',{timeZone:timezone});}
@@ -129,7 +129,7 @@
       const result=await loadAnalytics(profile,q,force,signal);
       if(id===requestId){const previousScope=loadedScope;if(result.filters&&(result.filters.category!==category||result.filters.source!==source||result.filters.timezone!==timezone))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');loadedPanel=panel;loadedScope=scope;loadedAudienceQuery=audienceQuery;
         if(JSON.stringify([scope,audienceOffset,search,view.sort,view.coreOnly])===audienceQuery)pagedAudience=null;
-        if(JSON.stringify(data)!==JSON.stringify(result))data=Object.fromEntries(Object.entries(result).map(([key,value])=>[key,JSON.stringify(data?.[key])===JSON.stringify(value)?data[key]:value]));
+        if(!sameResponse(data,result))data=mergeResponseBlocks(data,result);
         if(scope!==previousScope){selected=null;}}
     }catch(e){if(id===requestId&&!signal?.aborted){error=(e as Error).message;}}
     finally{if(id===requestId)busy=false;}

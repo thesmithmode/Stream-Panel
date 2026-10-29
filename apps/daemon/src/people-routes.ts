@@ -3,7 +3,7 @@ import type { ConfigurationPort } from './config.js';
 import type { StorePort } from './store-contract.js';
 import { object, string } from './provider-values.js';
 import { analyticsSettings } from './analytics-settings.js';
-type Store = StorePort<'bindDonorNickname' | 'candidatePersons' | 'createPersonNote' | 'deletePersonNote' | 'donorBindings' | 'donorNicknames' | 'insights' | 'merge' | 'merges' | 'person' | 'personActivity' | 'personFollowing' | 'personMetadata' | 'personNotes' | 'personStats' | 'persons' | 'personsPage' | 'personsTop' | 'renamePerson' | 'setPersonMetadata' | 'splitIdentities' | 'splits' | 'undoMerge' | 'undoSplit' | 'updatePersonNote'>;
+type Store = StorePort<'bindDonorNickname' | 'candidatePersons' | 'createPersonNote' | 'deletePersonNote' | 'donorBindings' | 'donorNicknames' | 'insights' | 'merge' | 'merges' | 'person' | 'personActivity' | 'personFollowing' | 'personMetadata' | 'personNotes' | 'personStats' | 'persons' | 'personsPage' | 'personOptions' | 'personAnalytics' | 'personsTop' | 'renamePerson' | 'setPersonMetadata' | 'splitIdentities' | 'splits' | 'undoMerge' | 'undoSplit' | 'updatePersonNote'>;
 export function registerPeopleRoutes(app: FastifyInstance, db: Store, configuration: ConfigurationPort) {
     app.get("/api/v1/persons/:id/following", async (request) => db.call("personFollowing", string(object(request.params).id), string(object(request.query).session)));
     app.get('/api/v1/donor-nicknames', () => db.call('donorNicknames'));
@@ -17,6 +17,7 @@ export function registerPeopleRoutes(app: FastifyInstance, db: Store, configurat
             throw new Error("INVALID_PERIOD");
         return Date.now() - Number(period) * 86400000;
     }
+    app.get('/api/v1/persons/options',request=>{const q=object(request.query);return db.call('personOptions',string(q.search),Number(q.offset??0),Number(q.limit??50),string(q.includeBots)==='1',string(q.selected),configuration.value.excludedBotLogins,string(q.exclude));});
     app.get('/api/v1/persons/page', request => {
         const q = object(request.query);
         return db.call('personsPage', string(q.search), configuration.value.excludedBotLogins, peopleFrom(q), Number(q.offset ?? 0), Number(q.limit ?? 50));
@@ -35,6 +36,7 @@ export function registerPeopleRoutes(app: FastifyInstance, db: Store, configurat
         return db.call('insights',string(q.session)||undefined,configuration.value.excludedBotLogins,{...defaults,...(q.to===undefined?{}:{toMs:Number(q.to)}),ownerId:configuration.value.twitch?.userId??'',youtubeAccount:configuration.value.youtube?.userId??configuration.value.youtubeAccountId??''});
     });
     app.get("/api/v1/persons/:id", async (request) => db.call("person", string(object(request.params).id), string(object(request.query).events) !== "false"));
+    app.get('/api/v1/persons/:id/analytics',request=>{const q=object(request.query),defaults=analyticsSettings(configuration.value.analyticsSettings);return db.call('personAnalytics',string(object(request.params).id),{...defaults,fromMs:Number(q.from),toMs:Math.min(Number(q.to),Date.now()),source:(string(q.source)||'all') as 'all'|'twitch'|'youtube',category:string(q.category),timezone:string(q.timezone)||defaults.timezone,ownerId:configuration.value.twitch?.userId??'',youtubeAccount:configuration.value.youtube?.userId??configuration.value.youtubeAccountId??'',excludedLogins:configuration.value.excludedBotLogins});});
     app.get("/api/v1/persons/:id/activity", async (request) => db.call("personActivity", string(object(request.params).id), analyticsSettings(configuration.value.analyticsSettings).chatWindowMinutes, analyticsSettings(configuration.value.analyticsSettings).timezone));
     app.get("/api/v1/persons/:id/metadata", async (request) => db.call("personMetadata", string(object(request.params).id)));
     app.post("/api/v1/persons/:id/metadata", async (request) => {

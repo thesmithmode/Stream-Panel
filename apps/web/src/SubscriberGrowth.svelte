@@ -1,4 +1,5 @@
 <script lang="ts">
+ import {dateTimeFormatter} from '../../../packages/core/src/date-time-formatter';
  import {api,getServerRevision} from './api';
  import {onMount,untrack} from 'svelte';
  import {subscriberScope,subscriberPeriod,clearSubscriberCache,type SubscriberView as View} from './subscriber-cache';
@@ -47,11 +48,13 @@
  const totals=$derived(series.flatMap(s=>s.points.map(p=>p.total)));
  const y=(value:number,source:string)=>{const scale=series.find(s=>s.source===source)!.scale;return 230-(value-scale.low)/Math.max(1,scale.high-scale.low)*200;};
  const dateTicks=$derived(subscriberDateOffsets(view.days).map(offset=>localDateWindow(new Date(Date.parse(view.day)-(view.days-1-offset)*86400000).toISOString().slice(0,10),view.timezone).from));
- const axisNumber=(n:number)=>new Intl.NumberFormat('ru-RU',{notation:n>=10000?'compact':'standard',maximumFractionDigits:1}).format(n);
+ const normalNumber=new Intl.NumberFormat('ru-RU',{notation:'standard',maximumFractionDigits:1}),compactNumber=new Intl.NumberFormat('ru-RU',{notation:'compact',maximumFractionDigits:1});
+ const axisNumber=(n:number)=>(n>=10000?compactNumber:normalNumber).format(n);
  const youtubePoints=$derived(series[1]!.points);
  const publications=$derived((data?.youtube.publications??[]).filter(item=>subscriberValueAt(youtubePoints,item.publishedAt)!==null));
  const streams=$derived(subscriberStreamBands(bands?.scope===bandScope()?bands.twitch:data?.twitch.streams??[],bands?.scope===bandScope()?bands.youtube:data?.youtube.streams??[],view.from,plotTo));
- const label=(at:number,date=false)=>new Intl.DateTimeFormat('ru-RU',{timeZone:view.timezone,...(date?{day:'2-digit',month:'2-digit'}:{hour:'2-digit',minute:'2-digit'})}).format(at);
+ const dayFormat=$derived(dateTimeFormatter('ru-RU',{timeZone:view.timezone,day:'2-digit',month:'2-digit'})),hourFormat=$derived(dateTimeFormatter('ru-RU',{timeZone:view.timezone,hour:'2-digit',minute:'2-digit'}));
+ const label=(at:number,date=false)=>(date?dayFormat:hourFormat).format(at);
  const dateRange=$derived(`${label(view.from,true)}–${label(view.to-1,true)}`);
  const kind=(item:Publication)=>item.kind==='shorts'?'Shorts':item.kind==='video'?'Видео':'Тип уточняется';
  const shift=(direction:number)=>{day=new Date(Date.parse(day)+direction*days*86400000).toISOString().slice(0,10);};

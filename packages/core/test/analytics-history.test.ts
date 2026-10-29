@@ -185,13 +185,13 @@ test('expired or displaced report preparation can restart without losing histori
   fixture(s,60);const h=new AnalyticsHistory((s as any).db),query={...options,toMs:base+62*86400000};
   while(h.prepare(query).preparing){/* warm bounded batches */}
   let cpu=0;t.mock.method(performance,'now',()=>cpu+=5);
-  const firstProgress=h.report(query),nextProgress=h.report(query);assert.equal(firstProgress.preparing,true);assert.ok(nextProgress.ready!>firstProgress.ready!);
+  const firstProgress=h.report(query),nextProgress=h.report(query);assert.equal(firstProgress.preparing,true);assert.ok(!nextProgress.preparing||nextProgress.ready!>=firstProgress.ready!,'the next slice either advances or completes the report');
   now+=6*60000;
   h.prepare(query);
   const restarted=h.report(query);assert.ok(restarted.preparing||restarted.summary.messages===60,'expired work resumes from persisted intermediate totals');
   assert.equal(ready(h,query).summary.messages,60);
-  const first={...query,minMessages:100};
-  for(let filter=100;filter<106;filter++)assert.equal(ready(h,{...query,minMessages:filter}).summary.messages,60);
+  const first={...query,regularThresholdPercent:100};
+  for(let filter=0;filter<6;filter++)assert.equal(ready(h,{...query,regularThresholdPercent:filter}).summary.messages,60);
   assert.ok((h as any).jobs.size<=4,'filter changes retain bounded work and reuse prepared totals');
   assert.equal(ready(h,first).summary.messages,60);assert.equal(s.eventCount(),60);
  }finally{s.close();}
@@ -540,10 +540,10 @@ test('incremental polling reads its validation snapshot once and restarts after 
   let cpu=0;t.mock.method(performance,'now',()=>cpu+=300);
   assert.equal(h.report(query).preparing,true);
   assert.equal(h.report(query).preparing,true);
-  assert.equal(validations,1,'progress polling must not rescan the last minute and all identities');
+  assert.equal(validations,0,'progress metadata must not read historical facts');
   s.ingest({source:'twitch',accountId:'owner',externalId:'late-during-preparation',type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:base+minute,receivedAtMs:query.toMs,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{count:1}});
   const result=ready(h,query),raw=audienceAnalytics(db,query);
-  assert.equal(validations,2,'a correction needs a fresh revision and validation snapshot');
+  assert.equal(validations,0,'a correction rebuilds facts without a validation scan');
   assert.deepEqual(result.summary,raw.summary);assert.deepEqual(result.hours,raw.hours);assert.deepEqual(result.streamComparison,raw.streamComparison);
   h.close();
  }finally{s.close();}

@@ -1,3 +1,4 @@
+import {normalizeCoreOptions} from '../../../packages/core/src/core-classification.js';
 import {READ_CACHE_TTL_MS} from './read-cache.js';
 /** Moving live/rolling windows share one bounded polling interval.
  * Historical endpoints and all non-time filters stay exact. Queries still use original args. */
@@ -14,7 +15,7 @@ export function readCacheKey(method:string,args:unknown[],now=Date.now()):string
  const key=[...args];
  if((method==='analytics'||method==='clockAudience')&&args[0]&&typeof args[0]==='object'){
   const options=args[0] as Record<string,unknown>;
-  key[0]={...options,toMs:moving(options.toMs)};
+  key[0]={...normalizeCoreOptions(options),toMs:moving(options.toMs)};
  }
  if(method==='persons'||method==='personsPage')key[2]=rolling(args[2]);
  if(method==='personsTop')key[4]=rolling(args[4]);

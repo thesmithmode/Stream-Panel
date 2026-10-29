@@ -1,4 +1,5 @@
 <script lang="ts">
+ import PersonPicker from './PersonPicker.svelte';
   import {screenData} from './screen-data';
   import SectionTabs from "./SectionTabs.svelte";
   import {latestRequest} from './latest-request';
@@ -55,15 +56,7 @@
   const donorCurrencies=$derived([...new Set(tops.flatMap(p=>Object.keys(p.donationTotals)))].sort());
   const rankLabels=$derived(new Map(tops.map(t=>[t.id,sortBy==='donations'?Object.entries(t.donationTotals).map(([currency,amount])=>money(amount,currency)).join(' · ')||`${t.donationCount} донатов`:sortBy==='observed_minutes'?formatDuration(t.observedMinutes):`${t.messageCount} сообщ.`])));
   let pageRows = $state<Person[]>([]), peopleOffset = $state(0), peopleTotal = $state(0), peopleLoading = $state(false), peopleLoaded=$state(false);
-  const directory = latestRequest(), recipients = latestRequest();
-  let people = $state<Person[]>([]);
-  $effect(()=>{
-    const editing=detailTab==='accounts'||detailTab==='donations';void rankRefresh;
-    if(!editing)return;
-    void recipients.run(signal=>api<Person[]>('persons',undefined,signal),rows=>{people=rows;},failure=>{error=failure.message;});
-    return ()=>recipients.cancel();
-  });
-  const availablePeople = $derived([...new Map([...people,...pageRows].map(person=>[person.id,person])).values()]);
+  const directory = latestRequest();
   let selectedSession = '';
   const rows = $derived(
     sortBy === "default"
@@ -183,7 +176,7 @@
     }
   }
   async function merge() {
-    const other = availablePeople.find((p) => p.id === target);
+    const other = target?await api<Person>(`persons/${encodeURIComponent(target)}?events=false`):null;
     if (!other || !detail) return;
     await api("persons/merge", {
       sourceId: detail.id,
@@ -360,15 +353,8 @@
           </div>{/if}
         <h3>Объединить с человеком</h3>
         <div class="inline">
-          <select aria-label="Целевой человек" bind:value={target}
-            ><option value="">Выберите группу…</option
-            >{#each availablePeople.filter((p) => p.id !== selectedId) as person}<option
-                value={person.id}
-                >{person.display_name}{candidates.includes(person.id)
-                  ? " · совпадает имя"
-                  : ""}</option
-              >{/each}</select
-          ><button
+          <PersonPicker label="Целевой человек" searchLabel="Поиск целевого человека" bind:value={target} includeBots={true} excludeId={selectedId??''} suggestedIds={candidates}/>
+          <button
             class="primary"
             disabled={busy || !target}
             onclick={() => operation(async()=>{if(await confirmAction("Объединить людей?","Аккаунты и история обеих карточек будут объединены."))await merge();})}>Объединить</button
@@ -400,7 +386,7 @@
       {:else if detailTab==='donations'}
        <button class="outline small" aria-expanded={showDonorLinks} onclick={()=>showDonorLinks=!showDonorLinks}>{showDonorLinks?'Скрыть привязку':'Привязать донаты по нику'}</button>
        {#if showDonorLinks}<DonorLinks personId={detail.id} onChange={()=>refreshPerson(detail.id)} />{/if}
-       {#key detail.id}<PersonDonations personId={detail.id} revision={detail.revision} people={availablePeople} onChange={()=>refreshPerson(detail.id)} />{/key}
+       {#key detail.id}<PersonDonations personId={detail.id} revision={detail.revision} onChange={()=>refreshPerson(detail.id)} />{/key}
       {:else if detailTab==='notes'}
        <PersonMetadata personId={detail.id} onChange={()=>refreshPerson(detail.id)} />
        <PersonNotes personId={detail.id} />

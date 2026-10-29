@@ -49,6 +49,7 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
   await page.getByRole('tab',{name:'Динамика',exact:true}).click();assert.equal(await page.getByText('Таблица сравнения стримов',{exact:true}).count(),0);
   data.aggregate=true;data.timeline=[{at:localDateWindow(new Date(now).toLocaleDateString('sv-SE',{timeZone:'Europe/Moscow'}),'Europe/Moscow').from,presenceKnown:true,observed:1}];await renderNextHistory();await page.getByRole('button',{name:person.name,exact:true}).waitFor();
   await page.route('**/api/v1/analytics?*',route=>new URL(route.request().url()).searchParams.get('from')==='0'?route.fulfill({json:data}):route.fulfill({status:400,json:{error:'DETAIL_UNAVAILABLE'}}));
+  await page.route('**/api/v1/persons/historical/analytics?*',route=>route.fulfill({status:400,json:{error:'DETAIL_UNAVAILABLE'}}));
   await page.getByRole('button',{name:`Интервалы ${person.name}`,exact:true}).click();
   await page.getByRole('alert').filter({hasText:'DETAIL_UNAVAILABLE'}).waitFor();
   await page.getByRole('heading',{name:`Активность: ${person.name}`,exact:true}).waitFor();
@@ -56,6 +57,7 @@ test('analytics keeps unknown historical signals distinct from zero and renders 
   assert.equal(await page.locator('.minute-dot.unknown').count(),1440);
   await page.getByRole('button',{name:'Закрыть детализацию'}).click();await page.unroute('**/api/v1/analytics?*');
   await page.route('**/api/v1/analytics?*',route=>route.fulfill({json:new URL(route.request().url()).searchParams.get('from')==='0'?data:{...data,audience:[{...person,intervals:[{from:now-60000,to:now,session:'historical-session',kind:'observed'}]}]}}));
+  await page.unroute('**/api/v1/persons/historical/analytics?*');await page.route('**/api/v1/persons/historical/analytics?*',route=>route.fulfill({json:{...data,audience:[{...person,intervals:[{from:now-60000,to:now,session:'historical-session',kind:'observed'}]}]}}));
   await page.getByRole('button',{name:`Интервалы ${person.name}`,exact:true}).click();await page.locator('.minute-dot.observed').first().waitFor();assert.equal(await page.getByLabel('Дата минутной сетки').inputValue(),new Date(now).toLocaleDateString('sv-SE',{timeZone:'Europe/Moscow'}));
   await page.getByRole('button',{name:'Закрыть детализацию'}).click();await page.unroute('**/api/v1/analytics?*');await page.route('**/api/v1/analytics?*',route=>route.fulfill({json:data}));
   data={summary:{entities:205,core:0,streams:0,messages:0,regulars:0,regularShare:0},audience:Array.from({length:205},(_,i)=>({...person,id:`legacy-${i}`,name:`Архив ${i}`,source:'youtube',tags:['архив'],attendanceSessionIds:[],attendanceRatio:0,observedMinutesPerSession:0})),categories:[],hours:[],timeline:[]};

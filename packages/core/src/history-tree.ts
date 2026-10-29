@@ -19,7 +19,7 @@ export class HistoryTree {
  constructor(private db:Database.Database,private policy:{availableBytes?:()=>number;maxTotalBytes?:number}={}){db.exec(historyTreeSchema);}
  allowed(){return (this.policy.maxTotalBytes??Infinity)>0&&(this.policy.availableBytes?.()??Infinity)>=1024*1024*1024;}
  private descriptor(leaves:FoldLeaf[],depth=0):Branch {
-  if(leaves.length===1)return {key:hash(['history-leaf-3',leaves[0]!.version]),leaf:leaves[0]!};
+  if(leaves.length===1)return {key:hash(['history-leaf-4',leaves[0]!.version]),leaf:leaves[0]!};
   while(leaves[0]!.position[depth]===leaves.at(-1)!.position[depth])depth++;
   const groups:FoldLeaf[][]=[];for(const leaf of leaves){const last=groups.at(-1);if(last&&last[0]!.position[depth]===leaf.position[depth])last.push(leaf);else groups.push([leaf]);}
   const children=groups.map(group=>this.descriptor(group,depth+1));return {key:hash(['history-branch-1',children.map(c=>c.key)]),children};
