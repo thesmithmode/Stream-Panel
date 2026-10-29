@@ -1,5 +1,6 @@
 #!/usr/bin/python3
-"""Root-owned liveness watchdog. Every 5 minutes while a stream is live, every 6 hours otherwise.
+"""Root-owned liveness watchdog. Every 5 minutes while a stream is live, every 15 minutes while
+someone uses the panel, every 6 hours otherwise.
 
 Restarts stream-panel.service when /healthz fails or collectors stop advancing their
 heartbeat or live-stream observations. Database reads run as the service user, read-only.
@@ -12,6 +13,8 @@ CONFIG = pathlib.Path('/etc/stream-panel')
 SERVICE = 'stream-panel.service'
 MARKERS = ('deploying', 'initializing', 'restoring', 'restore-pending')
 OFF_STREAM_INTERVAL_MS = 6 * 3600000
+PANEL_ACTIVE_INTERVAL_MS = 15 * 60000
+PANEL_ACTIVE_WINDOW_MS = 20 * 60000  # Authenticated requests refresh sp_panel_activity at most once a minute.
 LIVE_WINDOW_MS = 12 * 3600000        # Older open rows are stale history, not a live stream.
 OBSERVATION_STALE_MS = 4 * 60000     # Live polls advance every 60 s.
 HEARTBEAT_STALE_MS = 2 * 60000       # Collector heartbeat advances every 30 s.
@@ -23,7 +26,10 @@ def read_snapshot(path, now):
     db = sqlite3.connect(f'file:{path}?mode=ro', uri=True, timeout=5)
     try:
         profiles = [row[0] for row in db.execute('SELECT profile FROM sp_profile_schema ORDER BY profile')]
-        result = {'live': False, 'profiles': {}}
+        result = {'live': False, 'panelActive': False, 'profiles': {}}
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sp_panel_activity'").fetchone():
+            seen = db.execute('SELECT last_seen_ms FROM sp_panel_activity WHERE id=1').fetchone()
+            result['panelActive'] = bool(seen) and now - seen[0] <= PANEL_ACTIVE_WINDOW_MS
         for profile in profiles:
             if not re.fullmatch(r'[a-z][a-z0-9_]{0,31}', profile): continue
             prefix = f'p_{profile}_'
@@ -54,12 +60,13 @@ def problems(snapshot, now, service_started_at):
                 found.append(f"{profile}:{stream['platform']}_observation_stale")
     return found
 
-def due(state, live, now):
-    return live or now - state.get('lastCheckAt', 0) >= OFF_STREAM_INTERVAL_MS
+def due(state, live, now, panel_active=False):
+    interval = PANEL_ACTIVE_INTERVAL_MS if panel_active else OFF_STREAM_INTERVAL_MS
+    return live or now - state.get('lastCheckAt', 0) >= interval
 
-def decide(state, now, live, healthy, issues):
+def decide(state, now, live, healthy, issues, panel_active=False):
     """Return (action, new_state). Action is skip, ok, restart or cooldown."""
-    if not due(state, live, now): return 'skip', state
+    if not due(state, live, now, panel_active): return 'skip', state
     state = {**state, 'lastCheckAt': now}
     if healthy and not issues: return 'ok', state
     if now - state.get('lastRestartAt', -RESTART_COOLDOWN_MS) < RESTART_COOLDOWN_MS: return 'cooldown', state
@@ -113,15 +120,16 @@ def run(now=None, read=snapshot_as_service, health=check_health, started=service
     try: snapshot = read(now)
     except Exception: snapshot = None
     live = True if snapshot is None else snapshot['live']  # Unknown state is checked, not skipped.
-    if not due(state, live, now): return 'skip'
+    panel_active = snapshot is not None and snapshot.get('panelActive') is True
+    if not due(state, live, now, panel_active): return 'skip'
     began = started()
     if began is not None and now - began < STARTUP_GRACE_MS: return 'starting'  # Recheck on next tick.
     healthy = began is not None and health()
     # An unreadable snapshot (e.g. busy during backup) alone never restarts; /healthz covers the DB.
     issues = [] if snapshot is None or began is None else problems(snapshot, now, began)
-    action, state = decide(state, now, live, healthy, issues)
+    action, state = decide(state, now, live, healthy, issues, panel_active)
     detail = ','.join(issues) or ('ok' if healthy else 'health_failed')
-    print(f"stream-watchdog live={str(live).lower()} action={action} detail={detail}")
+    print(f"stream-watchdog live={str(live).lower()} panel_active={str(panel_active).lower()} action={action} detail={detail}")
     if action == 'restart':
         save_state(state)
         subprocess.run(['/usr/bin/systemctl', 'reset-failed', SERVICE], timeout=10)
