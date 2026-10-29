@@ -11,6 +11,22 @@ import {presenceMinutes,pollCoveredMinutes,type PresencePoll} from "./presence.j
 export class AudienceQueries {
   constructor(private readonly db:Database.Database) {}
 
+  personOptions(search='',offset=0,limit=50,includeBots=false,selected='',excludedBotLogins:readonly string[]=[],exclude=''){
+    if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>50||search.length>256)throw Error('INVALID_PERSON_PAGE');
+    this.db.function('sp_options_lower',{deterministic:true},(v:unknown)=>String(v??'').toLowerCase());
+    const bots=this.botJson(excludedBotLogins),term=candidateKey(search);
+    const query=`WITH options AS (SELECT p.id,p.display_name,
+      (SELECT group_concat(DISTINCT source) FROM (SELECT source FROM identities WHERE person_id=p.id UNION SELECT 'youtube' source FROM youtube_identities WHERE person_id=p.id)) sources,
+      CASE WHEN EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND i.match_key IN(SELECT value FROM json_each(?))) OR EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?)))) THEN 1 ELSE 0 END is_bot
+      FROM persons p WHERE NOT EXISTS(SELECT 1 FROM person_merges m WHERE m.source_person_id=p.id AND m.undone_at_ms IS NULL)) SELECT * FROM options WHERE (?=1 OR is_bot=0) AND id<>?`;
+    const filter=` AND (?='' OR instr(sp_options_lower(display_name),sp_options_lower(?))>0 OR EXISTS(SELECT 1 FROM identities i LEFT JOIN identity_aliases a ON a.identity_id=i.id WHERE i.person_id=options.id AND (instr(i.match_key,?)>0 OR instr(a.candidate_key,?)>0)) OR EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=options.id AND (instr(y.match_key,?)>0 OR instr(a.match_key,?)>0)))`;
+    const args=[bots,bots,bots,Number(includeBots),exclude,search,search,term,term,term,term];
+    const items=this.db.prepare(query+filter+' ORDER BY display_name,id LIMIT ? OFFSET ?').all(...args,limit,offset) as {id:string;display_name:string;sources:string|null;is_bot:number}[];
+    const total=(this.db.prepare('SELECT count(*) n FROM ('+query+filter+')').get(...args) as {n:number}).n;
+    const selectedItem=selected?this.db.prepare(query+' AND id=?').get(bots,bots,bots,Number(includeBots),exclude,selected) as typeof items[number]|undefined:undefined;
+    return {items,total,offset,limit,selectedItem:selectedItem??null};
+  }
+
   persons(search = "", excludedBotLogins: readonly string[] = [], fromMs=0): Record<string, unknown>[] {
     return this.personRows(search, excludedBotLogins, fromMs, 0, 500, false).map(({_total, ...person}) => person);
   }

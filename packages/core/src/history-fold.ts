@@ -1,3 +1,4 @@
+import {coreSessions} from './core-classification.js';
 import {unionSpans,type audienceAnalytics} from './analytics.js';
 import {HistoryTimeline,type TimelineState} from './history-timeline.js';
 import {InsightAccumulator,type InsightState} from './insights.js';
@@ -42,7 +43,8 @@ export function streamFold(report:Report&{clockBuckets?:TimeAudienceSummary[]},t
 export function mergeHistory(left:HistoryFold,right:HistoryFold,timezone:string):HistoryFold {
  const people=new Map(left.people.map(p=>[p.id,p]));
  for(const p of right.people){const row=people.get(p.id);if(!row){people.set(p.id,p);continue;}
-  for(const field of ['messages','visits','observedMinutes','estimatedChatMinutes','activityMinutes','sessionCount','attendanceCount','coreAttendanceCount'] as const)row[field]+=p[field];
+  for(const field of ['messages','visits','observedMinutes','estimatedChatMinutes','activityMinutes','sessionCount','attendanceCount'] as const)row[field]+=p[field];
+  Object.assign(row,coreSessions([...row.coreSessionIds,...p.coreSessionIds],row.coreAttendanceCount+p.coreAttendanceCount));
   row.sources=[...new Set([...row.sources,...p.sources])];row.accounts=[...new Map([...row.accounts,...p.accounts].map(a=>[a.source+':'+a.name,a])).values()];
   for(const field of ['sessionIds','attendanceSessionIds','intervals','messageMinutes'] as const)(row[field] as unknown[])=[...row[field],...p[field]].slice(-100);
   money(row.donations,p.donations);

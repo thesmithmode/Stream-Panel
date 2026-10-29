@@ -31,6 +31,16 @@ const tracked:readonly Spec[]=[
  ['youtube_publications','subscribers','account_id,video_id,title,published_at_ms,kind'],
  ['youtube_snapshots','subscribers','account_id,key,payload_json',r=>`${r}.key IN('channel','report')`],
 ];
+/** Additive metadata versions; safe to initialize on existing version-28 profiles. */
+export const analyticsPresentationSchema=`
+INSERT OR IGNORE INTO ui_revisions(domain) VALUES('analyticsPresentation');
+${[['person_preferences','person_id,manual_core'],['person_tags','person_id,label'],['collection_gaps','source,started_at_ms,ended_at_ms']].flatMap(([table,columns])=>['INSERT','UPDATE','DELETE'].map(op=>{
+ const changed=op==='UPDATE'?columns!.split(',').map(c=>`OLD.${c} IS NOT NEW.${c}`).join(' OR '):'';
+ const relevant=table==='collection_gaps'?(op==='UPDATE'?"OLD.source IN('twitch','youtube') OR NEW.source IN('twitch','youtube')":`${op==='DELETE'?'OLD':'NEW'}.source IN('twitch','youtube')`):'';
+ const guard=[changed,relevant].filter(Boolean).map(v=>'('+v+')').join(' AND ');
+ return `CREATE TRIGGER IF NOT EXISTS presentation_${table}_${op.toLowerCase()} AFTER ${op} ON ${table} ${guard?'WHEN '+guard:''} BEGIN UPDATE ui_revisions SET revision=revision+1 WHERE domain='analyticsPresentation'; END;`;
+})).join('\n')}
+`;
 export const changeRevisionSchema=`
 CREATE TABLE IF NOT EXISTS ui_revisions(domain TEXT PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;
 INSERT OR IGNORE INTO ui_revisions(domain) VALUES('activity'),('people'),('donations'),('follows'),('subscribers');
@@ -41,5 +51,6 @@ ${tracked.flatMap(([table,domain,columns,guard])=>['INSERT','UPDATE','DELETE'].m
  const when=[changed,relevant].filter(Boolean).map(x=>`(${x})`).join(' AND ');
  return `CREATE TRIGGER IF NOT EXISTS ui_${domain}_${table}_${operation.toLowerCase()} AFTER ${operation} ON ${table} ${when?'WHEN '+when:''} BEGIN UPDATE ui_revisions SET revision=revision+1 WHERE domain='${domain}'; END;`;
 })).join('\n')}
+${analyticsPresentationSchema}
 PRAGMA user_version=26;
 `;
