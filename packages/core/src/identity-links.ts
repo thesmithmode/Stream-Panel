@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import {randomUUID} from "node:crypto";
 import {assertTimestamp,candidateKey,matchKey,type Source} from "./domain.js";
+import {linkKey,sharedHolder} from "./shared-identity-keys.js";
 interface IdentityRow {id:string;person_id:string}
 interface Membership {id:string;personId:string}
 interface MergeRow {before_json:string;expected_json:string;source_person_id:string;target_person_id:string;undone_at_ms:number|null}
@@ -318,13 +319,16 @@ export class IdentityLinks {
    * Same-source DA fallback: if a Donor identity was not reused, attach a new
    * Donor row to an existing Person that already owns that DA match_key
    * (historical repair path). Prefer one Donor identity per name going forward.
+   * An account already grouped in another profile joins this profile's holder of that group.
    */
   resolveAutoLinkPerson(
     source: Source | "youtube",
     accountId: string,
-    _externalId: string,
+    externalId: string,
     displayName: string,
   ): { personId: string; how: string } | null {
+    const linked=this.sharedLinkPerson(source,externalId,displayName);
+    if(linked)return linked;
     const key = matchKey(displayName);
     if (!key) return null;
     if(["аноним","anonymous","anon"].includes(key)){
@@ -358,6 +362,13 @@ export class IdentityLinks {
         return { personId: same[0]!.person_id, how: "da_name_attach" };
     }
     return null;
+  }
+
+  /** The person of this profile that holds an account linked (in any profile) with this new account. */
+  sharedLinkPerson(source:Source|"youtube",externalId:string,displayName:string):{personId:string;how:string}|null {
+    const shared=linkKey(source,externalId,matchKey(displayName));
+    const holder=shared?sharedHolder(this.db,shared):null;
+    return holder?{personId:holder,how:"shared_link"}:null;
   }
 
   reconcileNicknameLinks(onlyKey?:string):void {

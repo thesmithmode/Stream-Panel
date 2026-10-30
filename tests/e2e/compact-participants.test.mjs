@@ -22,7 +22,10 @@ test('compact participants expand inline without empty space, preserve sorting a
   await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`[data-session-id="${sid}"] .stream-open`).click();await page.getByRole('tab',{name:'Участники',exact:true}).click();
   const rank=page.getByRole('region',{name:'Рейтинг участников'}),rows=rank.locator('.participant-row'),toggle=rank.getByRole('button',{name:'Интервалы AmaliyaMelina',exact:true}),details=rank.getByRole('region',{name:'Интервалы AmaliyaMelina',exact:true});
   await toggle.waitFor();assert.equal(await rows.count(),50);assert.equal(await rank.locator('.account-details,.accounts,.ranking-sort').count(),0);
-  assert.equal(await rank.getByText('Alias that should not repeat',{exact:true}).count(),0);
+  assert.equal(await rows.first().locator('.platform-nicks').count(),0,'a nickname equal to the only account is not repeated');
+  assert.equal(await rows.nth(1).locator('.platform-nicks span').textContent(),'Alias that should not repeat');
+  assert.equal(await rows.nth(1).locator('.platform-nicks span').evaluate(e=>getComputedStyle(e).color),'rgb(169, 112, 255)');
+  assert.equal(await rows.nth(2).locator('.platform-nicks span').evaluate(e=>getComputedStyle(e).color),'rgb(255, 89, 89)');
   assert.equal(await rank.getByRole('button',{name:'Интервалы Viewer 03',exact:true}).count(),0,'no empty disclosure when intervals are absent');
   assert.equal(await rows.nth(2).locator('.person-name').evaluate(e=>getComputedStyle(e).color),'rgb(255, 89, 89)');
   assert.equal(await rows.first().locator('.person-name').evaluate(e=>getComputedStyle(e).color),'rgb(169, 112, 255)');
@@ -37,6 +40,8 @@ test('compact participants expand inline without empty space, preserve sorting a
    assert.ok(Math.abs(nextAfter.y-nextBefore.y-detailRow.height)<2,'the next participant moves by exactly the expanded content height');
    assert.equal(await rank.locator('.interval-detail td').getAttribute('colspan'),width<=720?'3':'6');
    assert.equal(await details.locator('.interval-row').count(),3);
+   if(width>720){await details.getByText('Twitch · AmaliyaMelina',{exact:true}).first().waitFor();await details.getByText('YouTube · оценка',{exact:true}).waitFor();}
+   else assert.equal(await details.locator('.phone-nick').first().textContent(),'AmaliyaMelina');
    await details.locator(width<=720?'.phone-gap':'.interval-gap').filter({hasText:width<=720?'пауза 2м':'Пауза Twitch · 2 мин'}).waitFor();
    assert.ok(detailRow.height<= (width<=720?106:80),`intervals stay compact at ${width}px: ${detailRow.height}`);
    const columns=await rank.evaluate(el=>{
