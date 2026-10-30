@@ -34,17 +34,20 @@ export class SharedIdentities {
   private joined():Set<string> {
     return new Set((this.raw.prepare("SELECT profile FROM sp_identity_sync_profiles").all() as {profile:string}[]).map(row=>row.profile));
   }
+  private applied():Set<string> {
+    return new Set((this.raw.prepare("SELECT profile FROM sp_identity_sync_applied").all() as {profile:string}[]).map(row=>row.profile));
+  }
 
   /** Cheap check before taking the write lock. */
   pending():boolean {
-    const joined=this.joined();
-    return this.profiles().some(p=>!joined.has(p.name)||p.db.prepare("SELECT 1 FROM identity_sync_queue LIMIT 1").get()!==undefined);
+    const joined=this.joined(),applied=this.applied();
+    return this.profiles().some(p=>!joined.has(p.name)||!applied.has(p.name)||p.db.prepare("SELECT 1 FROM identity_sync_queue LIMIT 1").get()!==undefined);
   }
 
   /** Applies every queued membership change to all profiles. Returns the profiles whose persons changed. */
   sync(hint:SyncHint={}):string[] {
     return this.raw.transaction(()=>{
-      const profiles=this.profiles(),joined=this.joined(),now=Date.now();
+      const profiles=this.profiles(),joined=this.joined(),applied=this.applied(),now=Date.now();
       const changed=new Set<string>(),moved=new Set<string>(),names=new Map<string,string>(),touched=new Set<string>();
       for(const profile of profiles){
         if(joined.has(profile.name)){
@@ -55,11 +58,18 @@ export class SharedIdentities {
           this.join(profile,now,changed);
           this.raw.prepare("INSERT INTO sp_identity_sync_profiles VALUES (?,?)").run(profile.name,now);
         }
+        // An unchanged journal does not mean this profile already follows it.
+        // Reconcile once per profile, including files opened by the early v29
+        // implementation; normal writes still process only changed keys.
+        if(!applied.has(profile.name))for(const row of profile.db.prepare("SELECT DISTINCT link_key FROM identity_link_keys").all() as {link_key:string}[])changed.add(row.link_key);
       }
       if(changed.size)for(const profile of profiles){
         if(this.conform(profile,changed,moved,names,now))touched.add(profile.name);
       }
-      for(const profile of profiles)profile.db.prepare("DELETE FROM identity_sync_queue").run();
+      for(const profile of profiles){
+        profile.db.prepare("DELETE FROM identity_sync_queue").run();
+        if(!applied.has(profile.name))this.raw.prepare("INSERT INTO sp_identity_sync_applied VALUES (?)").run(profile.name);
+      }
       return [...touched];
     }).immediate();
   }

@@ -5,7 +5,11 @@ export const SHARED_IDENTITY_VERSION=29;
  * an account without a row is linked to nothing. */
 export const sharedIdentityTables=`CREATE TABLE IF NOT EXISTS sp_identity_links(link_key TEXT PRIMARY KEY,cluster TEXT NOT NULL,updated_at_ms INTEGER NOT NULL) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS sp_identity_links_cluster ON sp_identity_links(cluster,link_key);
-CREATE TABLE IF NOT EXISTS sp_identity_sync_profiles(profile TEXT PRIMARY KEY,joined_at_ms INTEGER NOT NULL) STRICT;`;
+CREATE TABLE IF NOT EXISTS sp_identity_sync_profiles(profile TEXT PRIMARY KEY,joined_at_ms INTEGER NOT NULL) STRICT;
+-- Separate from publication: early v29 could mark a profile joined without
+-- applying links already published by a profile opened earlier. Additive state
+-- also lets those existing v29 files reconcile once without changing facts.
+CREATE TABLE IF NOT EXISTS sp_identity_sync_applied(profile TEXT PRIMARY KEY) WITHOUT ROWID;`;
 // Global account keys: Twitch user id, YouTube channel id, normalized DonationAlerts nickname
 // (the same match_key the donor binding and auto-link code use). Manual/correction ledger
 // identities and the anonymous donor are profile bookkeeping, never shared.
