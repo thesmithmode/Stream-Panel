@@ -402,6 +402,7 @@ export class TwitchConnection {
       this.token.userId,
       string(body.login) || this.token.userId,
       Date.now(),
+      string(body.login) || undefined,
     );
   }
   async start(): Promise<void> {

@@ -4,7 +4,7 @@ import { botExclusionSet, isExcludedBot, normalizeBotLogin } from "../src/bots.j
 import { StreamStore } from "../src/store.js";
 
 test('each profile excludes its own broadcaster while counting the other broadcaster as a viewer',()=>{
- const viewers=[['ruslan-id','FullRandomName_Twitch'],['gulnaz-id','AmaliaMelina']] as const;
+ const viewers=[['ruslan-id','rlod'],['gulnaz-id','AmaliaMelina']] as const;
  const at=Date.UTC(2026,9,11,12);
  for(const [profile,owner,guest] of [['ruslan',viewers[0],viewers[1]],['gulnaz',viewers[1],viewers[0]]] as const){
   const store=new StreamStore(':memory:',profile);

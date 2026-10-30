@@ -139,8 +139,8 @@ test('excluded owner donations stay in raw history but never inflate summary or 
     const s = new StreamStore(':memory:');
     try {
         recordedStream(s,'channel', 'donations', base, 'platform', base);
-        s.ensureOwnerIdentity('owner','owner','fullrandomname_twitch',base);
-        for (const [n, name] of ['fullrandomname_twitch', 'RealDonor'].entries())
+        s.ensureOwnerIdentity('owner','owner','rlod',base);
+        for (const [n, name] of ['rlod', 'RealDonor'].entries())
             s.ingest({ source: 'donationalerts', accountId: 'da', externalId: String(n), type: 'donation', actor: { externalId: daDonorExternalId(name), displayName: name }, occurredAtMs: base + minute, receivedAtMs: base + minute, sourceTime: null, timeQuality: 'configured', transport: 'rest', payload: { amountMinor: '500', currency: 'RUB' } });
         const summary = s.summary();
         assert.equal(summary.donations, 1);

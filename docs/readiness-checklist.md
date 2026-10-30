@@ -13,7 +13,7 @@
 | YouTube: OAuth PKCE, live chat, история курсоров, отчёты своего канала, общая квота | YouTube tests; нужна авторизация своего аккаунта |
 | Категория, заголовок и счётчики эфира из Twitch | `stream_samples`, Twitch reconcile, analytics tests |
 | Отдельная аналитика, ядро, категории, дни/часы, возвращения и минутные сигналы | `analytics.ts`, `Analytics.svelte`, `TrendChart.svelte`; core + browser tests |
-| Исключения владельцев и ботов из персональной статистики | ID владельца + имена/aliases; тесты с переименованным owner, jeetbot, fullrandomname_twitch, обеими формами StreamElements |
+| Исключения владельцев и ботов из персональной статистики | Постоянный ID владельца внутри профиля + связанные аккаунты; переименование в rlod/rlod_yt, учёт в чужом профиле, jeetbot и обе формы StreamElements |
 | Полный пустой опрос отличается от сбоя/неизвестности; оценка YouTube помечена отдельно | Presence/analytics tests + UI; личного времени просмотра API не предоставляет |
 | Шифрованная локальная копия обоих профилей и restore с отзывом сессий; cloud upload в Supabase — optional | `backup.ts`, backup tests; download/restore проверяются после deployment |
 | Server-only Linux amd64 bundle, привязанный к SHA; Bootstrap и Deploy повторно используют CI artifact с retention 30 дней | Quality gate artifact + `ops/receive.py`; проверка точного SHA в Actions |
