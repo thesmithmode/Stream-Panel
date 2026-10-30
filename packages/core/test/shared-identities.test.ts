@@ -102,7 +102,7 @@ test('rollout joins existing groups of every profile once, idempotently, and reb
  // Rewind the file to schema 28 and group ruslan's accounts the way an earlier manual merge did.
  const db=new Database(path);let stable:unknown,affected:unknown;
  try{
-  db.exec('DROP TABLE sp_identity_links;DROP TABLE sp_identity_sync_profiles;UPDATE sp_profile_schema SET version=28');
+  db.exec('DROP TABLE sp_identity_links;DROP TABLE sp_identity_sync_profiles;DROP TABLE sp_identity_sync_applied;UPDATE sp_profile_schema SET version=28');
   for(const profile of ['ruslan','gulnaz']){
    for(const {name,type} of db.prepare(`SELECT name,type FROM sqlite_master WHERE type IN ('trigger','view','index') AND (name LIKE 'p_${profile}_identity_sync%' OR name IN ('p_${profile}_identity_link_keys','p_${profile}_identities_external','p_${profile}_youtube_identities_external'))`).all() as {name:string;type:string}[])
     db.exec(`DROP ${type.toUpperCase()} IF EXISTS "${name}"`);
@@ -188,3 +188,60 @@ test('a single-profile or legacy store keeps working without shared groups',()=>
  try{const one=tw(s,'700','solo'),two=yt(s,'UCsolo','Solo YT');merge(s,two,one);assert.deepEqual(s.syncSharedIdentities(),[]);assert.equal(personOf(s,'youtube:UCsolo'),one);}
  finally{s.close();}
 });
+
+// Hosted startup opens ruslan before gulnaz. A profile whose keys are already in
+// the journal must still apply those links, even when publishing changes no keys.
+for(const order of [['ruslan','gulnaz'],['gulnaz','ruslan']] as const)for(const version of [28,29]){
+ test(`existing v${version} groups converge with ${order.join(' then ')} startup and cached stream reports`,()=>{
+  const {path,done}=files();let a=new StreamStore(path,'ruslan'),b=new StreamStore(path,'gulnaz');
+  const ids:string[]=[],people:string[]=[],before:ReturnType<StreamStore['analytics']>[]=[],query={fromMs:0,toMs:at+86400000,youtubeAccount:'yt-owner',ownerId:'owner'};
+  try{
+   for(const [index,store] of [a,b].entries()){
+    const id=store.startSession('owner',`startup-${index}`,at,'platform',at);ids.push(id);
+    store.attachPlatformStream(id,'youtube','yt-owner',`video-${index}`,at,at,null,'Video');
+    const person=tw(store,'startup-viewer','Twitch viewer',at+minute);people.push(person);
+    yt(store,'UCstartup','YouTube viewer',at+minute);
+    store.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+(index+2)*minute,status:'complete',userIds:['startup-viewer']});
+    store.createDonation({personId:person,amount:String(index+1),currency:'RUB',occurredAtMs:at+minute,message:'',sourceName:'Cash'},at+minute);
+    store.endSession(id,at+10*minute);
+    before.push(store.analytics({...query,sessionId:id}));
+    assert.equal(before[index]!.audience.length,2);
+   }
+   a.close();b.close();
+   const db=new Database(path);
+   try{
+    // Reproduce the pre-release local grouping: only ruslan joined these accounts.
+    db.prepare('UPDATE p_ruslan_youtube_identities SET person_id=?').run(people[0]);
+    db.exec('DELETE FROM sp_identity_links;DELETE FROM p_ruslan_identity_sync_queue;DELETE FROM p_gulnaz_identity_sync_queue');
+    db.exec('DROP TABLE IF EXISTS sp_identity_sync_applied');
+    if(version===28){
+     db.exec('DROP TABLE sp_identity_links;DROP TABLE sp_identity_sync_profiles;UPDATE sp_profile_schema SET version=28');
+     for(const profile of ['ruslan','gulnaz']){
+      for(const row of db.prepare("SELECT name,type FROM sqlite_master WHERE type IN ('trigger','view','index') AND (name LIKE ? OR name IN (?,?,?))").all(`p_${profile}_identity_sync%`,`p_${profile}_identity_link_keys`,`p_${profile}_identities_external`,`p_${profile}_youtube_identities_external`) as {name:string;type:string}[])
+       db.exec(`DROP ${row.type.toUpperCase()} IF EXISTS "${row.name}"`);
+      db.exec(`DROP TABLE p_${profile}_identity_sync_queue`);
+     }
+    }else{
+     // The shipped v29 bug marked both profiles joined but left gulnaz split.
+     db.prepare('INSERT INTO sp_identity_links VALUES(?,?,?)').run('twitch:startup-viewer','startup-cluster',at);
+     db.prepare('INSERT INTO sp_identity_links VALUES(?,?,?)').run('youtube:UCstartup','startup-cluster',at);
+    }
+   }finally{db.close();}
+   const opened=order.map(profile=>new StreamStore(path,profile));
+   a=opened[order.indexOf('ruslan') as 0|1]!;b=opened[order.indexOf('gulnaz') as 0|1]!;
+   for(const [index,store] of [a,b].entries()){
+    assert.equal(personOf(store,'twitch:startup-viewer'),personOf(store,'youtube:UCstartup'));
+    const report=store.analytics({...query,sessionId:ids[index]!});
+    assert.equal(report.audience.length,1);
+    assert.equal(report.summary.messages,before[index]!.summary.messages);
+    assert.equal(report.audience[0]!.observedMinutes,before[index]!.audience.find(p=>p.observedMinutes>0)!.observedMinutes);
+    assert.deepEqual(report.audience[0]!.donations,{RUB:String((index+1)*100)});
+   }
+   const snapshot=[groups(a),groups(b),a.changeStamp(),b.changeStamp()];
+   a.syncSharedIdentities();b.syncSharedIdentities();
+   a.close();b.close();a=new StreamStore(path,'ruslan');b=new StreamStore(path,'gulnaz');
+   assert.deepEqual([groups(a),groups(b),a.changeStamp(),b.changeStamp()],snapshot);
+   for(let i=0;i<3;i++){assert.deepEqual(a.syncSharedIdentities(),[]);assert.deepEqual(b.syncSharedIdentities(),[]);}
+  }finally{a.close();b.close();done();}
+ });
+}
