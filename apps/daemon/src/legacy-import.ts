@@ -41,7 +41,8 @@ export async function migrateLegacy(source:string,destination:string) {
     // Copy permanent keys verbatim, without allocating replacements during fact import.
     for(const trigger of recreate)db.exec(`DROP TRIGGER "${trigger.name}"`);
     for(const object of auxiliary)db.exec(`DROP ${object.type} IF EXISTS "${object.name}"`);
-    for(const table of actualTables.filter(name=>!name.startsWith('analytics_'))){
+    // The shared account-group queue is refilled by the profile's identity triggers while importing.
+    for(const table of actualTables.filter(name=>!name.startsWith('analytics_')&&name!=='identity_sync_queue')){
      // This metadata is seeded by the schema; import the original counters verbatim.
      if(table==='ui_revisions')db.exec('DELETE FROM p_ruslan_ui_revisions');
      counts[table]=(db.prepare(`SELECT count(*) AS n FROM "${table}"`).get() as {n:number}).n;

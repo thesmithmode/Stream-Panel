@@ -2,7 +2,7 @@
  import Help from './Help.svelte';
  import Icon from './Icon.svelte';
  import {platformClass} from './period';
- import {type RankPerson,presenceMinutes,rankTable,intervalRows,durationLabel} from './audience-ranking';
+ import {type RankPerson,presenceMinutes,rankTable,intervalRows,durationLabel,platformNicknames,intervalSource} from './audience-ranking';
  import {intervalRange} from './stream-time';
  import {money} from './api';
  let {people,onPerson,showIntervals=false,streamStart=0,streamEnd=0}:{people:RankPerson[];onPerson:(id:string)=>void;showIntervals?:boolean;streamStart?:number;streamEnd?:number}=$props();
@@ -20,7 +20,7 @@
   const rows=intervalRows(person.intervals??[]);
   return [...new Set(rows.map(span=>span.kind))].map(kind=>rows.filter(span=>span.kind===kind));
  };
- const source=(kind:string)=>kind==='observed'?'Twitch':'YouTube · оценка';
+ const source=(kind:string,person:RankPerson)=>{const label=intervalSource(kind,person.accounts);return [label.platform,label.nick,label.estimate?'оценка':''].filter(Boolean).join(' · ');};
 </script>
 <svelte:window bind:innerWidth={viewport}/>
 <section class="panel audience-ranking" aria-label="Рейтинг участников">
@@ -37,7 +37,8 @@
    {@const regionId=`${id}-intervals-${person.id}`}
    {@const hasIntervals=showIntervals&&!!person.intervals?.length}
    <tr class="participant-row" class:expanded={expanded.has(person.id)&&hasIntervals}>
-    <td><button class={`text-button person-name ${platformClass(person.accounts?.map(a=>a.source))}`} title={person.name} onclick={()=>onPerson(person.id)}>{person.name}</button>
+    <td><button class={`text-button person-name ${platformClass(person.accounts?.map(a=>a.source))}`} class:with-nicks={platformNicknames(person).length>0} title={person.name} onclick={()=>onPerson(person.id)}>{person.name}</button>
+     {#if platformNicknames(person).length}<div class="platform-nicks">{#each platformNicknames(person) as account}<span class:twitch={account.source==='twitch'} class:youtube={account.source==='youtube'} title={`${account.source==='twitch'?'Twitch':'YouTube'} · ${account.name}`}>{account.name}</span>{/each}</div>{/if}
      {#if currencies.some(c=>BigInt(person.donations?.[c]??'0')!==0n)}<div class="phone-donations">{#each currencies as c}{#if BigInt(person.donations?.[c]??'0')!==0n}<span>{money(person.donations![c]!,c)}</span>{/if}{/each}</div>{/if}
     </td>
     <td class:with-disclosure={showIntervals}>{#if hasIntervals}<button class="interval-toggle" aria-label={`Интервалы ${person.name}`} aria-expanded={expanded.has(person.id)} aria-controls={expanded.has(person.id)?regionId:undefined} onclick={()=>toggle(person.id)}><strong>{durationLabel(presenceMinutes(person))}</strong><Icon name="arrow" size={14}/></button>{:else}<strong class="plain-duration">{durationLabel(presenceMinutes(person))}</strong>{/if}</td>
@@ -49,10 +50,11 @@
      {#each groups(person) as spans}
       <ul class="platform-intervals">
        {#each spans as span,index}
+        {@const label=intervalSource(span.kind,person.accounts)}
         <li class="interval-row">
-         <small class="interval-source" class:twitch={span.kind==='observed'} class:youtube={span.kind!=='observed'} class:repeated={index>0}><span class="desktop-label">{source(span.kind)}</span><span class="phone-label">{span.kind==='observed'?'Twitch':'YT · оценка'}</span></small>
+         <small class="interval-source" class:twitch={span.kind==='observed'} class:youtube={span.kind!=='observed'} class:repeated={index>0} title={source(span.kind,person)}><span class="desktop-label">{source(span.kind,person)}</span><span class="phone-label">{label.platform==='Twitch'?'Twitch':'YT'}{label.estimate?' · оценка':''}{#if label.nick}<span class="phone-nick">{label.nick}</span>{/if}</span></small>
          <span class="interval-range">{intervalRange(span.from,span.to,streamStart,streamEnd)}</span>
-         <strong>{durationLabel((span.to-span.from)/60000)}{#if span.gap>0}<span class="phone-gap" title={`Пауза ${source(span.kind)} · ${durationLabel(span.gap/60000)}`}> · пауза {durationLabel(span.gap/60000).replaceAll(' мин','м').replaceAll(' ч','ч')}</span>{/if}</strong>
+         <strong>{durationLabel((span.to-span.from)/60000)}{#if span.gap>0}<span class="phone-gap" title={`Пауза ${source(span.kind,person)} · ${durationLabel(span.gap/60000)}`}> · пауза {durationLabel(span.gap/60000).replaceAll(' мин','м').replaceAll(' ч','ч')}</span>{/if}</strong>
          {#if span.gap>0}<span class="interval-gap" title="Промежуток без сохранённых сигналов площадки">Пауза {span.kind==='observed'?'Twitch':'YouTube'} · {durationLabel(span.gap/60000)}</span>{/if}
         </li>
        {/each}
@@ -73,6 +75,9 @@
  th button{background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0;min-height:44px;}
  td{font-size:13px;white-space:nowrap;font-variant-numeric:tabular-nums;}
  .person-name{display:block;max-width:100%;min-height:44px;font-size:14px;text-align:left;white-space:normal;overflow-wrap:anywhere;}
+ .person-name.with-nicks{min-height:30px;padding-top:6px;}
+ .platform-nicks{display:flex;flex-wrap:wrap;gap:0 8px;padding-bottom:6px;font-size:11px;line-height:14px;white-space:normal;overflow-wrap:anywhere;}
+ .phone-nick{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
  .twitch{color:var(--twitch,#a970ff)!important;}.youtube{color:var(--youtube,#ff5959)!important;}
  .interval-toggle{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-height:44px;width:100%;padding:0;border:0;background:none;font:inherit;color:var(--text);white-space:nowrap;}
  .interval-toggle :global(svg){transform:rotate(90deg);color:var(--muted);flex-shrink:0;}
@@ -84,7 +89,7 @@
  .interval-list{padding:2px 0;display:grid;gap:2px;}
  .platform-intervals{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;align-items:center;gap:2px 16px;}
  .interval-row{display:flex;align-items:baseline;gap:10px;min-height:26px;font-size:12px;}
- .interval-source{width:116px;flex:none;font-size:11px;white-space:nowrap;}
+ .interval-source{min-width:116px;max-width:280px;flex:none;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
  .interval-source.repeated{display:none;}
  .interval-range,.interval-row>strong{white-space:nowrap;}
  .interval-row>strong{font-size:12px;font-weight:500;}
@@ -97,6 +102,7 @@
   table{table-layout:fixed;}.desktop-label,.donation-column{display:none;}.phone-label{display:inline;}
   th,td{padding:4px 8px;}th:first-child{width:auto;}th:nth-child(2){width:106px;}th:nth-child(3){width:62px;}
   .person-name{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .platform-nicks{flex-wrap:nowrap;overflow:hidden;}.platform-nicks>span{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .interval-toggle{gap:5px;font-size:12px;}.interval-toggle strong,.plain-duration{font-weight:500;font-size:12px;}
   .message-count{font-size:13px;white-space:normal;overflow-wrap:anywhere;}.phone-donations{display:flex;gap:4px 8px;flex-wrap:wrap;color:var(--muted);font-size:11px;padding-bottom:4px;white-space:normal;overflow-wrap:anywhere;}
   .phone-donation-sort{display:flex;gap:4px 12px;flex-wrap:wrap;padding:0 12px 4px;}.phone-donation-sort button{min-height:36px;font-size:12px;}.phone-donation-sort button[aria-pressed=true]{color:var(--accent);}
@@ -104,7 +110,8 @@
   th.with-disclosure button{margin-right:19px;}td.with-disclosure .plain-duration{padding-right:19px;}
   .platform-intervals{display:grid;gap:0;}
   .interval-row{display:grid;grid-template-columns:76px minmax(0,1fr) auto;gap:2px 7px;min-height:28px;font-size:11px;align-items:baseline;}
-  .interval-source{width:auto;font-size:10px;}.interval-source.repeated{display:block;}
+  .interval-source{width:auto;min-width:0;max-width:none;font-size:10px;}.interval-source.repeated{display:block;}.interval-source.repeated .phone-nick{display:none;}
+  .phone-nick{line-height:11px;}
   .interval-row>strong{font-size:11px;text-align:right;}.interval-range{white-space:normal;overflow-wrap:anywhere;}
   .interval-gap{display:none;}.phone-gap{display:inline;color:var(--muted);font-size:9px;font-weight:400;}
 

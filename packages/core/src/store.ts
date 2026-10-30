@@ -8,6 +8,7 @@ import {RecentEvents,type RecentFilter} from './recent-events.js';
 export {priorModerationQuery} from "./event-ingestion.js";
 import {StreamSessions} from "./stream-sessions.js";
 import {IdentityLinks} from "./identity-links.js";
+import {SharedIdentities,type SyncHint} from "./shared-identities.js";
 import {AudienceQueries} from "./audience-queries.js";
 import {ProviderStorage} from "./provider-storage.js";
 import {messageMetadata} from "./message-storage.js";
@@ -46,6 +47,8 @@ export class StreamStore {
   private readonly streams:StreamSessions;
   private readonly links:IdentityLinks;
   private readonly queries:AudienceQueries;
+  private readonly shared:SharedIdentities|null;
+  private readonly sharedTouched=new Set<string>();
 
   constructor(path: string, private readonly profile?: string) {
     this.db = openProfileDatabase(path, profile);
@@ -56,6 +59,7 @@ export class StreamStore {
     this.links=new IdentityLinks(this.db,id=>this.annotations.personRevision(id));
     this.queries=new AudienceQueries(this.reads);
     this.eventIngestion=new EventIngestion(this.db,this.links,this.streams);
+    this.shared=profile===undefined?null:new SharedIdentities(this.db,profile);
     registerDonationSum(this.db);
     try {
       migrateDatabase(this.db);
@@ -64,6 +68,8 @@ export class StreamStore {
     this.records=new ChannelRecords(this.reads,(id,bots)=>({...this.streams.sessions(id,0,1,bots)[0],...this.history.recordMetrics(id,JSON.parse(bots) as string[])}));
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
       this.db.transaction(() => {this.collapseDuplicateDaDonors();this.reconcileNicknameLinks();}).immediate();
+      // Account groups are shared by all profiles: join them and apply the others' changes.
+      this.syncShared();
     } catch (error) {
       this.db.close();
       throw error;
@@ -133,8 +139,26 @@ export class StreamStore {
     sourceRevision: number,
     targetRevision: number,
     nowMs: number,
-  ) {return this.links.merge(sourceId,targetId,sourceRevision,targetRevision,nowMs);}
-  undoMerge(mergeId: string, nowMs: number) {return this.links.undoMerge(mergeId,nowMs);}
+  ) {return this.shareLinks({keep:targetId},()=>this.links.merge(sourceId,targetId,sourceRevision,targetRevision,nowMs));}
+  undoMerge(mergeId: string, nowMs: number) {
+    const target=(this.db.prepare("SELECT target_person_id AS id FROM person_merges WHERE id=?").get(mergeId) as {id:string}|undefined)?.id;
+    return this.shareLinks(target?{keep:target}:{},()=>this.links.undoMerge(mergeId,nowMs));
+  }
+  /** Runs one membership change and applies it to every profile in the same transaction. */
+  private shareLinks<T>(hint:SyncHint,run:()=>T):T {
+    if(!this.shared)return run();
+    return this.db.transaction(()=>{const result=run();this.syncShared(hint);return result;}).immediate();
+  }
+  private syncShared(hint:SyncHint={}):void {
+    if(this.shared)for(const profile of this.shared.sync(hint))this.sharedTouched.add(profile);
+  }
+  /** Applies pending shared account-group changes; returns the profiles whose persons changed since the last call. */
+  syncSharedIdentities():string[] {
+    if(this.shared?.pending())this.syncShared();
+    const touched=[...this.sharedTouched];
+    this.sharedTouched.clear();
+    return touched;
+  }
   collapseDuplicateDaDonors() {return this.links.collapseDuplicateDaDonors();}
   private resolveAutoLinkPerson(
     source: Source | "youtube",
@@ -157,9 +181,12 @@ export class StreamStore {
     name: string,
     sourceRevision: number,
     nowMs: number,
-  ) {return this.links.splitIdentities(ids,name,sourceRevision,nowMs);}
+  ) {
+    const source=(this.db.prepare("SELECT person_id AS id FROM identities WHERE id=? UNION ALL SELECT person_id FROM youtube_identities WHERE id=?").get(ids[0],ids[0]) as {id:string}|undefined)?.id;
+    return this.shareLinks(source?{keep:source}:{},()=>this.links.splitIdentities(ids,name,sourceRevision,nowMs));
+  }
   splits() {return this.links.splits();}
-  undoSplit(id: string, atMs: number) {return this.links.undoSplit(id,atMs);}
+  undoSplit(id: string, atMs: number) {return this.shareLinks({},()=>this.links.undoSplit(id,atMs));}
   merges() {return this.links.merges();}
   persons(
     search = "",
@@ -245,6 +272,18 @@ export class StreamStore {
     return this.db.prepare('SELECT b.name_key AS key,b.name,b.updated_at_ms AS at FROM donor_bindings b LEFT JOIN identities i ON i.id=b.identity_id WHERE coalesce(i.person_id,b.person_id)=? ORDER BY b.name').all(person) as {key:string;name:string;at:number}[];
   }
   bindDonorNickname(person:string,name:string,revision:number,at:number){
+    const shared=this.shared;
+    if(!shared)return this.bindDonorNicknameHere(person,name,revision,at);
+    return this.db.transaction(()=>{
+      // The group that loses the nickname keeps its other shared accounts.
+      const previous=(this.db.prepare("SELECT person_id AS id FROM identities WHERE source='donationalerts' AND match_key=? AND person_id<>? ORDER BY id LIMIT 1").get(matchKey(name),person) as {id:string}|undefined)?.id;
+      const result=this.bindDonorNicknameHere(person,name,revision,at);
+      this.syncShared(previous?{keep:previous}:{});
+      for(const profile of shared.shareDonorBinding(matchKey(name),name.trim(),at))this.sharedTouched.add(profile);
+      return result;
+    }).immediate();
+  }
+  private bindDonorNicknameHere(person:string,name:string,revision:number,at:number){
     assertTimestamp(at);const key=matchKey(name);
     if(!key||name.length>200||['аноним','anonymous','anon'].includes(key))throw new Error('INVALID_DONOR_NICKNAME');
     return this.db.transaction(()=>{
@@ -539,7 +578,7 @@ export class StreamStore {
           | undefined;
         if (!identity) {
           const name=poll.userNames?.[userId] || userId;
-          const linked=poll.userNames?.[userId]?this.resolveAutoLinkPerson("twitch",accountId,userId,name):null;
+          const linked=poll.userNames?.[userId]?this.resolveAutoLinkPerson("twitch",accountId,userId,name):this.links.sharedLinkPerson("twitch",userId,"");
           const personId = linked?.personId??randomUUID();
           identity = { id: randomUUID() };
           if(!linked)insertPerson.run(personId, name);

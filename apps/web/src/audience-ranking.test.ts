@@ -25,3 +25,14 @@ test('table combines overlapping platforms, retains zero rows, sorts exact curre
  assert.equal(intervalRows(intervals)[2].gap,180000);
  assert.equal(durationLabel(80),'1 ч 20 мин');assert.equal(durationLabel(60),'1 ч');assert.equal(durationLabel(0),'0 мин');
 });
+import {platformNicknames,intervalSource} from './audience-ranking.ts';
+test('platform nicknames appear only when they add something to the group name and label interval groups',()=>{
+ const tw={source:'twitch',name:'chikist007'},yt={source:'youtube',name:'@egorbarinov6515'};
+ assert.deepEqual(platformNicknames({id:'a',name:'chikist007',accounts:[tw]}),[]);
+ assert.deepEqual(platformNicknames({id:'a',name:'Егор4ик',accounts:[tw]}),[tw]);
+ assert.deepEqual(platformNicknames({id:'a',name:'chikist007',accounts:[tw,tw,yt,{source:'donationalerts',name:'Егор4ик'},{source:'twitch',name:''}]}),[tw,yt]);
+ assert.deepEqual(platformNicknames({id:'a',name:'x'}),[]);
+ assert.deepEqual(intervalSource('observed',[tw,yt]),{platform:'Twitch',nick:'chikist007',estimate:false});
+ assert.deepEqual(intervalSource('chat_proxy',[tw,yt,{source:'youtube',name:'Second'}]),{platform:'YouTube',nick:'@egorbarinov6515, Second',estimate:true});
+ assert.deepEqual(intervalSource('chat_proxy',undefined),{platform:'YouTube',nick:'',estimate:true});
+});

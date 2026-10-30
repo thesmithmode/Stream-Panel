@@ -31,6 +31,21 @@ export function intervalRows(intervals:NonNullable<RankPerson['intervals']>){
   return {...span,gap:previous===undefined?0:Math.max(0,span.from-previous)};
  });
 }
+type Account=NonNullable<RankPerson['accounts']>[number];
+const platforms=(accounts:RankPerson['accounts'])=>{
+ const seen=new Set<string>();
+ return (accounts??[]).filter(a=>(a.source==='twitch'||a.source==='youtube')&&a.name&&!seen.has(`${a.source}\n${a.name}`)&&seen.add(`${a.source}\n${a.name}`));
+};
+/** Platform nicknames under a group name: only when they add something to the name. */
+export function platformNicknames(person:RankPerson):Account[] {
+ const accounts=platforms(person.accounts);
+ return accounts.length>1||(accounts.length===1&&accounts[0]!.name!==person.name)?accounts:[];
+}
+/** Interval group label: platform, its nicknames in this group, and whether time is an estimate. */
+export function intervalSource(kind:string,accounts:RankPerson['accounts']):{platform:'Twitch'|'YouTube';nick:string;estimate:boolean}{
+ const source=kind==='observed'?'twitch':'youtube';
+ return {platform:source==='twitch'?'Twitch':'YouTube',nick:platforms(accounts).filter(a=>a.source===source).map(a=>a.name).join(', '),estimate:source==='youtube'};
+}
 export function durationLabel(minutes:number):string {
  const rounded=Math.max(0,Math.round(minutes));
  return rounded>=60?`${Math.floor(rounded/60)} ч${rounded%60?` ${rounded%60} мин`:''}`:`${rounded} мин`;
