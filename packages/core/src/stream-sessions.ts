@@ -9,6 +9,19 @@ import {windowsFromLinks,sessionBreaks} from "./session-windows.js";
 export class StreamSessions {
   constructor(private readonly db:Database.Database, private readonly reads:Database.Database=db) {}
 
+  /** OAuth supplies the current login; completed broadcasts keep their original facts. */
+  refreshTwitchChannelLinks(accountId:string,login:string):void {
+    if(!/^[A-Za-z0-9_]{1,25}$/.test(login))throw new Error('INVALID_TWITCH_LOGIN');
+    const current=`https://www.twitch.tv/${login}`;
+    const urls=this.db.prepare("SELECT DISTINCT url FROM platform_streams WHERE platform='twitch' AND account_id=? AND url IS NOT NULL AND url<>?").all(accountId,current) as {url:string}[];
+    for(const {url} of urls){
+      if(!this.validPlatformStreamUrl('twitch',url))continue;
+      // Channel links change on rename; VODs, clips and other paths do not.
+      if(!/^\/[A-Za-z0-9_]+\/?$/.test(new URL(url).pathname))continue;
+      this.db.prepare("UPDATE platform_streams SET url=? WHERE platform='twitch' AND account_id=? AND url=?").run(current,accountId,url);
+    }
+  }
+
   assignEvent(id: string, accountId: string, atMs: number): void {
     // v1 has one Twitch channel: known-time DA facts share that channel's session.
     const source = (

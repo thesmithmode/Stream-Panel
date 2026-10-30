@@ -11,10 +11,11 @@ test("stream history shows only confirmed Twitch and YouTube links from the plat
   let browser;
   try {
     const now = Date.now(), base = now - 120000;
-    const bothId = await a.db.call("observePlatformStream", "twitch", "twitch-channel", "twitch-stream", base, base + 60000, "https://www.twitch.tv/channel", "Combined platform stream");
+    const bothId = await a.db.call("observePlatformStream", "twitch", "twitch-channel", "twitch-stream", base, base + 60000, "https://www.twitch.tv/Fullrandomname_twitch", "Combined platform stream");
     assert.ok(bothId);
     assert.equal(await a.db.call("observePlatformStream", "youtube", "youtube-channel", "combined-video", base + 30000, base + 61000, "https://www.youtube.com/watch?v=combined-video", "Combined platform stream"), bothId);
     await a.db.call("endSession", bothId, base + 90000, "observed");
+    await a.db.call('ensureOwnerIdentity','twitch-channel','twitch-channel','rlod',now,'rlod');
 
     const youtubeOnlyId = await a.db.call("observePlatformStream", "youtube", "youtube-only-channel", "youtube-only-video", base + 120000, base + 180000, "https://www.youtube.com/watch?v=youtube-only-video", "YouTube only stream");
     assert.ok(youtubeOnlyId);
@@ -38,7 +39,7 @@ test("stream history shows only confirmed Twitch and YouTube links from the plat
     assert.deepEqual(combined.platforms, ["twitch", "youtube"]);
     assert.equal(combined.primaryTitle, "Combined platform stream");
     assert.deepEqual(combined.confirmedUrls, [
-      { platform: "twitch", url: "https://www.twitch.tv/channel" },
+      { platform: "twitch", url: "https://www.twitch.tv/rlod" },
       { platform: "youtube", url: "https://www.youtube.com/watch?v=combined-video" },
     ]);
     const youtubeOnly = sessions.find(session => session.id === youtubeOnlyId);
@@ -55,7 +56,7 @@ test("stream history shows only confirmed Twitch and YouTube links from the plat
     const bothRow = page.locator(".stream-card").filter({ hasText: "Combined platform stream" });
     assert.equal(await bothRow.locator(".stream-platforms").textContent(), "Twitch · YouTube");
     await bothRow.locator(".stream-actions summary").click();
-    for (const [label, url] of [["Twitch", "https://www.twitch.tv/channel"], ["YouTube", "https://www.youtube.com/watch?v=combined-video"]]) {
+    for (const [label, url] of [["Twitch", "https://www.twitch.tv/rlod"], ["YouTube", "https://www.youtube.com/watch?v=combined-video"]]) {
       const link = bothRow.getByRole("link", { name: label, exact: true });
       assert.equal(await link.getAttribute("href"), url);
       assert.equal(await link.getAttribute("target"), "_blank");

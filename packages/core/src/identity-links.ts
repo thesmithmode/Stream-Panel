@@ -396,10 +396,13 @@ export class IdentityLinks {
     return this.db.transaction(() => {
       const existing = this.db
         .prepare(
-          "SELECT id, person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id=?",
+          "SELECT id, person_id, display_name FROM identities WHERE source='twitch' AND account_id=? AND external_id=?",
         )
-        .get(accountId, userId) as IdentityRow | undefined;
+        .get(accountId, userId) as (IdentityRow & {display_name:string}) | undefined;
       if (existing) {
+        // Earlier releases could update the identity but leave its card on an old alias.
+        this.db.prepare("UPDATE persons SET display_name=? WHERE id=? AND (display_name=? OR display_name IN(SELECT name FROM identity_aliases WHERE identity_id=?))")
+          .run(displayName,existing.person_id,existing.display_name,existing.id);
         this.db
           .prepare(
             "UPDATE identities SET display_name=?, candidate_key=?, match_key=? WHERE id=?",

@@ -172,7 +172,14 @@ export class StreamStore {
     userId: string,
     displayName: string,
     atMs: number,
-  ) {return this.links.ensureOwnerIdentity(accountId,userId,displayName,atMs);}
+    channelLogin?: string,
+  ) {
+    return this.db.transaction(()=>{
+      const person=this.links.ensureOwnerIdentity(accountId,userId,displayName,atMs);
+      if(channelLogin && accountId===userId)this.streams.refreshTwitchChannelLinks(accountId,channelLogin);
+      return person;
+    }).immediate();
+  }
   candidatePersons(name: string) {return this.links.candidatePersons(name);}
   eventCount(personId?: string) {return this.links.eventCount(personId);}
   private rememberAlias(identityId: string, name: string, nowMs: number) {return this.links.rememberAlias(identityId,name,nowMs);}
@@ -481,16 +488,19 @@ export class StreamStore {
     if (typeof externalId !== "string" || !/^[A-Za-z0-9_-]{1,256}$/.test(externalId)) return;
     const name = typeof author.displayName === "string" && author.displayName.trim()
       ? author.displayName.trim().slice(0,200) : externalId;
-    let identity = this.db.prepare("SELECT id,person_id FROM youtube_identities WHERE account_id=? AND external_id=?").get(account,externalId) as {id:string;person_id:string}|undefined;
+    let identity = this.db.prepare("SELECT id,person_id,display_name FROM youtube_identities WHERE account_id=? AND external_id=?").get(account,externalId) as {id:string;person_id:string;display_name:string}|undefined;
     if (!identity) {
       const prior = this.db.prepare("SELECT person_id FROM youtube_identities WHERE external_id=? ORDER BY id LIMIT 1").get(externalId) as {person_id:string}|undefined;
       const linked=this.resolveAutoLinkPerson("youtube",account,externalId,name);
       const personId = prior?.person_id ?? linked?.personId ?? `youtube:${externalId}`;
       this.db.prepare("INSERT OR IGNORE INTO persons VALUES (?,?,0)").run(personId,name);
-      identity = {id:`youtube:${account}:${externalId}`,person_id:personId};
+      identity = {id:`youtube:${account}:${externalId}`,person_id:personId,display_name:name};
       this.db.prepare("INSERT INTO youtube_identities VALUES (?,?,?,?,?,?,?)").run(identity.id,account,externalId,name,matchKey(name),personId,Number(author.isChatOwner===true));
       this.db.prepare("UPDATE persons SET revision=revision+1 WHERE id=?").run(personId);
-    } else this.db.prepare("UPDATE youtube_identities SET display_name=?,match_key=?,is_owner=MAX(is_owner,?) WHERE id=?").run(name,matchKey(name),Number(author.isChatOwner===true),identity.id);
+    } else {
+      this.db.prepare("UPDATE persons SET display_name=? WHERE id=? AND (display_name=? OR display_name IN(SELECT name FROM youtube_identity_aliases WHERE identity_id=?))").run(name,identity.person_id,identity.display_name,identity.id);
+      this.db.prepare("UPDATE youtube_identities SET display_name=?,match_key=?,is_owner=MAX(is_owner,?) WHERE id=?").run(name,matchKey(name),Number(author.isChatOwner===true),identity.id);
+    }
     this.db.prepare("INSERT INTO youtube_identity_aliases VALUES (?,?,?,?,?) ON CONFLICT(identity_id,name) DO UPDATE SET first_seen_ms=MIN(first_seen_ms,excluded.first_seen_ms),last_seen_ms=MAX(last_seen_ms,excluded.last_seen_ms)").run(identity.id,name,matchKey(name),at,at);
   }
   youtubeData(account: string) {

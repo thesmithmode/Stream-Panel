@@ -67,7 +67,8 @@ export class Configuration {
         ? this.value.excludedBotLogins
             .filter((v): v is string => typeof v === "string")
             .map((v) => v.trim())
-            // Remove the former universal self-exclusion from saved profiles.
+            // Keep the legacy spelling: remove the old universal self-exclusion,
+            // not the current channel login. Owners are excluded by ID per profile.
             .filter(v=>Boolean(v)&&normalizeBotLogin(v)!=='fullrandomname_twitch')
             .slice(0, 200)
         : [];
