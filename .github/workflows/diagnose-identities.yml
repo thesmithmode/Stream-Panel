@@ -1,7 +1,7 @@
 name: Read-only identity diagnostics
 on:
-  pull_request:
-    paths: [ops/diagnose-identities.py, .github/workflows/diagnose-identities.yml]
+  push:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
