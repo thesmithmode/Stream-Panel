@@ -401,7 +401,7 @@ export class IdentityLinks {
         .get(accountId, userId) as (IdentityRow & {display_name:string}) | undefined;
       if (existing) {
         // Earlier releases could update the identity but leave its card on an old alias.
-        this.db.prepare("UPDATE persons SET display_name=? WHERE id=? AND (display_name=? OR display_name IN(SELECT name FROM identity_aliases WHERE identity_id=?))")
+        this.db.prepare("UPDATE persons SET display_name=? WHERE id=? AND NOT EXISTS(SELECT 1 FROM person_names n WHERE n.person_id=persons.id) AND (display_name=? OR display_name IN(SELECT name FROM identity_aliases WHERE identity_id=?))")
           .run(displayName,existing.person_id,existing.display_name,existing.id);
         this.db
           .prepare(
@@ -487,6 +487,7 @@ export class IdentityLinks {
     name: string,
     sourceRevision: number,
     nowMs: number,
+    manualName=true,
   ): string {
     assertTimestamp(nowMs);
     if (
@@ -514,6 +515,7 @@ export class IdentityLinks {
       this.db
         .prepare("INSERT INTO persons VALUES (?, ?, 1)")
         .run(target, name.trim());
+      if(manualName)this.db.prepare('INSERT OR IGNORE INTO person_names VALUES (?)').run(target);
       for (const identity of all) {
         this.db
           .prepare("UPDATE identities SET person_id=? WHERE id=?")

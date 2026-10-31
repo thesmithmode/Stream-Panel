@@ -275,7 +275,7 @@ test(
       await page.locator('.stream-open').click();
       assert.equal(await page.locator('.stream-feed').count(),0);
       await page.getByRole('tab',{name:'Участники',exact:true}).click();await page.getByRole('region',{name:'Рейтинг участников'}).getByRole('button',{name:'Тестовый зритель',exact:true}).click();
-      await page.getByRole("tab", {name:"Аккаунты",exact:true}).click();await page.getByLabel("Имя группы").waitFor();
+      await page.getByRole("tab", {name:"Аккаунты",exact:true}).click();await page.getByLabel("Имя человека").waitFor();
       await page.getByRole("button", { name: "Стримы", exact: true }).click();
       await page.locator('.stream-open').click();
       assert.equal(await page.getByRole("button", {name:"К списку стримов",exact:true}).count(),1);

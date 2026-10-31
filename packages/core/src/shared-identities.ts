@@ -213,7 +213,7 @@ export class SharedIdentities {
     }
     const first=profile.db.prepare("SELECT display_name FROM identities WHERE id=? UNION ALL SELECT display_name FROM youtube_identities WHERE id=?").get(rows[0]!.id,rows[0]!.id) as {display_name:string};
     const name=(names.get(group)??first.display_name).trim().slice(0,200)||rows[0]!.link_key.slice(0,200);
-    const split=profile.links.splitIdentities([...ids],name,revision(profile.db,person),now);
+    const split=profile.links.splitIdentities([...ids],name,revision(profile.db,person),now,false);
     if(others.length===1)profile.links.merge(split,others[0]!,revision(profile.db,split),revision(profile.db,others[0]!),now);
   }
 
@@ -233,8 +233,9 @@ function revision(db:Database.Database,id:string):number {
 }
 /** A renamed group keeps its name; otherwise the person with most accounts (then a Twitch one) receives the others. */
 function rank(db:Database.Database,id:string):{manual:number;accounts:number;twitch:number} {
-  return db.prepare(`SELECT (SELECT display_name FROM persons WHERE id=?) NOT IN (SELECT display_name FROM identities WHERE person_id=? UNION SELECT display_name FROM youtube_identities WHERE person_id=?)
-      AND NOT EXISTS(SELECT 1 FROM split_guards WHERE target_person_id=? AND undone_at_ms IS NULL) AS manual,
+  const named=Number(db.pragma('user_version',{simple:true}))>=30;
+  return db.prepare(`SELECT (${named?'EXISTS(SELECT 1 FROM person_names WHERE person_id=?) OR':''} (SELECT display_name FROM persons WHERE id=?) NOT IN (SELECT display_name FROM identities WHERE person_id=? UNION SELECT display_name FROM youtube_identities WHERE person_id=?)
+      AND NOT EXISTS(SELECT 1 FROM split_guards WHERE target_person_id=? AND undone_at_ms IS NULL)) AS manual,
     (SELECT count(*) FROM identity_link_keys WHERE person_id=?) AS accounts,
-    EXISTS(SELECT 1 FROM identities WHERE person_id=? AND source='twitch') AS twitch`).get(id,id,id,id,id,id) as {manual:number;accounts:number;twitch:number};
+    EXISTS(SELECT 1 FROM identities WHERE person_id=? AND source='twitch') AS twitch`).get(...(named?[id]:[]),id,id,id,id,id,id) as {manual:number;accounts:number;twitch:number};
 }
