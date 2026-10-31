@@ -11,6 +11,10 @@ db.row_factory=sqlite3.Row
 db.execute('PRAGMA query_only=ON')
 print('integrity='+str(db.execute('PRAGMA quick_check').fetchone()[0]))
 print('foreign_key_errors='+str(len(db.execute('PRAGMA foreign_key_check').fetchall())))
+if db.execute("SELECT 1 FROM sqlite_master WHERE name='sp_auth_sessions'").fetchone():
+    print('panel_sessions='+json.dumps([dict(r) for r in db.execute('SELECT profile,count(*) sessions,min(expires_at_ms) first_expiry,max(expires_at_ms) last_expiry FROM sp_auth_sessions GROUP BY profile')]))
+runtime=subprocess.run(['systemctl','show','stream-panel','-p','NRestarts','-p','ActiveEnterTimestamp','-p','ExecMainStartTimestamp','-p','Result'],capture_output=True,text=True,timeout=10)
+print('runtime='+json.dumps(runtime.stdout.splitlines()))
 for profile in ('ruslan','gulnaz'):
     p='p_'+profile+'_'
     rows=db.execute(f'''SELECT s.id,s.started_at_ms,s.ended_at_ms,
@@ -30,13 +34,29 @@ import re
 logs=subprocess.run(['journalctl','-u','stream-panel','--since','-12 hours','-n','20000','--no-pager','-o','cat'],capture_output=True,text=True,timeout=20).stdout
 patterns=['SQLITE_[A-Z_]+','INVALID_STREAM_SAMPLE','INVALID_YOUTUBE_SESSION','UNKNOWN_OPERATION','STORAGE_FULL','DB_WORKER_[A-Z_]+','no such (?:table|column): [a-zA-Z0-9_.]+','[A-Za-z_]+ has [0-9]+ columns but [0-9]+ values were supplied','(?:dist|node_modules)/[a-zA-Z0-9_./-]+\\.(?:js|mjs|cjs):[0-9]+(?::[0-9]+)?']
 print('errors='+json.dumps({p:sorted(set(re.findall(p,logs))) for p in patterns}))
+print('runtime_events='+json.dumps({'serverReady':logs.count('Stream Panel server listening'),'heapLimitReached':'heap out of memory' in logs.lower(),'oomKilled':'oom-kill' in logs.lower()}))
 print('release='+Path('/opt/stream-panel/current').resolve().name)
 # Verify the deployed calculation against real samples, using a read-only handle.
 node_program=r'''
 import Database from 'better-sqlite3';
+import {readFileSync} from 'node:fs';
+import {dirname,join} from 'node:path';
+import {gunzipSync} from 'node:zlib';
+import {profileView} from './dist/packages/core/src/profile-db.js';
+import {logicalReadDatabase} from './dist/packages/core/src/session-groups.js';
+import {audienceAnalytics} from './dist/packages/core/src/analytics.js';
+import {registerDonationSum} from './dist/packages/core/src/donation-statistics.js';
 import {streamMetrics} from './dist/packages/core/src/stream-metrics.js';
 import {windowsFromLinks} from './dist/packages/core/src/session-windows.js';
 const db=new Database(process.argv[1],{readonly:true,fileMustExist:true});
+db.pragma('query_only=ON');
+db.pragma('busy_timeout=5000');
+registerDonationSum(db);
+const reportCounts=report=>({participants:report.audience.length,
+ observedParticipants:report.audience.filter(p=>p.observedMinutes>0).length,
+ observedMinutes:report.audience.reduce((n,p)=>n+p.observedMinutes,0),
+ estimatedMinutes:report.audience.reduce((n,p)=>n+p.estimatedChatMinutes,0),
+ messages:report.audience.reduce((n,p)=>n+p.messages,0)});
 try{
  for(const profile of ['ruslan','gulnaz']){
   const p='p_'+profile+'_',s=db.prepare(`SELECT id,started_at_ms,ended_at_ms FROM ${p}sessions ORDER BY started_at_ms DESC LIMIT 1`).get();
@@ -46,6 +66,40 @@ try{
   const windows=windowsFromLinks(links.map(l=>({started_at_ms:l.from,ended_at_ms:l.to})),s.started_at_ms,s.ended_at_ms??Date.now());
   const metrics=streamMetrics(windows,samples,new Map(),links).viewers;
   console.log('deployed_viewers='+JSON.stringify({profile,known:metrics.known??null,twitch:metrics.twitch,youtube:metrics.youtube}));
+  const scoped=logicalReadDatabase(profileView(db,profile));
+  const cfg=JSON.parse(readFileSync(join(dirname(process.argv[1]),'profiles',profile,'secrets.json'),'utf8'));
+  const recent=scoped.prepare('SELECT id,started_at_ms,ended_at_ms FROM sessions ORDER BY started_at_ms DESC LIMIT 3').all();
+  for(const session of recent){
+   const id=session.id,start=session.started_at_ms,end=session.ended_at_ms??Date.now();
+   const polls=scoped.prepare(`SELECT p.status,count(*) polls,
+    sum((SELECT count(*) FROM presence_members m WHERE m.poll_id=p.id)) memberships,
+    sum(NOT EXISTS(SELECT 1 FROM presence_members m WHERE m.poll_id=p.id)) emptyPolls
+    FROM presence_polls p WHERE session_id=? GROUP BY p.status`).all(id);
+   const people=scoped.prepare(`SELECT count(DISTINCT i.id) identities,count(DISTINCT i.person_id) people,
+    count(DISTINCT CASE WHEN i.external_id=i.account_id THEN i.person_id END) owners
+    FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id
+    WHERE p.session_id=? AND p.status='complete'`).get(id);
+   const events=scoped.prepare(`SELECT e.type,count(*) count FROM effective_events e
+    JOIN event_sessions es ON es.event_id=e.id WHERE es.session_id=? GROUP BY e.type`).all(id);
+   const youtube=scoped.prepare(`SELECT count(*) messages,count(DISTINCT author_id) authors
+    FROM youtube_messages WHERE published_at_ms>=? AND published_at_ms<?`).get(start,end);
+   const gaps=scoped.prepare(`SELECT source,reason,count(*) count FROM collection_gaps
+    WHERE started_at_ms<? AND coalesce(ended_at_ms,?)>=? GROUP BY source,reason`).all(end,end,start)
+    .map(r=>({...r,reason:/^[a-zA-Z0-9_]{1,80}$/.test(r.reason)?r.reason:'other'}));
+   console.log('participant_inputs='+JSON.stringify({profile,start,end,polls,people,events,youtube,gaps}));
+   try{
+    const report=audienceAnalytics(scoped,{fromMs:start,toMs:end,sessionId:id,source:'all',category:'',timezone:'Europe/Moscow',
+     excludedLogins:cfg.excludedBotLogins??[],ownerId:cfg.twitch?.userId??'',youtubeAccount:cfg.youtube?.userId??cfg.youtubeAccountId??''});
+    console.log('participant_calculation='+JSON.stringify({profile,start,...reportCounts(report)}));
+   }catch(error){console.log('participant_calculation='+JSON.stringify({profile,start,error:/^[A-Z_]{1,80}$/.test(error.message)?error.message:'CALCULATION_FAILED'}));}
+   for(const table of ['analytics_stream_facts','analytics_stream_cache']){
+    const cached=scoped.prepare(`SELECT payload,updated_at_ms,revision FROM ${table} WHERE session_id=? ORDER BY updated_at_ms DESC LIMIT 5`).all(id);
+    console.log('participant_cache='+JSON.stringify({profile,start,table,entries:cached.map(row=>{
+     try{const report=JSON.parse(gunzipSync(row.payload,{maxOutputLength:16*1024*1024}));return {at:row.updated_at_ms,revision:row.revision,from:report.filters.fromMs,to:report.filters.toMs,source:report.filters.source,categoryFiltered:Boolean(report.filters.category),...reportCounts(report)};}
+     catch{return {at:row.updated_at_ms,invalid:true};}
+    })}));
+   }
+  }
  }
 }finally{db.close();}
 '''
@@ -54,10 +108,29 @@ subprocess.run(['/opt/stream-panel/current/bin/node','--input-type=module','-e',
 # Credential presence and Google access-token health only; no secrets leave the host.
 import time
 from urllib.request import Request, urlopen
+from urllib.parse import urlencode
 from urllib.error import HTTPError
 for profile in ('ruslan','gulnaz'):
     secret_path=Path(config.get('STREAM_PANEL_DATA_DIR','/var/lib/stream-panel'))/'profiles'/profile/'secrets.json'
     saved=json.loads(secret_path.read_text()) if secret_path.exists() else {}
+    twitch=saved.get('twitch') or {}
+    twitch_result={'profile':profile,'tokenPresent':bool(twitch.get('access'))}
+    if twitch.get('access'):
+        for label,url in [('validate','https://id.twitch.tv/oauth2/validate'),('chatters','https://api.twitch.tv/helix/chat/chatters?'+urlencode({'broadcaster_id':twitch.get('userId',''),'moderator_id':twitch.get('userId',''),'first':1000}))]:
+            try:
+                headers={'Authorization':('OAuth ' if label=='validate' else 'Bearer ')+twitch['access'],'Client-Id':saved.get('twitchClientId','')}
+                with urlopen(Request(url,headers=headers),timeout=15) as response:
+                    payload=json.loads(response.read())
+                    twitch_result[label+'Status']=response.status
+                    if label=='validate':
+                        twitch_result['sameAccount']=payload.get('user_id')==twitch.get('userId')
+                        twitch_result['chattersScope']='moderator:read:chatters' in payload.get('scopes',[])
+                    else:
+                        twitch_result['chattersNow']=len(payload.get('data',[]))
+                        twitch_result['hasNextPage']=bool(payload.get('pagination',{}).get('cursor'))
+            except HTTPError as error: twitch_result[label+'Status']=error.code
+            except Exception: twitch_result[label+'Status']='network_error'
+    print('twitch_auth='+json.dumps(twitch_result))
     token=saved.get('youtube') or {}
     result={'profile':profile,'clientId':bool(saved.get('youtubeClientId')),'clientSecret':bool(saved.get('youtubeClientSecret')),'access':bool(token.get('access')),'refresh':bool(token.get('refresh')),'expired':token.get('expiresAt',0)<time.time()*1000}
     if token.get('access'):
