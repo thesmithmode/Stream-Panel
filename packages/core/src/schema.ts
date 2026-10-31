@@ -588,7 +588,17 @@ CREATE INDEX IF NOT EXISTS youtube_publications_time ON youtube_publications(acc
 INSERT OR IGNORE INTO subscriber_counts SELECT p.source,p.account_id,c.observed_at_ms,json_extract(p.payload_json,'$.total') FROM provider_snapshots p JOIN follower_checks c ON c.snapshot_id=p.id WHERE p.key='followers' AND p.source='twitch' AND json_type(p.payload_json,'$.total')='integer' AND json_extract(p.payload_json,'$.total')>=0;
 PRAGMA user_version=25;
 `;
-export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24,schemaV25,changeRevisionSchema,analyticsRevisionSchema,overviewRevisionSchema,sharedIdentitySchema] as const;
+export const schemaV30=`
+CREATE TABLE IF NOT EXISTS person_names(person_id TEXT PRIMARY KEY REFERENCES persons(id)) WITHOUT ROWID;
+-- Existing combined cards already represent a human; keep their chosen label even
+-- when it happens to equal one donor alias. Provider account names still update.
+INSERT OR IGNORE INTO person_names SELECT p.id FROM persons p WHERE p.display_name NOT IN (SELECT display_name FROM identities WHERE person_id=p.id UNION SELECT display_name FROM youtube_identities WHERE person_id=p.id)
+ OR (SELECT count(DISTINCT source) FROM (SELECT source FROM identities WHERE person_id=p.id AND account_id NOT LIKE 'correction:%' AND account_id NOT LIKE 'manual:%' UNION ALL SELECT 'youtube' FROM youtube_identities WHERE person_id=p.id))>1;
+DELETE FROM donation_audit WHERE kind='assignment';
+DELETE FROM membership_operations WHERE kind='donation_assignment';
+PRAGMA user_version=30;
+`;
+export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24,schemaV25,changeRevisionSchema,analyticsRevisionSchema,overviewRevisionSchema,sharedIdentitySchema,schemaV30] as const;
 export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;
 
 

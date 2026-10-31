@@ -1,4 +1,5 @@
 <script lang="ts">
+ import {personAccounts} from './person-accounts';
  import PersonPicker from './PersonPicker.svelte';
   import {screenData} from './screen-data';
   import SectionTabs from "./SectionTabs.svelte";
@@ -35,6 +36,7 @@
     onSelect:(id:string)=>void;
     onChange: () => Promise<void>;
   } = $props();
+  function selectAccount(ids:string[],checked:boolean){selectedIdentities=checked?[...new Set([...selectedIdentities,...ids])]:selectedIdentities.filter(id=>!ids.includes(id));}
   let detailTab=$state("overview"),showFollowing=$state(false),detailLoading=$state(false),showDonorLinks=$state(false);
   let search = $state(""),
     selectedId = $state(""),
@@ -43,6 +45,7 @@
     error = $state(""),
     name = $state(""),
     target = $state(""),
+
     selectedIdentities = $state<string[]>([]),
     splitName = $state(""),
     merges = $state<any[]>([]),
@@ -52,6 +55,8 @@
       "default",
     ),
     tops = $state<PersonTop[]>([]);
+  const accounts=$derived(personAccounts(detail?.identities??[],detail?.display_name??''));
+
   let donorCurrency=$state('RUB'),rankRefresh=$state(0);
   const donorCurrencies=$derived([...new Set(tops.flatMap(p=>Object.keys(p.donationTotals)))].sort());
   const rankLabels=$derived(new Map(tops.map(t=>[t.id,sortBy==='donations'?Object.entries(t.donationTotals).map(([currency,amount])=>money(amount,currency)).join(' · ')||`${t.donationCount} донатов`:sortBy==='observed_minutes'?formatDuration(t.observedMinutes):`${t.messageCount} сообщ.`])));
@@ -300,14 +305,14 @@
 
         </div>{/if}
         <h3>Связанные аккаунты</h3>
-        <div class="account-summary">{#each detail.identities as identity}<span><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong></span>{/each}</div>
+        <div class="account-summary">{#each accounts as identity}<span><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong></span>{/each}</div>
         <div class="actions"><button class="outline small" onclick={()=>{detailTab='donations';showDonorLinks=true;}}>Привязать донаты</button></div>
         <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} sessionId="" onPerson={(id)=>void select(id)} />{/if}</details>
       {:else if detailTab==='messages'}
        <RecentEvents personId={detail.id} messagesOnly />
       {:else if detailTab==='accounts'}
         <label
-          >Имя группы
+          >Имя человека
           <div class="inline">
             <input bind:value={name} /><button
               class="outline"
@@ -322,19 +327,19 @@
         >
 
         <h3>Связанные аккаунты <Help id="person-identities-help" label="О связях аккаунтов" text="Здесь собраны аккаунты одного человека. Совпадающие никнеймы связываются автоматически. При неоднозначном совпадении выберите человека вручную; выбранный аккаунт можно разъединить, сохранив события." /></h3>
-        {#each detail.identities as identity}<label class="identity-row"
+        {#each accounts as identity}<label class="identity-row"
             ><input
               type="checkbox"
-              bind:group={selectedIdentities}
-              value={identity.id}
+              checked={identity.ids.every(id=>selectedIdentities.includes(id))}
+              onchange={event=>selectAccount(identity.ids,event.currentTarget.checked)}
             /><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong><span class="small muted"
               >{identity.source === "donationalerts" ? "Донатер" : "Участник"} · {identity.source === "twitch" ? "Twitch" : identity.source === "youtube" ? "YouTube" : "DonationAlerts"}</span
-            ></label
+            >{#if identity.aliases.length}<small class="account-aliases">Имена: {identity.aliases.join(", ")}</small>{/if}</label
           >{/each}
         {#if selectedIdentities.length}<div class="inline">
             <input
-              aria-label="Имя новой группы"
-              placeholder="Имя новой группы"
+              aria-label="Имя нового человека"
+              placeholder="Имя нового человека"
               bind:value={splitName}
             /><button
               class="outline"
@@ -400,7 +405,7 @@
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 
 <style>
- .donor-filters{display:flex;gap:12px;flex-wrap:wrap;padding:8px 12px}.donor-filters label{display:grid;gap:6px;font-size:12px}.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}
+ .account-aliases{flex-basis:100%;color:var(--muted);font-size:11px;overflow-wrap:anywhere}.donor-filters{display:flex;gap:12px;flex-wrap:wrap;padding:8px 12px}.donor-filters label{display:grid;gap:6px;font-size:12px}.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}
  .people-grid{display:grid;grid-template-columns:280px minmax(0,1fr);align-items:stretch;gap:16px;min-height:0;flex:1;}
  .people-grid>section{min-height:0;height:100%;max-height:100%;display:flex;flex-direction:column;overflow:hidden;margin-bottom:0;}
  .people-directory{padding-top:8px;}.people-list{min-height:0;flex:1;max-height:none;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-bottom:4px}.people-pages{display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:8px;padding:10px 12px;flex:0 0 auto;border-top:1px solid var(--border)}.people-pages span{grid-column:1/-1;grid-row:1;text-align:center;font-size:12px}.people-pages button{min-width:0;min-height:40px}

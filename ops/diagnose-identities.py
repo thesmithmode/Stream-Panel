@@ -20,6 +20,14 @@ for profile in ('ruslan', 'gulnaz'):
     people = {r['id']: dict(r) for r in db.execute(f'SELECT * FROM {p}persons')}
     selected = {r['person_id'] for r in identities if matches(r['display_name'])}
     selected.update(r['id'] for r in people.values() if matches(r['display_name']))
+    pinned = bool(db.execute('SELECT 1 FROM sqlite_master WHERE name=?', (p + 'person_names',)).fetchone())
+    for person in selected:
+        row = people[person]
+        row['name_pinned'] = pinned and bool(db.execute(f'SELECT 1 FROM {p}person_names WHERE person_id=?', (person,)).fetchone())
+        has_account = any(i['person_id'] == person for i in identities)
+        merged = bool(db.execute(f'SELECT 1 FROM {p}person_merges WHERE source_person_id=? AND undone_at_ms IS NULL', (person,)).fetchone())
+        has_metadata = any(db.execute(f'SELECT 1 FROM {p}{table} WHERE person_id=? LIMIT 1', (person,)).fetchone() for table in ('person_notes', 'person_tags', 'person_preferences'))
+        row['directory_visible'] = has_account or (not merged and has_metadata)
     print('people=' + json.dumps({'profile': profile, 'rows': [people[x] for x in sorted(selected)]}, ensure_ascii=False))
     rows = []
     for row in identities:

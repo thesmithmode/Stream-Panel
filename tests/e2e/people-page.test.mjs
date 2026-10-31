@@ -49,7 +49,7 @@ test('people browse beyond 500 records, preserve a selected card and search acro
   await page.goForward();
   await page.getByRole('heading',{name:'Viewer 001',exact:true}).waitFor();
   await page.getByRole('tab',{name:'Аккаунты',exact:true}).click();
-  await page.getByLabel('Имя группы').waitFor();
+  await page.getByLabel('Имя человека').waitFor();
   await assertUiLayout(page);
   await page.getByRole('button',{name:'К списку людей',exact:true}).click();
   await page.getByRole('button',{name:'Следующие люди'}).scrollIntoViewIfNeeded();

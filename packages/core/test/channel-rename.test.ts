@@ -51,10 +51,10 @@ test('provider renames update automatic card names while preserving explicit gro
     const owner=s.ensureOwnerIdentity('owner','owner','Fullrandomname_twitch',at);
     assert.equal(s.ensureOwnerIdentity('owner','owner','rlod',at+minute),owner);
     assert.equal(s.person(owner).display_name,'rlod');
-    // Persisted state produced by earlier releases: new identity, old card name.
+    // An explicitly chosen name stays even when it equals an old account alias.
     s.renamePerson(owner,'Fullrandomname_twitch');
     s.ensureOwnerIdentity('owner','owner','rlod',at+minute);
-    assert.equal(s.person(owner).display_name,'rlod');
+    assert.equal(s.person(owner).display_name,'Fullrandomname_twitch');
     s.renamePerson(owner,'Руслан');
     s.ensureOwnerIdentity('owner','owner','rlod_next',at+2*minute);
     assert.equal(s.person(owner).display_name,'Руслан');
@@ -64,7 +64,7 @@ test('provider renames update automatic card names while preserving explicit gro
     assert.equal(s.person(yt).display_name,'rlod_yt');
     s.renamePerson(yt,'Fullrandomname');
     s.youtubeMessages('channel','chat',[message('2b','yt-author','rlod_yt',at+minute)]);
-    assert.equal(s.person(yt).display_name,'rlod_yt');
+    assert.equal(s.person(yt).display_name,'Fullrandomname');
     s.renamePerson(yt,'YouTube group');
     s.youtubeMessages('channel','chat',[message('3','yt-author','NextName',at+2*minute)]);
     assert.equal(s.person(yt).display_name,'YouTube group');
