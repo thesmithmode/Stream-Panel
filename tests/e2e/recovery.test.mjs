@@ -52,11 +52,14 @@ test(
         .getByRole("heading", { name: "Вход в Stream Panel" })
         .waitFor();
       await page.getByText("DB_WORKER_STOPPED", { exact: true }).waitFor();
+      // Quiesce the old page before draining HTTP connections: its focus/poll
+      // requests must not race the intentional daemon shutdown.
+      await goto(page, "about:blank");
       await a.app.close();
       const port = Number(new URL(a.origin).port);
       restarted = await createApplication(a.dir, port, false);
       await restarted.app.listen({ host: "127.0.0.1", port });
-      await reload(page);
+      await goto(page, a.origin);
       await page.getByText("Войдите в свой профиль", { exact: true }).waitFor();
       await goto(page, restarted.bootstrap());
       assert.equal(await page.locator(".record-button").count(), 0);
