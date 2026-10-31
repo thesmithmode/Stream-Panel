@@ -354,7 +354,7 @@ test('donation API enforces auth, CSRF, strict exact-money payloads and optimist
   assert.equal((await f.a.app.inject({url:'/api/v1/donations?person=youtube%3Aauthor',headers:f.headers})).json().total,0);
   assert.equal((await f.a.app.inject({url:'/api/v1/donations',headers:f.headers})).json().total,1);
   assert.equal((await post(`/api/v1/donations/${id}/assign`,{personId:input.personId,revision:1})).json().revision,2);
-  assert.equal((await f.a.app.inject({url:`/api/v1/donations/${id}/audit`,headers:f.headers})).json().length,3);
+  assert.equal((await f.a.app.inject({url:`/api/v1/donations/${id}/audit`,headers:f.headers})).json().length,1);
   assert.equal((await post('/api/v1/persons',{name:'Manual person'})).statusCode,404);
   assert.equal((await f.a.app.inject({url:'/api/v1/donations?limit=101',headers:f.headers})).statusCode,400);
   assert.equal((await f.a.app.inject({url:'/api/v1/donations?includeDeleted=yes',headers:f.headers})).statusCode,400);

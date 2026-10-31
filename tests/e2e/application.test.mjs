@@ -103,7 +103,7 @@ test(
         .click();
       await page.getByRole("tab",{name:"Аккаунты",exact:true}).click();
       await page.locator(".identity-row input").first().check();
-      await page.getByLabel("Имя новой группы").fill("Выделенная группа");
+      await page.getByLabel("Имя нового человека").fill("Выделенная группа");
       await page
         .getByRole("button", { name: "Разъединить выбранные", exact: true })
         .click();await acceptConfirmation(page,'Подтвердить');
@@ -112,7 +112,7 @@ test(
         .filter({ hasText: "Выделенная группа" })
         .waitFor();
       checks.push("split selected identity");
-      await page.getByLabel("Имя группы").fill("Проверенный зритель");
+      await page.getByLabel("Имя человека").fill("Проверенный зритель");
       await page
         .getByRole("button", { name: "Сохранить", exact: true })
         .click();

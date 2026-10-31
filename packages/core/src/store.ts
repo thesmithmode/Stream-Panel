@@ -504,7 +504,7 @@ export class StreamStore {
       this.db.prepare("INSERT INTO youtube_identities VALUES (?,?,?,?,?,?,?)").run(identity.id,account,externalId,name,matchKey(name),personId,Number(author.isChatOwner===true));
       this.db.prepare("UPDATE persons SET revision=revision+1 WHERE id=?").run(personId);
     } else {
-      this.db.prepare("UPDATE persons SET display_name=? WHERE id=? AND (display_name=? OR display_name IN(SELECT name FROM youtube_identity_aliases WHERE identity_id=?))").run(name,identity.person_id,identity.display_name,identity.id);
+      this.db.prepare("UPDATE persons SET display_name=? WHERE id=? AND NOT EXISTS(SELECT 1 FROM person_names n WHERE n.person_id=persons.id) AND (display_name=? OR display_name IN(SELECT name FROM youtube_identity_aliases WHERE identity_id=?))").run(name,identity.person_id,identity.display_name,identity.id);
       this.db.prepare("UPDATE youtube_identities SET display_name=?,match_key=?,is_owner=MAX(is_owner,?) WHERE id=?").run(name,matchKey(name),Number(author.isChatOwner===true),identity.id);
     }
     this.db.prepare("INSERT INTO youtube_identity_aliases VALUES (?,?,?,?,?) ON CONFLICT(identity_id,name) DO UPDATE SET first_seen_ms=MIN(first_seen_ms,excluded.first_seen_ms),last_seen_ms=MAX(last_seen_ms,excluded.last_seen_ms)").run(identity.id,name,matchKey(name),at,at);
@@ -637,7 +637,7 @@ export class StreamStore {
           .run(user.user_name, candidateKey(user.user_name), matchKey(user.user_name), identity.id);
         this.db
           .prepare(
-            "UPDATE persons SET display_name=? WHERE id=? AND display_name=?",
+            "UPDATE persons SET display_name=? WHERE id=? AND NOT EXISTS(SELECT 1 FROM person_names n WHERE n.person_id=persons.id) AND display_name=?",
           )
           .run(user.user_name, identity.person_id, identity.display_name);
         this.rememberAlias(identity.id, user.user_name, atMs);
@@ -648,12 +648,10 @@ export class StreamStore {
 
   renamePerson(id: string, name: string): void {
     if (!name.trim() || name.length > 200) throw new Error("INVALID_NAME");
-    if (
-      !this.db
-        .prepare("UPDATE persons SET display_name=? WHERE id=?")
-        .run(name.trim(), id).changes
-    )
-      throw new Error("PERSON_NOT_FOUND");
+    this.db.transaction(()=>{
+      if(!this.db.prepare("UPDATE persons SET display_name=?,revision=revision+1 WHERE id=?").run(name.trim(),id).changes)throw Error('PERSON_NOT_FOUND');
+      this.db.prepare('INSERT OR IGNORE INTO person_names VALUES (?)').run(id);
+    }).immediate();
   }
 
   gap(
