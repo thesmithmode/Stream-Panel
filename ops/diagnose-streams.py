@@ -124,12 +124,26 @@ for profile in ('ruslan','gulnaz'):
                     twitch_result[label+'Status']=response.status
                     if label=='validate':
                         twitch_result['sameAccount']=payload.get('user_id')==twitch.get('userId')
+                        twitch_result['numericAccount']=str(payload.get('user_id','')).isdigit()
+                        if profile=='ruslan': twitch_result['currentLoginMatches']=payload.get('login')=='rlod'
                         twitch_result['chattersScope']='moderator:read:chatters' in payload.get('scopes',[])
                     else:
+                        twitch_result['dataArray']=isinstance(payload.get('data'),list)
                         twitch_result['chattersNow']=len(payload.get('data',[]))
+                        twitch_result['reportedTotal']=payload.get('total')
                         twitch_result['hasNextPage']=bool(payload.get('pagination',{}).get('cursor'))
             except HTTPError as error: twitch_result[label+'Status']=error.code
             except Exception: twitch_result[label+'Status']='network_error'
+    if twitch.get('access'):
+        try:
+            url='https://api.twitch.tv/helix/chat/chatters?'+urlencode({'broadcaster_id':twitch.get('userId',''),'moderator_id':twitch.get('userId',''),'first':100})
+            with urlopen(Request(url,headers={'Authorization':'Bearer '+twitch['access'],'Client-Id':saved.get('twitchClientId','')}),timeout=15) as response:
+                payload=json.loads(response.read())
+                twitch_result['alternateStatus']=response.status
+                twitch_result['alternateCount']=len(payload.get('data',[]))
+                twitch_result['alternateTotal']=payload.get('total')
+        except HTTPError as error: twitch_result['alternateStatus']=error.code
+        except Exception: twitch_result['alternateStatus']='network_error'
     print('twitch_auth='+json.dumps(twitch_result))
     token=saved.get('youtube') or {}
     result={'profile':profile,'clientId':bool(saved.get('youtubeClientId')),'clientSecret':bool(saved.get('youtubeClientSecret')),'access':bool(token.get('access')),'refresh':bool(token.get('refresh')),'expired':token.get('expiresAt',0)<time.time()*1000}
