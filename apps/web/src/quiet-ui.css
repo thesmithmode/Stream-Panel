@@ -160,3 +160,6 @@ button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,s
 
 @media(max-width:360px){.sidebar nav button{font-size:10px}}
 .history-toolbar{justify-content:space-between}.history-toolbar>span{font-size:14px;color:var(--muted)}
+
+/* Stream sections remain full-size touch targets when the live audience tab wraps. */
+@media(max-width:720px){.stream-page>.section-tabs,.stream-page .section-tabs{flex-wrap:wrap;justify-content:flex-start;column-gap:16px;row-gap:0}}

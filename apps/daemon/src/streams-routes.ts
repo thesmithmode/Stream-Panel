@@ -4,7 +4,7 @@ import type { ConfigurationPort } from './config.js';
 import type { StorePort } from './store-contract.js';
 import { object, string } from './provider-values.js';
 import { analyticsSettings } from './analytics-settings.js';
-type Store = StorePort<'matchingStream' | 'subscriberHistory' | 'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteManualSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'streamMetadata' | 'summary'>;
+type Store = StorePort<'currentChat' | 'matchingStream' | 'subscriberHistory' | 'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteManualSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'streamMetadata' | 'summary'>;
 export function registerStreamsRoutes(app: FastifyInstance, db: Store, configuration: ConfigurationPort) {
     app.get('/api/v1/events/recent',request=>{const q=object(request.query);return db.call('recentEvents',Number(q.offset??0),Number(q.limit??100),{...(string(q.session)?{session:string(q.session)}:{}),...(string(q.person)?{person:string(q.person)}:{}),messagesOnly:string(q.messages)==='1'});});
     for(const path of ['/api/v1/analytics/subscribers','/api/v1/analytics/subscriber-streams'])app.get(path,request=>{
@@ -42,6 +42,10 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
     });
     app.get('/api/v1/sessions/match',async(request,reply)=>{const q=object(request.query);return reply.type('application/json').send(JSON.stringify(await db.call('matchingStream',Number(q.startedAt),string(q.latest)==='1')));});
     app.get("/api/v1/sessions", async (request) => db.call("sessions", string(object(request.query).session) || undefined, Number(object(request.query).offset ?? 0), Number(object(request.query).limit ?? 100), configuration.value.excludedBotLogins));
+    app.get('/api/v1/sessions/:id/current-chat',async(request,reply)=>{
+      const q=object(request.query);if(q.includeExcluded!==undefined&&!['0','1'].includes(string(q.includeExcluded)))throw Error('INVALID_CHAT_FILTER');
+      return conditionalResponse(request,reply,await db.call('currentChat',string(object(request.params).id),configuration.value.excludedBotLogins,string(q.includeExcluded)==='1'));
+    });
     app.get("/api/v1/sessions/:id/followers", async (request) => db.call("followingAnalytics", string(object(request.params).id)));
     app.get("/api/v1/sessions/:id/metadata", async (request) => db.call('streamMetadata', string(object(request.params).id)));
     app.post('/api/v1/sessions/merge',async request=>({id:await db.call('mergeSessions',object(request.body).sessionIds as string[])}));
