@@ -1,5 +1,6 @@
 <script lang="ts">
  import {dateTime} from './format';
+ import {missingTwitchPresence} from './presence-quality';
  import ActionMenu from "./ActionMenu.svelte";
  import SectionTabs from "./SectionTabs.svelte";
   import {untrack} from 'svelte';
@@ -40,6 +41,7 @@
   const viewerMetrics=$derived(audienceData?.streamComparison?.[0]?.viewers);
   const viewers=$derived(viewerMetrics?.known?.partialMinutes?viewerMetrics.known:viewerMetrics?.all);
   const viewerPartial=$derived((viewerMetrics?.known?.partialMinutes??0)>0);
+  const missingPresence=$derived(missingTwitchPresence(audienceData?.timeline??[]));
   function loadResolution(){
     try{const saved=Number(localStorage.getItem(`sp-stream-resolution-${getProfile()}`));return [1,5,15].includes(saved)?saved:5;}catch{return 5;}
   }
@@ -62,7 +64,7 @@
     const controller=new AbortController();
     void Promise.all([loadAnalytics(getProfile(),query,false,controller.signal),api<Array<{at:number;title:string;categoryName:string}>>(`sessions/${current}/metadata`,undefined,controller.signal)]).then(([result,history])=>{
       if(id===audienceRequest){audienceData=result;metadata=history.filter((row,i)=>!i||row.title!==history[i-1]!.title||row.categoryName!==history[i-1]!.categoryName);}
-    }).catch(error=>{if(id===audienceRequest&&!(error instanceof ConnectionError)){audienceError=(error as Error).message;}}).finally(()=>{if(id===audienceRequest)audienceBusy=false;});
+    }).catch(error=>{if(id===audienceRequest){audienceError=error instanceof ConnectionError?'Не удалось загрузить участников и график. Проверьте соединение и повторите обновление.':(error as Error).message;}}).finally(()=>{if(id===audienceRequest)audienceBusy=false;});
     return()=>{audienceRequest++;controller.abort();};
     });
   });
@@ -98,7 +100,10 @@
 <Insights sessionId={sessionFilter} refreshToken={summary} {onPerson} {onStream} />
 {#if sessionFilter}<StreamDonations sessionId={sessionFilter} {onPerson} {changed}/><details class="section-disclosure"><summary>Подписчики</summary><Following embedded sessionId={sessionFilter} {onPerson}/></details>{/if}
 {:else if activeTab==='people'}
-<AudienceRanking people={audienceData?.audience??[]} {onPerson} showIntervals streamStart={session?.started_at_ms??0} streamEnd={session?.ended_at_ms??Date.now()}/>
+{#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceBusy}<p role="status">Загружаем участников…</p>{:else}
+{#if missingPresence}<p class="notice" role="status">Сообщения Twitch сохранены, но данных о присутствии участников нет. Время в чате недоступно: прочерк не означает отсутствие человека.</p>{/if}
+<AudienceRanking people={audienceData?.audience??[]} {onPerson} showIntervals {missingPresence} streamStart={session?.started_at_ms??0} streamEnd={session?.ended_at_ms??Date.now()}/>
+{/if}
 {:else if sessionFilter}<section class="panel"><header><h2>События стрима · 48 ч</h2></header><div class="settings-body"><RecentEvents sessionId={sessionFilter}/></div></section>{/if}
 </div>
 <style>

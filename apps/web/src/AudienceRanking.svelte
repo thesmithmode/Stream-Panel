@@ -5,7 +5,7 @@
  import {type RankPerson,presenceMinutes,rankTable,intervalRows,durationLabel,platformNicknames,intervalSource} from './audience-ranking';
  import {intervalRange} from './stream-time';
  import {money} from './api';
- let {people,onPerson,showIntervals=false,streamStart=0,streamEnd=0}:{people:RankPerson[];onPerson:(id:string)=>void;showIntervals?:boolean;streamStart?:number;streamEnd?:number}=$props();
+ let {people,onPerson,showIntervals=false,missingPresence=false,streamStart=0,streamEnd=0}:{people:RankPerson[];onPerson:(id:string)=>void;showIntervals?:boolean;missingPresence?:boolean;streamStart?:number;streamEnd?:number}=$props();
  const id=$props.id();
  let metric=$state('presence'),descending=$state(true),limit=$state(50),expanded=$state(new Set<string>()),viewport=$state(1024);
  const currencies=$derived([...new Set(people.flatMap(p=>Object.keys(p.donations??{})))].sort());
@@ -41,7 +41,7 @@
      {#if platformNicknames(person).length}<div class="platform-nicks">{#each platformNicknames(person) as account}<span class:twitch={account.source==='twitch'} class:youtube={account.source==='youtube'} title={`${account.source==='twitch'?'Twitch':'YouTube'} · ${account.name}`}>{account.name}</span>{/each}</div>{/if}
      {#if currencies.some(c=>BigInt(person.donations?.[c]??'0')!==0n)}<div class="phone-donations">{#each currencies as c}{#if BigInt(person.donations?.[c]??'0')!==0n}<span>{money(person.donations![c]!,c)}</span>{/if}{/each}</div>{/if}
     </td>
-    <td class:with-disclosure={showIntervals}>{#if hasIntervals}<button class="interval-toggle" aria-label={`Интервалы ${person.name}`} aria-expanded={expanded.has(person.id)} aria-controls={expanded.has(person.id)?regionId:undefined} onclick={()=>toggle(person.id)}><strong>{durationLabel(presenceMinutes(person))}</strong><Icon name="arrow" size={14}/></button>{:else}<strong class="plain-duration">{durationLabel(presenceMinutes(person))}</strong>{/if}</td>
+    <td class:with-disclosure={showIntervals}>{#if hasIntervals}<button class="interval-toggle" aria-label={`Интервалы ${person.name}`} aria-expanded={expanded.has(person.id)} aria-controls={expanded.has(person.id)?regionId:undefined} onclick={()=>toggle(person.id)}><strong>{durationLabel(presenceMinutes(person))}</strong><Icon name="arrow" size={14}/></button>{:else}<strong class="plain-duration">{missingPresence&&person.accounts?.some(a=>a.source==='twitch')&&presenceMinutes(person)===0?'—':durationLabel(presenceMinutes(person))}</strong>{/if}</td>
     <td class="message-count">{person.messages??0}</td>
     {#each currencyColumns as currency}<td class="donation-column">{BigInt(person.donations?.[currency]??'0')===0n?'—':money(person.donations![currency]!,currency)}</td>{/each}
    </tr>

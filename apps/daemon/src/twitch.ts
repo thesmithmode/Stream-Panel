@@ -1,4 +1,5 @@
 import {subscriberInterval} from './subscriber-cadence.js';
+import {ChatterHealth} from './chatter-health.js';
 import WebSocket from "ws";
 import type { ConfigurationPort, Tokens } from "./config.js";
 import type {StorePort} from './store-contract.js';
@@ -147,6 +148,7 @@ export class TwitchConnection {
   private sessionId: string | null = null;
   private lastFollowersPollAt:number|null=null;
   private lastSuccessfulPollAt: number | null = null;
+  private chatterHealth=new ChatterHealth();
   private authGeneration = 0;
   private gapStart: number | null = null;
   private rateLimitedUntil = 0;
@@ -503,6 +505,8 @@ export class TwitchConnection {
           const event = normalizeTwitch(body, this.token.userId);
           if (event) {
             await this.db.call("ingest", event);
+            if(!this.stopped&&generation===this.authGeneration&&event.type==='chat.message'&&object(event.payload).originChannelId===this.token.userId&&event.occurredAtMs!==null)
+              this.chatterHealth.message(event.occurredAtMs);
             this.status.lastEventAt = Date.now();
             if (
               event.type === "stream.online" ||
@@ -679,7 +683,7 @@ export class TwitchConnection {
           link.account_id === accountId && link.ended_at_ms === null)
           ? String(active!.id) : null;
       }
-      if (this.sessionId !== previousSession) this.lastSuccessfulPollAt = null;
+      if (this.sessionId !== previousSession) {this.lastSuccessfulPollAt = null;this.chatterHealth=new ChatterHealth();}
       if (!current()) return;
       if (
         this.platformLive && this.sessionId &&
@@ -691,18 +695,30 @@ export class TwitchConnection {
           const users: { user_id: string; user_name: string }[] = [];
           const sessionId = this.sessionId;
           const abort = AbortSignal.timeout(30000);
-          const poll = await collectChatters(async (cursor) => {
+          const fetchPage=async (cursor:string|undefined,first=1000) => {
             if (!current()) throw new Error("TWITCH_AUTH_CANCELLED");
             const page = object(
               await this.api(
-                `chat/chatters?broadcaster_id=${accountId}&moderator_id=${accountId}&first=1000${cursor ? `&after=${encodeURIComponent(cursor)}` : ""}`,
+                `chat/chatters?broadcaster_id=${accountId}&moderator_id=${accountId}&first=${first}${cursor ? `&after=${encodeURIComponent(cursor)}` : ""}`,
                 { signal: abort },
               ),
             ) as unknown as ChattersPage;
-            users.push(...page.data);
+            if(Array.isArray(page.data))users.push(...page.data);
             return page;
-          });
+          };
+          let poll = await collectChatters(cursor=>fetchPage(cursor),this.now);
           if (!current()) return;
+          if(poll.status==='complete'&&poll.userIds.length===0)this.chatterHealth.empty(poll.completedAtMs);
+          if(poll.userIds.length)this.chatterHealth.populated();
+          if(this.chatterHealth.recover(poll.completedAtMs)){
+            // A different documented page size also checks a different cached URL.
+            // One additional sweep per five minutes, under the same deadline/rate limit.
+            poll=await collectChatters(cursor=>fetchPage(cursor,100),this.now);
+            if(!current())return;
+            if(poll.userIds.length)this.chatterHealth.populated();
+          }
+          const suspect=poll.userIds.length===0&&this.chatterHealth.suspect(poll.completedAtMs);
+          if(suspect){poll.status='failed';console.warn('TWITCH_CHATTERS_EMPTY_WITH_CHAT');}
           // Cover the interval from the previous successful poll (not one minute bucket).
           const windowed = {
             ...poll,
@@ -716,7 +732,7 @@ export class TwitchConnection {
           if (!current()) return;
           await this.db.call("updateChatterNames", accountId, users, Date.now());
           if (!current()) return;
-          this.status.capabilities.presence = poll.status;
+          this.status.capabilities.presence = suspect?'Twitch не передаёт список участников при активном чате; время недоступно':poll.status;
           if (poll.status === "complete")
             this.lastSuccessfulPollAt = poll.completedAtMs;
           else {
@@ -724,7 +740,7 @@ export class TwitchConnection {
             await this.db.call(
               "gap",
               "twitch",
-              poll.status === "failed" ? "chatters_poll_failed" : "chatters_poll_incomplete",
+              suspect?'chatters_empty_with_chat':poll.status === "failed" ? "chatters_poll_failed" : "chatters_poll_incomplete",
               windowed.startedAtMs,
               poll.completedAtMs,
             );
@@ -792,6 +808,7 @@ export class TwitchConnection {
     this.reconcileRequested = false;
     this.lastFollowersPollAt=null;
     this.lastSuccessfulPollAt = null;
+    this.chatterHealth=new ChatterHealth();
     for (const socket of this.sockets) socket.close();
     this.sockets.clear();
     this.socket = null;
