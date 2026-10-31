@@ -10,7 +10,7 @@ import { BACKUP_STREAM_MAX_SIZE } from "./backup-stream.js";
 import { stageRestore, commitRestore, receiveRestore } from "./restore-service.js";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AccountStore, profiles, canAccessProfile, publicUser, type Profile, type UserSession } from "./auth.js";
+import { AccountStore, ACCOUNT_SESSION_SECONDS, profiles, canAccessProfile, publicUser, type Profile, type UserSession } from "./auth.js";
 import { BackupService } from "./backup.js";
 import { createApplication } from "./server.js";
 import {
@@ -101,7 +101,7 @@ export async function createHostedApplication(
     const body = request.body as { username: string; password: string };
     const result = await accounts.login(body.username, body.password, request.ip);
     if (!result) return reply.code(401).send({ error: "INVALID_LOGIN" });
-    reply.setCookie("sp_session", result.token, { httpOnly: true, secure: origin.protocol === "https:", sameSite: "lax", path: "/", maxAge: 86400 });
+    reply.setCookie("sp_session", result.token, { httpOnly: true, secure: origin.protocol === "https:", sameSite: "lax", path: "/", maxAge: ACCOUNT_SESSION_SECONDS });
     return { csrf: result.csrf, user: publicUser(result.user) };
   });
   const statusView=(value:Record<string,unknown>,user:UserSession,profile:Profile)=>({...value,...(user.profile==='ruslan'?{backup:{...(backup?.status??{state:'disabled'}),restoreAvailable:!!backup&&!!onRestore}}:{}),user:publicUser(user,profile)});

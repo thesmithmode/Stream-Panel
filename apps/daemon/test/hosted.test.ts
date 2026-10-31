@@ -60,6 +60,9 @@ test("hosted logins isolate two profiles and simultaneous writes; login, CSRF, o
     const response = await h.app.inject({ method: "POST", url: "/api/v1/auth/login", headers: base, payload: { username, password } });
     assert.equal(response.statusCode, 200, response.body);
     assert.match(String(response.headers["set-cookie"]), /Secure/);
+    assert.match(String(response.headers["set-cookie"]), /Max-Age=2592000(?:;|$)/);
+    assert.match(String(response.headers["set-cookie"]), /HttpOnly/);
+    assert.match(String(response.headers["set-cookie"]), /SameSite=Lax/i);
     return { ...base, cookie: String(response.headers["set-cookie"]).split(";")[0]!, "x-csrf-token": response.json().csrf };
   }
   try {

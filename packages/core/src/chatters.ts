@@ -4,6 +4,7 @@ import type { PresencePoll } from "./presence.js";
 export interface ChattersPage {
   data: { user_id: string; user_login: string; user_name: string }[];
   pagination: { cursor?: string };
+  total?: number;
 }
 
 // The adapter supplies HTTP, token rotation, abort, and rate-limit handling.
@@ -33,7 +34,8 @@ export async function collectChatters(
       }
       cursor = response.pagination.cursor;
       if (cursor === undefined || cursor === "") {
-        status = "complete";
+        status = response.data.length===0&&typeof response.total==='number'&&response.total>0
+          ? (users.size?'partial':'failed') : "complete";
         break;
       }
       if (typeof cursor !== "string" || cursors.has(cursor))

@@ -109,3 +109,47 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });
+
+test('historical empty Twitch lists show missing time instead of zero while preserved messages remain visible',{timeout:60000},async()=>{
+ const app=await application();let browser;
+ try{
+  const base=Date.now()-3600000;
+  const missing=await app.db.call('startSession','missing','empty-lists',base,'platform',base);
+  for(let i=0;i<8;i++){
+   await app.db.call('recordPoll',missing,'missing',{startedAtMs:base+i*60000,completedAtMs:base+i*60000+1000,status:'complete',userIds:[]});
+   await app.db.call('ingest',{source:'twitch',accountId:'missing',externalId:'missing-'+i,type:'chat.message',actor:{externalId:'speaker',displayName:'Night Speaker'},occurredAtMs:base+i*60000,receivedAtMs:base+i*60000,timeQuality:'provider',sourceTime:null,transport:'eventsub',payload:{text:'Saved message'}});
+  }
+  await app.db.call('endSession',missing,base+10*60000);
+  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();
+  await page.locator(`[data-session-id="${missing}"] .stream-open`).click();await page.getByRole('tab',{name:'Участники',exact:true}).click();
+  await page.getByText('Сообщения Twitch сохранены, но данных о присутствии участников нет.',{exact:false}).waitFor();
+  const row=page.locator('.participant-row').filter({has:page.getByRole('button',{name:'Night Speaker',exact:true})});
+  assert.equal(await row.locator('td:nth-child(2)').textContent(),'—');assert.equal(await row.locator('td:nth-child(3)').textContent(),'8');
+  assert.equal(await page.title(),'Stream Panel');assert.equal(await page.locator('vite-error-overlay').count(),0);
+  await assertUiLayout(page);const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;
+  if(evidence){await mkdir(evidence,{recursive:true});await page.screenshot({path:join(evidence,'presence-missing-desktop.png'),fullPage:true});}
+  await page.setViewportSize({width:390,height:844});await assertUiLayout(page);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  if(evidence)await page.screenshot({path:join(evidence,'presence-missing-mobile.png'),fullPage:true});
+  await page.getByRole('tab',{name:'Итоги',exact:true}).click();await page.locator('.series-panel').waitFor();
+  assert.deepEqual(errors,[]);await saveCoverage(page);
+ }finally{await browser?.close();await app.close();}
+});
+
+test('participant request failures show an error rather than an empty ranking and reload recovers',{timeout:60000},async()=>{
+ const app=await application();let browser;
+ try{
+  const base=Date.now()-600000,id=await app.db.call('startSession','failure','failure',base,'platform',base);
+  await app.db.call('endSession',id,base+60000);
+  browser=await launchBrowser();const page=await browser.newPage();
+  await page.route('**/api/v1/sessions/*/metadata',route=>route.abort());
+  await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();
+  await page.locator(`[data-session-id="${id}"] .stream-open`).click();await page.getByRole('tab',{name:'Участники',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'Не удалось загрузить участников'}).waitFor();
+  assert.equal(await page.getByRole('region',{name:'Рейтинг участников'}).count(),0);
+  await page.unroute('**/api/v1/sessions/*/metadata');await page.reload();
+  await page.getByRole('tab',{name:'Участники',exact:true}).click();await page.getByRole('region',{name:'Рейтинг участников'}).waitFor();
+  assert.equal(await page.getByRole('alert').count(),0);await saveCoverage(page);
+ }finally{await browser?.close();await app.close();}
+});
