@@ -128,9 +128,10 @@ test('historical empty Twitch lists show missing time instead of zero while pres
   const row=page.locator('.participant-row').filter({has:page.getByRole('button',{name:'Night Speaker',exact:true})});
   assert.equal(await row.locator('td:nth-child(2)').textContent(),'—');assert.equal(await row.locator('td:nth-child(3)').textContent(),'8');
   assert.equal(await page.title(),'Stream Panel');assert.equal(await page.locator('vite-error-overlay').count(),0);
-  await assertUiLayout(page);await page.screenshot({path:'/workspace/presence-missing-desktop.png',fullPage:true});
+  await assertUiLayout(page);const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;
+  if(evidence){await mkdir(evidence,{recursive:true});await page.screenshot({path:join(evidence,'presence-missing-desktop.png'),fullPage:true});}
   await page.setViewportSize({width:390,height:844});await assertUiLayout(page);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
-  await page.screenshot({path:'/workspace/presence-missing-mobile.png',fullPage:true});
+  if(evidence)await page.screenshot({path:join(evidence,'presence-missing-mobile.png'),fullPage:true});
   await page.getByRole('tab',{name:'Итоги',exact:true}).click();await page.locator('.series-panel').waitFor();
   assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
