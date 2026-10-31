@@ -29,7 +29,7 @@ test("password sessions persist, expire and revoke without exposing hashes or ac
     auth.logout(login.token);
     assert.equal(auth.session(`sp_session=${login.token}`), null);
     assert.equal(auth.session(`sp_session=${second.token}`)?.profile, "gulnaz");
-    now += 86400001;
+    now += 30 * 86400000;
     assert.equal(auth.session(`sp_session=${second.token}`), null);
     assert.equal(auth.session(undefined), null);
     await assert.rejects(auth.createUser("unknown", "abc", "X", "correct-long-password"), /INVALID_PROFILE/);
@@ -39,6 +39,21 @@ test("password sessions persist, expire and revoke without exposing hashes or ac
     now += 900001;
     assert.ok(await auth.login("ruslan", "correct-long-password", "blocked"));
   } finally { auth.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('account login survives daily returns and server restarts for 30 days, then expires',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'sp-auth-persist-')),path=join(dir,'data.sqlite');
+  const started=1000;let now=started,auth=new AccountStore(path,()=>now);
+  try{
+    await auth.createUser('ruslan','ruslan','Руслан','correct-long-password');
+    const login=await auth.login('ruslan','correct-long-password','ip');assert.ok(login);
+    const cookie=`sp_session=${login.token}`;
+    auth.close();now+=2*86400000;auth=new AccountStore(path,()=>now);
+    assert.equal(auth.session(cookie)?.profile,'ruslan');
+    assert.equal(auth.validCsrf(auth.session(cookie)!,login.csrf),true);
+    now=started+30*86400000-1;assert.equal(auth.session(cookie)?.profile,'ruslan');
+    now++;assert.equal(auth.session(cookie),null);
+  }finally{auth.close();await rm(dir,{recursive:true,force:true});}
 });
 
 test("authenticated requests record throttled panel activity for the server watchdog", async () => {

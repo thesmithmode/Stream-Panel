@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 
 export const profiles = ["ruslan", "gulnaz"] as const;
+export const ACCOUNT_SESSION_SECONDS = 30 * 24 * 60 * 60;
 export type Profile = typeof profiles[number];
 export type UserSession = { profile: Profile; username: string; displayName: string; csrf: string; tokenHash: string };
 /** Ruslan owns the installation; Gulnaz can use only her own profile. */
@@ -80,7 +81,7 @@ export class AccountStore {
         this.db.prepare("DELETE FROM sp_auth_sessions WHERE expires_at_ms<=?").run(now);
         const active = (this.db.prepare("SELECT count(*) AS n FROM sp_auth_sessions WHERE profile=?").get(user.profile) as { n: number }).n;
         if (active >= 20) throw new Error("TOO_MANY_SESSIONS");
-        this.db.prepare("INSERT INTO sp_auth_sessions VALUES (?, ?, ?, ?)").run(digest(token), user.profile, csrf, now + 86400000);
+        this.db.prepare("INSERT INTO sp_auth_sessions VALUES (?, ?, ?, ?)").run(digest(token), user.profile, csrf, now + ACCOUNT_SESSION_SECONDS * 1000);
       }).immediate();
       return { token, csrf, user: { profile: user.profile, username: user.username, displayName: user.display_name } };
     } finally { this.pending--; }
