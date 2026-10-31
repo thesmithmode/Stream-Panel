@@ -1,4 +1,5 @@
 <script lang="ts">
+ import CurrentChatParticipants from './CurrentChatParticipants.svelte';
  import {dateTime} from './format';
  import {missingTwitchPresence} from './presence-quality';
  import ActionMenu from "./ActionMenu.svelte";
@@ -83,8 +84,8 @@
  <div><span>Донаты</span><strong>{Object.keys(summary.totals).length?Object.entries(summary.totals).map(([c,a])=>money(a,c)).join(' · '):'—'}</strong></div>
  <div><span>Сообщения</span><strong>{summary.messages.toLocaleString('ru-RU')}</strong></div>
 </section>
-<SectionTabs items={[["summary","Итоги"],["people","Участники"],["events","События"]]} bind:value={activeTab} label="Разделы эфира" panelId="stream-tabpanel"/>
-<div id="stream-tabpanel" role="tabpanel" aria-label={activeTab==='summary'?'Итоги':activeTab==='people'?'Участники':'События'}>
+<SectionTabs items={[["summary","Итоги"],["people","Участники"],["current","Текущие зрители"],["events","События"]]} bind:value={activeTab} label="Разделы эфира" panelId="stream-tabpanel"/>
+<div id="stream-tabpanel" role="tabpanel" aria-label={activeTab==='summary'?'Итоги':activeTab==='people'?'Участники':activeTab==='current'?'Текущие зрители':'События'}>
 {#if activeTab==='summary'}
 <section class="panel series-panel">
   <header><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2></header>
@@ -99,6 +100,8 @@
 
 <Insights sessionId={sessionFilter} refreshToken={summary} {onPerson} {onStream} />
 {#if sessionFilter}<StreamDonations sessionId={sessionFilter} {onPerson} {changed}/><details class="section-disclosure"><summary>Подписчики</summary><Following embedded sessionId={sessionFilter} {onPerson}/></details>{/if}
+{:else if activeTab==='current'}
+<CurrentChatParticipants sessionId={sessionFilter} {onPerson}/>
 {:else if activeTab==='people'}
 {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceBusy}<p role="status">Загружаем участников…</p>{:else}
 {#if missingPresence}<p class="notice" role="status">Сообщения Twitch сохранены, но данных о присутствии участников нет. Время в чате недоступно: прочерк не означает отсутствие человека.</p>{/if}
