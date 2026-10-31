@@ -1,3 +1,4 @@
+import {CurrentChatQueries} from './current-chat.js';
 import {AnalyticsReportCache} from './analytics-report-cache.js';
 import {ChannelRecords} from './channel-records.js';
 import {SubscriberHistory,type SubscriberQuery,type Publication} from './subscriber-history.js';
@@ -36,6 +37,7 @@ import { type PresencePoll } from "./presence.js";
 
 
 export class StreamStore {
+  private currentChatQueries:CurrentChatQueries;
   private history:AnalyticsHistory;
   private records:ChannelRecords;
   private overviewActivity:AnalyticsReportCache<{messages:number;attendees:number}>;
@@ -58,6 +60,7 @@ export class StreamStore {
     this.streams=new StreamSessions(this.db,this.reads);
     this.links=new IdentityLinks(this.db,id=>this.annotations.personRevision(id));
     this.queries=new AudienceQueries(this.reads);
+    this.currentChatQueries=new CurrentChatQueries(this.reads,this.queries);
     this.eventIngestion=new EventIngestion(this.db,this.links,this.streams);
     this.shared=profile===undefined?null:new SharedIdentities(this.db,profile);
     registerDonationSum(this.db);
@@ -114,6 +117,9 @@ export class StreamStore {
     confirmedPresentIds?: string[],
   ) {return this.streams.observePlatformStream(platform,accountId,externalId,startedAtMs,observedAtMs,url,title,confirmedPresentIds);}
   activeLogicalStream() {return this.streams.activeLogicalStream();}
+  currentChat(sessionId:string,excluded:readonly string[]=[],includeExcluded=false,now=Date.now()){
+    return this.currentChatQueries.read(this.groups.root(sessionId),excluded,includeExcluded,now,this.changeStamp());
+  }
   changeStamp(){return (this.db.prepare('SELECT coalesce(sum(revision),0) value FROM ui_revisions').get() as {value:number}).value;}
   streamMatchContext(sessionId:string){
     const id=this.groups.root(sessionId);
