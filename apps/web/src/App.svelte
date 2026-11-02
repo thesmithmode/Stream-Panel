@@ -36,7 +36,7 @@
 
 
   let retryInitialization=()=>{};
-  let autoRefresh=$state(true),refreshSeconds=$state(0);
+  let autoRefresh=$state(true),refreshSeconds=$state(60);
   function toggleRefresh(){autoRefresh=!autoRefresh;if(autoRefresh)void action(async()=>{});}
   let moreOpen=$state(false);
   let tab = $state("overview"),
@@ -329,7 +329,7 @@
  <nav class="more-links" aria-label="Дополнительные разделы">{#each [['connections','Интеграции'],['settings','Настройки']] as const as [key,label]}<button class:active={tab===key} aria-current={tab===key?'page':undefined} onclick={()=>navigate(key)}><Icon name={key}/>{label}<Icon name="arrow" size={18}/></button>{/each}</nav>
  <section class="more-refresh"><h3>Обновление данных</h3><div class="refresh-controls">
  <button class="refresh-toggle" aria-label={`Автообновление ${autoRefresh?'Вкл':'Выкл'}`} aria-pressed={autoRefresh} onclick={toggleRefresh}><span class="dot" class:off={!autoRefresh}></span>Автообновление <strong>{autoRefresh?'Вкл':'Выкл'}</strong></button>
- {#if autoRefresh}<label>Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={0}>Авто · 1 / 5 мин</option><option value={60}>1 мин</option><option value={300}>5 мин</option><option value={900}>15 мин</option></select></label>{/if}
+ {#if autoRefresh}<label>Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={60}>1 мин</option><option value={300}>5 мин</option><option value={900}>15 мин</option></select></label>{/if}
  <button class="outline manual-refresh" disabled={busy} onclick={()=>void action(async()=>{})}><Icon name="refresh" size={18}/><span>{busy?'Обновляем…':'Обновить данные'}</span></button>
  {#if connectionLost}<p role="status">Нет связи с сервером</p>{/if}
  </div></section>

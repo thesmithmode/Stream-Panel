@@ -13,8 +13,8 @@ const solo=(key:string)=>`solo:${key}`;
 
 /**
  * One account-to-person grouping shared by every profile of the physical file. Each profile
- * keeps its own persons, names, notes, tags, events and money; only which accounts belong
- * together is shared. Profiles record touched persons in identity_sync_queue (triggers),
+ * keeps its own person records, notes, tags, events and money; membership and explicit
+ * human names are shared. Profiles record touched persons in identity_sync_queue (triggers),
  * publish them into sp_identity_links, and every other profile is conformed with its own
  * reversible merge/split operations. Replicated operations are not published back: the
  * queue is cleared in the same transaction after every published change was applied.
@@ -38,6 +38,24 @@ export class SharedIdentities {
     return new Set((this.raw.prepare("SELECT profile FROM sp_identity_sync_applied").all() as {profile:string}[]).map(row=>row.profile));
   }
 
+  /** Rename the human, never the provider accounts; names follow shared membership. */
+  renameHuman(person:string,name:string):string[] {
+    const source=this.profiles().find(p=>p.name===this.profile);
+    if(!source)return [];
+    const direct=(source.db.prepare('SELECT link_key FROM identity_link_keys WHERE person_id=?').all(person) as {link_key:string}[]).map(r=>r.link_key);
+    const keys=[...new Set(direct.flatMap(key=>{const cluster=clusterOf(this.raw,key);return cluster?membersOf(this.raw,cluster):[key];}))];
+    const touched:string[]=[];
+    for(const profile of this.profiles()){
+      if(profile.name===this.profile)continue;
+      const holders=[...new Set(unambiguous(accountsFor(profile.db,keys)).map(r=>r.person_id))];
+      if(holders.length!==1)continue;
+      profile.db.prepare('UPDATE persons SET display_name=?,revision=revision+1 WHERE id=? AND display_name<>?').run(name,holders[0]!,name);
+      if(Number(profile.db.pragma('user_version',{simple:true}))>=30)profile.db.prepare('INSERT OR IGNORE INTO person_names VALUES (?)').run(holders[0]!);
+      touched.push(profile.name);
+    }
+    return touched;
+  }
+
   /** Cheap check before taking the write lock. */
   pending():boolean {
     const joined=this.joined(),applied=this.applied();
@@ -48,6 +66,7 @@ export class SharedIdentities {
   sync(hint:SyncHint={}):string[] {
     return this.raw.transaction(()=>{
       const profiles=this.profiles(),joined=this.joined(),applied=this.applied(),now=Date.now();
+      const initialNames=profiles.some(p=>Number(p.db.pragma('user_version',{simple:true}))>=30&&!this.raw.prepare('SELECT 1 FROM sp_identity_names_applied WHERE profile=?').get(p.name));
       const changed=new Set<string>(),moved=new Set<string>(),names=new Map<string,string>(),touched=new Set<string>();
       for(const profile of profiles){
         if(joined.has(profile.name)){
@@ -63,10 +82,26 @@ export class SharedIdentities {
         // implementation; normal writes still process only changed keys.
         if(!applied.has(profile.name))for(const row of profile.db.prepare("SELECT DISTINCT link_key FROM identity_link_keys").all() as {link_key:string}[])changed.add(row.link_key);
       }
+      if(initialNames)for(const profile of profiles)for(const row of profile.db.prepare('SELECT DISTINCT link_key FROM identity_link_keys').all() as {link_key:string}[])changed.add(row.link_key);
       if(changed.size)for(const profile of profiles){
         if(this.conform(profile,changed,moved,names,now))touched.add(profile.name);
       }
+      for(const cluster of new Set([...changed].map(key=>clusterOf(this.raw,key)??solo(key)))){
+        const keys=cluster.startsWith('solo:')?[cluster.slice(5)]:membersOf(this.raw,cluster);
+        const holders=profiles.flatMap(profile=>{
+          const ids=[...new Set(unambiguous(accountsFor(profile.db,keys)).map(r=>r.person_id))];
+          return ids.length===1&&Number(profile.db.pragma('user_version',{simple:true}))>=30?[{profile,id:ids[0]!}]:[];
+        });
+        const named=holders.slice().sort((a,b)=>(!initialNames?Number(b.profile.name===this.profile)-Number(a.profile.name===this.profile):0)||Number(b.profile.name==='ruslan')-Number(a.profile.name==='ruslan')).find(h=>h.profile.db.prepare('SELECT 1 FROM person_names WHERE person_id=?').get(h.id));
+        if(!named)continue;
+        const name=(named.profile.db.prepare('SELECT display_name FROM persons WHERE id=?').get(named.id) as {display_name:string}).display_name;
+        for(const h of holders){
+          if(h.profile.db.prepare('UPDATE persons SET display_name=? WHERE id=? AND display_name<>?').run(name,h.id,name).changes)touched.add(h.profile.name);
+          h.profile.db.prepare('INSERT OR IGNORE INTO person_names VALUES (?)').run(h.id);
+        }
+      }
       for(const profile of profiles){
+        if(Number(profile.db.pragma('user_version',{simple:true}))>=30)this.raw.prepare('INSERT OR IGNORE INTO sp_identity_names_applied VALUES (?)').run(profile.name);
         profile.db.prepare("DELETE FROM identity_sync_queue").run();
         if(!applied.has(profile.name))this.raw.prepare("INSERT INTO sp_identity_sync_applied VALUES (?)").run(profile.name);
       }
@@ -138,6 +173,7 @@ export class SharedIdentities {
       owned.set(row.person_id,(owned.get(row.person_id)??new Set<string>()).add(row.link_key));
       holderOf.set(row.link_key,row.person_id);
     }
+    for(const key of holderOf.keys())changed.add(key);
     const previous=new Map<string,string[]>();
     for(const key of holderOf.keys()){
       const cluster=clusterOf(this.raw,key);

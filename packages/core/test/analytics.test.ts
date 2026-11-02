@@ -176,7 +176,8 @@ test('YouTube messages around a category switch in one minute are split correctl
     } finally { s.close(); }
 });
 
-test('renamed bot identities and former channel owners remain excluded without current OAuth tokens', () => {
+test('renamed bot identities and former channel owners remain excluded without current OAuth tokens', t => {
+ t.mock.timers.enable({apis:['Date'],now:base+24*60*minute});
  const s=new StreamStore(':memory:');
  try {
   const sid=recordedStream(s,'channel','excluded',base,'platform',base);

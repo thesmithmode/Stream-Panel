@@ -22,7 +22,7 @@ const merge=(s:StreamStore,source:string,target:string,time=at)=>s.merge(source,
 const queue=(s:StreamStore)=>(raw(s).prepare('SELECT count(*) n FROM identity_sync_queue').get() as {n:number}).n;
 function files(){const dir=mkdtempSync(join(tmpdir(),'sp-shared-identities-'));return {path:join(dir,'data.sqlite'),done:()=>rmSync(dir,{recursive:true,force:true})};}
 
-test('a merge, its undo, a split and its undo in one profile apply at once to every profile; names, notes and events stay per profile',()=>{
+test('a merge, its undo, a split and its undo in one profile apply at once to every profile; names are common while notes and events stay per profile',()=>{
  const {path,done}=files(),a=new StreamStore(path,'ruslan'),b=new StreamStore(path,'gulnaz');
  try{
   const aTw=tw(a,'100','chikist007'),aYt=yt(a,'UCegor','@egorbarinov');da(a,'Егор4ик');
@@ -33,13 +33,13 @@ test('a merge, its undo, a split and its undo in one profile apply at once to ev
   // The renamed gulnaz group keeps its own name and receives the other account.
   assert.deepEqual(groups(b),['da:егор4ик','twitch:100+youtube:UCegor']);
   assert.equal(personOf(b,'twitch:100'),bYt);assert.equal(b.person(bYt).display_name,'Гульназ name');
-  assert.equal(b.events(undefined,bYt).length,2);assert.equal(a.person(aTw).display_name,'chikist007');
+  assert.equal(b.events(undefined,bYt).length,2);assert.equal(a.person(aTw).display_name,'Гульназ name');
   assert.equal(queue(a)+queue(b),0);
-  assert.deepEqual(a.syncSharedIdentities(),['gulnaz']);assert.deepEqual(a.syncSharedIdentities(),[]);
+  assert.deepEqual(a.syncSharedIdentities().sort(),['gulnaz','ruslan']);assert.deepEqual(a.syncSharedIdentities(),[]);
   // A merge in the second profile extends the same group in the first one without echoing back.
   merge(b,bDa,bYt);
   assert.deepEqual(groups(a),['da:егор4ик+twitch:100+youtube:UCegor']);
-  assert.equal(a.person(aTw).display_name,'chikist007');
+  assert.equal(a.person(aTw).display_name,'Гульназ name');
   assert.deepEqual(b.syncSharedIdentities(),['ruslan']);
   // Undoing the replicated merge in the first profile undoes the original one in the second.
   a.undoMerge(String(a.merges()[0]!.id),at+1);
@@ -51,7 +51,7 @@ test('a merge, its undo, a split and its undo in one profile apply at once to ev
   const ytIdentity=(b.person(bYt).identities as any[]).find(i=>i.external_id==='UCegor');
   b.splitIdentities([ytIdentity.id],'Ютуб',b.personRevision(bYt),at+2);
   assert.deepEqual(groups(a),['da:егор4ик','twitch:100','youtube:UCegor']);
-  assert.equal(personOf(a,'twitch:100'),aTw);assert.equal(a.person(aTw).display_name,'chikist007');
+  assert.equal(personOf(a,'twitch:100'),aTw);assert.equal(a.person(aTw).display_name,'Гульназ name');
   assert.equal(personOf(b,'twitch:100'),bYt);assert.equal(b.person(bYt).display_name,'Гульназ name');
   b.undoSplit(String(b.splits()[0]!.id),at+3);
   assert.deepEqual(groups(a),['da:егор4ик','twitch:100+youtube:UCegor']);

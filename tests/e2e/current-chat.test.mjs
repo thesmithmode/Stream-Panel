@@ -18,7 +18,8 @@ test('live chat combines silent Twitch members and recent YouTube authors, sorts
   await a.db.call('recordPoll',sid,'owner',{startedAtMs:base,completedAtMs:now-60000,status:'complete',userIds:['silent'],userNames:names});
   await a.db.call('recordPoll',sid,'owner',{startedAtMs:now-60000,completedAtMs:now-1000,status:'complete',userIds:['silent','talker','owner','streamelements'],userNames:names});
   const chat=async(id)=>a.db.call('ingest',{source:'twitch',accountId:'owner',externalId:id,type:'chat.message',actor:{externalId:'talker',displayName:'Talker'},occurredAtMs:Date.now()-100,receivedAtMs:Date.now(),sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
-  await chat('one');await chat('two');
+  const talker=await chat('one');await chat('two');
+  await a.db.call('renamePerson',talker.personId,'Person Talker');
   await a.db.call('youtubeMessages','yt-owner','yt-chat',[{id:'yt-one',snippet:{type:'textMessageEvent',publishedAt:new Date(now-60000).toISOString()},authorDetails:{channelId:'yt-person',displayName:'YouTubePerson'}}]);
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:900}});page.setDefaultTimeout(10000);
   await page.clock.install({time:new Date()});
@@ -30,6 +31,7 @@ test('live chat combines silent Twitch members and recent YouTube authors, sorts
   await page.getByRole('tab',{name:'Текущие зрители',exact:true}).click();
   const panel=page.getByRole('region',{name:'Текущие зрители',exact:true});
   await panel.getByRole('button',{name:'SilentViewer',exact:true}).waitFor();
+  await panel.getByRole('button',{name:'Person Talker',exact:true}).waitFor();
   assert.equal(await panel.locator('tbody tr').count(),3);assert.equal(await panel.locator('img,.avatar').count(),0);
   const silent=panel.locator('tbody tr').filter({has:page.getByRole('button',{name:'SilentViewer',exact:true})});
   assert.equal(await silent.locator('td').nth(2).textContent(),'0');assert.equal(await silent.locator('td').nth(3).textContent(),'Не писал');
