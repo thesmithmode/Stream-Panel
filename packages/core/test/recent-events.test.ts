@@ -40,14 +40,15 @@ test('archive resolves exact account authors after splits and leaves unlinked or
   const b=s.ingest({...message('two',at+1000),accountId:'other-owner',actor:{externalId:'other-id',displayName:'Viewer'}}).personId!;
   s.ingest({...message('no-author',at+2000),type:'chat.clear',actor:null});
   assert.equal(s.recentEvents().find(row=>row.external_id==='no-author')!.person_id,null);
-  // Even the same external user ID must resolve in the event's own account.
+  // One Twitch ID initially shares a person across channels; a selective split then separates the rows.
   const c=s.ingest({...message('three',at+3000),accountId:'third-owner',actor:{externalId:'viewer',displayName:'Another viewer'}}).personId!;
+  assert.equal(c,a);
   const merged=s.merge(a,b,s.personRevision(a),s.personRevision(b),at+4000);
   const identity=(s.person(b).identities as {id:string;external_id:string}[]).find(i=>i.external_id==='viewer')!;
   const split=s.splitIdentities([identity.id],'Separate',s.personRevision(b),at+5000);
   assert.equal(s.recentEvents().find(row=>row.external_id==='one')!.person_id,split);
   assert.equal(s.recentEvents().find(row=>row.external_id==='two')!.person_id,b);
-  assert.equal(s.recentEvents().find(row=>row.external_id==='three')!.person_id,c);
+  assert.equal(s.recentEvents().find(row=>row.external_id==='three')!.person_id,b);
   assert.ok(merged);
  }finally{s.close();}
 });
