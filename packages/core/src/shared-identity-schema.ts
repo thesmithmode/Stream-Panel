@@ -3,7 +3,8 @@ export const SHARED_IDENTITY_VERSION=29;
 /** Physical-file tables shared by every profile. Created outside profile migrations, so
  * profile views never rename them (like sp_youtube_quota). One row per linked account key;
  * an account without a row is linked to nothing. */
-export const sharedIdentityTables=`CREATE TABLE IF NOT EXISTS sp_identity_links(link_key TEXT PRIMARY KEY,cluster TEXT NOT NULL,updated_at_ms INTEGER NOT NULL) WITHOUT ROWID;
+export const sharedIdentityTables=`CREATE TABLE IF NOT EXISTS sp_identity_names_applied(profile TEXT PRIMARY KEY) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS sp_identity_links(link_key TEXT PRIMARY KEY,cluster TEXT NOT NULL,updated_at_ms INTEGER NOT NULL) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS sp_identity_links_cluster ON sp_identity_links(cluster,link_key);
 CREATE TABLE IF NOT EXISTS sp_identity_sync_profiles(profile TEXT PRIMARY KEY,joined_at_ms INTEGER NOT NULL) STRICT;
 -- Separate from publication: early v29 could mark a profile joined without
