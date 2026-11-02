@@ -5,6 +5,20 @@ import {normalizeDonation,parseDonationTime,findDonation} from '../../dist/apps/
 const envelope=(type,event={},metadata={})=>({metadata:{message_type:'notification',message_id:'envelope',message_timestamp:'2026-10-10T07:00:00Z',...metadata},payload:{subscription:{type},event}});
 const config=()=>({value:{twitchClientId:'client123',twitch:{access:'old',refresh:'refresh',expiresAt:Date.now()+3600000,userId:'owner',scopes:[]}},save:async()=>{}});
 
+test('Twitch profile lookup uses authenticated user IDs and rejects invalid batches or responses',async()=>{
+ const c=new TwitchConnection(config(),{call:async()=>{}},async(url,init)=>{
+  assert.equal(new URL(url).pathname,'/helix/users');assert.deepEqual(new URL(url).searchParams.getAll('id'),['42','43']);
+  assert.equal(init.headers.get('Authorization'),'Bearer old');assert.equal(init.headers.get('Client-Id'),'client123');assert.ok(init.signal);
+  return Response.json({data:[{id:'42',login:'confirmed_login',display_name:'Not a login'}]});
+ });
+ assert.deepEqual(await c.profileLogins(['42','43']),[{id:'42',login:'confirmed_login'}]);
+ for(const ids of [[],['bad'],Array(101).fill('1')])await assert.rejects(c.profileLogins(ids),/INVALID_TWITCH_USER_IDS/);
+ const malformed=new TwitchConnection(config(),{call:async()=>{}},async()=>Response.json({data:null}));
+ await assert.rejects(malformed.profileLogins(['42']),/INVALID_TWITCH_USERS/);
+ const disconnected=new TwitchConnection({value:{},save:async()=>{}},{call:async()=>{}});
+ await assert.rejects(disconnected.profileLogins(['42']),/TWITCH_LOGIN_REQUIRED/);
+});
+
 test('Twitch notifications preserve anonymous and moderation provenance and reject malformed evidence',()=>{
  assert.equal(messageText('raw text'),'raw text');for(const value of [null,[],123,{text:123}])assert.equal(messageText(value),'');
  assert.equal(normalizeTwitch(envelope('channel.follow',{}, {message_type:'session_keepalive'}),'owner'),null);

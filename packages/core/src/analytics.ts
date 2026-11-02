@@ -14,7 +14,6 @@ export interface AnalyticsOptions {
     streamFrom?:number;streamTo?:number;streamOffset?:number;streamLimit?:number;
     /** Internal fact projections; public routes never accept these flags. */
     activityInput?:ActivityInput[];
-    personId?:string;
     activityOnly?:boolean;
     donationsOnly?:boolean;
     fromMs: number;
@@ -122,7 +121,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         throw new Error('ANALYTICS_RANGE_TOO_LARGE');
     const sessionIds = JSON.stringify(sessions.map(s => s.id));
     const visible = `SELECT p.id,p.display_name FROM persons p WHERE NOT EXISTS(SELECT 1 FROM identities ib WHERE ib.person_id=p.id AND (ib.match_key IN(SELECT value FROM json_each(?)) OR EXISTS(SELECT 1 FROM identity_aliases a WHERE a.identity_id=ib.id AND ltrim(a.candidate_key,'@#') IN(SELECT value FROM json_each(?))) OR (ib.source='twitch' AND (ib.external_id=? OR ib.external_id=ib.account_id)))) AND NOT EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))))`;
-    const people = db.prepare(visible+(options.personId?' AND p.id=?':'')).all(botJson, botJson, options.ownerId ?? '', botJson,botJson,...(options.personId?[options.personId]:[])) as {
+    const people = db.prepare(visible).all(botJson, botJson, options.ownerId ?? '', botJson,botJson) as {
         id: string;
         display_name: string;
     }[];
@@ -131,7 +130,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         e = { id, name, source: platform, sources:[platform], messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, sessionIds: new Set(), attendanceSessionIds: new Set(), coreSessionIds: [], regular: false, intervals: [], donations: {}, core: false, tags:[], manualCore:null, follower:null,arrivalHours:[] };
         entities.set(id, e);
     } else if(!e.sources.includes(platform)) e.sources.push(platform); return e; };
-    const allowed = new Map(people.filter(p=>!options.personId||p.id===options.personId).map(p => [p.id, p.display_name]));
+    const allowed = new Map(people.map(p => [p.id, p.display_name]));
     const platformWindows=db.prepare('SELECT session_id,platform,started_at_ms,ended_at_ms FROM platform_streams WHERE session_id IN(SELECT value FROM json_each(?))').all(sessionIds) as {session_id:string;platform:string;started_at_ms:number;ended_at_ms:number|null}[];
     const samples = db.prepare('SELECT * FROM stream_samples WHERE session_id IN(SELECT value FROM json_each(?)) ORDER BY observed_at_ms').all(sessionIds) as any[];
     const samplesBySession=groupBySession(samples),platformsBySession=groupBySession(platformWindows);
@@ -174,7 +173,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         coreDurations.set(s.id, spans.reduce((n, span) => n + span.to - span.from, 0));
     }
     const corePresence = new Map<string, Span[]>();
-    const activity=options.donationsOnly?[]:options.activityInput??readActivityInput(db,sessions.map(s=>s.id),sessions.length?Math.max(...sessions.map(s=>s.ended_at_ms??to)):to,options.youtubeAccount,window,options.personId);
+    const activity=options.donationsOnly?[]:options.activityInput??readActivityInput(db,sessions.map(s=>s.id),sessions.length?Math.max(...sessions.map(s=>s.ended_at_ms??to)):to,options.youtubeAccount,window);
     for(const row of activity){
         const spans=corePresence.get(row.person)??[];
         for(const w of fullWindows.get(row.session)??[]){const start=Math.max(w.from,row.from),end=Math.min(w.to,row.to);if(end>start)spans.push({from:start,to:end,session:row.session,kind:'observed'});}
@@ -252,7 +251,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             entity(row.person,name,'twitch').intervals.push(...spans);
         }
         }
-        const messages = options.donationsOnly?[]:db.prepare(`SELECT i.person_id,es.session_id,min(e.occurred_at_ms) AS at,count(*) AS n,(SELECT c.category_id FROM stream_samples c WHERE c.session_id=es.session_id AND c.observed_at_ms<=e.occurred_at_ms ORDER BY c.observed_at_ms DESC LIMIT 1) AS cat FROM event_sessions es INDEXED BY event_sessions_session CROSS JOIN events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE e.type='chat.message' AND e.occurred_at_ms>=? AND e.occurred_at_ms<? AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id) AND es.session_id IN(SELECT value FROM json_each(?)) AND (?='' OR i.person_id=?) GROUP BY i.person_id,es.session_id,cast(e.occurred_at_ms/60000 AS INTEGER),cat LIMIT 50001`).all(from, to, sessionIds,options.personId??'',options.personId??'') as any[];
+        const messages = options.donationsOnly?[]:db.prepare(`SELECT i.person_id,es.session_id,min(e.occurred_at_ms) AS at,count(*) AS n,(SELECT c.category_id FROM stream_samples c WHERE c.session_id=es.session_id AND c.observed_at_ms<=e.occurred_at_ms ORDER BY c.observed_at_ms DESC LIMIT 1) AS cat FROM event_sessions es INDEXED BY event_sessions_session CROSS JOIN events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE e.type='chat.message' AND e.occurred_at_ms>=? AND e.occurred_at_ms<? AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id) AND es.session_id IN(SELECT value FROM json_each(?)) GROUP BY i.person_id,es.session_id,cast(e.occurred_at_ms/60000 AS INTEGER),cat LIMIT 50001`).all(from, to, sessionIds) as any[];
         if (messages.length > 50000)
             throw new Error('ANALYTICS_RANGE_TOO_LARGE');
         for (const row of messages) {
@@ -290,10 +289,10 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         const excludedAuthors = new Set((db.prepare(`SELECT DISTINCT author_id FROM youtube_messages WHERE account_id=? AND (json_extract(payload_json,'$.authorDetails.isChatOwner')=1 OR lower(ltrim(trim(json_extract(payload_json,'$.authorDetails.displayName')),'@#')) IN(SELECT value FROM json_each(?)))`).all(options.youtubeAccount,botJson) as {author_id:string}[]).map(row=>row.author_id));
         const chats = db.prepare(`WITH scoped AS (
     SELECT *, (SELECT ps.session_id FROM platform_streams ps JOIN sessions s ON s.id=ps.session_id WHERE ps.platform='youtube' AND ps.account_id=m.account_id AND ps.started_at_ms<=m.published_at_ms AND coalesce(ps.ended_at_ms,s.ended_at_ms,?)>m.published_at_ms ORDER BY ps.started_at_ms DESC LIMIT 1) AS sid
-    FROM youtube_messages m WHERE account_id=? AND author_id!=? AND author_id!='' AND (?='' OR author_id IN(SELECT external_id FROM youtube_identities WHERE account_id=m.account_id AND person_id=?)) AND published_at_ms>=? AND published_at_ms<? AND json_extract(payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
+    FROM youtube_messages m WHERE account_id=? AND author_id!=? AND author_id!='' AND published_at_ms>=? AND published_at_ms<? AND json_extract(payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
   ), categorized AS (
     SELECT *, (SELECT c.category_id FROM stream_samples c WHERE c.session_id=scoped.sid AND c.observed_at_ms<=scoped.published_at_ms ORDER BY c.observed_at_ms DESC LIMIT 1) AS cat FROM scoped
-  ) SELECT author_id,max(json_extract(payload_json,'$.authorDetails.displayName')) AS name,min(published_at_ms) AS at,max(published_at_ms) AS last_at,sum(CASE WHEN published_at_ms>=? THEN 1 ELSE 0 END) AS n,min(CASE WHEN published_at_ms>=? THEN published_at_ms END) AS message_at,sid,cat FROM categorized GROUP BY author_id,cast(published_at_ms/60000 AS INTEGER),sid,cat LIMIT 50001`).all(to, options.youtubeAccount, options.youtubeAccount,options.personId??'',options.personId??'', Math.max(0,from-window*60000), to, from, from) as any[];
+  ) SELECT author_id,max(json_extract(payload_json,'$.authorDetails.displayName')) AS name,min(published_at_ms) AS at,max(published_at_ms) AS last_at,sum(CASE WHEN published_at_ms>=? THEN 1 ELSE 0 END) AS n,min(CASE WHEN published_at_ms>=? THEN published_at_ms END) AS message_at,sid,cat FROM categorized GROUP BY author_id,cast(published_at_ms/60000 AS INTEGER),sid,cat LIMIT 50001`).all(to, options.youtubeAccount, options.youtubeAccount, Math.max(0,from-window*60000), to, from, from) as any[];
         if (chats.length > 50000)
             throw new Error('ANALYTICS_RANGE_TOO_LARGE');
         for (const chat of chats) {

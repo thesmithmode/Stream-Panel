@@ -195,7 +195,7 @@ export async function createApplication(
   // Local bootstrap sessions have no hosted account; the common onRequest hook
   // still requires a valid session before this capability response is returned.
   app.get('/api/v1/auth/me',()=>({user:null}));
-  registerPeopleRoutes(app, db, configuration);
+  registerPeopleRoutes(app, db, configuration, ids=>twitch.profileLogins(ids));
   registerDonationsRoutes(app, db, configuration);
   registerStreamsRoutes(app, db, configuration);
   const dataEpoch=randomUUID();

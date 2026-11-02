@@ -17,15 +17,38 @@ test('filtered archive follows current person links and logical stream groups wi
   const people=s.persons(),viewer=String(people.find(p=>p.display_name==='Viewer')!.id),other=String(people.find(p=>p.display_name==='Other')!.id);
   assert.deepEqual(s.recentEvents(0,100,{session:a}).map(r=>r.external_id),['a']);
   assert.deepEqual(s.recentEvents(0,100,{person:viewer,messagesOnly:true}).map(r=>r.external_id),['a']);
+  assert.equal(s.recentEvents(0,100,{session:a})[0]!.person_id,viewer);
   const merged=s.merge(viewer,other,s.personRevision(viewer),s.personRevision(other),at+200000);
-  assert.equal(s.recentEvents(0,100,{person:other,messagesOnly:true}).length,2);s.undoMerge(merged,at+210000);
+  assert.equal(s.recentEvents(0,100,{person:other,messagesOnly:true}).length,2);
+  assert.ok(s.recentEvents().every(row=>row.person_id===other));s.undoMerge(merged,at+210000);
+  assert.equal(s.recentEvents().find(row=>row.external_id==='a')!.person_id,viewer);
   assert.equal(s.recentEvents(0,100,{person:other,messagesOnly:true}).length,1);
   s.mergeSessions([a,b]);assert.equal(s.recentEvents(0,100,{session:b}).length,2);s.unmergeSessions(a);assert.equal(s.recentEvents(0,100,{session:b}).length,1);
   const c=s.startSession('concurrent','c',at,'platform',at);s.attachPlatformStream(c,'youtube','yt','video-b',at,at,null,'B');s.endSession(c,at+60000);
   const yt=(id:string)=>[{id,snippet:{type:'textMessageEvent',publishedAt:new Date(at+1000).toISOString(),displayMessage:id},authorDetails:{channelId:'yt-viewer',displayName:'YouTube'}}];
   s.youtubeMessages('yt','chat-a',yt('ya'),'video-a');s.youtubeMessages('yt','chat-b',yt('yb'),'video-b');s.youtubeMessages('yt','legacy',yt('ambiguous'));
+  const ytPerson=s.recentEvents().find(row=>row.external_id==='ya')!.person_id;assert.ok(ytPerson);
+  assert.equal(s.person(ytPerson).display_name,'YouTube');
   const rows=s.recentEvents(0,100,{session:a});assert.ok(rows.some(r=>r.external_id==='ya'));assert.ok(!rows.some(r=>['yb','ambiguous'].includes(r.external_id)));
   assert.equal(s.recentEvents(0,100,{session:'missing'}).length,0);assert.throws(()=>s.recentEvents(0,100,{person:'x'.repeat(257)}),/INVALID_RECENT_EVENTS_FILTER/);
+ }finally{s.close();}
+});
+test('archive resolves exact account authors after splits and leaves unlinked or anonymous rows plain',()=>{
+ const s=new StreamStore(':memory:');try{
+  const at=Date.now()-10000;
+  const a=s.ingest(message('one',at)).personId!;
+  const b=s.ingest({...message('two',at+1000),accountId:'other-owner',actor:{externalId:'other-id',displayName:'Viewer'}}).personId!;
+  s.ingest({...message('no-author',at+2000),type:'chat.clear',actor:null});
+  assert.equal(s.recentEvents().find(row=>row.external_id==='no-author')!.person_id,null);
+  // Even the same external user ID must resolve in the event's own account.
+  const c=s.ingest({...message('three',at+3000),accountId:'third-owner',actor:{externalId:'viewer',displayName:'Another viewer'}}).personId!;
+  const merged=s.merge(a,b,s.personRevision(a),s.personRevision(b),at+4000);
+  const identity=(s.person(b).identities as {id:string;external_id:string}[]).find(i=>i.external_id==='viewer')!;
+  const split=s.splitIdentities([identity.id],'Separate',s.personRevision(b),at+5000);
+  assert.equal(s.recentEvents().find(row=>row.external_id==='one')!.person_id,split);
+  assert.equal(s.recentEvents().find(row=>row.external_id==='two')!.person_id,b);
+  assert.equal(s.recentEvents().find(row=>row.external_id==='three')!.person_id,c);
+  assert.ok(merged);
  }finally{s.close();}
 });
 test('recent content is deduplicated and expiry never removes permanent facts or revisions',()=>{
