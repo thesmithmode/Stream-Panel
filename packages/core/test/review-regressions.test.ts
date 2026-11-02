@@ -35,14 +35,6 @@ test('person picker searches beyond 500 without computing event statistics',()=>
   assert.throws(()=>s.personOptions('',-1),/INVALID_PERSON_PAGE/);assert.throws(()=>s.personOptions('',0,51),/INVALID_PERSON_PAGE/);
  }finally{s.close();}
 });
-test('person day projection returns only that person and exact presence coverage',()=>{
- const s=new StreamStore(':memory:');try{
-  const sid=s.startSession('owner','day',at,'platform',at);s.recordPoll(sid,'owner',{startedAtMs:at,completedAtMs:at+m,status:'complete',userIds:['one','two'],userNames:{one:'One',two:'Two'}});s.endSession(sid,at+10*m);
-  const id=String(s.persons().find(p=>p.display_name==='One')!.id),q={fromMs:at,toMs:at+10*m};
-  const full=s.analytics(q),detail=s.personAnalytics(id,q);assert.equal(detail.audience.length,1);assert.deepEqual(detail.audience[0]?.intervals,full.audience.find(p=>p.id===id)?.intervals);assert.deepEqual(detail.timeline,full.timeline.map(p=>({at:p.at,presenceKnown:p.presenceKnown})));
-  assert.throws(()=>s.personAnalytics('missing',q),/PERSON_NOT_FOUND/);
- }finally{s.close();}
-});
 test('aggregated qualified IDs agree with count across finished streams',()=>{
  const s=new StreamStore(':memory:');try{
   for(let i=0;i<2;i++){const start=at+i*86400000,id=s.startSession('owner',String(i),start,'platform',start);s.recordPoll(id,'owner',{startedAtMs:start,completedAtMs:start+m,status:'complete',userIds:['viewer']});s.endSession(id,start+2*m);}

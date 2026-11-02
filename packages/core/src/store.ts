@@ -17,7 +17,7 @@ import {registerDonationSum,donationTotals} from './donation-statistics.js';
 import {parseDonationTime} from './donation-time.js';
 import {personActivity} from "./person-activity.js";
 import {DonationLedger,type DonationInput} from "./donations.js";
-import { audienceAnalytics,type AnalyticsOptions } from "./analytics.js";
+import { type AnalyticsOptions } from "./analytics.js";
 import Database from "better-sqlite3";
 import { createHash,randomUUID } from "node:crypto";
 import { openProfileDatabase } from "./profile-db.js";
@@ -386,13 +386,6 @@ export class StreamStore {
     const windowsBySession=new Map<string,typeof links>();for(const link of links){const list=windowsBySession.get(link.session_id)??[];list.push(link);windowsBySession.set(link.session_id,list);}
     const now=Date.now(),totals30=donationTotals(this.reads,now-30*86400000,now,excluded);
     return {records:this.records.read(excluded),totals30,streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+windowsFromLinks(windowsBySession.get(s.id)??[],s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees:activity.attendees,messages:activity.messages,totals:donationTotals(this.reads,undefined,undefined,excluded),donations};
-  }
-  personAnalytics(id:string,options:AnalyticsOptions){
-    return this.reads.transaction(()=>{
-    this.queries.person(id,false);
-    const report=audienceAnalytics(this.reads,{...options,personId:id,activityOnly:true});
-    return {filters:report.filters,audience:report.audience,timeline:report.timeline.map(p=>({at:p.at,presenceKnown:p.presenceKnown})),aggregate:false};
-    })();
   }
   personOptions(search='',offset=0,limit=50,includeBots=false,selected='',excluded:readonly string[]=[],exclude=''){return this.queries.personOptions(search,offset,limit,includeBots,selected,excluded,exclude);}
 

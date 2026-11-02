@@ -165,6 +165,13 @@ export class TwitchConnection {
     if (!this.config.value.twitch) throw new Error("TWITCH_LOGIN_REQUIRED");
     return this.config.value.twitch;
   }
+  async profileLogins(ids:readonly string[]):Promise<{id:string;login:string}[]> {
+    if(!ids.length||ids.length>100||ids.some(id=>!/^\d+$/.test(id)))throw new Error('INVALID_TWITCH_USER_IDS');
+    const query=new URLSearchParams(ids.map(id=>['id',id]));
+    const body=object(await this.api(`users?${query}`,{signal:AbortSignal.timeout(5000)}));
+    if(!Array.isArray(body.data))throw new Error('INVALID_TWITCH_USERS');
+    return body.data.map(raw=>{const user=object(raw);return {id:string(user.id),login:string(user.login)};});
+  }
   async beginAuth(clientId: string, extended: boolean): Promise<unknown> {
     if (!/^[a-zA-Z0-9]{5,100}$/.test(clientId))
       throw new Error("INVALID_CLIENT_ID");

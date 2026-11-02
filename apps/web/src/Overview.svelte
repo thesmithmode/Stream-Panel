@@ -107,7 +107,7 @@
 {#if missingPresence}<p class="notice" role="status">Сообщения Twitch сохранены, но данных о присутствии участников нет. Время в чате недоступно: прочерк не означает отсутствие человека.</p>{/if}
 <AudienceRanking people={audienceData?.audience??[]} {onPerson} showIntervals {missingPresence} streamStart={session?.started_at_ms??0} streamEnd={session?.ended_at_ms??Date.now()}/>
 {/if}
-{:else if sessionFilter}<section class="panel"><header><h2>События стрима · 48 ч</h2></header><div class="settings-body"><RecentEvents sessionId={sessionFilter}/></div></section>{/if}
+{:else if sessionFilter}<section class="panel"><header><h2>События стрима · 48 ч</h2></header><div class="settings-body"><RecentEvents sessionId={sessionFilter} {onPerson}/></div></section>{/if}
 </div>
 <style>
  .stream-title-row{display:flex;gap:16px;align-items:start}.stream-title-row h1{flex:1;min-width:0;font-size:26px;line-height:1.3;margin:0 0 12px;overflow-wrap:anywhere}.stream-meta{color:var(--muted);margin:0 0 6px;font-size:14px}.series-panel>header{display:flex;align-items:center;justify-content:space-between}

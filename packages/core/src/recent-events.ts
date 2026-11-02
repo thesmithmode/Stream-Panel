@@ -44,7 +44,13 @@ export class RecentEvents {
    where.push(`((r.source<>'youtube' AND EXISTS(SELECT 1 FROM events e JOIN logical_event_sessions es ON es.event_id=e.id WHERE e.source=r.source AND e.account_id=r.account_id AND e.type=r.type AND e.external_id=r.external_id AND es.session_id=?)) OR (r.source='youtube' AND EXISTS(SELECT 1 FROM logical_platform_streams p WHERE p.platform='youtube' AND p.session_id=? AND p.account_id=r.account_id AND r.at_ms>=p.started_at_ms AND r.at_ms<coalesce(p.ended_at_ms,?) AND (json_extract(r.payload_json,'$.videoId')=p.external_id OR (json_extract(r.payload_json,'$.videoId') IS NULL AND 1=(SELECT count(*) FROM logical_platform_streams q WHERE q.platform='youtube' AND q.account_id=r.account_id AND r.at_ms>=q.started_at_ms AND r.at_ms<coalesce(q.ended_at_ms,?)))))))`);
    args.push(filter.session,filter.session,now,now);
   }
-  return (this.db.prepare(`SELECT r.*,coalesce((SELECT p.display_name FROM identities i JOIN persons p ON p.id=i.person_id WHERE i.source=r.source AND i.account_id=r.account_id AND i.external_id=r.actor_id),(SELECT p.display_name FROM youtube_identities i JOIN persons p ON p.id=i.person_id WHERE r.source='youtube' AND i.account_id=r.account_id AND i.external_id=r.actor_id),r.actor_name) AS person_name FROM recent_events r WHERE ${where.join(' AND ')} ORDER BY r.at_ms DESC,r.id DESC LIMIT ? OFFSET ?`).all(...args,limit,offset) as RecentRow[]).map(({payload_json,...row})=>({...row,payload:JSON.parse(payload_json) as Record<string,unknown>}));
+  // Resolve membership and the human name at read time, including merge/split changes.
+  return (this.db.prepare(`SELECT r.*,coalesce(i.person_id,y.person_id) AS person_id,coalesce(p.display_name,r.actor_name) AS person_name
+   FROM recent_events r
+   LEFT JOIN identities i ON r.source<>'youtube' AND i.source=r.source AND i.account_id=r.account_id AND i.external_id=r.actor_id
+   LEFT JOIN youtube_identities y ON r.source='youtube' AND y.account_id=r.account_id AND y.external_id=r.actor_id
+   LEFT JOIN persons p ON p.id=coalesce(i.person_id,y.person_id)
+   WHERE ${where.join(' AND ')} ORDER BY r.at_ms DESC,r.id DESC LIMIT ? OFFSET ?`).all(...args,limit,offset) as (RecentRow&{person_id:string|null})[]).map(({payload_json,...row})=>({...row,payload:JSON.parse(payload_json) as Record<string,unknown>}));
  }
  purge(now=Date.now()):number {
   assertTimestamp(now);

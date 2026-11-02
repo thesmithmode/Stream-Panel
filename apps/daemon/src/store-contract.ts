@@ -48,7 +48,6 @@ export const storeOperations={
   persons:"cached",
   personsPage:"cached",
   personOptions:"cached",
-  personAnalytics:"cached",
   createPerson:"write",
   donorNicknames:"cached",
   donorBindings:"cached",
