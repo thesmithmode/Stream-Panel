@@ -163,3 +163,6 @@ button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,s
 
 /* Stream sections remain full-size touch targets when the live audience tab wraps. */
 @media(max-width:720px){.stream-page>.section-tabs,.stream-page .section-tabs{flex-wrap:wrap;justify-content:flex-start;column-gap:16px;row-gap:0}}
+
+@media(min-width:721px){.heading-profile{position:fixed;left:22px;bottom:24px;width:156px;z-index:11}.sidebar nav{padding-bottom:80px}.heading-profile .analytics-menu-trigger{display:none}}
+@media(min-width:721px) and (max-width:1000px){.heading-profile{left:12px;width:140px}.heading-profile select{max-width:116px}}
