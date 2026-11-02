@@ -20,7 +20,7 @@ test('stream archive and person messages show only the selected scope, paginate,
   for(const width of [390,1280]){await page.setViewportSize({width,height:844});await assertUiLayout(page);}
   const midnight=Date.UTC(2026,9,21,21),long='Очень длинное сообщение без обрезки. '.repeat(12),token='x'.repeat(180);
   const compactRows=[
-   {id:'short',source:'twitch',actor_name:'Egor4ik',at_ms:midnight+60000,payload:{text:'Привет!'}},
+   {id:'short',source:'twitch',person_id:'fixture-person',actor_name:'Egor4ik',at_ms:midnight+60000,payload:{text:'Привет!'}},
    {id:'youtube',source:'youtube',actor_name:'Mila',at_ms:midnight,payload:{text:'Я тут'}},
    {id:'long',source:'twitch',actor_name:'ДлинноеИмя'.repeat(8),at_ms:midnight-1000,payload:{text:long}},
    {id:'token',source:'youtube',actor_name:'Mila',at_ms:midnight-2000,payload:{text:token}},

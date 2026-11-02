@@ -84,6 +84,7 @@ export interface Event {
     originChannelId?: string;
   };
 }
+export interface PlatformLink {identityId:string;source:'twitch'|'youtube';url:string}
 export interface Person {
   is_bot?: number;
   id: string;

@@ -5,7 +5,7 @@
  import CategoryComparison from "./CategoryComparison.svelte";
  import SectionTabs from "./SectionTabs.svelte";
   import { onMount, untrack } from "svelte";
-  import { api, date, money, sameResponse,mergeResponseBlocks } from "./api";
+  import { api, money, sameResponse,mergeResponseBlocks } from "./api";
   import {analyticsView,loadAnalyticsView,saveAnalyticsView} from "./analytics-view";
   import Insights from "./Insights.svelte";
   import Help from "./Help.svelte";
@@ -13,9 +13,8 @@
   import Icon from "./Icon.svelte";
   import SubscriberGrowth from "./SubscriberGrowth.svelte";
   import AudienceGrowth from "./AudienceGrowth.svelte";
-  import {num,pct,dateTime} from './format';
+  import {num,pct} from './format';
   import ActivityClock from "./ActivityClock.svelte";
-  import {localDateWindow} from "./time-audience";
   import DonationPatterns from './DonationPatterns.svelte';
   import {platformClass} from './period';
   import TimePatterns from "./TimePatterns.svelte";
@@ -26,12 +25,10 @@
   const localInput=(at:number)=>{const d=new Date(at);return new Date(at-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
   let from=$state(localInput(0)),to=$state(localInput(Date.now())),source=$state("all"),category=$state("");
   let timezone=$state(untrack(()=>defaultTimezone));
-  let search=$state(""),liveEnd=$state(true),data=$state.raw<any>(null),error=$state(""),busy=$state(false),selected=$state<any>(null),day=$state("");
-  $effect(()=>{void section;selected=null;});
+  let search=$state(""),liveEnd=$state(true),data=$state.raw<any>(null),error=$state(""),busy=$state(false);
   let heatCurrency=$state("RUB");
   let heatCalculation=$state("average"),selectedHour=$state<{day:string;hour:number}|null>(null);
   let period=$state<number|'all'|'custom'>('all');
-  let detailData=$state<any>(null),detailBusy=$state(false);
   const reportScope=$derived(JSON.stringify([profile,section,period,period==='custom'?from:'',period==='custom'?to:'',source,category,timezone]));
   let loadedScope=$state(''),loadedPanel=$state('');
   let refreshController:AbortController|undefined;
@@ -91,25 +88,6 @@
     return `${day} ${hour}:00 — ${value===null?"нет данных":view.heatMetric==='amount'?money(String(Math.round(value)),heatCurrency):`${num(value)}`}${count===undefined?'':` · эфиров: ${count}`} · ${(known??0).toLocaleString('ru-RU',{maximumFractionDigits:1})} мин с данными`;
   }
   const categoryOptions=$derived([...(data?.availableCategories??data?.categories??[])].filter((c:any)=>c.id).sort((a:any,b:any)=>a.name.localeCompare(b.name,'ru')));
-  const timelineByMinute=$derived(new Map((data?.aggregate?(detailData?.timeline??[]):(data?.timeline??[])).map((point:any)=>[point.at,point])) as Map<number,any>);
-  const detailPerson=$derived(data?.aggregate?detailData?.audience?.find((p:any)=>p.id===selected?.id):selected);
-  const detailMinutes=$derived.by(()=>{
-    if(!selected||!day)return [];
-    const bounds=localDateWindow(day,timezone),start=bounds.from;
-    return Array.from({length:Math.ceil((bounds.to-bounds.from)/60000)},(_,i)=>{
-      const at=start+i*60000,span=(detailPerson?.intervals??[]).find((s:any)=>s.from<at+60000&&s.to>at),known=timelineByMinute.get(at)?.presenceKnown;
-      return {at,state:span?.kind==="chat_proxy"?"estimated":span?"observed":selected.source==="twitch"&&known?"not_observed":"unknown"};
-    });
-  });
-  $effect(()=>{
-    detailData=null;detailBusy=false;const person=selected?.id,currentDay=day,aggregate=data?.aggregate;
-    if(!person||!currentDay||!aggregate)return;
-    const bounds=localDateWindow(currentDay,timezone),controller=new AbortController();detailBusy=true;
-    const q=new URLSearchParams({from:String(bounds.from),to:String(bounds.to),source,category,timezone});
-    void analyticsReport(signal=>api(`persons/${encodeURIComponent(person)}/analytics?${q}`,undefined,signal),controller.signal).then(result=>{if(!controller.signal.aborted)detailData=result;}).catch(e=>{if(!controller.signal.aborted)error=e.message;}).finally(()=>{if(!controller.signal.aborted)detailBusy=false;});
-    return ()=>controller.abort();
-  });
-  function selectEntity(e:any){selected=e;day=new Date(e.intervals.at(-1)?.from??new Date(to).getTime()).toLocaleDateString('sv-SE',{timeZone:timezone});}
   function preset(days:number|'all'){period=days;liveEnd=true;const now=Date.now();from=localInput(days==='all'?0:now-days*86400000);to=localInput(now);}
   async function refresh(force=false,signal?:AbortSignal){
     refreshController?.abort();refreshController=new AbortController();
@@ -127,10 +105,10 @@
       const cached=cachedAnalytics(profile,q);
       if(cached&&id===requestId){data=cached;loadedPanel=panel;loadedScope=scope;loadedAudienceQuery=audienceQuery;}
       const result=await loadAnalytics(profile,q,force,signal);
-      if(id===requestId){const previousScope=loadedScope;if(result.filters&&(result.filters.category!==category||result.filters.source!==source||result.filters.timezone!==timezone))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');loadedPanel=panel;loadedScope=scope;loadedAudienceQuery=audienceQuery;
+      if(id===requestId){if(result.filters&&(result.filters.category!==category||result.filters.source!==source||result.filters.timezone!==timezone))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');loadedPanel=panel;loadedScope=scope;loadedAudienceQuery=audienceQuery;
         if(JSON.stringify([scope,audienceOffset,search,view.sort,view.coreOnly])===audienceQuery)pagedAudience=null;
         if(!sameResponse(data,result))data=mergeResponseBlocks(data,result);
-        if(scope!==previousScope){selected=null;}}
+}
     }catch(e){if(id===requestId&&!signal?.aborted){error=(e as Error).message;}}
     finally{if(id===requestId)busy=false;}
   }
@@ -144,19 +122,7 @@
   });
 </script>
 {#snippet categoryFilter(_label:string)}{/snippet}
-{#snippet personDetail()}
-  {#if selected}{#if detailBusy}<p class="small" role="status">Загружаем поминутные данные…</p>{/if}<section class="panel analytics-person"><header><h2>Активность: {selected.name}</h2><button class="outline" onclick={()=>selected=null}>Закрыть детализацию</button></header>
-    <div class="settings-body"><p>Эфиров: {selected.sessionCount??selected.sessionIds.length} · Сообщений: {selected.messages} · Наблюдений: {selected.observedMinutes} мин · Оценка активности по чату: {selected.estimatedChatMinutes} мин</p>
-      {#each Object.entries(selected.donations) as [currency,amount]}<p>Донаты с подтверждённым временем: {money(String(amount),currency)}</p>{/each}
-      <button class="outline" onclick={()=>onPerson(selected.id)}>Открыть карточку человека</button>
-      <label>Дата минутной сетки<input type="date" bind:value={day} /></label>
-      <div class="analytics-minute-grid" aria-label="Минутная сетка активности">{#each detailMinutes as point}<span class={`minute-dot ${point.state}`} title={`${date(point.at)} — ${({observed:"наблюдался в опросе",estimated:"оценка после сообщения",not_observed:"не обнаружен в опросе",unknown:"нет данных"} as Record<string,string>)[point.state]}`}></span>{/each}</div>
-      <Help id="analytics-minute-grid" label="О цветах минутной сетки" text="Бирюзовый — наблюдение, фиолетовый — оценка, светлый — отсутствовал в полном опросе, серый — неизвестно. Для YouTube отсутствие сообщения не означает уход."/>
-      <div class="table-wrap"><table><thead><tr><th>Начало сигнала</th><th>Конец интервала</th><th>Тип</th></tr></thead><tbody>{#each [...(detailPerson?.intervals??[])].sort((a:any,b:any)=>b.from-a.from).slice(0,100) as span}<tr><td data-label="Начало сигнала">{dateTime(span.from)}</td><td data-label="Конец интервала">{dateTime(span.to)}</td><td data-label="Тип">{span.kind==="observed"?"Наблюдения Twitch":"Оценка по чату YouTube"}</td></tr>{/each}</tbody></table></div>
-      <Help id="analytics-intervals" label="О границах интервалов" text={`${data.aggregate?"Показаны интервалы выбранного дня, до 100 строк.":"Показаны первые 100 интервалов."} Границы означают сигналы API с минутной детализацией, не доказанный вход/выход видеозрителя.`}/>
-    </div>
-  </section>{/if}
-{/snippet}
+
 <div class="analytics-toolbar">
  <div class="period-chips" role="group" aria-label="Быстрый выбор периода">{#each [[7,'7 дней'],[30,'30 дней'],['all','Всё время']] as [value,label]}<button class:active={period===value} aria-pressed={period===value} aria-label={String(label)} onclick={()=>preset(value as number|'all')}><span class="period-full">{label}</span><span class="period-short" aria-hidden="true">{value==='all'?'Всё':`${value} дн.`}</span></button>{/each}<button class:active={period==='custom'} aria-pressed={period==='custom'} aria-label="Свои даты" onclick={()=>{period='custom';filtersOpen=true;}}><span class="period-full">Свои даты</span><span class="period-short" aria-hidden="true">Даты</span></button></div>
  <button class="outline filters-button" aria-label="Фильтры" aria-expanded={filtersOpen} onclick={()=>filtersOpen=true}><Icon name="filters" size={18}/>Фильтры{#if category||source!=='all'||period==='custom'}<span class="filter-dot"></span>{/if}</button>
@@ -209,11 +175,10 @@
   {#if view.audience}<section class="panel returning-audience"><header><h2>Возвращаемость участников</h2><Help id="analytics-audience" label="О минутах в чате" text="Наблюдаемые минуты Twitch учитывают молчавших участников и исключают неизвестные промежутки. Оценка YouTube показана отдельно. Выберите сортировку по минутам или сообщениям; нажмите имя для подробностей."/><span>{data.audiencePage?(pagedAudience?.audiencePage?.total??data.audiencePage.total):visible.length} участников</span></header>
     <p class="small regular-summary">Ядро аудитории: <strong>{data.composition?.core??0} из {data.summary.attendees??data.summary.entities??0} ({data.summary.attendees?pct((data.composition?.core??0)/data.summary.attendees):"нет данных"})</strong></p>
     <div class="analytics-controls"><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label>Сортировка<select aria-label="Сортировка" bind:value={view.sort}><option value="observedMinutes">Минуты в чате</option><option value="estimatedChatMinutes">Оценка активности YouTube</option><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option><option value="attendanceRatio">Доля посещённых эфиров</option></select></label><label class="check"><input type="checkbox" bind:checked={view.coreOnly} /> Только ядро</label></div>
-    <div class="table-wrap compact-audience"><table class="compact-audience-table"><thead><tr><th>Участник</th><th>Эфиры</th><th>Минуты в чате</th><th>Сообщения</th><th>Интервалы</th></tr></thead><tbody>{#each visible.slice(0,data.audiencePage?100:200) as e (e.id)}<tr class="audience-row">
+    <div class="table-wrap compact-audience"><table class="compact-audience-table"><thead><tr><th>Участник</th><th>Эфиры</th><th>Минуты в чате</th><th>Сообщения</th></tr></thead><tbody>{#each visible.slice(0,data.audiencePage?100:200) as e (e.id)}<tr class="audience-row">
       <td class="audience-name" data-label="Участник"><div><button class={`text-button ${platformClass(e.sources??[e.source])}`} disabled={busy} onclick={()=>onPerson(e.id)}>{e.name}</button>{#if e.core}<span class="core-badge">Ядро</span>{:else if e.follower}<span class="follower-badge">Подписчик</span>{/if}{#each e.tags??[] as tag}<span class="person-tag">{tag}</span>{/each}</div><small>{(e.sources??[e.source]).map((source:string)=>source==='youtube'?'YouTube':source==='donationalerts'?'DA':'Twitch').join(' · ')}</small></td>
       <td class="audience-stat" data-label="Эфиры">{e.attendanceCount??e.attendanceSessionIds?.length??0}/{data.summary?.streams??0}</td><td class="audience-stat" data-label={e.source==='youtube'?'Мин · оценка':'Мин в чате'}>{num(e.source==='youtube'?e.estimatedChatMinutes:e.observedMinutes)}</td><td class="audience-stat" data-label="Сообщения">{num(e.messages,0)}</td>
-      <td class="audience-more"><button class="text-button small" aria-label={`Интервалы ${e.name}`} onclick={()=>selectEntity(e)}>Интервалы</button></td>
-    </tr>{#if selected?.id===e.id}<tr class="audience-detail"><td colspan="5">{@render personDetail()}</td></tr>{/if}{/each}</tbody></table></div>
+    </tr>{/each}</tbody></table></div>
     {#if !visible.length}<p class="muted analytics-empty">Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.</p>{/if}
     {#if visible.length>200}<p class="small muted">Показаны первые 200; используйте поиск или меньший период.</p>{/if}
   {#if data.audiencePage}<div class="audience-pagination"><button class="outline" disabled={audienceBusy||audienceOffset===0} onclick={()=>audienceOffset=Math.max(0,audienceOffset-100)}>Назад</button><span>{audienceBusy?'Загрузка…':`Страница ${Math.floor(audienceOffset/100)+1}`}</span><button class="outline" disabled={audienceBusy||audienceOffset+100>=(pagedAudience?.audiencePage?.total??data.audiencePage.total)} onclick={()=>audienceOffset+=100}>Далее</button></div>{/if}
@@ -244,8 +209,6 @@
 @media(max-width:1100px){.timing-grid{grid-template-columns:minmax(0,1fr)}.timing-grid :global(.time-patterns),.timing-grid :global(.donation-patterns){grid-column:auto;grid-row:auto}}.compact-audience{overflow-x:auto}.compact-audience-table{width:100%;border-collapse:collapse;min-width:620px}.compact-audience-table>tbody>tr>td,.compact-audience-table>thead>tr>th{padding:12px;text-align:right;border-bottom:1px solid var(--border);font-size:12px}.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}.analytics-help{padding:0 20px 12px;}header h2{display:flex;align-items:center;gap:8px;}
 
 .compact-audience-table>tbody>tr>td:first-child,.compact-audience-table>thead>tr>th:first-child{text-align:left}
-.compact-audience-table .audience-detail>td{text-align:left;padding:12px}
-.audience-detail :global(.analytics-person){border:0;margin:0}
 .analytics-toolbar .period-chips{gap:2px;padding:3px;flex-wrap:nowrap;min-width:0;overflow-x:auto;scrollbar-width:none}
 .analytics-toolbar .period-chips button{border-radius:6px;font-size:13px;min-width:max-content;flex:1 0 auto}
 .analytics-toolbar .period-chips button.active{background:var(--surface);color:var(--accent);font-weight:400}
@@ -255,12 +218,9 @@
  .compact-audience-table>tbody>.audience-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 12px;border-bottom:1px solid var(--border);padding:12px 16px}
  .compact-audience-table>tbody>.audience-row>td{display:block;text-align:left;border:0;padding:0;min-width:0}
  .compact-audience-table .audience-stat:before{content:attr(data-label);display:block;font-size:11px;color:var(--muted);margin-bottom:2px}
- .compact-audience-table .audience-name{grid-column:1/3;grid-row:1}
+ .compact-audience-table .audience-name{grid-column:1/-1;grid-row:1}
  .audience-name>div{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px}.audience-name button{overflow-wrap:anywhere;text-align:left}
  .audience-name small{font-size:11px;color:var(--muted)}
- .compact-audience-table>tbody>.audience-row>.audience-more{grid-column:3;grid-row:1;text-align:right;align-self:center}
- .audience-more button{min-height:36px;padding:4px 0;font-size:12px}
- .compact-audience-table>tbody>.audience-detail{display:block}.compact-audience-table .audience-detail>td{display:block;padding:12px}
  .analytics-toolbar .period-chips button{padding-inline:4px;font-size:12px}
 }
 .period-short{display:none}
