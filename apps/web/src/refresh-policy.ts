@@ -11,8 +11,6 @@ export function screenVersion(view:View,_session:string,c:Changes){
  if(view==='people')return JSON.stringify([v.people,v.activity,v.donations,v.follows,config,tick]);
  return JSON.stringify([v.activity,v.people,v.donations,config,tick]);
 }
-export function refreshInterval(preference:number,view:View,_session:string,c:Changes|null){
- if(preference>0)return preference;
- if(view==='connections'||view==='settings')return 300;
- return c?.activeStream&&(view!=='stream'||(c.stream?.id??_session)===c.activeStream)?60:300;
+export function refreshInterval(preference:number,_view:View,_session:string,_c:Changes|null){
+ return [60,300,900].includes(preference)?preference:60;
 }

@@ -19,7 +19,7 @@ test('current chat includes silent Twitch members, excludes renamed owner/bots a
   s.youtubeMessages('yt-owner','chat',[message('yt1','youtube-user',at+minute),message('yt2','youtube-user',at+2*minute)]);
   const result=s.currentChat(sid,[],false,at+2*minute+1000);
   assert.equal(result.twitchState,'current');
-  assert.deepEqual(result.people.filter(p=>p.source==='twitch').map(p=>p.name).sort(),['Silent','talker']);
+  assert.deepEqual(result.people.filter(p=>p.source==='twitch').map(p=>p.name).sort(),['Silent','Talker']);
   const silent=result.people.find(p=>p.name==='Silent')!;assert.equal(silent.messages,0);assert.equal(silent.lastMessageAt,null);assert.equal(silent.minutes,3,'overlapping inclusive minute buckets count once');
   const talker=result.people.find(p=>p.name==='talker'||p.name==='Talker')!;assert.equal(talker.messages,2);assert.equal(talker.lastMessageAt,at+2*minute);
   const yt=result.people.find(p=>p.source==='youtube')!;assert.equal(yt.minutes,null);assert.equal(yt.messages,2);
@@ -54,4 +54,21 @@ test('current chat remains isolated in two profiles sharing a file, including ow
    assert.equal(other.currentChat(sid,[],true,at+minute).people.length,0,'the other profile cannot read this stream even with exclusions disabled');
   }
  }finally{ruslan.close();gulnaz.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('one human row sums linked account messages and unions observed time even after the YouTube activity window',()=>{
+ const s=new StreamStore(':memory:');try{
+  const sid=s.observePlatformStream('twitch','owner','live',at,at,null,'live')!;
+  s.observePlatformStream('youtube','yt-owner','yt-live',at,at,null,'live');
+  chat(s,'tw','talker',at+minute);
+  const tw=(s as any).db.prepare("SELECT person_id FROM identities WHERE source='twitch' AND external_id='talker'").get().person_id;
+  s.youtubeMessages('yt-owner','chat',[message('yt1','youtube-user',at+minute),message('yt2','youtube-user',at+2*minute)]);
+  const yt=(s as any).db.prepare('SELECT person_id FROM youtube_identities WHERE external_id=?').get('youtube-user').person_id;
+  s.merge(yt,tw,s.personRevision(yt),s.personRevision(tw),at+3*minute);s.renamePerson(tw,'Общий человек');
+  for(const n of [1,2,14])s.recordPoll(sid,'owner',{startedAtMs:at+(n-1)*minute,completedAtMs:at+n*minute,status:'complete',userIds:['talker']});
+  const rows=s.currentChat(sid,[],false,at+14*minute).people;
+  assert.equal(rows.length,1);assert.equal(rows[0]!.name,'Общий человек');
+  assert.equal(rows[0]!.messages,3);assert.equal(rows[0]!.lastMessageAt,at+2*minute);
+  assert.equal(rows[0]!.minutes,4);assert.deepEqual(rows[0]!.accounts?.map(a=>a.source),['twitch','youtube']);
+ }finally{s.close();}
 });

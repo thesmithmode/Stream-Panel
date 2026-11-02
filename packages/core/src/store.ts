@@ -651,6 +651,7 @@ export class StreamStore {
     this.db.transaction(()=>{
       if(!this.db.prepare("UPDATE persons SET display_name=?,revision=revision+1 WHERE id=?").run(name.trim(),id).changes)throw Error('PERSON_NOT_FOUND');
       this.db.prepare('INSERT OR IGNORE INTO person_names VALUES (?)').run(id);
+      if(this.shared)for(const profile of this.shared.renameHuman(id,name.trim()))this.sharedTouched.add(profile);
     }).immediate();
   }
 

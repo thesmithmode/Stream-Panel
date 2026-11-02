@@ -10,3 +10,8 @@ test('all table metrics sort with unknown values last and keep silent users',()=
  assert.equal(people[0]!.key,'silent','sorting does not mutate incoming snapshots');
  assert.equal(messageAge(null,5000),'Не писал');assert.equal(messageAge(1000,5000),'Только что');assert.equal(messageAge(1000,121000),'2 мин назад');
 });
+
+test('search finds every linked account under the human name',()=>{
+ const human={...people[0]!,name:'Человек',accounts:[{source:'twitch' as const,name:'TwitchNick'},{source:'youtube' as const,name:'OtherHandle'}]};
+ assert.equal(sortChat([human],'@otherhandle','name',false).length,1);
+});

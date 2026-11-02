@@ -6,7 +6,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { StreamStore } from "../src/store.js";
 
-test("profiles share one SQLite but isolate identical provider keys, mutations and history after restart", async () => {
+test("profiles isolate activity and history while sharing the human name of the same account", async () => {
   const dir = await mkdtemp(join(tmpdir(), "sp-profiles-"));
   const path = join(dir, "data.sqlite");
   const a = new StreamStore(path, "ruslan");
@@ -24,7 +24,7 @@ test("profiles share one SQLite but isolate identical provider keys, mutations a
     assert.throws(() => b.person(first.personId!), /NOT_FOUND/);
     assert.throws(() => b.renamePerson(first.personId!, "Hacked"), /NOT_FOUND/);
     a.renamePerson(first.personId!, "Only A");
-    assert.equal(b.person(other.personId!).display_name, "Viewer");
+    assert.equal(b.person(other.personId!).display_name, "Only A");
     const sa = a.startSession("channel", "same-stream", 100, "platform", 100);
     const sb = b.startSession("channel", "same-stream", 100, "platform", 100);
     assert.notEqual(sa, sb);

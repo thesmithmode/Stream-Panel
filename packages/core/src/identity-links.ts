@@ -327,6 +327,10 @@ export class IdentityLinks {
     externalId: string,
     displayName: string,
   ): { personId: string; how: string } | null {
+    if(source==='twitch'||source==='youtube'){
+      const rows=this.db.prepare(source==='twitch'?"SELECT DISTINCT person_id FROM identities WHERE source='twitch' AND external_id=?":"SELECT DISTINCT person_id FROM youtube_identities WHERE external_id=?").all(externalId) as {person_id:string}[];
+      if(rows.length===1)return {personId:rows[0]!.person_id,how:'stable_account'};
+    }
     const linked=this.sharedLinkPerson(source,externalId,displayName);
     if(linked)return linked;
     const key = matchKey(displayName);
