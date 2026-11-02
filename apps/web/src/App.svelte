@@ -140,14 +140,14 @@
       const previous=changes,changed=!previous||screenVersion(tab as View,sessionFilter,previous)!==screenVersion(tab as View,sessionFilter,next);
       const connectionsChanged=!previous||previous.connectionRevision!==next.connectionRevision;
       const subscribersChanged=!previous||previous.versions.subscribers!==next.versions.subscribers||previous.versions.follows!==next.versions.follows;
-      setServerVersions(profile,next);changes=next;
+      setServerVersions(profile,next);
       if(fresh&&scopeReady)bumpReadRevision(profile);
       const requests=viewRequests(tab as View,sessionFilter).filter(([key])=>key==='status'?connectionsChanged||fresh||!scopeReady:changed||fresh||!scopeReady);
       const values=Object.fromEntries(await Promise.all(requests.map(async([key,path])=>[key,key==='status'&&initialStatus?initialStatus:await api(key==='sessions'&&tab==='sessions'&&sessionPage>0?`sessions?offset=${sessionPage*100}`:path,undefined,controller.signal)])));
       if(current!==epoch)return;
       if(values.status){status=values.status;setCsrf(status.csrf);user=status.user??user;}
       if(status)status={...status,sync:next.sync};
-      outdated=isOutdatedRelease(next.release);
+      changes=next;outdated=isOutdatedRelease(next.release);
       sessions=values.sessions??sessions;selectedSessions=selectedSessions.filter(id=>sessions.some(s=>s.id===id));summary=values.summary??summary;scopeReady=true;connectionLost=!navigator.onLine;error='';
       rememberScreen();
       if(changed||fresh)window.dispatchEvent(new CustomEvent('sp:data-refresh',{detail:{validated:true,force:fresh}}));

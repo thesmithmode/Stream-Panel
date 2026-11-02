@@ -1,4 +1,5 @@
 <script lang="ts">
+ import {onMount} from 'svelte';
  import AudioDonation from './AudioDonation.svelte';
  import {isAudioDonation} from './labels';
  import {api,date,money} from './api';
@@ -7,6 +8,7 @@
  let {sessionId='',personId='',messagesOnly=false,onPerson}:{sessionId?:string;personId?:string;messagesOnly?:boolean;onPerson:(id:string)=>void}=$props();
  type Row={id:string;source:string;type:string;actor_name:string|null;person_id:string|null;person_name?:string|null;at_ms:number;payload:Record<string,unknown>};
  let rows=$state<Row[]>([]),offset=$state(0),busy=$state(false),error=$state(''),refresh=$state(0);
+ onMount(()=>{const update=()=>refresh++;window.addEventListener('sp:clock-refresh',update);return()=>window.removeEventListener('sp:clock-refresh',update);});
  const limit=50;
  const clock=new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',hour:'2-digit',minute:'2-digit',second:'2-digit'});
  const calendar=new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',day:'numeric',month:'long',year:'numeric'});
