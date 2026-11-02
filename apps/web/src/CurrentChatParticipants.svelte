@@ -2,6 +2,7 @@
  import {onMount} from 'svelte';
  import {api,getProfile} from './api';
  import Help from './Help.svelte';
+ import {platformClass} from './period';
  import {durationLabel} from './audience-ranking';
  import {sortChat,messageAge,type CurrentChat,type ChatSort} from './current-chat';
  let {sessionId,onPerson}:{sessionId:string;onPerson:(id:string)=>void}=$props();
@@ -29,7 +30,7 @@
 <section class="panel current-chat" aria-label="Текущие зрители">
  <header><div><h2>Сейчас в чате{#if data} · {data.people.length}{/if}</h2>
  <p class="small muted" role="status">{#if data?.observedAt}Twitch · замер {messageAge(data.observedAt,now).replace('Только что','только что')}{:else if data?.twitchState==='waiting'}Twitch · ожидаем первый замер{:else if data?.twitchState==='inactive'}Twitch-эфир не идёт{:else if !data}Загружаем список…{/if}</p></div>
- <Help id="current-chat-help" label="О текущих зрителях" text="Twitch показывает подключённых к чату, включая молчащих, с задержкой. Время в чате и сообщения считаются за текущий стрим; это не подтверждённое время просмотра видео. YouTube отмечен красным и @: здесь только писавшие за последние 10 минут, присутствие и время просмотра неизвестны. Список обновляется вместе со страницей раз в минуту."/>
+ <Help id="current-chat-help" label="О текущих зрителях" text="Twitch показывает подключённых к чату, включая молчащих, с задержкой. Время в чате и сообщения считаются за текущий стрим; это не подтверждённое время просмотра видео. YouTube отмечен красным и @: отдельно появляются писавшие за последние 10 минут. Связанные аккаунты объединены под именем человека; сообщения учитываются за весь стрим. YouTube не сообщает присутствие и время просмотра. Список обновляется вместе со страницей раз в минуту."/>
  </header>
  <div class="chat-controls"><input aria-label="Поиск по нику" type="search" placeholder="Поиск по нику" bind:value={search}/></div>
  {#if error}<p class="notice error" role="alert">{error} <button class="text-button" onclick={()=>load()}>Повторить</button></p>{/if}
@@ -41,15 +42,15 @@
  <th scope="col" aria-sort={sort===key?(descending?'descending':'ascending'):'none'}><button onclick={()=>order(key as ChatSort)} aria-label={`${desktop}${arrow(key as ChatSort)}`}><span class="desktop-label">{desktop}</span><span class="phone-label">{phone}</span>{arrow(key as ChatSort)}</button></th>
  {/each}
  </tr></thead><tbody>
- {#each rows.slice(0,limit) as person (person.key)}<tr data-chatter-key={person.key}>
- <td><button class="text-button person-name" class:twitch={person.source==='twitch'} class:youtube={person.source==='youtube'} title={`${person.source==='twitch'?'Twitch':'YouTube · писал за последние 10 минут'} · ${person.name}`} onclick={()=>onPerson(person.personId)}>{person.source==='youtube'&&!person.name.startsWith('@')?'@':''}{person.name}</button></td>
+ {#each rows.slice(0,limit) as person (person.personId)}<tr data-chatter-key={person.key}>
+ <td><button class={`text-button person-name ${platformClass(person.accounts?.map(a=>a.source)??[person.source])}`} title={person.name} onclick={()=>onPerson(person.personId)}>{person.source==='youtube'&&person.name===person.accountName&&!person.name.startsWith('@')?'@':''}{person.name}</button>{#each person.accounts??[] as account}{#if (person.accounts?.length??0)>1||account.name!==person.name}<small class:twitch={account.source==='twitch'} class:youtube={account.source==='youtube'} style="display:block">{account.source==='youtube'&&!account.name.startsWith('@')?'@':''}{account.name}</small>{/if}{/each}</td>
  <td>{person.minutes===null?'—':durationLabel(person.minutes)}</td><td>{person.messages.toLocaleString('ru-RU')}</td><td><time title={person.lastMessageAt===null?'Не писал в текущем стриме':new Date(person.lastMessageAt).toLocaleString('ru-RU')}>{messageAge(person.lastMessageAt,now)}</time></td>
  </tr>{:else}<tr><td colspan="4" class="empty-small">{search?'Никто не найден':data.observedAt===null&&data.twitchState!=='inactive'?'Данные списка Twitch пока недоступны.':'Нет участников в последнем списке Twitch и недавних сообщений YouTube.'}</td></tr>{/each}
  </tbody></table></div>
  {#if rows.length>limit}<button class="outline small more" onclick={()=>limit+=50}>Показать ещё ({rows.length-limit})</button>{/if}
  {/if}
  <label class="small chat-filter"><input type="checkbox" bind:checked={includeExcluded}/> Показать владельца и ботов</label>
- <p class="small muted chat-note">Время и сообщения — за текущий стрим. <span class="youtube">@YouTube</span> — писали за последние 10 минут; время присутствия неизвестно.</p>
+ <p class="small muted chat-note">Время — по замерам Twitch, сообщения — со всех аккаунтов за текущий стрим. <span class="youtube">@YouTube</span> — писали за последние 10 минут; время присутствия неизвестно.</p>
 </section>
 <style>
  header{display:flex;align-items:start;gap:12px}header>div{flex:1}h2{margin:0}header p{margin:6px 0 0}

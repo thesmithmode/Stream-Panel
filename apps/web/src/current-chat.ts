@@ -3,7 +3,7 @@ export type {CurrentChat,CurrentChatter};
 export type ChatSort='name'|'minutes'|'messages'|'lastMessageAt';
 export function sortChat(people:readonly CurrentChatter[],search:string,sort:ChatSort,descending:boolean){
  const term=search.trim().replace(/^@/,'').toLocaleLowerCase('ru');
- return people.filter(p=>p.name.toLocaleLowerCase('ru').includes(term)).sort((a,b)=>{
+ return people.filter(p=>[p.name,p.accountName??'',...(p.accounts??[]).map(a=>a.name)].some(name=>name.toLocaleLowerCase('ru').includes(term))).sort((a,b)=>{
   const av=a[sort],bv=b[sort];
   // Unknown duration and no messages remain last in either direction.
   if(av===null||bv===null){if(av!==bv)return av===null?1:-1;}

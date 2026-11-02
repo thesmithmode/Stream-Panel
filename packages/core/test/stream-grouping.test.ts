@@ -62,7 +62,8 @@ test('manual grouping is reversible and preserves every original session, event 
   assert.deepEqual(raw.pragma('foreign_key_check'),[]);assert.equal(raw.pragma('integrity_check',{simple:true}),'ok');raw.close();
  }finally{s.close();await rm(dir,{recursive:true,force:true});}
 });
-test('groups expand without nesting, and invalid selections are atomic',()=>{
+test('groups expand without nesting, and invalid selections are atomic',t=>{
+ t.mock.timers.enable({apis:['Date'],now:at+500*m});
  const s=new StreamStore(':memory:');try{
   const a=part(s,0),b=part(s,1),c=part(s,2),g=grouping(s);
   for(const ids of [[],[a],[a,a],[a,'missing']])assert.throws(()=>g.mergeSessions(ids));
@@ -121,7 +122,8 @@ test('YouTube inferred minutes and person activity stop at each physical broadca
   assert.equal(completedReport(s,{...options,sessionId:root,youtubeAccount:'yt'}).audience.find(p=>p.id===youtube)!.estimatedChatMinutes,2);
  }finally{s.close();}
 });
-test('automatic continuation of a grouped tail keeps collection physical and the logical end state current',()=>{
+test('automatic continuation of a grouped tail keeps collection physical and the logical end state current',t=>{
+ t.mock.timers.enable({apis:['Date'],now:at+500*m});
  const s=new StreamStore(':memory:');try{
   const a=part(s,0),b=part(s,1),root=grouping(s).mergeSessions([a,b]);
   const tail=s.observePlatformStream('twitch','owner','resumed',at+123*m,at+123*m,null,'Resumed',['resumed'])!;
@@ -132,7 +134,8 @@ test('automatic continuation of a grouped tail keeps collection physical and the
   grouping(s).unmergeSessions(root);assert.equal(s.sessions().length,2);
  }finally{s.close();}
 });
-test('a live tail can be merged with adjacent earlier parts without stopping collection',()=>{
+test('a live tail can be merged with adjacent earlier parts without stopping collection',t=>{
+ t.mock.timers.enable({apis:['Date'],now:at+500*m});
  const s=new StreamStore(':memory:');try{
   const a=part(s,0),b=part(s,1),start=at+122*m,live=s.startSession('owner','current',start,'platform',start);
   const root=s.mergeSessions([live,b,a]);assert.equal(root,a);assert.equal(s.sessions().length,1);assert.equal(s.sessions()[0]!.ended_at_ms,null);
