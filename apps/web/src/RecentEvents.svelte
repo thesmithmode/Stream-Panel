@@ -2,12 +2,13 @@
  import {onMount} from 'svelte';
  import AudioDonation from './AudioDonation.svelte';
  import {isAudioDonation} from './labels';
- import {api,date,donationMoney} from './api';
+ import {api,date,donationMoney,sameResponse} from './api';
  import {getProfile} from './api';
  import {routeUrl} from './route';
  let {sessionId='',personId='',messagesOnly=false,onPerson}:{sessionId?:string;personId?:string;messagesOnly?:boolean;onPerson:(id:string)=>void}=$props();
  type Row={id:string;source:string;type:string;actor_name:string|null;person_id:string|null;person_name?:string|null;at_ms:number;payload:Record<string,unknown>};
- let rows=$state<Row[]>([]),offset=$state(0),busy=$state(false),error=$state(''),refresh=$state(0);
+ let rows=$state.raw<Row[]>([]),offset=$state(0),busy=$state(false),error=$state(''),refresh=$state(0);
+ let loaded=$state(false),requestedScope='';
  onMount(()=>{const update=()=>refresh++;window.addEventListener('sp:clock-refresh',update);return()=>window.removeEventListener('sp:clock-refresh',update);});
  const limit=50;
  const clock=new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -17,20 +18,23 @@
  $effect(()=>{void sessionId;void personId;void messagesOnly;offset=0;});
  $effect(()=>{
   const q=new URLSearchParams({offset:String(offset),limit:String(limit),...(sessionId?{session:sessionId}:{}),...(personId?{person:personId}:{}),...(messagesOnly?{messages:'1'}:{})});void refresh;
-  const controller=new AbortController();busy=true;error='';rows=[];
-  void api<Row[]>(`events/recent?${q}`,undefined,controller.signal).then(result=>{if(!controller.signal.aborted)rows=result;}).catch(e=>{if(!controller.signal.aborted)error=e.message;}).finally(()=>{if(!controller.signal.aborted)busy=false;});
+  const scope=q.toString();
+  if(requestedScope!==scope){requestedScope=scope;rows=[];loaded=false;}
+  const controller=new AbortController();busy=true;error='';
+  void api<Row[]>(`events/recent?${q}`,undefined,controller.signal).then(result=>{if(!controller.signal.aborted){if(!sameResponse(rows,result))rows=result;loaded=true;}}).catch(e=>{if(!controller.signal.aborted)error=e.message;}).finally(()=>{if(!controller.signal.aborted)busy=false;});
   return()=>controller.abort();
  });
 </script>
 <div class="recent-events" aria-busy={busy}>
  <p class="small muted">48 часов · МСК · новые сверху</p>
- {#if error}<p role="alert">{error}</p>{:else if busy}<p role="status">Загружаем…</p>{:else}
+ {#if error}<p role="alert">{error}</p>{/if}
+ {#if busy&&!loaded}<p role="status">Загружаем…</p>{:else}
   {#each rows as row,index (row.id)}
    {#if index===0||calendar.format(row.at_ms)!==calendar.format(rows[index-1]!.at_ms)}<h3 class="event-day">{calendar.format(row.at_ms)}</h3>{/if}
    <article><time datetime={new Date(row.at_ms).toISOString()} title={date(row.at_ms)}>{clock.format(row.at_ms)}</time>{' '}{#if row.person_id}<a class="event-author" class:twitch={row.source==='twitch'} class:youtube={row.source==='youtube'} title={`${row.actor_name??'Без автора'} · ${sourceName(row.source)}`} aria-label={`${row.actor_name??'Без автора'} · ${sourceName(row.source)}`} href={routeUrl({view:'people',session:'',person:row.person_id,profile:getProfile()})} onclick={event=>{if(event.button===0&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey&&!event.altKey){event.preventDefault();onPerson(row.person_id!);}}}>{row.person_name??row.actor_name??'Без автора'}:</a>{:else}<strong class="event-author" class:twitch={row.source==='twitch'} class:youtube={row.source==='youtube'} title={`${row.actor_name??'Без автора'} · ${sourceName(row.source)}`} aria-label={`${row.actor_name??'Без автора'} · ${sourceName(row.source)}`}>{row.person_name??row.actor_name??'Без автора'}:</strong>{/if}{' '}<span class="event-text">{#if row.payload.redacted}Сообщение удалено модерацией.{:else if typeof row.payload.text==='string'&&row.payload.text}{#if isAudioDonation(row.payload)}<AudioDonation text={row.payload.text}/>{:else}{row.payload.text}{/if}{:else}{labels[row.type]??'Событие'}{/if}</span>
     {#if typeof row.payload.amountMinor==='string'&&/^-?\d+$/.test(row.payload.amountMinor)&&typeof row.payload.currency==='string'}{' '}<strong class="event-amount">{donationMoney({amountMinor:row.payload.amountMinor,currency:row.payload.currency,rubAmountMinor:typeof row.payload.rubAmountMinor==='string'?row.payload.rubAmountMinor:null,exchangeRateDate:typeof row.payload.exchangeRateDate==='string'?row.payload.exchangeRateDate:null})}</strong>{/if}
    </article>
-  {:else}<p class="muted">{messagesOnly?'Нет сохранённых сообщений за последние 48 часов.':'Нет сохранённых событий этого стрима за последние 48 часов.'}</p>{/each}
+  {:else}{#if loaded}<p class="muted">{messagesOnly?'Нет сохранённых сообщений за последние 48 часов.':'Нет сохранённых событий этого стрима за последние 48 часов.'}</p>{/if}{/each}
  {/if}
  <div class="actions"><button class="outline small" disabled={busy||offset===0} onclick={()=>offset=Math.max(0,offset-limit)}>Назад</button><span class="small">Страница {offset/limit+1}</span><button class="outline small" disabled={busy||rows.length<limit} onclick={()=>offset+=limit}>Далее</button><button class="outline small" disabled={busy} onclick={()=>refresh++}>Обновить</button></div>
 </div>
