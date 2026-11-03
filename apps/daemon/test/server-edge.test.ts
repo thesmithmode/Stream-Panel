@@ -193,7 +193,9 @@ test('single-stream analytics derives its bounds server-side and never includes 
    await f.a.db.call('endSession',id,base+600000,'observed');
   }
   for(let i=0;i<101;i++){const id=await (f.a.db.call('startSession',`later-${i}`,`later-${i}`,base+1200000+i,'platform',base+1200000+i) as Promise<string>);await f.a.db.call('endSession',id,base+1201000+i,'observed');}
-  const r=await f.a.app.inject({url:`/api/v1/analytics?session=${first}&from=0&to=1`,headers:f.headers});
+  const read=()=>f.a.app.inject({url:`/api/v1/analytics?session=${first}&from=0&to=1`,headers:f.headers});
+  let r=await read();for(let i=0;r.json().preparing&&i<100;i++)r=await read();
+  assert.equal(r.json().preparing,undefined);
   assert.equal(r.statusCode,200,r.body);
   assert.equal(r.json().summary.streams,1);
   assert.deepEqual(r.json().audience.map((p:any)=>p.name),['silent']);
