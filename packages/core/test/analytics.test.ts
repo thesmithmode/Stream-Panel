@@ -313,19 +313,20 @@ test('switching away and back within one minute never counts a regular attendee 
  }finally{s.close();}
 });
 
-test('stream and category donation efficiency use clipped period durations and keep currencies exact',()=>{
+test('stream and category donation efficiency use clipped period durations and convert currencies at the donation date',()=>{
  const s=new StreamStore(':memory:');try{
   const sid=s.observePlatformStream('twitch','channel','rates',base,base,null,'Rates')!;
   s.streamSample(sid,base,'game','Game','Rates',10);s.streamSample(sid,base+minute,'talk','Talk','Rates',20);s.endSession(sid,base+2*minute);
   const person=String(s.createPerson('Supporter').id);
   s.createDonation({personId:person,amount:'10',currency:'RUB',occurredAtMs:base+45000,message:'',sourceName:'Cash'},base+3*minute);
   s.createDonation({personId:person,amount:'1.25',currency:'USD',occurredAtMs:base+75000,message:'',sourceName:'Transfer'},base+3*minute);
+  const fxDay=new Date(base+3*3600000).toISOString().slice(0,10);s.saveExchangeRates(fxDay,fxDay,[{currency:'USD',value:'100.0000',nominal:1}],base);
   const data=s.analytics({fromMs:base+30000,toMs:base+90000});
-  assert.equal(data.hours[0]!.sampleMinutes,1);assert.deepEqual(data.hours[0]!.donationTotals,{RUB:'1000',USD:'125'});assert.deepEqual(data.hours[0]!.donationsPerHourMinor,{RUB:'60000',USD:'7500'});
+  assert.equal(data.hours[0]!.sampleMinutes,1);assert.deepEqual(data.hours[0]!.donationTotals,{RUB:'13500'});assert.deepEqual(data.hours[0]!.donationsPerHourMinor,{RUB:'810000'});
   const comparison=data.streamComparison[0]!;assert.equal(comparison.durationMs,60000);assert.equal(comparison.donationCount,2);
-  assert.deepEqual(comparison.donationTotals,{RUB:'1000',USD:'125'});assert.deepEqual(comparison.donationsPerHourMinor,{RUB:'60000',USD:'7500'});assert.equal(comparison.audience,0);assert.equal(comparison.messagesPerHour,0);
+  assert.deepEqual(comparison.donationTotals,{RUB:'13500'});assert.deepEqual(comparison.donationsPerHourMinor,{RUB:'810000'});assert.equal(comparison.audience,0);assert.equal(comparison.messagesPerHour,0);
   const game=data.categories.find(c=>c.id==='game')!,talk=data.categories.find(c=>c.id==='talk')!;
-  assert.equal(game.minutes,.5);assert.equal(talk.minutes,.5);assert.deepEqual(game.donationsPerHourMinor,{RUB:'120000'});assert.deepEqual(talk.donationsPerHourMinor,{USD:'15000'});
+  assert.equal(game.minutes,.5);assert.equal(talk.minutes,.5);assert.deepEqual(game.donationsPerHourMinor,{RUB:'120000'});assert.deepEqual(talk.donationsPerHourMinor,{RUB:'1500000'});
   const filtered=s.analytics({fromMs:base+30000,toMs:base+90000,category:'game'}).streamComparison[0]!;assert.equal(filtered.durationMs,30000);assert.equal(filtered.donationCount,1);assert.deepEqual(filtered.donationsPerHourMinor,{RUB:'120000'});
  }finally{s.close();}
 });

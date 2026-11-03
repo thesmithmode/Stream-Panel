@@ -24,8 +24,9 @@
   <div class="metric"><div><span>Участники чата</span><strong>{data.attendees}</strong></div></div>
   <div class="metric"><div><span>Сообщения</span><strong>{data.messages.toLocaleString('ru-RU')}</strong></div></div>
   <div class="metric"><div><span>Донаты</span><strong>{data.donations}</strong></div></div>
-  <div class="metric"><div><span>Сумма донатов</span>{#each Object.entries(data.totals) as [currency,amount]}<strong>{money(amount,currency)}</strong>{:else}<strong>—</strong>{/each}</div></div>
+  <div class="metric"><div><span>Сумма донатов · RUB</span>{#each Object.entries(data.totals) as [currency,amount]}<strong>{money(amount,currency)}</strong>{:else}<strong>—</strong>{/each}</div></div>
  </section>
+ {#if data.pendingExchangeDonations}<p class="small muted" role="status">Донаты без пересчёта: {data.pendingExchangeDonations}. Ожидается курс ЦБ или уточнение даты; пока они не включены в рублёвую сумму.</p>{/if}
  <h2 class="records-heading">Рекорды за эфир</h2>
  <section class="metrics channel-records" aria-label="Рекорды канала">
   {#each [['online','Средний онлайн'],['messages','Сообщения'],['peakOnline','Пик зрителей'],['peakChat','Пик участников чата']] as [key,label]}{@const record=data.records?.[key as 'online'|'messages'|'peakOnline'|'peakChat']}

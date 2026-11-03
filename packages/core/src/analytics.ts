@@ -266,7 +266,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             minute(row.at).twitchMessages += row.n;
             addMessages(row.session_id, row.at, row.n, row.person_id, 'twitch');
         }
-        const tips = options.activityOnly?[]:db.prepare(`SELECT i.person_id,es.session_id,e.occurred_at_ms AS at,json_extract(e.payload_json,'$.currency') AS currency,json_extract(e.payload_json,'$.amountMinor') AS amount FROM effective_events e JOIN identities i ON i.id=e.identity_id JOIN event_sessions es ON es.event_id=e.id WHERE e.type='donation' AND e.occurred_at_ms>=? AND e.occurred_at_ms<? AND es.session_id IN(SELECT value FROM json_each(?)) LIMIT 50001`).all(from, to, sessionIds) as any[];
+        const tips = options.activityOnly?[]:db.prepare(`SELECT i.person_id,es.session_id,e.occurred_at_ms AS at,'RUB' AS currency,e.rub_amount_minor AS amount FROM valued_events e JOIN identities i ON i.id=e.identity_id JOIN event_sessions es ON es.event_id=e.id WHERE e.type='donation' AND e.occurred_at_ms>=? AND e.occurred_at_ms<? AND es.session_id IN(SELECT value FROM json_each(?)) LIMIT 50001`).all(from, to, sessionIds) as any[];
         if (tips.length > 50000)
             throw new Error('ANALYTICS_RANGE_TOO_LARGE');
         for (const tip of tips) {

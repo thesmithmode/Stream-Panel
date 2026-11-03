@@ -166,3 +166,9 @@ export interface PersonTop {
   observedMinutes: number;
 }
 export type {InsightCard} from '../../../packages/core/src/insights';
+
+export function donationMoney(row:{amountMinor:string;currency:string;rubAmountMinor?:string|null;exchangeRateDate?:string|null}) {
+ const original=money(row.amountMinor,row.currency);
+ if(row.currency==='RUB')return original;
+ return `${original} (${row.rubAmountMinor!=null?`${money(row.rubAmountMinor,'RUB')} · ЦБ${row.exchangeRateDate?` на ${row.exchangeRateDate.split('-').reverse().join('.')}`:''}`:'пересчёт в RUB ожидается'})`;
+}

@@ -11,7 +11,7 @@ test('all-history overview has compact real totals and excludes breaks, deleted 
 });
 
 
-test('overview donation window uses exact timestamps, corrections and separate currencies',()=>{
+test('overview donation window uses exact timestamps, corrections and historical RUB totals',()=>{
  const s=new StreamStore(':memory:');const now=Date.now,at=Date.parse('2026-10-21T12:00:00Z');Date.now=()=>at;
  try{
   const day=86400000;
@@ -20,13 +20,14 @@ test('overview donation window uses exact timestamps, corrections and separate c
    ['recent',at-1,'EUR','300','Viewer'],['future',at,'RUB','400','Viewer'],
    ['unknown',null,'RUB','500','Viewer'],['bot',at-1000,'RUB','600','jeetbot']
   ] as const)s.ingest({source:'donationalerts',accountId:'donations',externalId:id,type:'donation',actor:{externalId:`name:${name.toLowerCase()}`,displayName:name},occurredAtMs:time,receivedAtMs:at,sourceTime:null,timeQuality:time===null?'unknown':'provider',transport:'rest',payload:{currency,amountMinor:amount}});
-  const data=s.channelOverview();assert.deepEqual(data.totals30,{EUR:'300',RUB:'100'});assert.deepEqual(data.totals,{RUB:'1200',EUR:'300'});
+  s.saveExchangeRates('2026-10-21','2026-10-21',[{currency:'EUR',value:'100.0000',nominal:1}],at);
+  const data=s.channelOverview();assert.deepEqual(data.totals30,{RUB:'30100'});assert.deepEqual(data.totals,{RUB:'31200'});
   assert.equal('hours' in data,false);
   const person=s.persons().find(p=>p.display_name==='Viewer')!;
   const input={personId:String(person.id),amount:'4.00',currency:'RUB',occurredAtMs:at-1000,message:'',sourceName:'Manual'};
-  const donation=s.createDonation(input,at);assert.equal(s.channelOverview().totals30.RUB,'500');
+  const donation=s.createDonation(input,at);assert.equal(s.channelOverview().totals30.RUB,'30500');
   const corrected=s.updateDonation(String(donation.id),{...input,occurredAtMs:at-31*day},Number(donation.revision),at);
-  assert.equal(s.channelOverview().totals30.RUB,'100');s.deleteDonation(String(corrected.id),Number(corrected.revision),at);assert.deepEqual(s.channelOverview().totals,data.totals);
+  assert.equal(s.channelOverview().totals30.RUB,'30100');s.deleteDonation(String(corrected.id),Number(corrected.revision),at);assert.deepEqual(s.channelOverview().totals,data.totals);
  }finally{Date.now=now;s.close();}
 });
 

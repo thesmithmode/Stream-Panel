@@ -4,8 +4,8 @@
  import {isAudioDonation} from './labels';
  import {untrack,onMount} from 'svelte';
  import Icon from './Icon.svelte';
- import {api,date,money} from './api';
- type Donation={id:string;personId:string|null;personName:string|null;amountMinor:string;currency:string;occurredAtMs:number|null;message:string;sourceName:string;originalActorName:string;revision:number;deleted:boolean};
+ import {api,date,donationMoney} from './api';
+ type Donation={id:string;personId:string|null;personName:string|null;amountMinor:string;currency:string;rubAmountMinor?:string|null;exchangeRateDate?:string|null;occurredAtMs:number|null;message:string;sourceName:string;originalActorName:string;revision:number;deleted:boolean};
  let {personId,revision=0,onChange}:{personId:string;revision?:number;onChange:()=>Promise<void>}=$props();
  let rows=$state<Donation[]>([]),total=$state(0),offset=$state(0),busy=$state(false),error=$state(''),conflict=$state(false);
  let loaded=$state(false),loading=$state(true),loadedOffset=$state(0);
@@ -20,7 +20,7 @@
  onMount(()=>{const update=()=>{if(!editing)void refresh().catch(()=>{});};window.addEventListener('sp:data-refresh',update);return()=>window.removeEventListener('sp:data-refresh',update);});
  async function assign(row:Donation,target:string|null){busy=true;error='';conflict=false;try{await api(`donations/${encodeURIComponent(row.id)}/assign`,{personId:target,revision:row.revision});editing=null;await refresh();await onChange();}catch(e){conflict=(e as Error).message.includes('DONATION_CONFLICT');error=conflict?'Привязка изменилась в другом окне. Загрузите актуальный донат.':(e as Error).message;if(!conflict)await refresh().catch(()=>{});}finally{busy=false;}}
  let generation=0;
- const value=(row:Donation)=>/^\d+$/.test(row.amountMinor)?money(row.amountMinor,row.currency):'Сумма неизвестна';
+ const value=(row:Donation)=>/^\d+$/.test(row.amountMinor)?donationMoney(row):'Сумма неизвестна';
 </script>
 <section aria-label="Донаты человека">
  <h3>Донаты · {total}</h3>

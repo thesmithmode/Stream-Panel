@@ -83,6 +83,7 @@ test('corrections preserve raw SQLite bytes, provenance and independent profiles
   let a=new StreamStore(path,'ruslan'),b=new StreamStore(path,'gulnaz');const event=tip('same','Original donor'),id=eventKey(event);
   const original=a.ingest(event).personId!,other=b.ingest(event).personId!;
   const input={personId:original,amount:'7.00',currency:'USD',occurredAtMs:at+1000,message:'Updated',sourceName:'DA correction'};
+  a.saveExchangeRates('2026-10-09','2026-10-09',[{currency:'USD',value:'100.0000',nominal:1}],at);
   a.updateDonation(id,input,0,at+2000);a.deleteDonation(id,1,at+3000);a.close();b.close();
   const raw=new Database(path,{readonly:true});
   try{
@@ -96,7 +97,7 @@ test('corrections preserve raw SQLite bytes, provenance and independent profiles
   try{
    assert.equal(a.donation(id).deleted,true);assert.equal(a.donationAudit(id).length,2);assert.equal(a.ingest(event).inserted,false);
    assert.equal(a.personStats(original).donationCount,0);assert.equal(b.personStats(other).donationCount,1);
-   a.restoreDonation(id,2,at+4000);assert.equal((a.personStats(original).donationTotals as any).USD,'700');
+   a.restoreDonation(id,2,at+4000);assert.equal((a.personStats(original).donationTotals as any).RUB,'70000');
    assert.equal((b.personStats(other).donationTotals as any).RUB,'10000');
   }finally{a.close();b.close();}
  }finally{await rm(dir,{recursive:true,force:true});}

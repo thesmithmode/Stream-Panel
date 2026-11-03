@@ -1,3 +1,4 @@
+import {startDonationFx} from './donation-fx.js';
 import { createHostedApplication } from "./hosted.js";
 import { parseHostedNetworkConfig } from "./hosted-network.js";
 import { mkdir, access, realpath } from "node:fs/promises";
@@ -77,11 +78,12 @@ const backupTimer = setInterval(() => { if(!closing)void runBackup(); }, 60000);
 const retentionTimer=setInterval(()=>{void hosted.backup?.purgeLocal().catch(()=>console.error('Local backup cleanup failed'));},60*60*1000);
 const heartbeatTimer=setInterval(()=>{if(collectorsStarted&&!closing)for(const runtime of hosted.runtimes.values())void runtime.db.call("collectionLifecycle","heartbeat",Date.now()).catch(()=>console.error("Collector heartbeat failed"));},30000);
 const stopAnalyticsWarming=startAnalyticsWarmer(()=>hosted.runtimes.values(),()=>!closing&&collectorsStarted,()=>console.error('Historical analytics preparation failed'));
+const stopDonationFx=startDonationFx(()=>hosted.runtimes.values(),()=>!closing&&collectorsStarted,()=>console.error('CBR rates unavailable; donations preserved, historical conversion will retry'));
 const stopEventRetention=startEventRetention(()=>hosted.runtimes.values(),()=>!closing&&collectorsStarted,()=>console.error('Recent event cleanup failed'));
 const timer = setInterval(() => void startCollectors(), 2000);
 const shutdown = async (code=0) => {
   if (closing) return;
-  closing = true; clearInterval(timer); clearInterval(backupTimer);clearInterval(retentionTimer);clearInterval(heartbeatTimer);stopAnalyticsWarming();stopEventRetention();
+  closing = true; clearInterval(timer); clearInterval(backupTimer);clearInterval(retentionTimer);clearInterval(heartbeatTimer);stopAnalyticsWarming();stopEventRetention();stopDonationFx();
   const timeout = setTimeout(() => process.exit(1), 10000); timeout.unref();
   try { if(collectorsStarted)await Promise.allSettled([...hosted.runtimes.values()].map(runtime=>runtime.db.call("collectionLifecycle","stop",Date.now())));await frontend?.stop();await hosted.app.close(); clearTimeout(timeout); process.exit(code); }
   catch { process.exit(1); }
