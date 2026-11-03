@@ -8,9 +8,10 @@
  async function backup(){busy=true;error='';message='';try{const result=await api('backup',{});message=result.cloudError?'Локальная копия сохранена. Облачная загрузка не удалась.':`Резервная копия: ${result.filename}`;}catch(e){error=(e as Error).message;}finally{busy=false;}}
  async function save(){busy=true;error='';message='';try{rules=await api('settings',rules);message='Настройки профиля сохранены.';}catch(e){error=(e as Error).message;}finally{busy=false;}}
 </script>
-<section class="panel profile-settings"><header><h2>Аналитика · {profile==='gulnaz'?'Гульназ':'Руслан'}</h2><Help id="profile-rules-help" label="О правилах аналитики" text="Правила применяются к истории выбранного профиля. Ручная отметка ядра в карточке человека имеет приоритет. Порог — доля эфиров с суммарной активностью не менее 20% длительности. Активность связанных площадок объединяется."/></header>
+<section class="panel profile-settings"><header><h2>Аналитика · {profile==='gulnaz'?'Гульназ':'Руслан'}</h2><Help id="profile-rules-help" label="О правилах аналитики" text="Ядро определяется за выбранный период при наличии минимум 12 эфиров. Ручная отметка ядра в карточке человека имеет приоритет. Порог — доля эфиров с суммарной активностью не менее 20% длительности. Активность связанных площадок объединяется."/></header>
  {#if rules}<form class="settings-body" onsubmit={e=>{e.preventDefault();void save();}}>
   <div class="settings-fields">
+   <label>Период расчёта ядра<select bind:value={rules.coreWindowDays}>{#each [30,90,180] as days}<option value={days}>{days} дней</option>{/each}</select></label>
    <label>Порог посещаемости, %<input type="number" min="0" max="100" step="1" required bind:value={rules.regularThresholdPercent}/></label>
    <label>Окно активности YouTube, мин<input type="number" min="1" max="30" required bind:value={rules.chatWindowMinutes}/></label>
    <label>Часовой пояс аналитики<select bind:value={rules.timezone}><option value="Europe/Moscow">Москва</option><option value="UTC">UTC</option><option value="Asia/Yekaterinburg">Екатеринбург</option></select></label>

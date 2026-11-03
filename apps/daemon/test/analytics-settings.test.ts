@@ -1,9 +1,10 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {analyticsSettings} from '../src/analytics-settings.js';
 test('analytics settings preserve valid thresholds and reject invalid persistent rules',()=>{
- const defaults=analyticsSettings();assert.equal(defaults.regularThresholdPercent,80);
+ const defaults=analyticsSettings();assert.equal(defaults.regularThresholdPercent,80);assert.equal(defaults.coreWindowDays,90);
+ for(const coreWindowDays of [30,90,180])assert.equal(analyticsSettings({coreWindowDays}).coreWindowDays,coreWindowDays);
  assert.deepEqual(analyticsSettings({regularThresholdPercent:80,minSessions:1,timezone:'UTC'}),{...defaults,regularThresholdPercent:80,minSessions:1,timezone:'UTC'});
- for(const value of [null,[],false, {regularThresholdPercent:1.5},{regularThresholdPercent:101},{regularThresholdPercent:-1},{minSessions:1.5},{minMinutes:-1},{minMessages:1e7},{chatWindowMinutes:0},{coreRule:'bad'},{timezone:'invalid'},{timezone:5},{unknown:true}])assert.throws(()=>analyticsSettings(value),/INVALID_ANALYTICS_SETTINGS/);
+ for(const value of [null,[],false,{coreWindowDays:0},{coreWindowDays:365},{coreWindowDays:"90"}, {regularThresholdPercent:1.5},{regularThresholdPercent:101},{regularThresholdPercent:-1},{minSessions:1.5},{minMinutes:-1},{minMessages:1e7},{chatWindowMinutes:0},{coreRule:'bad'},{timezone:'invalid'},{timezone:5},{unknown:true}])assert.throws(()=>analyticsSettings(value),/INVALID_ANALYTICS_SETTINGS/);
 });
 test('existing profile threshold is raised once; subsequent saved preferences survive restart',async()=>{
  const {mkdtemp,writeFile,readFile,rm}=await import('node:fs/promises');const {join}=await import('node:path');const {tmpdir}=await import('node:os');const {Configuration}=await import('../src/config.js');

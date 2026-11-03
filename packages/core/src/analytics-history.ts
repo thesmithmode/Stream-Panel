@@ -137,7 +137,10 @@ export class AnalyticsHistory {
         const day=options.clockDay??'all',minute=options.clockMinute??0,resolution=options.clockResolution??60;
         return {filters:value.filters,...(options.clockBatch?{clockPages:workspace?.clockPages(day,minute,resolution)??[]}:{clockVisitors:workspace?.clockPage(day,minute,resolution,options.clockOffset??0)??{items:[],total:0,offset:options.clockOffset??0,limit:100}})};
     }
-    clockAudience(options:AnalyticsOptions):ClockResponse{return this.resolve(options,true,true);}
+    clockAudience(options:AnalyticsOptions):ClockResponse{
+        const core=this.rollingMembership(options);
+        return core.preparing?core:this.resolve(core.options,true,true);
+    }
     private checkWorkspace(workspace:AnalyticsWorkspace<Person>){
         for(;;){
             try{workspace.checkBudget();return;}catch(error){
@@ -358,7 +361,30 @@ export class AnalyticsHistory {
         };
     }
     query(options:AnalyticsOptions):Report{
+        const core=this.rollingMembership(options);
+        if(core.preparing)return core;
+        options=core.options;
         return options.sessionId?this.projection(this.sessionReport(options),options):this.resolve(options,options.summaryOnly??false);
+    }
+    private rollingMembership(options:AnalyticsOptions):{preparing:false;options:AnalyticsOptions}|(Report&{preparing:true}){
+        if(!options.rollingCore)return {preparing:false,options};
+        validateAnalyticsOptions(options);
+        // A minute-stable clock shares the existing incremental report cache across
+        // panels and periods. The roster always uses both platforms and all categories.
+        const toMs=Math.floor(Date.now()/60000)*60000;
+        const basis:AnalyticsOptions={fromMs:toMs-(options.coreWindowDays??90)*86400000,toMs,source:'all',category:'',summaryOnly:true,panel:'audience',audienceCoreOnly:true,
+            regularThresholdPercent:options.regularThresholdPercent??80,chatWindowMinutes:options.chatWindowMinutes??5,
+            timezone:options.timezone??'Europe/Moscow',excludedLogins:options.excludedLogins??[],ownerId:options.ownerId??'',youtubeAccount:options.youtubeAccount??''};
+        const corePeople:string[]=[];
+        for(let offset=0;;offset+=100){
+            const report=this.resolve({...basis,audienceOffset:offset},true);
+            if(report.preparing)return {...report,preparing:true};
+            for(const person of report.audience){
+                if(person.manualCore??(person.core&&report.summary.streams>=12))corePeople.push(person.id);
+            }
+            if(!report.audiencePage||offset+100>=report.audiencePage.total)break;
+        }
+        return {preparing:false,options:{...options,rollingCore:undefined,corePeople:corePeople.sort()}};
     }
     private sessionReport(options:AnalyticsOptions):Report{
         validateAnalyticsOptions(options);options=normalizeCoreOptions(options);
@@ -480,7 +506,8 @@ export class AnalyticsHistory {
         if(!sessions.length||!this.tree.allowed())return yield* this.legacyAggregate(options,sessions,validation,workspace);
         let sliceStart=performance.now(),processed=0;
         const timezone=options.timezone??'Europe/Moscow';
-        const {fromMs,toMs,...settings}=options;
+        const {fromMs,toMs,corePeople,rollingCore,coreWindowDays,...settings}=options;
+        void corePeople;void rollingCore;void coreWindowDays;
         const period=fromMs===0?'all':[7,30].find(days=>toMs-fromMs===days*86400000)??[fromMs,toMs];
         const scope=createHash('sha256').update(JSON.stringify([settings,period])).digest('hex');
         const gaps=this.statement("SELECT id,source,started_at_ms,ended_at_ms FROM collection_gaps WHERE source IN('twitch','youtube') ORDER BY id").all() as {id:string;started_at_ms:number;ended_at_ms:number|null}[];
@@ -552,7 +579,7 @@ export class AnalyticsHistory {
             const attendance = person.attendanceCount, ratio = selectedStreams ? attendance / selectedStreams : 0;
             const override = preferences.get(person.id);
             person.manualCore = override == null ? null : override === 1;
-            person.core = classifyCore(person.coreAttendanceCount,selectedStreams,options.regularThresholdPercent??80,person.manualCore);
+            person.core = classifyCore(person.coreAttendanceCount,selectedStreams,options.regularThresholdPercent??80,person.manualCore,options.corePeople?.includes(person.id));
             person.regular = person.core;
             person.attendanceRatio = ratio;
             person.sessionRatio = selectedStreams ? person.sessionCount / selectedStreams : 0;
