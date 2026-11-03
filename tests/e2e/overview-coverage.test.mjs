@@ -4,7 +4,7 @@ import { application, seed } from "../helpers/application.mjs";
 import { launchBrowser } from "../helpers/browser.mjs";
 import { startCoverage, saveCoverage, goto, reload } from "../helpers/browser-coverage.mjs";
 
-test("Overview insights render loading, empty, error and person paths; expand inline and cache until navigation", { timeout: 60000 }, async () => {
+test("Overview hides pending and empty insights, shows errors and opens useful findings immediately", { timeout: 60000 }, async () => {
   const app = await application();
   let browser;
   try {
@@ -53,16 +53,14 @@ test("Overview insights render loading, empty, error and person paths; expand in
     await page.getByRole("button", { name: "Стримы", exact: true }).waitFor();
     await page.getByRole("button", { name: "Стримы", exact: true }).click();
     await page.locator('.stream-open').click();
-    const trigger = page.getByRole("button", { name: "Инсайты", exact: true });
-    await trigger.click();
     const insightDialog = page.locator(".insight-body");
-    await page.locator(".insight-body").getByText("Ищем закономерности…", { exact: true }).waitFor();releaseInitial();
-    await page.getByText("Заметных особенностей этого эфира пока не найдено.", { exact: true }).waitFor();
-    await page.locator(".insights-section").getByRole("button",{name:"Инсайты",exact:true}).click();
-    assert.equal(await insightDialog.count(), 0);
+    assert.equal(await page.locator('.insights-section').count(),0);
+    releaseInitial();
+    await page.waitForResponse(r=>r.url().includes('/insights')&&!r.url().includes('to='));
+    await page.waitForResponse(r=>r.url().includes('/insights')&&r.url().includes('to=12345'));
+    assert.equal(await page.locator('.insights-section').count(),0);
 
     await reload(page);
-    await page.getByRole("button", { name: "Инсайты", exact: true }).click();
     await page.getByRole("alert").filter({ hasText: "INSIGHTS_UNAVAILABLE" }).waitFor();
     await page.locator(".insights-section").getByRole("button",{name:"Инсайты",exact:true}).click();
     assert.equal(await insightDialog.count(), 0);
@@ -70,7 +68,6 @@ test("Overview insights render loading, empty, error and person paths; expand in
     await reload(page);
     await page.getByRole("button", { name: "Стримы", exact: true }).click();
     await page.locator('.stream-open').click();
-    await page.getByRole("button", { name: "Инсайты", exact: true }).click();
     await page.getByText("Активный участник", { exact: true }).waitFor();
     assert.equal(new URL(insightUrls[1]).searchParams.get('to'),'12345');
     assert.match(insightUrls[3], new RegExp(`[?&]session=${sessionId}$`));

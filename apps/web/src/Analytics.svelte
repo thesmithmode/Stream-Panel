@@ -150,8 +150,10 @@
  <div class="analytics-results" aria-busy={busy}>
   {#if section==='dynamics'}
 
+  <div class="dynamics-grid">
   <AudienceGrowth bind:platform={view.dailyPlatform} bind:metric={view.dailyMetric} from={data.filters?.fromMs??0} end={data.filters?.toMs??Date.now()} {categoryFilter} streams={data.streamComparison??[]} range={data.streamRange} loadStreams={streamsLoader} {timezone} {onStream}/>
   <SubscriberGrowth {profile} {timezone} {onStream}/>
+  </div>
   <Insights report={data} loading={busy&&!data} {onPerson} {onStream}/>
   <details class="section-disclosure" bind:open={comparisonsOpen}><summary>Возвращаемость по эфирам</summary>{#if comparisonsOpen}<ComparisonCharts scope={reportScope} {categoryFilter} {timezone} {onStream} showGrowth={false} streams={data.streamComparison??[]} totalCount={data.streamRange?.total} loadStreams={streamsLoader}/>{/if}</details>
   {/if}

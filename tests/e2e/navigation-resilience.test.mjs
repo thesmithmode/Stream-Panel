@@ -19,13 +19,13 @@ test('stream scope never flashes channel totals, reload/back retain the route an
   await page.route('**/api/v1/summary?*',async route=>{await new Promise(r=>setTimeout(r,400));await route.continue();});
   await page.locator(`[data-session-id="${id}"]`).locator('.stream-open').click();
   assert.ok(!(await page.locator('main').textContent()).includes('12 000'));
-  await page.locator('.stream-kpis > div').filter({hasText:'Донаты'}).getByText('—',{exact:true}).waitFor();await page.locator('.stream-kpis').getByText('Средние зрители',{exact:true}).waitFor();
+  await page.locator('.stream-kpis').waitFor();assert.equal(await page.locator('.stream-kpis > div').filter({hasText:'Донаты'}).count(),0);await page.locator('.stream-kpis').getByText('Средние зрители',{exact:true}).waitFor();
   await page.locator('.stream-kpis > div').filter({hasText:'Средние зрители'}).getByText('10',{exact:true}).waitFor();
   assert.equal(await page.locator('.stream-kpis').getByText('Средние зрители',{exact:true}).locator('..').locator('strong').textContent(),'10');
   assert.equal(await page.getByText('Полнота наблюдений',{exact:true}).count(),0);
-  await reload(page);await page.locator('.stream-kpis > div').filter({hasText:'Донаты'}).getByText('—',{exact:true}).waitFor();assert.ok(new URL(page.url()).searchParams.get('stream')===id);
+  await reload(page);await page.locator('.stream-kpis').waitFor();assert.equal(await page.locator('.stream-kpis > div').filter({hasText:'Донаты'}).count(),0);assert.ok(new URL(page.url()).searchParams.get('stream')===id);
   await page.getByRole('tab',{name:'Участники',exact:true}).click();const ranking=page.getByRole('region',{name:'Рейтинг участников'});await ranking.getByRole('button',{name:'Viewer',exact:true}).click();await page.getByRole('heading',{name:'Viewer',exact:true}).waitFor();
-  await page.goBack();await page.locator('.stream-kpis > div').filter({hasText:'Донаты'}).getByText('—',{exact:true}).waitFor();await page.goBack();await page.getByRole('region',{name:'История стримов',exact:true}).waitFor();await page.goForward();await page.locator('.stream-kpis > div').filter({hasText:'Донаты'}).getByText('—',{exact:true}).waitFor();
+  await page.goBack();await page.locator('.stream-kpis').waitFor();assert.equal(await page.locator('.stream-kpis > div').filter({hasText:'Донаты'}).count(),0);await page.goBack();await page.getByRole('region',{name:'История стримов',exact:true}).waitFor();await page.goForward();await page.locator('.stream-kpis').waitFor();assert.equal(await page.locator('.stream-kpis > div').filter({hasText:'Донаты'}).count(),0);
   await page.locator('.trend-plot svg').first().waitFor();
   const layout=await page.locator('.trend-plot').first().evaluate(el=>{const svg=el.querySelector('svg'),box=svg.getBoundingClientRect();el.scrollLeft=1000;return {viewport:innerWidth,width:el.clientWidth,scrollWidth:el.scrollWidth,scrollLeft:el.scrollLeft,svgLeft:box.left,svgRight:box.right,barsFit:[...svg.querySelectorAll('.chart-bar rect')].every(bar=>{const r=bar.getBoundingClientRect();return r.left>=box.left-1&&r.right<=box.right+1;})};});
   assert.ok(layout.svgLeft>=0&&layout.svgRight<=layout.viewport&&layout.barsFit,JSON.stringify(layout));assert.equal(layout.scrollLeft,0,JSON.stringify(layout));assert.ok(layout.scrollWidth<=layout.width+1,JSON.stringify(layout));
@@ -35,7 +35,7 @@ test('stream scope never flashes channel totals, reload/back retain the route an
   await context.setOffline(true);await page.evaluate(()=>window.dispatchEvent(new Event('offline')));assert.equal(await page.getByText('Связь прервана. Показываем последние загруженные данные.',{exact:true}).count(),0);
   assert.ok(!(await page.locator('main').textContent()).includes('Failed to fetch'));
   await context.setOffline(false);await page.evaluate(()=>window.dispatchEvent(new Event('online')));await page.waitForFunction(()=>!document.body.textContent.includes('Связь прервана.'));
-  await navigate(page,'Обзор');await page.goBack();await page.locator('.stream-kpis > div').filter({hasText:'Донаты'}).getByText('—',{exact:true}).waitFor();assert.equal(await page.getByLabel('Профиль',{exact:true}).isEnabled(),true);
+  await navigate(page,'Обзор');await page.goBack();await page.locator('.stream-kpis').waitFor();assert.equal(await page.locator('.stream-kpis > div').filter({hasText:'Донаты'}).count(),0);assert.equal(await page.getByLabel('Профиль',{exact:true}).isEnabled(),true);
   assert.deepEqual(errors,[]);await saveCoverage(page,'navigation-resilience');
  }finally{await browser?.close();await app.close();}
 });
