@@ -48,6 +48,8 @@ test('desktop charts use readable heights, empty stream sections stay hidden and
   assert.equal(await page.getByRole('button',{name:'Инсайты',exact:true}).getAttribute('aria-expanded'),'true');
   await assertUiLayout(page);
   const chart=await page.locator('.series-panel').boundingBox(),insights=await page.locator('.insights-section').boundingBox();assert.ok(chart.y+chart.height<=insights.y+2,'stream insights remain below the chart');
+  await page.setViewportSize({width:1920,height:1000});assert.ok((await page.locator('main').boundingBox()).width<=1280,'stream content stays bounded on wide screens');await assertUiLayout(page);
+  await page.setViewportSize({width:1440,height:1000});
   if(process.env.STREAM_PANEL_QA_DIR)await page.screenshot({path:`${process.env.STREAM_PANEL_QA_DIR}/stream-desktop.png`});
   assert.equal(await page.title(),'Stream Panel');assert.ok(page.url().startsWith(a.origin));assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await a.close();}
