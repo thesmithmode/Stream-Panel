@@ -10,7 +10,10 @@ import {refreshData} from '../helpers/navigation.mjs';
 test('compact participants expand inline without empty space, preserve sorting and fit narrow screens',{timeout:60000},async()=>{
  const app=await application();let browser;
  try{
-  const sid=await seed(app),base=Math.floor((Date.now()-600000)/60000)*60000;
+  const seeded=await seed(app);await app.db.call('endSession',seeded,Date.now());
+  // Compact single-day layout must not depend on the runner crossing Moscow midnight.
+  const base=Date.UTC(2026,10,3,9),sid=await app.db.call('startSession','test-channel','compact-fixture',base,'platform',base);
+  await app.db.call('endSession',sid,base+600000);
   const people=Array.from({length:65},(_,i)=>({id:`compact-${i}`,name:i===0?'AmaliyaMelina':i===1?'ОченьДлинноеИмяБезПробелов'.repeat(6):`Viewer ${String(i).padStart(2,'0')}`,messages:i===1?123456789:65-i,activityMinutes:65-i,
    accounts:[{source:i===2?'youtube':'twitch',name:i===0?'AmaliyaMelina':'Alias that should not repeat'}],
    donations:i===0?{RUB:'22800',EUR:'500',USD:'100'}:{},
