@@ -37,6 +37,7 @@
 
   let retryInitialization=()=>{};
   let autoRefresh=$state(true),refreshSeconds=$state(60);
+  let viewportWidth=$state(0);
   function toggleRefresh(){autoRefresh=!autoRefresh;if(autoRefresh)void action(async()=>{});}
   let moreOpen=$state(false);
   let tab = $state("overview"),
@@ -253,8 +254,17 @@
     };
   });
 </script>
+<svelte:window bind:innerWidth={viewportWidth}/>
 <Confirmation/>
 
+{#snippet refreshControls()}
+ <section class="refresh-settings" aria-label="Обновление данных"><div class="refresh-controls">
+ <button class="refresh-toggle" aria-label={`Автообновление ${autoRefresh?'Вкл':'Выкл'}`} aria-pressed={autoRefresh} onclick={toggleRefresh}><span class="refresh-label">Автообновление</span><span class="toggle-track" class:enabled={autoRefresh} aria-hidden="true"><span></span></span></button>
+ {#if autoRefresh}<label>Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={60}>1 мин</option><option value={300}>5 мин</option><option value={900}>15 мин</option></select></label>{/if}
+ <button class="outline manual-refresh" disabled={busy} onclick={()=>void action(async()=>{})}><Icon name="refresh" size={18}/><span>{busy?'Обновляем…':'Обновить данные'}</span></button>
+ {#if connectionLost}<p role="status">Нет связи с сервером</p>{/if}
+ </div></section>
+{/snippet}
 
 <div class="app-shell">
   <aside class:analytics-context={tab==='analytics'&&scopeReady&&authorized&&!loading} class="sidebar" aria-label="Навигация">
@@ -263,8 +273,9 @@
       {#each nav as [key,label]}<button disabled={loading||!authorized} class:active={tab===key||(key==='sessions'&&tab==='stream')} aria-current={tab===key?'page':undefined} onclick={()=>navigate(key)}><Icon name={key}/>{label}</button>{/each}
       <button disabled={loading||!authorized} class:active={moreOpen||['connections','settings'].includes(tab)} aria-expanded={moreOpen} onclick={()=>moreOpen=true}><Icon name="more"/>Ещё</button>
     </nav>
+    {#if authorized&&viewportWidth>720}<div class="sidebar-refresh">{@render refreshControls()}</div>{/if}
   </aside>
-  <main class:sessions-page={tab==='sessions'} class:stream-page={tab==='stream'} class:people-page={tab==='people'}>
+  <main class:analytics-page={tab==='analytics'} class:sessions-page={tab==='sessions'} class:stream-page={tab==='stream'} class:people-page={tab==='people'}>
     <div class="page-heading">
       {#if tab==='stream'}<button aria-label="К списку стримов" class="back-link text-button" onclick={()=>navigate('sessions')}><Icon name="back"/>Стримы</button>{:else}<h1>{titles[tab]}</h1>{/if}
       {#if authorized}<label class="heading-profile">{#if tab==='analytics'}<button class="icon-button analytics-menu-trigger" aria-label="Ещё" aria-expanded={moreOpen} onclick={()=>moreOpen=true}><Icon name="more"/></button>{/if}<span class="dot" class:off={connectionLost||!autoRefresh} title={connectionLost?'Нет связи':autoRefresh?'Автообновление включено':'Автообновление выключено'}></span><select aria-label="Профиль" value={profile} disabled={busy} onchange={event=>void switchProfile(event.currentTarget.value as Profile)}>{#each allowedProfiles as allowed}<option value={allowed}>{allowed==='ruslan'?'Руслан':'Гульназ'}</option>{/each}</select></label>{/if}
@@ -327,10 +338,5 @@
 
 <Sheet bind:open={moreOpen} title="Ещё" compact>
  <nav class="more-links" aria-label="Дополнительные разделы">{#each [['connections','Интеграции'],['settings','Настройки']] as const as [key,label]}<button class:active={tab===key} aria-current={tab===key?'page':undefined} onclick={()=>navigate(key)}><Icon name={key}/>{label}<Icon name="arrow" size={18}/></button>{/each}</nav>
- <section class="more-refresh"><h3>Обновление данных</h3><div class="refresh-controls">
- <button class="refresh-toggle" aria-label={`Автообновление ${autoRefresh?'Вкл':'Выкл'}`} aria-pressed={autoRefresh} onclick={toggleRefresh}><span class="dot" class:off={!autoRefresh}></span>Автообновление <strong>{autoRefresh?'Вкл':'Выкл'}</strong></button>
- {#if autoRefresh}<label>Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={60}>1 мин</option><option value={300}>5 мин</option><option value={900}>15 мин</option></select></label>{/if}
- <button class="outline manual-refresh" disabled={busy} onclick={()=>void action(async()=>{})}><Icon name="refresh" size={18}/><span>{busy?'Обновляем…':'Обновить данные'}</span></button>
- {#if connectionLost}<p role="status">Нет связи с сервером</p>{/if}
- </div></section>
+ {#if viewportWidth<=720}<div class="more-refresh"><h3>Обновление данных</h3>{@render refreshControls()}</div>{/if}
 </Sheet>

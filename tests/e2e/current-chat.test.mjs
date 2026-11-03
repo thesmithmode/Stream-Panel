@@ -61,9 +61,13 @@ test('live chat combines silent Twitch members and recent YouTube authors, sorts
   await page.waitForFunction(()=>document.querySelector('[data-chatter-key="twitch:owner:talker"] td:nth-child(3)')?.textContent==='3');
   assert.equal(await page.evaluate(()=>window.__chatRow===document.querySelector('[data-chatter-key="twitch:owner:talker"]')),true,'keyed DOM row survives refresh');
   assert.equal(await panel.locator('th').nth(2).getAttribute('aria-sort'),'descending');
+  await page.setViewportSize({width:1440,height:900});
+  await panel.getByRole('searchbox',{name:'Поиск по нику'}).fill('talk');
   await chat('four');await page.clock.fastForward(60000);
   await page.waitForFunction(()=>document.querySelector('[data-chatter-key="twitch:owner:talker"] td:nth-child(3)')?.textContent==='4');
   assert.equal(await panel.locator('th').nth(2).getAttribute('aria-sort'),'descending','the actual App minute timer keeps the sort while refreshing counts');
+  assert.equal(await panel.getByRole('searchbox',{name:'Поиск по нику'}).inputValue(),'talk');
+  await panel.getByRole('searchbox',{name:'Поиск по нику'}).fill('');
   const visibleReads=reads;await page.evaluate(()=>Object.defineProperty(document,'hidden',{value:true,configurable:true}));await page.clock.fastForward(60000);
   assert.equal(reads,visibleReads,'a hidden page does not poll current chat');await page.evaluate(()=>Object.defineProperty(document,'hidden',{value:false,configurable:true}));
   await panel.getByRole('searchbox',{name:'Поиск по нику'}).fill('@youtube');assert.equal(await panel.locator('tbody tr').count(),1);

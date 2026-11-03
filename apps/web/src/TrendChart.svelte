@@ -42,7 +42,7 @@
   {#if !buckets.length}<p class="muted">Пока нет точек для графика</p>{:else}
     {#if split}<div class="legend chart-legend"><span><i class="regular-swatch"></i>Ядро аудитории</span><span><i class="follower-swatch"></i>Подписчики</span><span><i class="other-swatch"></i>{isMessageMetric(metric)?'Залётные':'Остальные участники'}</span>{#if hasUnknown}<span><i class="unknown-swatch"></i>Статус подписки неизвестен</span>{/if}</div>{/if}
 
-    <div class="trend-plot"><svg viewBox={`0 0 ${plotWidth} 305`} style="width:100%;display:block" role="group" aria-label="График активности по выбранному периоду">
+    <div class="trend-plot"><svg height="305" viewBox={`0 0 ${plotWidth} 305`} style="width:100%;display:block" role="group" aria-label="График активности по выбранному периоду">
       <defs><clipPath id={`${id}-plot`}><rect x={plotLeft} y="25" width={plotWidth-plotLeft-24} height="225"/></clipPath></defs>
       {#each axis.ticks as tick}
         {@const y=250-tick/maximum*220}
@@ -84,7 +84,7 @@
   .trend-chart{position:relative;width:100%;min-width:0;padding:16px 20px;}
   :global(.stream-page) .trend-chart{padding:4px 0 12px;}
   .trend-plot{width:100%;min-width:0;}
-  svg{display:block;width:100%;min-width:0;max-height:280px;overflow:hidden;height:auto;}
+  svg{display:block;width:100%;min-width:0;overflow:hidden;}
   .total-segment{fill:#5fc4aa;}
   .total-segment.unknown{fill:#606d7d;}
   .total-segment.estimated{fill:#ac89ec;}
