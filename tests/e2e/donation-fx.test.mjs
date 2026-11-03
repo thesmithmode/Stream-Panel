@@ -21,7 +21,7 @@ test('foreign donation history shows original plus historical RUB on desktop and
   await donations.getByText('2,50 USD (пересчёт в RUB ожидается)',{exact:true}).waitFor();
   await app.db.call('saveExchangeRates',day,day,[{currency:'USD',value:'80.1234',nominal:1}],Date.now());
   await refreshData(page);
-  const expected=`2,50 USD (200,31 RUB · ЦБ на ${day.split('-').reverse().join('.')})`;
+  const expected='2,50 USD (200,31 RUB)';
   await donations.getByText(expected,{exact:true}).waitFor();
   assert.equal((await app.db.call('summary',sid)).totals.RUB,'20031');await page.locator('.stream-kpis').getByText('200,31 RUB',{exact:true}).waitFor();
   for(const width of [1280,390,320]){await page.setViewportSize({width,height:900});await donations.scrollIntoViewIfNeeded();await assertUiLayout(page);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'foreign amount must wrap inside viewport');assert.ok(await donations.locator('.donation-owner').evaluate(el=>el.getBoundingClientRect().height<60),'donor name must remain readable');}

@@ -170,5 +170,6 @@ export type {InsightCard} from '../../../packages/core/src/insights';
 export function donationMoney(row:{amountMinor:string;currency:string;rubAmountMinor?:string|null;exchangeRateDate?:string|null}) {
  const original=money(row.amountMinor,row.currency);
  if(row.currency==='RUB')return original;
- return `${original} (${row.rubAmountMinor!=null?`${money(row.rubAmountMinor,'RUB')} · ЦБ${row.exchangeRateDate?` на ${row.exchangeRateDate.split('-').reverse().join('.')}`:''}`:'пересчёт в RUB ожидается'})`;
+ const rub=row.rubAmountMinor!=null?money(row.rubAmountMinor,'RUB').replace(/,([0-9]*?)0+(?= RUB$)/,(_,digits:string)=>digits?`,${digits}`:''):null;
+ return `${original} (${rub??'пересчёт в RUB ожидается'})`;
 }
