@@ -1,6 +1,6 @@
 /** One domain rule for raw, cached and aggregated reports. */
-export function classifyCore(qualified:number,total:number,threshold:number,override:boolean|null){
- return override??(qualified>0&&total>0&&qualified/total*100+1e-10>=threshold);
+export function classifyCore(qualified:number,total:number,threshold:number,override:boolean|null,membership?:boolean){
+ return override??membership??(qualified>0&&total>0&&qualified/total*100+1e-10>=threshold);
 }
 export function coreSessions(ids:readonly string[],count:number){
  const unique=[...new Set(ids)].sort();
