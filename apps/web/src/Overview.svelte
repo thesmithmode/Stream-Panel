@@ -81,7 +81,7 @@
 <section class="stream-kpis" aria-label="Итоги эфира">
  <div><span>Средние зрители</span><strong><span class="kpi-number">{viewers?.mean!=null?decimal(viewers.mean):audienceBusy?'…':'—'}</span></strong></div>
  <div><span>Пик зрителей</span><strong>{viewers?.peak!=null?viewers.peak:(audienceBusy?'…':'—')}</strong></div>
- <div><span>Донаты</span><strong>{Object.keys(summary.totals).length?Object.entries(summary.totals).map(([c,a])=>money(a,c)).join(' · '):'—'}</strong></div>
+ {#if summary.donations>0}<div><span>Донаты</span><strong>{Object.keys(summary.totals).length?Object.entries(summary.totals).map(([c,a])=>money(a,c)).join(' · '):'—'}</strong></div>{/if}
  <div><span>Сообщения</span><strong>{summary.messages.toLocaleString('ru-RU')}</strong></div>
 </section>
 <SectionTabs items={[["summary","Итоги"],["people","Участники"],["current","Текущие зрители"],["events","События"]]} bind:value={activeTab} label="Разделы эфира" panelId="stream-tabpanel"/>
@@ -99,7 +99,7 @@
 </section>
 
 <Insights sessionId={sessionFilter} refreshToken={summary} {onPerson} {onStream} />
-{#if sessionFilter}<StreamDonations sessionId={sessionFilter} {onPerson} {changed}/><details class="section-disclosure"><summary>Подписчики</summary><Following embedded sessionId={sessionFilter} {onPerson}/></details>{/if}
+{#if sessionFilter}<StreamDonations sessionId={sessionFilter} {onPerson} {changed}/><Following hideEmpty sessionId={sessionFilter} {onPerson}/>{/if}
 {:else if activeTab==='current'}
 <CurrentChatParticipants sessionId={sessionFilter} {onPerson}/>
 {:else if activeTab==='people'}

@@ -19,8 +19,8 @@ test('insights stay flat, exclude static attendance and omit accounting boilerpl
   await bottom.getByRole('tab',{name:'Время',exact:true}).click();await page.getByRole('tabpanel',{name:'Время',exact:true}).waitFor();
   await bottom.getByRole('tab',{name:'Аудитория',exact:true}).click();await page.getByRole('tabpanel',{name:'Аудитория',exact:true}).waitFor();
   await bottom.getByRole('tab',{name:'Динамика',exact:true}).click();
-  const section=page.getByRole('region',{name:'Инсайты',exact:true});await section.getByRole('button',{name:'Инсайты',exact:true}).click();await section.getByText('Перестал появляться',{exact:true}).waitFor();
-  assert.equal(await section.getByText('Давно много писал',{exact:true}).count(),0);assert.equal(await section.getByText('Давно смотрел',{exact:true}).count(),0);assert.equal(await section.locator('details').count(),0);assert.equal(await section.getByText(/Валюты считаются отдельно/).count(),0);
+  const section=page.getByRole('region',{name:'Инсайты',exact:true});await section.getByText('Перестал появляться',{exact:true}).waitFor();
+  assert.equal(await section.getByText('Давно много писал',{exact:true}).count(),0);assert.equal(await section.getByText('Давно смотрел',{exact:true}).count(),0);assert.equal(await section.locator('details').count(),1);assert.equal(await section.getByText(/Валюты считаются отдельно/).count(),0);
   const shots=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(shots){await mkdir(shots,{recursive:true});await page.screenshot({path:shots+'/analytics-navigation-mobile.png'});}
   await page.setViewportSize({width:1280,height:900});assert.equal(await bottom.isVisible(),false);assert.equal(await page.getByRole('tab',{name:'Динамика',exact:true}).count(),1);await assertUiLayout(page);
   await page.setViewportSize({width:390,height:844});await bottom.getByRole('button',{name:'Назад',exact:true}).click();await page.getByRole('region',{name:'Статистика канала за всю историю',exact:true}).waitFor();assert.equal(await page.getByRole('navigation',{name:'Разделы',exact:true}).isVisible(),true);assert.deepEqual(errors,[]);await saveCoverage(page);

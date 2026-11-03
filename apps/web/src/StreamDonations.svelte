@@ -23,6 +23,7 @@
  async function assign(){if(!editing||!recipient)return;busy=true;error='';try{await api(`donations/${encodeURIComponent(editing.id)}/assign`,{personId:recipient,revision:editing.revision});editing=null;editorGeneration++;await changed();}catch(e){error=(e as Error).message==='DONATION_CONFLICT'?'Привязка уже изменилась. Закройте форму и откройте донат снова.':(e as Error).message;await refresh();}finally{busy=false;}}
  async function rescan(){busy=true;error='';try{await api('donationalerts/rescan?recent=1',{},AbortSignal.timeout(60000));await changed();}catch(e){error=(e as Error).message;}finally{busy=false;}}
 </script>
+{#if showAll||total>0||error}
 <section class="panel stream-donations" aria-label={sessionId?'Донаты стрима':'Все донаты'}>
  <header><h2>{sessionId?'Донаты стрима':'Все донаты'} <span class="small muted">{statisticsCount}</span></h2><button class="icon-button" aria-label="Обновить донаты" disabled={busy||loading} onclick={rescan}><Icon name="refresh" size={18}/></button></header>
  <div class="donation-list">
@@ -44,6 +45,7 @@
  {#if total>10}<div class="actions"><button class="outline small" disabled={loading||offset===0} onclick={()=>offset-=10}>Предыдущие</button><span class="small muted">{offset+1}–{Math.min(offset+10,total)} из {total}</span><button class="outline small" disabled={loading||offset+10>=total} onclick={()=>offset+=10}>Следующие</button></div>{/if}
  </div>
 </section>
+{/if}
 <style>
 header{gap:12px;flex-wrap:wrap;}h2{display:flex;align-items:baseline;gap:10px;}.donation-list{padding:0 18px 12px;}article{padding:8px 0;border-bottom:1px solid var(--border);}article:last-child{border-bottom:0;}.donation-summary,.donation-owner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}.donation-summary{display:grid;grid-template-columns:minmax(0,1fr) auto 44px;gap:8px;margin-bottom:0;}.donation-owner{min-width:0;overflow-wrap:anywhere;}.donation-owner .text-button{text-align:left;white-space:normal;}.donation-summary strong{color:var(--text);font-size:17px;}.donation-message{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0;color:var(--text);}.donation-editor{display:grid;gap:10px;padding:14px;border-radius:8px;background:var(--bg);margin-top:12px;}.candidate-list{display:flex;gap:8px;flex-wrap:wrap;}.candidate-list button{display:flex;gap:8px;}.candidate-list button.active{border-color:var(--accent);}@media(max-width:600px){.donation-list{padding:0 12px 12px;}.donation-list article>time{font-size:11px;}}
 </style>
