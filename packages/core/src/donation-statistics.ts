@@ -1,7 +1,9 @@
+import {registerDonationFx} from './donation-fx.js';
 import {dateTimeFormatter} from './date-time-formatter.js';
 import type Database from 'better-sqlite3';
 import {assertTimestamp} from './domain.js';
 export function registerDonationSum(db:Database.Database){
+ registerDonationFx(db);
  db.aggregate('sum_donation_minor',{start:()=>0n,step:(sum:bigint,value:unknown)=>sum+(value===null?0n:BigInt(String(value))),result:(sum:bigint)=>sum.toString()});
 }
 export function donationWindow(from?:number,to?:number){

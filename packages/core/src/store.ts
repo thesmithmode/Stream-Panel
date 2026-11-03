@@ -1,4 +1,4 @@
-import {DonationFx,registerDonationFx,type CbrRate} from './donation-fx.js';
+import {DonationFx,type CbrRate} from './donation-fx.js';
 import {CurrentChatQueries} from './current-chat.js';
 import {AnalyticsReportCache} from './analytics-report-cache.js';
 import {ChannelRecords} from './channel-records.js';
@@ -65,7 +65,6 @@ export class StreamStore {
     this.eventIngestion=new EventIngestion(this.db,this.links,this.streams);
     this.shared=profile===undefined?null:new SharedIdentities(this.db,profile);
     registerDonationSum(this.db);
-    registerDonationFx(this.db);
     try {
       migrateDatabase(this.db);
     this.history=new AnalyticsHistory(this.reads);

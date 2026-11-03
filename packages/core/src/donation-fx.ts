@@ -11,8 +11,8 @@ CREATE VIEW IF NOT EXISTS valued_events AS SELECT e.*,CASE WHEN json_extract(e.p
 DELETE FROM analytics_reports;
 DELETE FROM analytics_money_facts;
 DELETE FROM analytics_stream_cache;
-UPDATE analytics_fact_versions SET money=money+1;
-UPDATE analytics_stream_revisions SET revision=revision+1;
+UPDATE analytics_fact_versions SET money=money+1 WHERE session_id IN (SELECT es.session_id FROM event_sessions es JOIN events e ON e.id=es.event_id WHERE e.type='donation');
+UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN (SELECT es.session_id FROM event_sessions es JOIN events e ON e.id=es.event_id WHERE e.type='donation');
 UPDATE analytics_global_revision SET revision=revision+1;
 UPDATE ui_revisions SET revision=revision+1;
 PRAGMA user_version=31;
@@ -49,7 +49,7 @@ export class DonationFx {
    for(const rate of rates)changes+=insert.run(day,rate.currency,rate.value,rate.nominal,effectiveDay).changes;
    this.db.prepare('INSERT INTO cbr_days VALUES(?,?,?) ON CONFLICT(day) DO UPDATE SET effective_day=excluded.effective_day,retry_at_ms=excluded.retry_at_ms').run(day,effectiveDay,now+86400000);
    if(changes){
-    this.db.exec('DELETE FROM analytics_reports; DELETE FROM analytics_money_facts; DELETE FROM analytics_stream_cache; UPDATE analytics_fact_versions SET money=money+1; UPDATE analytics_stream_revisions SET revision=revision+1; UPDATE analytics_global_revision SET revision=revision+1; UPDATE ui_revisions SET revision=revision+1;');
+    this.db.exec(`DELETE FROM analytics_reports; DELETE FROM analytics_money_facts; DELETE FROM analytics_stream_cache; UPDATE analytics_fact_versions SET money=money+1 WHERE session_id IN (SELECT es.session_id FROM event_sessions es JOIN events e ON e.id=es.event_id WHERE e.type='donation'); UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN (SELECT es.session_id FROM event_sessions es JOIN events e ON e.id=es.event_id WHERE e.type='donation'); UPDATE analytics_global_revision SET revision=revision+1; UPDATE ui_revisions SET revision=revision+1;`);
    }
   }).immediate();
  }
