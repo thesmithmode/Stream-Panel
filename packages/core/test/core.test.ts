@@ -1010,6 +1010,7 @@ test("personsTop ranks by messages, donations and observed minutes for a session
     const byMessages = store.personsTop("messages", session);
     assert.equal(byMessages[0]!.id, a);
     assert.equal(byMessages[0]!.messageCount, 2);
+    store.saveExchangeRates('1970-01-01','1970-01-01',[{currency:'USD',value:'100.0000',nominal:1}],85000);
     const byDonations = store.personsTop("donations", session);
     assert.equal(byDonations[0]!.id, b);
     assert.equal(byDonations[0]!.donationCount, 1);

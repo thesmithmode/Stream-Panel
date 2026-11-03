@@ -1,3 +1,4 @@
+import {donationValuation} from './donation-fx.js';
 import type Database from 'better-sqlite3';
 import {assertTimestamp,type EventInput,eventKey} from './domain.js';
 
@@ -50,7 +51,12 @@ export class RecentEvents {
    LEFT JOIN identities i ON r.source<>'youtube' AND i.source=r.source AND i.account_id=r.account_id AND i.external_id=r.actor_id
    LEFT JOIN youtube_identities y ON r.source='youtube' AND y.account_id=r.account_id AND y.external_id=r.actor_id
    LEFT JOIN persons p ON p.id=coalesce(i.person_id,y.person_id)
-   WHERE ${where.join(' AND ')} ORDER BY r.at_ms DESC,r.id DESC LIMIT ? OFFSET ?`).all(...args,limit,offset) as (RecentRow&{person_id:string|null})[]).map(({payload_json,...row})=>({...row,payload:JSON.parse(payload_json) as Record<string,unknown>}));
+   WHERE ${where.join(' AND ')} ORDER BY r.at_ms DESC,r.id DESC LIMIT ? OFFSET ?`).all(...args,limit,offset) as (RecentRow&{person_id:string|null})[]).map(({payload_json,...row})=>{
+    const payload=JSON.parse(payload_json) as Record<string,unknown>;
+    if(row.type!=='donation')return {...row,payload};
+    const event=this.db.prepare("SELECT occurred_at_ms FROM events WHERE source=? AND account_id=? AND external_id=? AND type='donation'").get(row.source,row.account_id,row.external_id) as {occurred_at_ms:number|null}|undefined;
+    return {...row,payload:{...payload,...donationValuation(this.db,payload,event?.occurred_at_ms??null)}};
+   });
  }
  purge(now=Date.now()):number {
   assertTimestamp(now);
