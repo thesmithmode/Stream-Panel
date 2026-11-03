@@ -11,6 +11,10 @@ import {streamMetrics} from './stream-metrics.js';
 import {windowsFromLinks,sessionBreaks} from './session-windows.js';
 import { botExclusionSet, isExcludedBot } from './bots.js';
 export interface AnalyticsOptions {
+    /** Internal, server-selected rolling membership; never accepted from query input. */
+    rollingCore?: boolean | undefined;
+    coreWindowDays?: number;
+    corePeople?: string[] | undefined;
     streamFrom?:number;streamTo?:number;streamOffset?:number;streamLimit?:number;
     /** Internal fact projections; public routes never accept these flags. */
     activityInput?:ActivityInput[];
@@ -90,6 +94,7 @@ function groupBySession<T extends {session_id:string}>(rows:T[]):Map<string,T[]>
     return groups;
 }
 export function validateAnalyticsOptions(options:AnalyticsOptions,from=options.fromMs,to=options.toMs){
+    if(options.coreWindowDays!==undefined&&![30,90,180].includes(options.coreWindowDays))throw Error('INVALID_ANALYTICS_FILTER');
     if([options.audienceOffset,options.clockOffset].some(n=>n!==undefined&&(!Number.isSafeInteger(n)||n<0)) ||
        (options.audienceSearch!==undefined&&(typeof options.audienceSearch!=='string'||options.audienceSearch.length>256)) ||
        (options.audienceSort!==undefined&&!['core','sessions','observedMinutes','estimatedChatMinutes','messages','attendanceRatio'].includes(options.audienceSort)) ||
@@ -358,7 +363,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         e.coreSessionIds = [...e.attendanceSessionIds].filter(id => (coreDurations.get(id) ?? 0)>0 && (coreTime.get(id) ?? 0)*5 >= coreDurations.get(id)!);
         const override=preferences.get(e.id);
         e.manualCore=override==null?null:override===1;
-        e.core=classifyCore(e.coreSessionIds.length,selectedStreamCount,regularThresholdPercent,e.manualCore);
+        e.core=classifyCore(e.coreSessionIds.length,selectedStreamCount,regularThresholdPercent,e.manualCore,options.corePeople?.includes(e.id));
         e.follower=followerPeople.has(e.id)?true:negativeFollowers.has(e.id)&&!e.sources.includes('youtube')?false:null;
         e.regular=e.core; // Compatibility fields refer to the same audience core.
         const signalMinutes=new Set<string>();

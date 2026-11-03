@@ -56,7 +56,7 @@ export class StreamFacts {
   this.save('analytics_activity_details',id,key,revision,value,end!==null);return value;
  }
  private scope(options:AnalyticsOptions,id:string,start:number,end:number|null){
-  const q={...options,sessionId:id,fromMs:Math.max(options.fromMs,start),toMs:Math.min(options.toMs,end??options.toMs)};
+  const q={...options,corePeople:undefined,rollingCore:undefined,sessionId:id,fromMs:Math.max(options.fromMs,start),toMs:Math.min(options.toMs,end??options.toMs)};
   const members=this.db.prepare('SELECT member_id FROM session_groups WHERE group_id=? ORDER BY member_id').all(id);
   const fields={format:6,members,from:q.fromMs,to:end===null&&q.toMs>=Date.now()-120000?'live':q.toMs,source:q.source??'all',category:q.category??'',timezone:q.timezone??'Europe/Moscow',chatWindowMinutes:q.chatWindowMinutes??5,excluded:[...botExclusionSet(q.excludedLogins??[])].sort(),owner:q.ownerId??'',youtube:q.youtubeAccount??'',regularThresholdPercent:q.regularThresholdPercent??80};
   return {q,key:createHash('sha256').update(JSON.stringify(fields)).digest('hex'),complete:end!==null&&q.fromMs===start&&q.toMs===end};
@@ -88,7 +88,7 @@ export class StreamFacts {
  }
  /** Apply current metadata without reading historical attendance. */
  present<T extends Report>(value:T,options?:AnalyticsOptions):T{
-  const signature=JSON.stringify([this.db.prepare("SELECT domain,revision FROM ui_revisions WHERE domain IN('people','follows','analyticsPresentation') ORDER BY domain").all(),options?.source,options?.youtubeAccount,options?.youtubeAccount?this.db.prepare("SELECT updated_at_ms,payload_json FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount):null]);
+  const signature=JSON.stringify([this.db.prepare("SELECT domain,revision FROM ui_revisions WHERE domain IN('people','follows','analyticsPresentation') ORDER BY domain").all(),options?.corePeople,options?.source,options?.youtubeAccount,options?.youtubeAccount?this.db.prepare("SELECT updated_at_ms,payload_json FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount):null]);
   const cached=this.presentations.get(value);if(cached?.signature===signature)return structuredClone(cached.value) as T;
   const ids=JSON.stringify(value.audience.map(p=>p.id));
   const names=new Map((this.db.prepare('SELECT id,display_name FROM persons WHERE id IN(SELECT value FROM json_each(?))').all(ids) as {id:string;display_name:string}[]).map(p=>[p.id,p.display_name]));
@@ -102,7 +102,7 @@ export class StreamFacts {
    if(snapshot.source==='twitch'&&info.complete)for(const r of this.db.prepare("SELECT DISTINCT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id NOT IN(SELECT value FROM json_each(?))").all(snapshot.account_id,followers) as {person_id:string}[]){negative.add(r.person_id);platformNegative.twitch!.add(r.person_id);}
   }
   const audience=value.audience.map(p=>{const override=preferences.get(p.id),f=value.filters;
-   const core=classifyCore(p.coreSessionIds.length,value.summary.streams,f.regularThresholdPercent,override==null?null:override===1);
+   const core=classifyCore(p.coreSessionIds.length,value.summary.streams,f.regularThresholdPercent,override==null?null:override===1,options?.corePeople?.includes(p.id));
    return {...p,name:names.get(p.id)??p.name,tags:tags.filter(t=>t.person_id===p.id).map(t=>t.label),manualCore:override==null?null:override===1,core,regular:core,follower:following.has(p.id)?true:negative.has(p.id)&&!p.sources.includes('youtube')?false:null};});
   const attendees=audience.filter(p=>p.attendanceSessionIds.length),core=audience.filter(p=>p.core).length;
   const composition={core:attendees.filter(p=>p.core).length,followers:attendees.filter(p=>!p.core&&p.follower===true).length,nonFollowers:attendees.filter(p=>!p.core&&p.follower===false).length,unknown:attendees.filter(p=>!p.core&&p.follower===null).length,twitch:attendees.filter(p=>p.sources.includes('twitch')).length,youtube:attendees.filter(p=>p.sources.includes('youtube')).length,both:attendees.filter(p=>p.sources.length>1).length};

@@ -22,7 +22,7 @@ test('real YouTube collection with omitted concurrentViewers keeps Twitch visibl
  try{
   const headers={host:'127.0.0.1:47831'},key=new URLSearchParams(a.bootstrap().split('#')[1]).get('key')!;
   const login=await a.app.inject({method:'POST',url:'/api/v1/bootstrap',headers,payload:{key}}),cookie=String(login.headers['set-cookie']).split(';')[0]!;
-  const read=async(url:string)=>{const r=await a.app.inject({method:'GET',url,headers:{...headers,cookie}});assert.equal(r.statusCode,200);return r.json();};
+  const read=async(url:string)=>{for(let i=0;i<100;i++){const r=await a.app.inject({method:'GET',url,headers:{...headers,cookie}});assert.equal(r.statusCode,200);const value=r.json();if(!value.preparing)return value;}throw Error('analytics preparation did not finish');};
   const id=await a.db.call('observePlatformStream','twitch','owner','stream',base,base,null,'Monday');
   await a.db.call('streamSample',id!,base+3000,'dota','Dota 2','Monday',8);
   await a.db.call('youtubeSnapshot','channel','channel',{id:'channel'},now);await a.db.call('youtubeSnapshot','channel','report',{},now);
