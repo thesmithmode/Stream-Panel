@@ -1,3 +1,4 @@
+import {registerDonationFx} from '../dist/packages/core/src/donation-fx.js';
 import Database from 'better-sqlite3';
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -6,6 +7,7 @@ const dir=process.env.STREAM_PANEL_DATA_DIR;
 if(!dir)throw new Error('DATA_DIRECTORY_REQUIRED');
 const db=new Database(join(dir,'data.sqlite'),{readonly:true});
 db.pragma('busy_timeout=20000');
+registerDonationFx(db);
 try{
  for(const profile of ['ruslan','gulnaz']){
   const config=JSON.parse(await readFile(join(dir,'profiles',profile,'secrets.json'),'utf8'));
@@ -32,6 +34,7 @@ try{
     selectedPaymentStreamRowsVerified++;
    }
   }
-  console.log(JSON.stringify({profile,utcOffsetMinutes:config.daUtcOffsetMinutes,validated:valid,invalidSourceTimes:invalid,total: facts.total,untimed:facts.untimed??0,linkedToStreams:facts.linked??0,...perStream,...missing,selectedPaymentStreamRowsVerified}));
+  const fx=db.prepare(`SELECT count(*) AS foreignDonations,coalesce(sum(rub_amount_minor IS NOT NULL),0) AS foreignValued,coalesce(sum(rub_amount_minor IS NULL AND occurred_at_ms IS NOT NULL),0) AS foreignPendingTimed,coalesce(sum(occurred_at_ms IS NULL),0) AS foreignUnknownTime FROM p_${profile}_valued_events WHERE type='donation' AND json_extract(payload_json,'$.currency')<>'RUB'`).get();
+  console.log(JSON.stringify({profile,...fx,utcOffsetMinutes:config.daUtcOffsetMinutes,validated:valid,invalidSourceTimes:invalid,total: facts.total,untimed:facts.untimed??0,linkedToStreams:facts.linked??0,...perStream,...missing,selectedPaymentStreamRowsVerified}));
  }
 }finally{db.close();}

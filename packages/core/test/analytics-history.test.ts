@@ -68,7 +68,8 @@ test('cached money, platform inference and core rules match raw analytics after 
  const opts={...options,youtubeAccount:'yt-owner'};
  for(const source of ['all','twitch','youtube'] as const)for(const coreRule of ['either','both','frequency'] as const){const query={...opts,source,coreRule};const raw=audienceAnalytics(db,query),r=ready(h,query);assert.deepEqual(r.summary,raw.summary);assert.deepEqual(r.composition,raw.composition);for(const p of raw.audience){const cached=r.audience.find((q:any)=>q.id===p.id);assert.equal(cached.messages,p.messages);assert.deepEqual(cached.donations,p.donations);assert.deepEqual(cached.tags,p.tags);}}
  s.updateDonation(String(tip.id),{personId:person,amount:'0.50',currency:'USD',occurredAtMs:base+86400000+minute,message:'Corrected',sourceName:'Cash'},0,base+86400000+2*minute);
- assert.deepEqual(ready(h,opts).audience.find((p:any)=>p.id===person).donations,{USD:'50'});
+ const fxDay=new Date(base+86400000+minute+3*3600000).toISOString().slice(0,10);s.saveExchangeRates(fxDay,fxDay,[{currency:'USD',value:'100.0000',nominal:1}],base);
+ assert.deepEqual(ready(h,opts).audience.find((p:any)=>p.id===person).donations,{RUB:'5000'});
  s.deleteDonation(String(tip.id),1,base+86400000+3*minute);assert.deepEqual(ready(h,opts).audience.find((p:any)=>p.id===person).donations,{});
  const yt=s.persons().find(p=>String(p.sources).includes('youtube'))!.id as string;s.merge(yt,person,s.personRevision(yt),s.personRevision(person),options.toMs);
  assert.equal(ready(h,opts).summary.entities,1);

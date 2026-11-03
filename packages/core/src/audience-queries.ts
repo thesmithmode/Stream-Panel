@@ -204,12 +204,11 @@ export class AudienceQueries {
     const youtubeMessageCount=youtubeParticipants.reduce((sum,row)=>sum+row.messages,0);
     const donationRows = this.db
       .prepare(
-        `SELECT json_extract(e.payload_json, '$.currency') AS currency,
-                json_extract(e.payload_json, '$.amountMinor') AS amount_minor
-         FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id
+        `SELECT 'RUB' AS currency,
+                e.rub_amount_minor AS amount_minor
+         FROM valued_events e LEFT JOIN identities i ON i.id=e.identity_id
          WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))
-           AND json_extract(e.payload_json, '$.currency') IS NOT NULL
-           AND json_extract(e.payload_json, '$.amountMinor') IS NOT NULL`,
+           AND e.rub_amount_minor IS NOT NULL`,
       )
       .all(...scope, botJson) as { currency: string; amount_minor: string }[];
     const totals: Record<string, string> = {};
@@ -623,13 +622,12 @@ export class AudienceQueries {
     ).n;
     const donationRows = this.db
       .prepare(
-        `SELECT json_extract(e.payload_json, '$.currency') AS currency,
-                json_extract(e.payload_json, '$.amountMinor') AS amount_minor
-         FROM effective_events e
+        `SELECT 'RUB' AS currency,
+                e.rub_amount_minor AS amount_minor
+         FROM valued_events e
          JOIN identities i ON i.id = e.identity_id
          WHERE i.person_id = ? AND ${inSession} AND e.type = 'donation' AND ${this.notBotClause('i')}
-           AND json_extract(e.payload_json, '$.currency') IS NOT NULL
-           AND json_extract(e.payload_json, '$.amountMinor') IS NOT NULL`,
+           AND e.rub_amount_minor IS NOT NULL`,
       )
       .all(personId, sid, sid,botJson) as { currency: string; amount_minor: string }[];
     const donationTotals: Record<string, string> = {};
@@ -824,7 +822,7 @@ export class AudienceQueries {
       .all(sid, sid, botJson, capped) as Record<string, unknown>[];
 
     const selectedIds=JSON.stringify(rows.map(row=>row.id));
-    const donations=this.db.prepare(`SELECT i.person_id,json_extract(e.payload_json,'$.currency') AS currency,json_extract(e.payload_json,'$.amountMinor') AS amount_minor FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id IN(SELECT value FROM json_each(?)) AND ${inSession} AND e.type='donation' AND json_extract(e.payload_json,'$.currency') IS NOT NULL AND json_extract(e.payload_json,'$.amountMinor') IS NOT NULL`).all(selectedIds,sid,sid) as {person_id:string;currency:string;amount_minor:string}[];
+    const donations=this.db.prepare(`SELECT i.person_id,'RUB' AS currency,e.rub_amount_minor AS amount_minor FROM valued_events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id IN(SELECT value FROM json_each(?)) AND ${inSession} AND e.type='donation' AND e.rub_amount_minor IS NOT NULL`).all(selectedIds,sid,sid) as {person_id:string;currency:string;amount_minor:string}[];
     const tipsByPerson=new Map<string,typeof donations>();for(const tip of donations){const list=tipsByPerson.get(tip.person_id)??[];list.push(tip);tipsByPerson.set(tip.person_id,list);}
     const counts=sortBy==='messages'?[]:this.db.prepare(`SELECT i.person_id,count(*) AS n FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id IN(SELECT value FROM json_each(?)) AND ${inSession} AND e.type='chat.message' AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id) AND ${this.notBotClause('i')} GROUP BY i.person_id`).all(selectedIds,sid,sid,botJson) as {person_id:string;n:number}[];
     const messages=new Map(counts.map(row=>[row.person_id,row.n]));

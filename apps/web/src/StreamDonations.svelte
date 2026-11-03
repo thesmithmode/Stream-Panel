@@ -5,14 +5,14 @@
  import {isAudioDonation} from './labels';
  import {onMount,untrack} from 'svelte';
  import Icon from './Icon.svelte';
- import {api,date,money} from './api';
- type Donation={id:string;personId:string|null;personName:string|null;amountMinor:string;currency:string;occurredAtMs:number|null;sourceTime?:string|null;sessionIds?:string[];message:string;originalActorName:string;revision:number};
+ import {api,date,donationMoney} from './api';
+ type Donation={id:string;personId:string|null;personName:string|null;amountMinor:string;currency:string;rubAmountMinor?:string|null;exchangeRateDate?:string|null;occurredAtMs:number|null;sourceTime?:string|null;sessionIds?:string[];message:string;originalActorName:string;revision:number};
  type Candidate={id:string;name:string;messages:number};
  let {sessionId,onPerson,changed}:{sessionId?:string;onPerson:(id:string)=>void;changed:()=>Promise<void>}=$props();
  let loaded=$state(false);
  let rows=$state<Donation[]>([]),total=$state(0),statisticsCount=$state(0),offset=$state(0),loading=$state(false),busy=$state(false),error=$state('');
  let editing=$state<Donation|null>(null),candidates=$state<Candidate[]>([]),recipient=$state(''),finding=$state(false);
- const value=(row:Donation)=>/^\d+$/.test(row.amountMinor)?money(row.amountMinor,row.currency):'Сумма неизвестна';
+ const value=(row:Donation)=>/^\d+$/.test(row.amountMinor)?donationMoney(row):'Сумма неизвестна';
  let generation=0,editorGeneration=0;
  let connection=$state('');
  const showAll=$derived(!sessionId);
@@ -47,5 +47,5 @@
 </section>
 {/if}
 <style>
-header{gap:12px;flex-wrap:wrap;}h2{display:flex;align-items:baseline;gap:10px;}.donation-list{padding:0 18px 12px;}article{padding:8px 0;border-bottom:1px solid var(--border);}article:last-child{border-bottom:0;}.donation-summary,.donation-owner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}.donation-summary{display:grid;grid-template-columns:minmax(0,1fr) auto 44px;gap:8px;margin-bottom:0;}.donation-owner{min-width:0;overflow-wrap:anywhere;}.donation-owner .text-button{text-align:left;white-space:normal;}.donation-summary strong{color:var(--text);font-size:17px;}.donation-message{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0;color:var(--text);}.donation-editor{display:grid;gap:10px;padding:14px;border-radius:8px;background:var(--bg);margin-top:12px;}.candidate-list{display:flex;gap:8px;flex-wrap:wrap;}.candidate-list button{display:flex;gap:8px;}.candidate-list button.active{border-color:var(--accent);}@media(max-width:600px){.donation-list{padding:0 12px 12px;}.donation-list article>time{font-size:11px;}}
+header{gap:12px;flex-wrap:wrap;}h2{display:flex;align-items:baseline;gap:10px;}.donation-list{padding:0 18px 12px;}article{padding:8px 0;border-bottom:1px solid var(--border);}article:last-child{border-bottom:0;}.donation-summary,.donation-owner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}.donation-summary{display:grid;grid-template-columns:minmax(0,1fr) auto 44px;gap:8px;margin-bottom:0;}.donation-owner{min-width:0;overflow-wrap:anywhere;}.donation-owner .text-button{text-align:left;white-space:normal;}.donation-summary strong{color:var(--text);font-size:17px;}.donation-message{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0;color:var(--text);}.donation-editor{display:grid;gap:10px;padding:14px;border-radius:8px;background:var(--bg);margin-top:12px;}.candidate-list{display:flex;gap:8px;flex-wrap:wrap;}.candidate-list button{display:flex;gap:8px;}.candidate-list button.active{border-color:var(--accent);}@media(max-width:600px){.donation-summary{grid-template-columns:minmax(0,1fr) 44px;}.donation-owner{grid-column:1;}.donation-summary>strong{grid-column:1;grid-row:2;font-size:15px;overflow-wrap:anywhere;}.donation-summary>.icon-button{grid-column:2;grid-row:1 / 3;}.donation-list{padding:0 12px 12px;}.donation-list article>time{font-size:11px;}}
 </style>

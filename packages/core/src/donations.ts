@@ -1,3 +1,4 @@
+import {donationValuation} from './donation-fx.js';
 import type Database from 'better-sqlite3';
 import {randomUUID} from 'node:crypto';
 import {assertTimestamp,moneyToMinor,eventKey} from './domain.js';
@@ -29,7 +30,7 @@ export class DonationLedger {
  }
  private present(row:Raw) {
   const payload=JSON.parse(row.payload_json),original=JSON.parse(row.original_payload);
-  return {id:row.id,sourceTime:row.source_time,receivedAtMs:row.received_at_ms,sessionIds:JSON.parse(row.stream_ids),personId:row.person_id,personName:row.display_name,amountMinor:String(payload.amountMinor??''),currency:String(payload.currency??''),occurredAtMs:row.occurred_at_ms,message:String(payload.text??''),sourceName:String(payload.sourceName??(row.account_id==='manual'?'Manual':'DonationAlerts')),originalActorName:String(original.actorName??''),provider:row.source,providerAccount:row.account_id,providerId:row.external_id,revision:row.revision,deleted:row.deleted===1};
+  return {...donationValuation(this.db,payload,row.occurred_at_ms),id:row.id,sourceTime:row.source_time,receivedAtMs:row.received_at_ms,sessionIds:JSON.parse(row.stream_ids),personId:row.person_id,personName:row.display_name,amountMinor:String(payload.amountMinor??''),currency:String(payload.currency??''),occurredAtMs:row.occurred_at_ms,message:String(payload.text??''),sourceName:String(payload.sourceName??(row.account_id==='manual'?'Manual':'DonationAlerts')),originalActorName:String(original.actorName??''),provider:row.source,providerAccount:row.account_id,providerId:row.external_id,revision:row.revision,deleted:row.deleted===1};
  }
  list(personId?:string,offset=0,limit=50,includeDeleted=false,sessionId?:string) {
   if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>100||typeof includeDeleted!=='boolean')throw new Error('INVALID_DONATION_PAGE');
