@@ -6,6 +6,21 @@ import {launchBrowser} from '../helpers/browser.mjs';
 import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';
 import {assertUiLayout} from '../helpers/ui-layout.mjs';
 
+test('empty daily chart captions stay below their controls at desktop and phone widths',{timeout:30000},async()=>{
+ const a=await application();let browser;
+ try{
+  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:900}});
+  await goto(page,a.bootstrap());await page.getByRole('button',{name:'Аналитика',exact:true}).click();
+  const caption=page.locator('.audience-growth .growth-caption');await caption.waitFor();
+  for(const width of [1280,1440,390,320]){
+   await page.setViewportSize({width,height:900});await assertUiLayout(page);
+   const toolbar=await page.locator('.daily-chart-toolbar').boundingBox(),note=await caption.boundingBox();
+   assert.ok(note.y>=toolbar.y+toolbar.height,JSON.stringify({width,toolbar,note}));
+  }
+  await saveCoverage(page);
+ }finally{await browser?.close();await a.close();}
+});
+
 test('one toolbar controls subscriber windows, custom dates validate locally, and desktop chart edges align',{timeout:60000},async()=>{
  const a=await application();let browser;
  try{
