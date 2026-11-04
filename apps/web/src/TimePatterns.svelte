@@ -1,8 +1,7 @@
 <script lang="ts">
- import type {Snippet} from 'svelte';
  import Help from './Help.svelte';
  import {money} from './api';
- let {categoryFilter,data,section='both'}:{section?:'both'|'time'|'audience';categoryFilter:Snippet<[string]>;data:any}=$props();
+ let {data,section='both'}:{section?:'both'|'time'|'audience';data:any}=$props();
  let dimension=$state('weekday'),metric=$state('viewers'),calculation=$state('average'),currency=$state('RUB');
  const days=['пн','вт','ср','чт','пт','сб','вс'];
  const currencies=$derived([...new Set<string>((data.hours??[]).flatMap((h:any)=>Object.keys(h.donationTotals)))]);
@@ -24,7 +23,7 @@
  const total=$derived(groups.reduce((n,g)=>n+g.count,0));
 
 </script>
-{#if section!=='audience'}<section class="panel chart-panel time-patterns"><header><h2>Когда стримить</h2><Help id="time-pattern-help" label="Как считаются средние" text="Средние взвешены по длительности с данными. Часы без эфиров не считаются нулями. Накопленная сумма складывает всю активность выбранного периода."/></header>{@render categoryFilter("Категория времени эфиров")}
+{#if section!=='audience'}<section class="panel chart-panel time-patterns"><header><h2>Когда стримить</h2><Help id="time-pattern-help" label="Как считаются средние" text="Средние взвешены по длительности с данными. Часы без эфиров не считаются нулями. Накопленная сумма складывает всю активность выбранного периода."/></header>
  <details class="pattern-controls"><summary>Настроить график</summary><div class="control-grid">
   <label>Сравнение времени<select aria-label="Сравнение времени" bind:value={dimension}><option value="weekday">Дни недели</option><option value="hour">Время суток</option></select></label>
   <label>Показатель времени<select aria-label="Показатель времени" bind:value={metric}><option value="viewers">Зрители</option><option value="messages">Сообщения</option><option value="observed">Участники Twitch</option><option value="estimated">Активность YouTube · оценка</option><option value="donations">Число донатов</option><option value="amount">Сумма донатов</option></select></label>
@@ -36,7 +35,7 @@
 </section>
 {/if}
 {#if section!=='time'}<div class="discovery-grid">
- <section class="panel chart-panel audience-composition"><header><h2>Состав аудитории</h2><Help id="composition-help" label="О составе аудитории" text={`Известные участники: Twitch ${data.composition.twitch}, YouTube ${data.composition.youtube}, связаны на обеих площадках ${data.composition.both}. Человек учитывается один раз. Статус подписки — на последнюю проверку. Анонимные зрители в счётчиках не раскрывают аккаунт. Неизвестный статус не означает отсутствие подписки.`}/></header>{@render categoryFilter("Категория состава аудитории")}<div class="settings-body">
+ <section class="panel chart-panel audience-composition"><header><h2>Состав аудитории</h2><Help id="composition-help" label="О составе аудитории" text={`Известные участники: Twitch ${data.composition.twitch}, YouTube ${data.composition.youtube}, связаны на обеих площадках ${data.composition.both}. Человек учитывается один раз. Статус подписки — на последнюю проверку. Анонимные зрители в счётчиках не раскрывают аккаунт. Неизвестный статус не означает отсутствие подписки.`}/></header><div class="settings-body">
   <div class="composition-bar" aria-label="Доли состава аудитории">{#each groups as g}<span style:width={`${total?g.count/total*100:0}%`} style:background={g.color}></span>{/each}</div>
   {#each groups as g}<p class="composition-row"><span><i style:background={g.color}></i>{g.label}</span><strong>{g.count}{total?` · ${Math.round(g.count/total*100)}%`:''}</strong></p>{/each}
  </div></section>

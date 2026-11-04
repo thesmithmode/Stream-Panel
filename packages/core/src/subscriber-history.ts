@@ -30,7 +30,7 @@ export class SubscriberHistory {
  }
  query(q:SubscriberQuery){
   const {source,account,from,to}=q;assertTimestamp(from);assertTimestamp(to);
-  if(!['twitch','youtube'].includes(source)||to<=from||to-from>31*86400000||typeof account!=='string')throw new Error('INVALID_SUBSCRIBER_WINDOW');
+  if(!['twitch','youtube'].includes(source)||to<=from||typeof account!=='string')throw new Error('INVALID_SUBSCRIBER_WINDOW');
   if(q.streamsOnly)return {source,from,to,counts:[] as CountPoint[],follows:[] as {id:string;name:string;at:number}[],streams:this.streams(q),publications:[] as Publication[],total:null,change:null,firstAt:null,lastAt:null};
   const prior=this.db.prepare('SELECT observed_at_ms AS at,total FROM subscriber_counts WHERE source=? AND account_id=? AND observed_at_ms<=? ORDER BY observed_at_ms DESC LIMIT 1').get(source,account,from) as CountPoint|undefined;
   // Keep both edges of constant runs, without sending 43,200 identical minute samples.

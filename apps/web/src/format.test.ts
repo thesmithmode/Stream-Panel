@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {num,pct,dateTime} from './format.ts';
+import {num,pct,dateTime,money} from './format.ts';
+
+test('money keeps one sign and two fraction digits without losing integer precision',()=>{
+ assert.equal(money('-50','RUB'),'-0,50 RUB');
+ assert.equal(money('-150','RUB'),'-1,50 RUB');
+ assert.equal(money('0','RUB'),'0,00 RUB');
+ assert.equal(money('100050','RUB'),'1 000,50 RUB');
+ assert.equal(money('900719925474099300','RUB'),'9 007 199 254 740 993,00 RUB');
+});
 
 test('Russian display formatting rounds shares and respects Moscow date boundaries', context=>{
  context.mock.timers.enable({apis:['Date'],now:Date.parse('2026-10-23T12:00:00Z')});

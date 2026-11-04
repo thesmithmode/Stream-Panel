@@ -18,6 +18,6 @@
  <label>{searchLabel}<input {disabled} bind:value={search} placeholder="Имя или ник" /></label>
  <label>{label}<select aria-label={label} {disabled} bind:value><option value="">{nullable?'Без привязки':'Выберите человека'}</option>{#each options as p (p.id)}<option value={p.id}>{p.display_name}{suggestedIds.includes(p.id)?" · совпадает имя":""}</option>{/each}</select></label>
  {#if error}<p role="alert">{error}</p>{/if}
- {#if total>50}<div class="actions"><button type="button" disabled={busy||offset===0} onclick={()=>offset=Math.max(0,offset-50)}>Предыдущие варианты</button><span>{offset+1}–{Math.min(offset+50,total)} из {total}</span><button type="button" disabled={busy||offset+50>=total} onclick={()=>offset+=50}>Следующие варианты</button></div>{/if}
+ {#if total>50}<div class="actions"><button type="button" disabled={disabled||busy||offset===0} onclick={()=>offset=Math.max(0,offset-50)}>Предыдущие варианты</button><span>{offset+1}–{Math.min(offset+50,total)} из {total}</span><button type="button" disabled={disabled||busy||offset+50>=total} onclick={()=>offset+=50}>Следующие варианты</button></div>{/if}
 </div>
 <style>.person-picker,label{display:grid;gap:6px;min-width:0;}input,select{width:100%;min-width:0;}</style>

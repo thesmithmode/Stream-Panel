@@ -19,7 +19,7 @@
  {#each sessions as session,index (session.id)}
   {#if index===0||sessionGroup(session.started_at_ms)!==sessionGroup(sessions[index-1]!.started_at_ms)}<h2 class="history-date">{sessionGroup(session.started_at_ms)}</h2>{/if}
   <article class="stream-card" data-session-id={session.id}>
-   <a class="stream-open" aria-label={`Открыть ${session.primaryTitle||'стрим'}`} href={routeUrl({view:'stream',session:session.id,person:'',profile:getProfile()})} onclick={e=>{e.preventDefault();onopen(session.id);}}>
+   <a class="stream-open" aria-label={`Открыть ${session.primaryTitle||'стрим'}`} href={routeUrl({view:'stream',session:session.id,person:'',profile:getProfile()})} onclick={e=>{if(e.button===0&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&!e.altKey){e.preventDefault();onopen(session.id);}}}>
    <div class="stream-card-heading">
     <div><span class="stream-period">{streamRange(session.started_at_ms,session.ended_at_ms)}</span><h3>{session.primaryTitle||'Без названия'}</h3><span class="stream-platforms">{session.platforms?.map(p=>p==='twitch'?'Twitch':'YouTube').join(' · ')||'Источник неизвестен'}{#if session.ended_at_ms===null}<span class="live-label">В эфире</span>{/if}{#if (session.memberIds?.length??0)>1}<span> · {session.memberIds!.length} части</span>{/if}</span></div>
    </div>
