@@ -193,5 +193,14 @@ button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,s
  .dynamics-grid>.audience-growth{border:1px solid var(--border);border-radius:12px}
  .dynamics-grid .growth-plot{padding-inline:12px}
 }
-@media(min-width:1101px){.dynamics-grid{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}}
+@media(min-width:1101px){
+ .dynamics-grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(4,auto) 1fr;align-items:stretch;row-gap:0}
+ .dynamics-grid>.panel{display:grid;grid-template-rows:subgrid;grid-row:1/span 5;align-content:start}
+ .dynamics-grid>.panel>header{grid-row:1}
+ .dynamics-grid .daily-chart-toolbar,.dynamics-grid .subscriber-totals{grid-row:2;align-self:center}
+ .dynamics-grid .growth-range,.dynamics-grid .subscriber-range{grid-row:3}
+ .dynamics-grid .growth-plot,.dynamics-grid .subscriber-plot{grid-row:4}
+ .dynamics-grid .growth-selection,.dynamics-grid .subscriber-details{grid-row:5}
+ .dynamics-grid .growth-caption,.dynamics-grid .subscriber-note{grid-row:2/span 4;align-self:start}
+}
 @media(max-width:720px){.stream-page .stream-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.stream-page .stream-kpis>div:last-child:nth-child(odd){grid-column:1/-1}}
