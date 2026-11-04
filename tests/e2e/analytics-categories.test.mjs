@@ -7,7 +7,7 @@ import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';
 import {assertUiLayout} from '../helpers/ui-layout.mjs';
 
 test('every chart category selector refreshes donations, time patterns and clock data, including cached switches',{timeout:90000},async()=>{
- const a=await application();let browser;
+ const a=await application();let browser,release,releaseOld;
  try{
   const base=Math.floor((Date.now()-86400000)/3600000)*3600000,minute=60000;
   const sid=await a.db.call('startSession','channel','category-check',base,'platform',base);
@@ -20,9 +20,8 @@ test('every chart category selector refreshes donations, time patterns and clock
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await goto(page,a.bootstrap());await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('tab',{name:'Время',exact:true}).click();
   await page.locator('.donation-patterns header').getByText('3 донатов',{exact:true}).waitFor();
-  let release;let entered;
-  const waiting=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);
-  await page.route('**/api/v1/analytics?*',async route=>{if(new URL(route.request().url()).searchParams.get('category')==='509658'){entered();await gate;}await route.continue();});
+  const waiting=page.waitForRequest(r=>new URL(r.url()).pathname==='/api/v1/analytics'&&new URL(r.url()).searchParams.get('category')==='509658'),gate=new Promise(resolve=>release=resolve);
+  await page.route('**/api/v1/analytics?*',async route=>{if(new URL(route.request().url()).searchParams.get('category')==='509658'){await gate;}await route.continue();});
   await setFilter(page,'Категория Twitch','509658');await waiting;
   assert.equal(await page.locator('.activity-clock .clock-plot').isVisible(),true);
   assert.equal(await page.locator('.time-patterns .pattern-bars').isVisible(),true);
@@ -51,24 +50,30 @@ test('every chart category selector refreshes donations, time patterns and clock
    }
   }
   assert.equal(progressSent,true);await page.unroute('**/api/v1/analytics?*');
-  let releaseOld,startedOld;
-  const oldWaiting=new Promise(resolve=>startedOld=resolve),oldGate=new Promise(resolve=>releaseOld=resolve);
-  await page.route('**/api/v1/analytics?*',async route=>{if(new URL(route.request().url()).searchParams.get('category')==='game'){startedOld();await oldGate;}await route.continue().catch(error=>{if(!route.request().failure())throw error;});});
+  const oldGate=new Promise(resolve=>releaseOld=resolve);
+  await page.route('**/api/v1/analytics?*',async route=>{if(new URL(route.request().url()).searchParams.get('category')==='game'){await oldGate;}await route.continue().catch(error=>{if(!route.request().failure())throw error;});});
   // Network fault checks explicitly invalidate reads; elapsed time no longer expires static reports.
-  await refreshData(page);await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');
+  // Wait for the actual forced report: clicking refresh may precede the changes request and cache invalidation.
+  async function refreshReport(){
+   const category=await page.getByLabel('Категория Twitch',{exact:true}).inputValue();
+   const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/analytics'&&new URL(r.url()).searchParams.get('category')===category&&r.status()<400);
+   await refreshData(page);await response;await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');
+  }
+  await refreshReport();
   await page.clock.setFixedTime(Date.now()+120000);
-  const oldCompleted=page.waitForEvent('requestfailed',{predicate:r=>new URL(r.url()).pathname==='/api/v1/analytics'&&new URL(r.url()).searchParams.get('category')==='game'});
+  const oldWaiting=page.waitForRequest(r=>new URL(r.url()).pathname==='/api/v1/analytics'&&new URL(r.url()).searchParams.get('category')==='game');
   await setFilter(page,'Категория Twitch','game');await oldWaiting;
+  const oldCompleted=page.waitForEvent('requestfailed',{predicate:r=>new URL(r.url()).pathname==='/api/v1/analytics'&&new URL(r.url()).searchParams.get('category')==='game'});
   await setFilter(page,'Категория Twitch','talk');
   await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();releaseOld();await oldCompleted;await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();await page.unroute('**/api/v1/analytics?*');
-  await refreshData(page);await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');
+  await refreshReport();
   await page.route('**/api/v1/analytics?*',route=>new URL(route.request().url()).searchParams.get('category')==='509658'?route.fulfill({json:unfiltered}):route.continue());
   await setFilter(page,'Категория Twitch','509658');
   await page.getByRole('alert').filter({hasText:'Сервер вернул данные для других фильтров'}).waitFor();assert.equal(await page.locator('.activity-clock .clock-plot').isVisible(),true);
   await page.unroute('**/api/v1/analytics?*');await setFilter(page,'Категория Twitch','talk');
   await page.locator('.donation-patterns header').getByText('2 донатов',{exact:true}).waitFor();
   assert.equal(await page.getByLabel('Категория Twitch').inputValue(),'talk');
-  await refreshData(page);await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');
+  await refreshReport();
   await page.clock.setFixedTime(Date.now()+240000);
   await page.route('**/api/v1/analytics?*',route=>new URL(route.request().url()).searchParams.get('category')==='game'?route.fulfill({status:503,json:{}}):route.continue());
   await setFilter(page,'Категория Twitch','game');
@@ -83,5 +88,5 @@ test('every chart category selector refreshes donations, time patterns and clock
   assert.ok((await clock.locator('svg g').allTextContents()).some(text=>text.includes('1 200 RUB/ч')));
   for(const width of [1280,390]){await page.setViewportSize({width,height:900});await assertUiLayout(page);if(process.env.STREAM_PANEL_QA_SHOTS)await page.locator('.activity-clock').screenshot({path:`${process.env.STREAM_PANEL_QA_SHOTS}/activity-${width}.png`});}
   assert.equal(await page.title(),'Stream Panel');assert.ok(await page.locator('main').innerText());assert.deepEqual(errors,[]);await saveCoverage(page);
- }finally{await browser?.close();await a.close();}
+ }finally{release?.();releaseOld?.();await browser?.close();await a.close();}
 });
