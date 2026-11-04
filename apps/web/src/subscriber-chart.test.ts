@@ -37,3 +37,16 @@ test('independent count axes retain integer ticks and cover empty, flat, zero an
  assert.deepEqual(subscriberDateOffsets(7),[0,1,2,3,4,5,6]);
  assert.deepEqual(subscriberDateOffsets(30),[0,5,10,15,20,25,29]);
 });
+
+test('stream bands retain input priority at shared boundaries and bound long-history date labels',()=>{
+ assert.deepEqual(subscriberStreamBands([{id:'later',start:5,end:15},{id:'earlier',start:0,end:10}],[{id:'yt',start:10,end:20}],0,20),[
+  {id:'earlier',start:0,end:5,source:'twitch'},
+  {id:'later',start:5,end:10,source:'twitch'},
+  {id:'later',start:10,end:15,source:'both'},
+  {id:'yt',start:15,end:20,source:'youtube'}
+ ]);
+ for(const days of [1,8,31,365,20000]){
+  const offsets=subscriberDateOffsets(days);
+  assert.equal(offsets[0],0);assert.equal(offsets.at(-1),days-1);assert.ok(offsets.length<=7);
+ }
+});

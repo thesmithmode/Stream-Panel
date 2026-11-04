@@ -33,13 +33,21 @@ export function subscriberPath(points:CountPoint[],to:number,x:(at:number)=>numb
 interface SubscriberStream {id:string;start:number;end:number}
 /** Partition actual airtime: overlaps are neutral, platform-only portions retain their source. */
 export function subscriberStreamBands(twitch:SubscriberStream[],youtube:SubscriberStream[],from:number,to:number){
- const input=[...twitch.map(s=>({...s,source:'twitch' as const})),...youtube.map(s=>({...s,source:'youtube' as const}))].filter(s=>s.end>from&&s.start<to);
- const edges=[...new Set(input.flatMap(s=>[Math.max(from,s.start),Math.min(to,s.end)]))].sort((a,b)=>a-b);
+ const input=[...twitch.map(s=>({...s,source:'twitch' as const})),...youtube.map(s=>({...s,source:'youtube' as const}))].filter(s=>s.end>from&&s.start<to&&s.end>s.start);
+ const events=new Map<number,{start:number[];end:number[]}>();
+ const edge=(at:number)=>{let event=events.get(at);if(!event){event={start:[],end:[]};events.set(at,event);}return event;};
+ input.forEach((s,i)=>{edge(Math.max(from,s.start)).start.push(i);edge(Math.min(to,s.end)).end.push(i);});
+ const edges=[...events.keys()].sort((a,b)=>a-b),active=new Set<number>();
  const bands:{id:string;start:number;end:number;source:'twitch'|'youtube'|'both'}[]=[];
- for(let i=1;i<edges.length;i++){
-  const start=edges[i-1]!,end=edges[i]!,active=input.filter(s=>s.start<end&&s.end>start);if(!active.length)continue;
-  const source=active.some(s=>s.source==='twitch')&&active.some(s=>s.source==='youtube')?'both':active[0]!.source;
-  const id=active[0]!.id,previous=bands.at(-1);
+ for(let i=0;i<edges.length-1;i++){
+  const start=edges[i]!,end=edges[i+1]!,event=events.get(start)!;
+  for(const index of event.end)active.delete(index);
+  for(const index of event.start)active.add(index);
+  if(!active.size)continue;
+  let first=Infinity,hasTwitch=false,hasYoutube=false;
+  for(const index of active){first=Math.min(first,index);if(input[index]!.source==='twitch')hasTwitch=true;else hasYoutube=true;}
+  const source=hasTwitch&&hasYoutube?'both':input[first]!.source;
+  const id=input[first]!.id,previous=bands.at(-1);
   if(previous&&previous.id===id&&previous.source===source&&previous.end===start)previous.end=end;else bands.push({id,start,end,source});
  }
  return bands;
@@ -57,7 +65,7 @@ export function subscriberScale(points:CountPoint[]){
 }
 /** Weekly labels show every local day; month labels stay readable on a phone. */
 export function subscriberDateOffsets(days:number){
- const step=days<=7?1:5,offsets:number[]=[];
+ const step=Math.max(1,Math.ceil((days-1)/6)),offsets:number[]=[];
  for(let i=0;i<days;i+=step)offsets.push(i);
  if(offsets.at(-1)!==days-1)offsets.push(days-1);
  return offsets;

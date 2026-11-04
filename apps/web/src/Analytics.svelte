@@ -95,6 +95,9 @@
     const scope=reportScope,id=++requestId;busy=true;error="";
 
     const fromMs=new Date(from).getTime(),toMs=new Date(to).getTime();
+    if(!Number.isFinite(fromMs)||!Number.isFinite(toMs)||fromMs<0||toMs<=fromMs||fromMs>=Date.now()){
+      error='Укажите начало периода раньше его конца и текущего времени.';busy=false;return;
+    }
     try{
       try {localStorage.setItem(`sp-analytics-${profile}`,JSON.stringify({timezone}));}catch{/* optional local preferences */}
       // Small reports are filtered locally; retain the complete first page so clearing
@@ -121,7 +124,6 @@
     mounted=true;const update=()=>{if(!document.hidden&&navigator.onLine&&!busy){if(liveEnd){const now=Date.now();if(typeof period==='number')from=localInput(now-period*86400000);const next=localInput(now);if(next===to)void refresh(true,lifetime.signal);else to=next;}else void refresh(true,lifetime.signal);}};const clock=()=>{if(period!=='all')update();};window.addEventListener('sp:clock-refresh',clock);window.addEventListener('sp:data-refresh',update);return ()=>{lifetime.abort();requestId++;window.removeEventListener('sp:data-refresh',update);window.removeEventListener('sp:clock-refresh',clock);};
   });
 </script>
-{#snippet categoryFilter(_label:string)}{/snippet}
 
 <div class="analytics-toolbar">
  <div class="period-chips" role="group" aria-label="Быстрый выбор периода">{#each [[7,'7 дней'],[30,'30 дней'],['all','Всё время']] as [value,label]}<button class:active={period===value} aria-pressed={period===value} aria-label={String(label)} onclick={()=>preset(value as number|'all')}><span class="period-full">{label}</span><span class="period-short" aria-hidden="true">{value==='all'?'Всё':`${value} дн.`}</span></button>{/each}<button class:active={period==='custom'} aria-pressed={period==='custom'} aria-label="Свои даты" onclick={()=>{period='custom';filtersOpen=true;}}><span class="period-full">Свои даты</span><span class="period-short" aria-hidden="true">Даты</span></button></div>
@@ -151,29 +153,29 @@
   {#if section==='dynamics'}
 
   <div class="dynamics-grid">
-  <AudienceGrowth bind:platform={view.dailyPlatform} bind:metric={view.dailyMetric} from={data.filters?.fromMs??0} end={data.filters?.toMs??Date.now()} {categoryFilter} streams={data.streamComparison??[]} range={data.streamRange} loadStreams={streamsLoader} {timezone} {onStream}/>
-  <SubscriberGrowth {profile} {timezone} {onStream}/>
+  <AudienceGrowth bind:platform={view.dailyPlatform} bind:metric={view.dailyMetric} from={data.filters?.fromMs??0} end={data.filters?.toMs??Date.now()} streams={data.streamComparison??[]} range={data.streamRange} loadStreams={streamsLoader} {timezone} {onStream}/>
+  <SubscriberGrowth {profile} {timezone} liveEnd={liveEnd&&period!=='custom'} from={data.filters?.fromMs??0} to={data.filters?.toMs??Date.now()} {onStream}/>
   </div>
   <Insights report={data} loading={busy&&!data} {onPerson} {onStream}/>
-  <details class="section-disclosure" bind:open={comparisonsOpen}><summary>Возвращаемость по эфирам</summary>{#if comparisonsOpen}<ComparisonCharts scope={reportScope} {categoryFilter} {timezone} {onStream} showGrowth={false} streams={data.streamComparison??[]} totalCount={data.streamRange?.total} loadStreams={streamsLoader}/>{/if}</details>
+  <details class="section-disclosure" bind:open={comparisonsOpen}><summary>Возвращаемость по эфирам</summary>{#if comparisonsOpen}<ComparisonCharts scope={reportScope} {timezone} {onStream} showGrowth={false} streams={data.streamComparison??[]} totalCount={data.streamRange?.total} loadStreams={streamsLoader}/>{/if}</details>
   {/if}
   {#if section==='time'}
   {#if view.hours}<section class="panel"><header><h2>Активность по дням и часам</h2><Help id="analytics-hours" label="О карте активности" text="Нажмите ячейку для точного значения. Яркость показывает активность, серый — нет данных. Часы без эфира не считаются нулями. Для зрителей показана сумма известных значений площадок; пропущенные замеры не считаются нулём."/></header><details class="chart-options"><summary>Настроить карту</summary><div class="filter-fields"><label>Метрика карты<select aria-label="Метрика карты" bind:value={view.heatMetric}><option value="viewers">Зрители (все)</option><option value="observed">Наблюдения Twitch</option><option value="estimated">Оценка активности YouTube</option><option value="messages">Сообщения</option><option value="donations">Число донатов</option><option value="amount">Сумма донатов</option></select></label>{#if view.heatMetric==='amount'}<label>Валюта карты<select aria-label="Валюта карты" bind:value={heatCurrency}>{#each [...new Set<string>((data.hours??[]).flatMap((h:any)=>Object.keys(h.donationTotals)))] as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select></label>{/if}<label>Расчёт карты<select aria-label="Расчёт карты" bind:value={heatCalculation}><option value="average">Среднее / на час эфира</option><option value="total">Накопленная сумма</option></select></label></div></details>
-    {@render categoryFilter("Категория карты активности")}
+
     <div class="hour-heatmap" aria-label="Карта активности по дням и часам">
       <div class="heatmap-labels"><span></span>{#each Array.from({length:24},(_,i)=>i) as hour}<span>{hour}</span>{/each}</div>
       {#each weekdays as weekday}<div class="heatmap-row"><strong>{weekday}</strong>{#each Array.from({length:24},(_,i)=>i) as hour}<button aria-label={hourTitle(weekday,hour)} title={hourTitle(weekday,hour)} onclick={()=>selectedHour={day:weekday,hour}} style:background={heatValue(hourCells.get(`${weekday}:${hour}`))!==null?`rgba(95,196,170,${.15+.85*(heatValue(hourCells.get(`${weekday}:${hour}`))??0)/hourMax})`:"#3b4350"}></button>{/each}</div>{/each}
     </div>{#if selectedHour}<p class="analytics-help small" role="status">{hourTitle(selectedHour.day,selectedHour.hour)}</p>{/if}</section>{/if}
 
-  {#if view.trend}<ActivityClock scope={reportScope} visitorRevision={data.clockRevision} {categoryFilter} rows={data.activityClock??[]} windows={data.activityWindows??[]} people={data.audience??[]} summary={data.clockBuckets??[]} summarySelection={data.clockSelection} loadSummary={clockLoader} loadVisitors={visitorLoader} {onPerson} bind:metric={view.metric} bind:resolution={view.resolution} {timezone}/>{/if}
+  {#if view.trend}<ActivityClock scope={reportScope} visitorRevision={data.clockRevision} rows={data.activityClock??[]} windows={data.activityWindows??[]} people={data.audience??[]} summary={data.clockBuckets??[]} summarySelection={data.clockSelection} loadSummary={clockLoader} loadVisitors={visitorLoader} {onPerson} bind:metric={view.metric} bind:resolution={view.resolution} {timezone}/>{/if}
 
   <div class="timing-grid">
-  {#if data.patterns&&data.composition}<TimePatterns {categoryFilter} {data} section="time" />{/if}
+  {#if data.patterns&&data.composition}<TimePatterns {data} section="time" />{/if}
 
-  {#if data.donationTiming}<DonationPatterns {categoryFilter} timing={data.donationTiming}/>{/if}
+  {#if data.donationTiming}<DonationPatterns timing={data.donationTiming}/>{/if}
   </div>
   {/if}
-  {#if section==='audience'}{#if data.composition}<TimePatterns {categoryFilter} {data} section="audience"/>{/if}
+  {#if section==='audience'}{#if data.composition}<TimePatterns {data} section="audience"/>{/if}
   {#if view.audience}<section class="panel returning-audience"><header><h2>Возвращаемость участников</h2><Help id="analytics-audience" label="О минутах в чате" text="Наблюдаемые минуты Twitch учитывают молчавших участников и исключают неизвестные промежутки. Оценка YouTube показана отдельно. Выберите сортировку по минутам или сообщениям; нажмите имя для подробностей."/><span>{data.audiencePage?(pagedAudience?.audiencePage?.total??data.audiencePage.total):visible.length} участников</span></header>
     <p class="small regular-summary">Ядро аудитории: <strong>{data.composition?.core??0} из {data.summary.attendees??data.summary.entities??0} ({data.summary.attendees?pct((data.composition?.core??0)/data.summary.attendees):"нет данных"})</strong></p>
     <div class="analytics-controls"><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label>Сортировка<select aria-label="Сортировка" bind:value={view.sort}><option value="observedMinutes">Минуты в чате</option><option value="estimatedChatMinutes">Оценка активности YouTube</option><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option><option value="attendanceRatio">Доля посещённых эфиров</option></select></label><label class="check"><input type="checkbox" bind:checked={view.coreOnly} /> Только ядро</label></div>
@@ -200,7 +202,6 @@
  .timing-grid{grid-template-rows:repeat(6,auto) auto;row-gap:0;align-items:stretch}
  .timing-grid :global(.time-patterns),.timing-grid :global(.donation-patterns){display:grid;grid-template-rows:subgrid;grid-row:1/span 6;row-gap:0}
  .timing-grid :global(.time-patterns>header),.timing-grid :global(.donation-patterns>header){grid-row:1}
- .timing-grid :global(.chart-category){grid-row:2}
  .timing-grid :global(.pattern-controls),.timing-grid :global(.donation-patterns>.controls){grid-row:3;align-content:start;padding:16px 20px}
  .timing-grid :global(.pattern-note){grid-row:4;margin:0;padding:0 20px 8px}
  .timing-grid :global(.pattern-bars),.timing-grid :global(.donation-patterns>.bars){grid-row:5;grid-auto-rows:28px;align-content:start;gap:6px;padding:8px 20px 16px}

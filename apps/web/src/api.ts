@@ -3,6 +3,8 @@ export {sameResponse,mergeResponseBlocks} from './response-equality';
 import { createProfileSelection } from "./profile";
 
 import {requestJson} from "./request";
+import {money} from './format';
+export {money} from './format';
 let csrf = "";
 const revisions=new Map<string,number>();
 export const getDataRevision=(profile:string)=>revisions.get(profile)??0;
@@ -55,10 +57,6 @@ export async function api<T = any>(path: string, body?: unknown, signal?: AbortS
 
   if(body!==undefined){revisions.set(profile,getDataRevision(profile)+1);for(const [key,value] of validators)if(JSON.parse(key)[0]===profile){validators.delete(key);validatorBytes-=value.bytes;}}
   return result;
-}
-export function money(minor: string, currency: string) {
-  const value = BigInt(minor);
-  return `${(value / 100n).toLocaleString("ru-RU")},${(value % 100n).toString().padStart(2, "0")} ${currency}`;
 }
 export function date(at: number | null) {
   return at === null

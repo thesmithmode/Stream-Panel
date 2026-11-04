@@ -1,6 +1,10 @@
 /** Display-only formatting; server timestamps and calculations stay unchanged. */
 export const num=(value:number,digits=1)=>value.toLocaleString('ru-RU',{maximumFractionDigits:digits});
 export const pct=(fraction:number)=>`${num(fraction*100,fraction*100<10?1:0)}%`;
+export function money(minor:string,currency:string){
+ const value=BigInt(minor),absolute=value<0n?-value:value;
+ return `${value<0n?'-':''}${(absolute/100n).toLocaleString('ru-RU')},${String(absolute%100n).padStart(2,'0')} ${currency}`;
+}
 export function dateTime(at:number){
  const currentYear=new Date().toLocaleDateString('en',{timeZone:'Europe/Moscow',year:'numeric'});
  const year=new Date(at).toLocaleDateString('en',{timeZone:'Europe/Moscow',year:'numeric'});

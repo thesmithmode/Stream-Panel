@@ -1,12 +1,12 @@
 <script lang="ts">
- import {untrack,type Snippet} from 'svelte';
+ import {untrack} from 'svelte';
  import {clockActivitySeries,clockDonationSeries,clockAxis,type ClockActivity} from '../../../packages/core/src/clock-activity';
  import {clockLabel,timeAudience,type Window,type TimePerson,type TimeAudienceSummary} from './time-audience';
  import TimeAudience from './TimeAudience.svelte';
  import type {ActivityMetric} from './analytics-view';
  import {chartMetrics} from './chart-series';
  import Help from './Help.svelte';
- let {scope,visitorRevision,categoryFilter,rows,metric=$bindable('viewers'),resolution=$bindable(15),timezone,windows=[],people=[],summary=[],summarySelection,loadSummary,onPerson,loadVisitors}:{visitorRevision?:string|undefined;scope?:string;categoryFilter:Snippet<[string]>;rows:ClockActivity[];metric?:ActivityMetric;resolution?:number;timezone:string;windows?:Window[];people?:TimePerson[];summary?:TimeAudienceSummary[];summarySelection?:{day:string;resolution:number};loadSummary?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>;onPerson:(id:string)=>void;loadVisitors?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>}=$props();
+ let {scope,visitorRevision,rows,metric=$bindable('viewers'),resolution=$bindable(15),timezone,windows=[],people=[],summary=[],summarySelection,loadSummary,onPerson,loadVisitors}:{visitorRevision?:string|undefined;scope?:string;rows:ClockActivity[];metric?:ActivityMetric;resolution?:number;timezone:string;windows?:Window[];people?:TimePerson[];summary?:TimeAudienceSummary[];summarySelection?:{day:string;resolution:number};loadSummary?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>;onPerson:(id:string)=>void;loadVisitors?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>}=$props();
  let day=$state('all'),currency=$state('RUB'),selected=$state<number|null>(null),availableWidth=$state(800);
  const plotWidth=$derived(Math.max(300,availableWidth));
  const step=$derived([1,5,15,30,60].includes(resolution)?resolution:15);
@@ -42,7 +42,7 @@
  $effect(()=>{void metric;void step;void day;void scope;void activeCurrency;selected=null;});
 </script>
 <section class="panel chart-panel activity-clock">
- <header><h2>Активность по часам</h2><Help id="activity-clock-help" label="О суточном графике" text="Все дни выбранного периода совмещены на шкале 00:00–24:00 в часовом поясе аналитики. Зрители — среднее по времени с известными замерами; сообщения — число на час эфира. Время без эфиров и пропущенные замеры не считаются нулями. При неполных данных площадок показана сумма известных зрителей с пометкой о неполных данных; неизвестные значения не считаются нулями. Сумма зрителей площадок не означает уникальных людей. Активные участники — известные люди по наблюдениям Twitch и сигналам чата; это отдельная метрика. Нажмите столбец, чтобы увидеть людей и их явку за тот же интервал. Часы просмотра — накопленная сумма: онлайн × фактическое время известных замеров; она зависит от количества эфиров. Донаты — сумма в выбранной валюте на час эфира, только во время записанных эфиров. Нажмите столбец для точного значения."/></header>{@render categoryFilter("Категория суточного графика")}
+ <header><h2>Активность по часам</h2><Help id="activity-clock-help" label="О суточном графике" text="Все дни выбранного периода совмещены на шкале 00:00–24:00 в часовом поясе аналитики. Зрители — среднее по времени с известными замерами; сообщения — число на час эфира. Время без эфиров и пропущенные замеры не считаются нулями. При неполных данных площадок показана сумма известных зрителей с пометкой о неполных данных; неизвестные значения не считаются нулями. Сумма зрителей площадок не означает уникальных людей. Активные участники — известные люди по наблюдениям Twitch и сигналам чата; это отдельная метрика. Нажмите столбец, чтобы увидеть людей и их явку за тот же интервал. Часы просмотра — накопленная сумма: онлайн × фактическое время известных замеров; она зависит от количества эфиров. Донаты — сумма в выбранной валюте на час эфира, только во время записанных эфиров. Нажмите столбец для точного значения."/></header>
  <details class="clock-settings"><summary>Настроить график</summary><div class="clock-controls">
 
   <label>Метрика графика<select bind:value={metric}>{#each choices as choice}<option value={choice.value}>{choice.label}</option>{/each}</select></label>
