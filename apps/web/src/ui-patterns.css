@@ -22,7 +22,7 @@
 .chart-panel select{min-height:44px;font-size:13px;border-radius:9px}
 .chart-panel .control-grid{gap:12px}
 .chart-panel .control-grid label{font-size:12px}
-.chart-panel .period-chips,.subscriber-switch{padding:3px;gap:4px;border:1px solid var(--border);border-radius:9px;background:transparent}
-.chart-panel .period-chips button,.subscriber-switch button{min-height:40px;font-size:13px;font-weight:400;border:0;border-radius:6px;background:transparent;color:var(--muted)}
-.chart-panel .period-chips button.active,.subscriber-switch button.active{background:var(--surface);color:var(--accent)}
+.chart-panel .period-chips{padding:3px;gap:4px;border:1px solid var(--border);border-radius:9px;background:transparent}
+.chart-panel .period-chips button{min-height:40px;font-size:13px;font-weight:400;border:0;border-radius:6px;background:transparent;color:var(--muted)}
+.chart-panel .period-chips button.active{background:var(--surface);color:var(--accent)}
 .chart-panel strong,.analytics-table td,.compact-audience-table td{font-variant-numeric:tabular-nums}

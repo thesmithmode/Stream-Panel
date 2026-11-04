@@ -55,6 +55,10 @@ test("stream history shows only confirmed Twitch and YouTube links from the plat
     await page.getByRole("button", { name: "Стримы", exact: true }).click();
     const bothRow = page.locator(".stream-card").filter({ hasText: "Combined platform stream" });
     assert.equal(await bothRow.locator(".stream-platforms").textContent(), "Twitch · YouTube");
+    const originalUrl=page.url(),newTab=context.waitForEvent('page');
+    await bothRow.locator('.stream-open').click({modifiers:['ControlOrMeta']});
+    const opened=await newTab;await opened.waitForURL(url=>url.searchParams.get('stream')===bothId);
+    assert.equal(page.url(),originalUrl,'opening a stream in another tab preserves the list');await opened.close();
     await bothRow.locator(".stream-actions summary").click();
     for (const [label, url] of [["Twitch", "https://www.twitch.tv/rlod"], ["YouTube", "https://www.youtube.com/watch?v=combined-video"]]) {
       const link = bothRow.getByRole("link", { name: label, exact: true });
