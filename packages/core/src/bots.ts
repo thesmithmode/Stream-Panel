@@ -28,9 +28,10 @@ export function normalizeBotLogin(login: string): string {
 }
 
 export function botExclusionSet(
-  extra: readonly string[] = [],
+  extra: readonly string[] | false = [],
 ): ReadonlySet<string> {
   const set = new Set<string>();
+  if(extra===false)return set;
   for (const login of WELL_KNOWN_TWITCH_BOTS)
     set.add(normalizeBotLogin(login));
   for (const login of extra) {

@@ -53,5 +53,5 @@ export class DonationFx {
    }
   }).immediate();
  }
- pendingCount(botJson='[]'):number{return (this.db.prepare("SELECT count(*) n FROM valued_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE e.type='donation' AND e.rub_amount_minor IS NULL AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))").get(botJson) as {n:number}).n;}
+ pendingCount(botJson='[]'):number{return (this.db.prepare("SELECT count(*) n FROM valued_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE e.type='donation' AND e.rub_amount_minor IS NULL AND (i.id IS NULL OR NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))))").get(botJson) as {n:number}).n;}
 }

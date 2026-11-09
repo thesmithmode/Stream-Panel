@@ -164,7 +164,7 @@ export class AnalyticsHistory {
    WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND s.started_at_ms<? AND coalesce(s.ended_at_ms,?)>? ${options.sessionId?'AND s.id=?':''} ORDER BY s.started_at_ms,s.id`).all(options.toMs, options.toMs, options.fromMs,...(options.sessionId?[options.sessionId]:[])) as Session[];
     }
     private key(options: AnalyticsOptions, session: Session): string {
-        const fields = { format: 12,members:session.members??null, from: Math.max(options.fromMs, session.started_at_ms), to: session.ended_at_ms===null&&options.toMs>=Date.now()-120000?'live':Math.min(options.toMs, session.ended_at_ms??options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: [...(options.excludedLogins ?? [])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
+        const fields = { ...(session.ended_at_ms===null?{liveScope:options.toMs%60000===0?'minute-boundary':'partial-minute'}:{}),format: 12,members:session.members??null, from: Math.max(options.fromMs, session.started_at_ms), to: session.ended_at_ms===null&&options.toMs>=Date.now()-120000?'live':Math.min(options.toMs, session.ended_at_ms??options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: options.excludedLogins===false?false:[...(options.excludedLogins??[])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
         return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
     }
     private followerRevision(){
@@ -288,7 +288,7 @@ export class AnalyticsHistory {
         const report=this.build(options,session);this.save(options,session,global,report);
         if(session.ended_at_ms===null){while(this.liveStreams.size>=12)this.liveStreams.delete(this.liveStreams.keys().next().value!);this.liveStreams.set(key,{revision,report});}return report;
     }
-    recordMetrics(id:string,excludedLogins:string[]){
+    recordMetrics(id:string,excludedLogins:string[]|false){
         const session=this.statement('SELECT account_id,started_at_ms,ended_at_ms FROM sessions WHERE id=?').get(id) as {account_id:string;started_at_ms:number;ended_at_ms:number|null};
         const youtube=this.statement("SELECT account_id FROM platform_streams WHERE session_id=? AND platform='youtube' ORDER BY started_at_ms,account_id LIMIT 1").get(id) as {account_id:string}|undefined;
         const report=this.facts.activity({fromMs:0,toMs:session.ended_at_ms??Date.now(),sessionId:id,excludedLogins,ownerId:session.account_id,youtubeAccount:youtube?.account_id??''},id,session.started_at_ms,session.ended_at_ms);

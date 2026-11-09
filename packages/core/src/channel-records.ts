@@ -9,8 +9,8 @@ export class ChannelRecords {
  private scope='';
  private rows=new Map<string,Row>();
  private cache:AnalyticsReportCache<Row[]>;
- constructor(private db:Database.Database,private metric:(id:string,botJson:string)=>{viewerKnownMean?:unknown;messageCount?:unknown;viewerKnownPeak?:unknown;viewerPeakAt?:number;peakChat?:number|null;peakChatAt?:number}|undefined){this.cache=new AnalyticsReportCache(db);}
- read(botJson:string):ChannelRecordValues{
+ constructor(private db:Database.Database,private metric:(id:string,botJson:string,includeBots?:boolean)=>{viewerKnownMean?:unknown;messageCount?:unknown;viewerKnownPeak?:unknown;viewerPeakAt?:number;peakChat?:number|null;peakChatAt?:number}|undefined){this.cache=new AnalyticsReportCache(db);}
+ read(botJson:string,includeBots=false):ChannelRecordValues{
   const key=createHash('sha256').update('channel-records-v3:'+botJson).digest('hex');
   if(this.scope!==key){this.rows=new Map((this.cache.get(key)??[]).map(row=>[row.id,row]));this.scope=key;}
   const streams=this.db.prepare(`SELECT s.id,s.started_at_ms at,s.ended_at_ms ended,(SELECT sum(activity) FROM analytics_fact_versions v WHERE v.session_id=s.id OR v.session_id IN(SELECT member_id FROM session_groups WHERE group_id=s.id)) revision,
@@ -24,7 +24,7 @@ export class ChannelRecords {
    const signature=JSON.stringify([stream.at,stream.ended,stream.revision,stream.members]);
    let row=this.rows.get(stream.id);
    if(row?.signature!==signature){
-    const metrics=this.metric(stream.id,botJson);
+    const metrics=this.metric(stream.id,botJson,includeBots);
     row={id:stream.id,signature,at:stream.at,online:typeof metrics?.viewerKnownMean==='number'?metrics.viewerKnownMean:null,messages:Number(metrics?.messageCount??0),peakOnline:typeof metrics?.viewerKnownPeak==='number'?metrics.viewerKnownPeak:null,peakChat:metrics?.peakChat??null,peakOnlineAt:metrics?.viewerPeakAt??stream.at,peakChatAt:metrics?.peakChatAt??stream.at};
     this.rows.set(stream.id,row);changed=true;
    }

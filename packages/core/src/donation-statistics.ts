@@ -32,7 +32,7 @@ export function donorRanking(db:Database.Database,sessionId:string|undefined,bot
  const groups=db.prepare(`SELECT p.id,p.display_name,p.revision,'RUB' AS currency,sum_donation_minor(e.rub_amount_minor) AS amount,count(*) AS n,
   (SELECT group_concat(DISTINCT source) FROM (SELECT source FROM identities WHERE person_id=p.id UNION SELECT 'youtube' FROM youtube_identities WHERE person_id=p.id)) AS sources
   FROM valued_events e JOIN identities i ON i.id=e.identity_id JOIN persons p ON p.id=i.person_id WHERE e.type='donation' AND (? IS NULL OR e.id IN(SELECT event_id FROM event_sessions WHERE session_id=?)) AND ${window.sql}
-  AND NOT EXISTS(SELECT 1 FROM identities z WHERE z.person_id=p.id AND z.match_key IN(SELECT value FROM json_each(?)))
+  AND NOT EXISTS(SELECT 1 FROM identities z WHERE z.person_id=p.id AND EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||z.person_id OR ((value=z.match_key OR value='person:'||z.person_id) AND z.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))))
   AND json_extract(e.payload_json,'$.currency') IS NOT NULL AND json_extract(e.payload_json,'$.amountMinor') IS NOT NULL GROUP BY p.id,currency`).all(sessionId??null,sessionId??null,...window.args,botJson) as {id:string;display_name:string;revision:number;currency:string;amount:string;n:number;sources:string}[];
  const people=new Map<string,{id:string;display_name:string;revision:number;sources:string;messageCount:number;observedMinutes:number;donationCount:number;donationTotals:Record<string,string>}>();
  for(const g of groups){const row=people.get(g.id)??{id:g.id,display_name:g.display_name,revision:g.revision,sources:g.sources,messageCount:0,observedMinutes:0,donationCount:0,donationTotals:{}};row.donationCount+=g.n;row.donationTotals[g.currency]=g.amount;people.set(g.id,row);}
@@ -42,6 +42,6 @@ export function donorRanking(db:Database.Database,sessionId:string|undefined,bot
 /** Exact RUB totals for a half-open window; unknown dates stay all-time only. */
 export function donationTotals(db:Database.Database,from:number|undefined,to:number|undefined,botJson:string){
  const window=donationWindow(from,to);
- const rows=db.prepare(`SELECT 'RUB' AS currency,sum_donation_minor(e.rub_amount_minor) AS amount FROM valued_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE e.type='donation' AND ${window.sql} AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?))) AND e.rub_amount_minor IS NOT NULL GROUP BY currency`).all(...window.args,botJson) as {currency:string;amount:string}[];
+ const rows=db.prepare(`SELECT 'RUB' AS currency,sum_donation_minor(e.rub_amount_minor) AS amount FROM valued_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE e.type='donation' AND ${window.sql} AND (i.id IS NULL OR NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))) AND e.rub_amount_minor IS NOT NULL GROUP BY currency`).all(...window.args,botJson) as {currency:string;amount:string}[];
  return Object.fromEntries(rows.map(row=>[row.currency,row.amount]));
 }

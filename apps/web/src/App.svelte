@@ -262,11 +262,12 @@
  <button class="refresh-toggle" aria-label={`Автообновление ${autoRefresh?'Вкл':'Выкл'}`} aria-pressed={autoRefresh} onclick={toggleRefresh}><span class="refresh-label">Автообновление</span><span class="toggle-track" class:enabled={autoRefresh} aria-hidden="true"><span></span></span></button>
  {#if autoRefresh}<label>Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={60}>1 мин</option><option value={300}>5 мин</option><option value={900}>15 мин</option></select></label>{/if}
  <button class="outline manual-refresh" disabled={busy} onclick={()=>void action(async()=>{})}><Icon name="refresh" size={18}/><span>{busy?'Обновляем…':'Обновить данные'}</span></button>
+ <label class="bot-statistics"><input type="checkbox" checked={status?.config?.analyticsSettings?.includeBots??false} disabled={busy||!authorized} onchange={event=>{const includeBots=event.currentTarget.checked;void action(async()=>{const rules=await api("settings");await api("settings",{...rules,includeBots});clearAnalyticsCache();});}}/>Учитывать ботов</label>
  {#if connectionLost}<p role="status">Нет связи с сервером</p>{/if}
  </div></section>
 {/snippet}
 
-<div class="app-shell">
+<div class="app-shell" class:highlight-bots={status?.config?.analyticsSettings?.highlightBots??true} class:highlight-humans={status?.config?.analyticsSettings?.highlightHumans??true}>
   <aside class:analytics-context={tab==='analytics'&&scopeReady&&authorized&&!loading} class="sidebar" aria-label="Навигация">
     <a class="brand" href="/">Stream <span>Panel</span></a>
     <nav aria-label="Разделы">
@@ -314,7 +315,7 @@
       {:else if tab === "analytics"}
         <Analytics bind:section={analyticsSection} onBack={()=>navigate(analyticsBack)} profile={profile} defaultTimezone={status.config.analyticsSettings?.timezone??"Europe/Moscow"} onPerson={openPerson} onStream={id=>{sessionFilter=id;navigate("stream");}} />
       {:else if tab === "donations"}<StreamDonations onPerson={openPerson} changed={()=>refresh(true)} />
-      {:else if tab === "settings"}<Settings {profile} {status} />
+      {:else if tab === "settings"}<Settings {profile} {status} onChange={()=>action(async()=>{clearAnalyticsCache();})} />
       {:else if tab === "connections"}<Connections
           {status}
           onChange={()=>refresh(true)}

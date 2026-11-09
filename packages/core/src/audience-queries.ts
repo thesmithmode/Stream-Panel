@@ -11,13 +11,13 @@ import {presenceMinutes,pollCoveredMinutes,type PresencePoll} from "./presence.j
 export class AudienceQueries {
   constructor(private readonly db:Database.Database) {}
 
-  personOptions(search='',offset=0,limit=50,includeBots=false,selected='',excludedBotLogins:readonly string[]=[],exclude=''){
+  personOptions(search='',offset=0,limit=50,includeBots=false,selected='',excludedBotLogins:readonly string[]|false=[],exclude=''){
     if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>50||search.length>256)throw Error('INVALID_PERSON_PAGE');
     this.db.function('sp_options_lower',{deterministic:true},(v:unknown)=>String(v??'').toLowerCase());
     const bots=this.botJson(excludedBotLogins),term=candidateKey(search);
     const query=`WITH options AS (SELECT p.id,p.display_name,
       (SELECT group_concat(DISTINCT source) FROM (SELECT source FROM identities WHERE person_id=p.id UNION SELECT 'youtube' source FROM youtube_identities WHERE person_id=p.id)) sources,
-      CASE WHEN EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND i.match_key IN(SELECT value FROM json_each(?))) OR EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?)))) THEN 1 ELSE 0 END is_bot
+      CASE WHEN EXISTS(SELECT 1 FROM human_people h WHERE h.person_id=p.id) OR EXISTS(SELECT 1 FROM manual_neutral_people n WHERE n.person_id=p.id) THEN 0 WHEN EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))) OR EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||y.person_id OR ((value=y.match_key OR value='person:'||y.person_id) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) OR (a.match_key IN(SELECT value FROM json_each(?)) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))) THEN 1 ELSE 0 END is_bot
       FROM persons p WHERE NOT EXISTS(SELECT 1 FROM person_merges m WHERE m.source_person_id=p.id AND m.undone_at_ms IS NULL)) SELECT * FROM options WHERE (?=1 OR is_bot=0) AND id<>?`;
     const filter=` AND (?='' OR instr(sp_options_lower(display_name),sp_options_lower(?))>0 OR EXISTS(SELECT 1 FROM identities i LEFT JOIN identity_aliases a ON a.identity_id=i.id WHERE i.person_id=options.id AND (instr(i.match_key,?)>0 OR instr(a.candidate_key,?)>0)) OR EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=options.id AND (instr(y.match_key,?)>0 OR instr(a.match_key,?)>0)))`;
     const args=[bots,bots,bots,Number(includeBots),exclude,search,search,term,term,term,term];
@@ -27,19 +27,20 @@ export class AudienceQueries {
     return {items,total,offset,limit,selectedItem:selectedItem??null};
   }
 
-  persons(search = "", excludedBotLogins: readonly string[] = [], fromMs=0): Record<string, unknown>[] {
-    return this.personRows(search, excludedBotLogins, fromMs, 0, 500, false).map(({_total, ...person}) => person);
+  persons(search = "", excludedBotLogins: readonly string[] | false = [], fromMs=0): Record<string, unknown>[] {
+    return this.personRows(search, excludedBotLogins, fromMs, 0, 500, "all").map(({_total, ...person}) => person);
   }
 
-  personsPage(search = "", excludedBotLogins: readonly string[] = [], fromMs=0, offset=0, limit=50) {
+  personsPage(search = "", excludedBotLogins: readonly string[] | false = [], fromMs=0, offset=0, limit=50, botFilter="humans") {
     if (!Number.isSafeInteger(offset) || offset<0 || !Number.isSafeInteger(limit) || limit<1 || limit>100)
       throw new Error('INVALID_PERSON_PAGE');
-    const rows = this.personRows(search, excludedBotLogins, fromMs, offset, limit, true);
-    const total = Number(rows[0]?._total ?? (offset ? this.personRows(search, excludedBotLogins, fromMs, 0, 1, true)[0]?._total : 0) ?? 0);
+    const rows = this.personRows(search, excludedBotLogins, fromMs, offset, limit, botFilter);
+    const total = Number(rows[0]?._total ?? (offset ? this.personRows(search, excludedBotLogins, fromMs, 0, 1, botFilter)[0]?._total : 0) ?? 0);
     return {items: rows.map(({_total, ...person}) => person), total, offset, limit};
   }
 
-  private personRows(search: string, excludedBotLogins: readonly string[], fromMs: number, offset: number, limit: number, hideBots: boolean): Record<string, unknown>[] {
+  private personRows(search: string, excludedBotLogins: readonly string[] | false, fromMs: number, offset: number, limit: number, botFilter: string): Record<string, unknown>[] {
+    if(!["all","bots","humans"].includes(botFilter))throw Error("INVALID_BOT_FILTER");
     if(!Number.isSafeInteger(fromMs)||fromMs<0)throw new Error("INVALID_PERIOD");
     const excluded = this.analyticsExclusions(excludedBotLogins);
     const botJson = JSON.stringify([...excluded]);
@@ -51,10 +52,10 @@ export class AudienceQueries {
         `WITH people AS (SELECT p.id, p.display_name, p.revision,
           coalesce(ec.event_count, 0) + (SELECT count(*) FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE y.person_id=p.id AND m.published_at_ms>=${fromMs}) AS event_count,
           (SELECT group_concat(DISTINCT source) FROM (SELECT source FROM identities WHERE person_id=p.id UNION ALL SELECT 'youtube' AS source FROM youtube_identities WHERE person_id=p.id)) AS sources,
-          CASE WHEN EXISTS(
+          CASE WHEN EXISTS(SELECT 1 FROM human_people h WHERE h.person_id=p.id) OR EXISTS(SELECT 1 FROM manual_neutral_people n WHERE n.person_id=p.id) THEN 0 WHEN EXISTS(
             SELECT 1 FROM identities ib
-            WHERE ib.person_id=p.id AND ib.match_key IN (SELECT value FROM json_each(?))
-          ) OR EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?)))) THEN 1 ELSE 0 END AS is_bot
+            WHERE ib.person_id=p.id AND EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||ib.person_id OR ((value=ib.match_key OR value='person:'||ib.person_id) AND ib.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))
+          ) OR EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||y.person_id OR ((value=y.match_key OR value='person:'||y.person_id) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) OR (a.match_key IN(SELECT value FROM json_each(?)) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))) THEN 1 ELSE 0 END AS is_bot
         FROM persons p
         LEFT JOIN (
           SELECT i.person_id,sum(counts.n) AS event_count FROM identities i JOIN (
@@ -72,10 +73,10 @@ export class AudienceQueries {
             ) OR EXISTS(SELECT 1 FROM youtube_identities y JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND instr(a.match_key,?)>0)
           )
           AND (${fromMs}=0 OR coalesce(ec.event_count,0)>0 OR EXISTS(SELECT 1 FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE y.person_id=p.id AND m.published_at_ms>=${fromMs}) OR EXISTS(SELECT 1 FROM presence_members m JOIN presence_polls poll ON poll.id=m.poll_id JOIN identities i ON i.id=m.identity_id WHERE i.person_id=p.id AND poll.status='complete' AND poll.completed_at_ms>=${fromMs}))
-        ) SELECT *, count(*) OVER() AS _total FROM people WHERE (?=0 OR is_bot=0)
+        ) SELECT *, count(*) OVER() AS _total FROM people WHERE (?='all' OR is_bot=CASE WHEN ?='bots' THEN 1 ELSE 0 END)
         ORDER BY event_count DESC, display_name, id LIMIT ? OFFSET ?`,
       )
-      .all(botJson, botJson, botJson, term, term, key, key, Number(hideBots), limit, offset) as Record<string, unknown>[];
+      .all(botJson, botJson, botJson, term, term, key, key, botFilter, botFilter, limit, offset) as Record<string, unknown>[];
   }
 
   person(id: string,includeEvents=true): Record<string, unknown> {
@@ -168,7 +169,7 @@ export class AudienceQueries {
 
   summary(
     sessionId?: string,
-    excludedBotLogins: readonly string[] = [],
+    excludedBotLogins: readonly string[] | false = [],
     details = true,
   ): Record<string, unknown> {
     const excluded = this.analyticsExclusions(excludedBotLogins);
@@ -189,7 +190,7 @@ export class AudienceQueries {
           WHERE ${inSession}
           AND ${twitchMessageFilter}
         ) AS messages,
-        (SELECT count(*) FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))) AS donations`,
+        (SELECT count(*) FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))))) AS donations`,
       )
       .get(...scope, ...scope, botJson, ...scope, botJson) as {
       event_count: number;
@@ -207,7 +208,7 @@ export class AudienceQueries {
         `SELECT 'RUB' AS currency,
                 e.rub_amount_minor AS amount_minor
          FROM valued_events e LEFT JOIN identities i ON i.id=e.identity_id
-         WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))
+         WHERE ${inSession} AND e.type = 'donation' AND (i.id IS NULL OR NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))))
            AND e.rub_amount_minor IS NOT NULL`,
       )
       .all(...scope, botJson) as { currency: string; amount_minor: string }[];
@@ -220,7 +221,7 @@ export class AudienceQueries {
     // Stream cards do not need a second expansion of minute presence data.
     if(!details)return {messages:counts.messages+youtubeMessageCount,donations:counts.donations,totals,chatters:null,lastPollAtMs:null,events:counts.event_count+youtubeMessageCount};
     const participants=this.db.prepare(`SELECT i.person_id,i.display_name,count(*) AS messages FROM effective_events e JOIN identities i ON i.id=e.identity_id
-      WHERE ${inSession} AND e.type='chat.message' AND i.match_key NOT IN(SELECT value FROM json_each(?))
+      WHERE ${inSession} AND e.type='chat.message' AND NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))
         AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id)
       GROUP BY i.person_id`).all(...scope,botJson) as {person_id:string;display_name:string;messages:number}[];
     const combinedParticipants=new Map(participants.map(row=>[row.person_id,{personId:row.person_id,name:row.display_name,messages:row.messages}]));
@@ -240,7 +241,7 @@ export class AudienceQueries {
             `SELECT count(*) n FROM presence_members m
              JOIN identities i ON i.id = m.identity_id
              WHERE m.poll_id = ?
-               AND i.match_key NOT IN (SELECT value FROM json_each(?))`,
+               AND NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))`,
           )
           .get(latest.id, botJson) as { n: number }
       ).n;
@@ -251,12 +252,12 @@ export class AudienceQueries {
           (SELECT count(DISTINCT i.person_id) FROM effective_events e
             JOIN identities i ON i.id = e.identity_id
             WHERE ${inSession}
-              AND i.match_key NOT IN (SELECT value FROM json_each(?))
+              AND NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))
           ) AS unique_persons_events,
           (SELECT count(DISTINCT i.id) FROM effective_events e
             JOIN identities i ON i.id = e.identity_id
             WHERE ${inSession}
-              AND i.match_key NOT IN (SELECT value FROM json_each(?))
+              AND NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))
           ) AS unique_identities_events`,
       )
       .get(...scope, botJson, ...scope, botJson) as {
@@ -300,7 +301,7 @@ export class AudienceQueries {
                JOIN presence_polls p ON p.id = m.poll_id
                JOIN identities i ON i.id = m.identity_id
                WHERE p.session_id = ? AND p.status = 'complete'
-                 AND i.match_key NOT IN (SELECT value FROM json_each(?))`,
+                 AND NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))`,
             )
             .get(sessionId, botJson) as { n: number }
         ).n;
@@ -312,7 +313,7 @@ export class AudienceQueries {
                JOIN presence_polls p ON p.id = m.poll_id
                JOIN identities i ON i.id = m.identity_id
                WHERE p.session_id = ? AND p.status = 'complete'
-                 AND i.match_key NOT IN (SELECT value FROM json_each(?))`,
+                 AND NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))`,
             )
             .get(sessionId, botJson) as { n: number }
         ).n;
@@ -327,7 +328,7 @@ export class AudienceQueries {
           `SELECT count(*) AS n FROM presence_members m
            JOIN identities i ON i.id = m.identity_id
            WHERE m.poll_id = ?
-             AND i.match_key NOT IN (SELECT value FROM json_each(?))`,
+             AND NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))`,
         );
         chattersOverTime = pollRows.map((row) => ({
           atMs: row.completed_at_ms,
@@ -350,7 +351,7 @@ export class AudienceQueries {
         }
       ).n;
     }
-    const uniquePeople=new Set((this.db.prepare(`SELECT DISTINCT i.person_id FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND i.match_key NOT IN(SELECT value FROM json_each(?))`).all(...scope,botJson) as {person_id:string}[]).map(row=>row.person_id));
+    const uniquePeople=new Set((this.db.prepare(`SELECT DISTINCT i.person_id FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE ${inSession} AND NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))`).all(...scope,botJson) as {person_id:string}[]).map(row=>row.person_id));
     for(const row of youtubeParticipants)uniquePeople.add(row.person_id);
     return {
       messages: counts.messages + youtubeMessageCount,
@@ -548,31 +549,34 @@ export class AudienceQueries {
     return result;
   }
 
-  private analyticsExclusions(excludedBotLogins: readonly string[] = []): ReadonlySet<string> {
+  private analyticsExclusions(excludedBotLogins: readonly string[] | false = []): ReadonlySet<string> {
     const keys=new Set(botExclusionSet(excludedBotLogins));
     const json=JSON.stringify([...keys]);
     const rows=this.db.prepare(`WITH excluded_people AS (
-      SELECT i.person_id FROM identities i WHERE i.match_key IN(SELECT value FROM json_each(?))
+      SELECT i.person_id FROM identities i WHERE EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))
        OR (i.source='twitch' AND i.external_id=i.account_id)
        OR EXISTS(SELECT 1 FROM identity_aliases a WHERE a.identity_id=i.id AND ltrim(a.candidate_key,'@#') IN(SELECT value FROM json_each(?)))
       UNION
       SELECT y.person_id FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id
-       WHERE y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))
+       WHERE y.is_owner=1 OR y.external_id=y.account_id OR EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||y.person_id OR ((value=y.match_key OR value='person:'||y.person_id) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) OR (a.match_key IN(SELECT value FROM json_each(?)) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))
     ) SELECT DISTINCT match_key FROM identities WHERE person_id IN(SELECT person_id FROM excluded_people)
       UNION SELECT DISTINCT match_key FROM youtube_identities WHERE person_id IN(SELECT person_id FROM excluded_people)
-    `).all(json,json,json,json) as {match_key:string}[];
+      UNION SELECT 'person:'||person_id FROM manual_bot_people WHERE ?=0
+      UNION SELECT 'owner:'||person_id FROM identities WHERE source='twitch' AND external_id=account_id
+      UNION SELECT 'owner:'||person_id FROM youtube_identities WHERE is_owner=1 OR external_id=account_id
+    `).all(json,json,json,json,Number(excludedBotLogins===false)) as {match_key:string}[];
     for(const row of rows)keys.add(row.match_key);
     return keys;
   }
-  botJson(excludedBotLogins: readonly string[] = []): string {
+  botJson(excludedBotLogins: readonly string[] | false = []): string {
     return JSON.stringify([...this.analyticsExclusions(excludedBotLogins)]);
   }
 
   notBotClause(alias = "i"): string {
-    return `${alias}.match_key NOT IN (SELECT value FROM json_each(?))`;
+    return `NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||${alias}.person_id OR ((value=${alias}.match_key OR value='person:'||${alias}.person_id) AND ${alias}.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))`;
   }
   private youtubePersonActivity(personId: string, sessionId?: string, botJson = this.botJson(),chatWindowMinutes=5,fromMs=0) {
-    const excluded = this.db.prepare(`SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=? AND (y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))) LIMIT 1`).get(personId,botJson,botJson);
+    const excluded = this.db.prepare(`SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=? AND (y.is_owner=1 OR y.external_id=y.account_id OR EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||y.person_id OR ((value=y.match_key OR value='person:'||y.person_id) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) OR (a.match_key IN(SELECT value FROM json_each(?)) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) LIMIT 1`).get(personId,botJson,botJson);
     if (excluded) return {messageCount:0,estimatedChatMinutes:0,sessionIds:new Set<string>(),firstSeenMs:null};
     const now = Date.now();
     const rows = this.db.prepare(`SELECT m.id,m.published_at_ms FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE m.published_at_ms>=${fromMs} AND y.person_id=? AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')`).all(personId) as {id:string;published_at_ms:number}[];
@@ -590,7 +594,7 @@ export class AudienceQueries {
   personStats(
     personId: string,
     sessionId?: string,
-    excludedBotLogins: readonly string[] = [],
+    excludedBotLogins: readonly string[] | false = [],
     chatWindowMinutes=5,
     fromMs=0,
   ): Record<string, unknown> {
@@ -600,7 +604,7 @@ export class AudienceQueries {
       .get(personId) as { id: string; display_name: string } | undefined;
     if (!person) throw new Error("PERSON_NOT_FOUND");
     const botJson = this.botJson(excludedBotLogins);
-    const excludedPerson=Boolean(this.db.prepare(`SELECT 1 FROM identities WHERE person_id=? AND match_key IN(SELECT value FROM json_each(?)) UNION ALL SELECT 1 FROM youtube_identities WHERE person_id=? AND (is_owner=1 OR external_id=account_id OR match_key IN(SELECT value FROM json_each(?))) LIMIT 1`).get(personId,botJson,personId,botJson));
+    const excludedPerson=Boolean(this.db.prepare(`SELECT 1 FROM identities i WHERE person_id=? AND EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) UNION ALL SELECT 1 FROM youtube_identities y WHERE person_id=? AND (is_owner=1 OR external_id=account_id OR EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||y.person_id OR ((value=y.match_key OR value='person:'||y.person_id) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))) LIMIT 1`).get(personId,botJson,personId,botJson));
     const sid = sessionId ?? null;
     const inSession =
       `(coalesce(e.occurred_at_ms,e.received_at_ms)>=${fromMs} AND (? IS NULL OR e.id IN (SELECT event_id FROM event_sessions WHERE session_id=?)))`;
@@ -741,7 +745,7 @@ export class AudienceQueries {
   personsTop(
     sortBy: "messages" | "donations" | "observed_minutes" = "messages",
     sessionId?: string,
-    excludedBotLogins: readonly string[] = [],
+    excludedBotLogins: readonly string[] | false = [],
     limit = 50,
     fromMs=0,toMs?:number,currency='RUB',
   ): Record<string, unknown>[] {
@@ -800,7 +804,7 @@ export class AudienceQueries {
       SELECT y.person_id,count(*) AS n FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id
       WHERE m.published_at_ms>=${fromMs} AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
        AND (? IS NULL OR EXISTS(SELECT 1 FROM platform_streams ps JOIN sessions ss ON ss.id=ps.session_id WHERE ps.platform='youtube' AND ps.account_id=m.account_id AND ps.session_id=? AND ps.started_at_ms<=m.published_at_ms AND coalesce(ps.ended_at_ms,ss.ended_at_ms,?)>m.published_at_ms))
-       AND NOT EXISTS(SELECT 1 FROM youtube_identities z LEFT JOIN youtube_identity_aliases a ON a.identity_id=z.id WHERE z.person_id=y.person_id AND (z.is_owner=1 OR z.external_id=z.account_id OR z.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))))
+       AND NOT EXISTS(SELECT 1 FROM youtube_identities z LEFT JOIN youtube_identity_aliases a ON a.identity_id=z.id WHERE z.person_id=y.person_id AND (z.is_owner=1 OR z.external_id=z.account_id OR z.match_key IN(SELECT value FROM json_each(?)) OR (a.match_key IN(SELECT value FROM json_each(?)) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))))
       GROUP BY y.person_id
     ) SELECT p.id,p.display_name,p.revision,sum(c.n) AS metric_count,
       (SELECT group_concat(DISTINCT source) FROM (SELECT source FROM identities WHERE person_id=p.id UNION ALL SELECT 'youtube' AS source FROM youtube_identities WHERE person_id=p.id)) AS sources
