@@ -20,7 +20,7 @@ test('cached screens and profiles render before delayed revalidation without for
   for(const [profile,online] of [['ruslan',5],['gulnaz',9]]){
    const db=host.runtimes.get(profile).db,at=Date.now()-3600000;
    ids[profile]=await db.call('startSession','owner','instant-'+profile,at,'platform',at);
-   await db.call('streamSample',ids[profile],at,'game','Game','Private '+profile,online);
+   await db.call('streamSample',ids[profile],at,'game','Game','Private '+profile,((value)=>value===null||value<=0?value:value+1)(online));
    await db.call('endSession',ids[profile],at+60000);
   }
   await host.app.listen({host:'127.0.0.1',port});browser=await launchBrowser();

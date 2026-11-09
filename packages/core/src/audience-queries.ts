@@ -594,7 +594,7 @@ export class AudienceQueries {
   personStats(
     personId: string,
     sessionId?: string,
-    excludedBotLogins: readonly string[] | false = [],
+    _excludedBotLogins: readonly string[] | false = [],
     chatWindowMinutes=5,
     fromMs=0,
   ): Record<string, unknown> {
@@ -603,7 +603,8 @@ export class AudienceQueries {
       .prepare("SELECT id, display_name FROM persons WHERE id=?")
       .get(personId) as { id: string; display_name: string } | undefined;
     if (!person) throw new Error("PERSON_NOT_FOUND");
-    const botJson = this.botJson(excludedBotLogins);
+    // A personal card shows its own facts regardless of aggregate bot filters.
+    const botJson = JSON.stringify([...this.analyticsExclusions(false)].filter(key=>key.startsWith('owner:')));
     const excludedPerson=Boolean(this.db.prepare(`SELECT 1 FROM identities i WHERE person_id=? AND EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) UNION ALL SELECT 1 FROM youtube_identities y WHERE person_id=? AND (is_owner=1 OR external_id=account_id OR EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||y.person_id OR ((value=y.match_key OR value='person:'||y.person_id) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))) LIMIT 1`).get(personId,botJson,personId,botJson));
     const sid = sessionId ?? null;
     const inSession =

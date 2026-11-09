@@ -12,7 +12,7 @@ let sequence=0;
 function viewer(s:StreamStore,id:string,time=at,name=id){return s.ingest({source:'twitch',accountId:'owner',externalId:`m${++sequence}`,type:'chat.message',actor:{externalId:id,displayName:name},occurredAtMs:time,receivedAtMs:time,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}}).personId!;}
 function mark(s:StreamStore,id:string,value=true){return s.setPersonBot(id,value,s.personRevision(id));}
 const raw=(s:StreamStore)=>(s as unknown as {db:Database.Database}).db;
-function broadcast(s:StreamStore,stream:string,time:number,users:string[]){const id=s.startSession('owner',stream,time,'platform',time);s.streamSample(id,time,'game','Game','',10);for(const user of users)viewer(s,user,time);s.recordPoll(id,'owner',{startedAtMs:time,completedAtMs:time+minute,status:'complete',userIds:users});s.endSession(id,time+2*minute);return id;}
+function broadcast(s:StreamStore,stream:string,time:number,users:string[]){const id=s.startSession('owner',stream,time,'platform',time);s.streamSample(id,time,'game','Game','',11);for(const user of users)viewer(s,user,time);s.recordPoll(id,'owner',{startedAtMs:time,completedAtMs:time+minute,status:'complete',userIds:users});s.endSession(id,time+2*minute);return id;}
 
 test('manual marks rebuild only affected stream facts, separate both modes and never alter platform online',()=>{
  const s=new StreamStore(':memory:');try{
@@ -133,7 +133,7 @@ test('YouTube and DonationAlerts accounts automatically establish humanity even 
 test('rolling-core minute-boundary warming cannot hide current-minute chat in a live report',t=>{
  const now=at+10*minute+30000;t.mock.method(Date,'now',()=>now);
  const s=new StreamStore(':memory:');try{
-  const sid=s.startSession('owner','live',at,'platform',at);s.streamSample(sid,at,'game','Game','',10);
+  const sid=s.startSession('owner','live',at,'platform',at);s.streamSample(sid,at,'game','Game','',11);
   const id=viewer(s,'current',now-5000),q={sessionId:sid,fromMs:0,toMs:Math.floor(now/minute)*minute};
   assert.equal(s.analytics(q).summary.messages,0);
   assert.equal(s.analytics({...q,toMs:now}).summary.messages,1);
@@ -171,5 +171,14 @@ test('neutral explicitly clears detected bot coloring and cached exclusions, inc
   s.setPersonClassification(custom,'unknown',s.personRevision(custom));assert.equal(s.personBot(custom,['custombot']).knownBot,false);
   assert.equal(s.analytics(q).summary.attendees,2);assert.equal(s.personsPage('', ['custombot'],0,0,50,'bots').total,0);
   s.setPersonClassification(known,'bot',s.personRevision(known));assert.equal(s.person(known).is_bot,1);assert.equal(s.analytics(q).summary.attendees,1);
+ }finally{s.close();}
+});
+
+
+test('classification changes preserve personal message and presence history',()=>{
+ const s=new StreamStore(':memory:');try{
+  broadcast(s,'history',at,['viewer']);const id=s.candidatePersons('viewer')[0]!;
+  const before=s.personStats(id);assert.ok(Number(before.totalObservedMinutes)>0);assert.ok(Number(before.messageCount)>0);
+  for(const kind of ['bot','human','unknown'] as const){s.setPersonClassification(id,kind,s.personRevision(id));const after=s.personStats(id);assert.equal(after.totalObservedMinutes,before.totalObservedMinutes);assert.equal(after.messageCount,before.messageCount);assert.equal(after.sessionsWithAttendance,before.sessionsWithAttendance);}
  }finally{s.close();}
 });

@@ -15,13 +15,13 @@ test('analytics accepts arbitrary multi-year dates and all-time without expandin
         assert.throws(() => store.analytics({ fromMs: oldStart, toMs: 8640000000000001 }), /INVALID_ANALYTICS_FILTER/);
 
         const sessionId = store.startSession('channel', 'old-platform-stream', oldStart, 'platform', oldStart);
-        store.streamSample(sessionId, oldStart, 'game', 'Game', 'Old stream', 12);
+        store.streamSample(sessionId, oldStart, 'game', 'Game', 'Old stream', 13);
         store.endSession(sessionId, oldStart + 2 * 60000, 'observed');
         const history = store.analytics({ fromMs: 0, toMs: Date.UTC(2026, 9, 9) });
         assert.equal(history.summary.streams, 1);
         assert.equal(history.sessions.some(session => session.id === sessionId), true);
         const recentStart=Date.UTC(2026,0,1), recent=store.startSession('channel','recent-stream',recentStart,'platform',recentStart);
-        store.streamSample(recent,recentStart,'other','Other game','Recent stream',5);
+        store.streamSample(recent,recentStart,'other','Other game','Recent stream',6);
         store.endSession(recent,recentStart+2*60000,'observed');
         const custom=store.analytics({fromMs:oldStart,toMs:recentStart+day});
         assert.equal(custom.summary.streams,2);

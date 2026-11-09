@@ -5,7 +5,7 @@ test('deployed analytics probe uses a private copy, emits timing counts only and
  const dir=await mkdtemp(join(tmpdir(),'sp-analytics-probe-')),path=join(dir,'data.sqlite');
  try{
   for(const profile of ['ruslan','gulnaz']){
-   const s=new StreamStore(path,profile),at=Date.now()-86400000;try{const id=s.startSession('private-owner','private-stream',at,'platform',at);s.streamSample(id,at,'game','Private title','',4);s.endSession(id,at+60000);s.followingSnapshot('twitch','private-owner',[],true,at,profile==='ruslan'?144:145);s.youtubeSnapshot('private-youtube','channel',{statistics:{subscriberCount:profile==='ruslan'?'29':'73'}},at);}finally{s.close();}
+   const s=new StreamStore(path,profile),at=Date.now()-86400000;try{const id=s.startSession('private-owner','private-stream',at,'platform',at);s.streamSample(id,at,'game','Private title','',5);s.endSession(id,at+60000);s.followingSnapshot('twitch','private-owner',[],true,at,profile==='ruslan'?144:145);s.youtubeSnapshot('private-youtube','channel',{statistics:{subscriberCount:profile==='ruslan'?'29':'73'}},at);}finally{s.close();}
    await mkdir(join(dir,'profiles',profile),{recursive:true});await writeFile(join(dir,'profiles',profile,'secrets.json'),JSON.stringify({twitch:{userId:'private-owner'},youtubeAccountId:'private-youtube',youtubeClientSecret:'must-never-print',excludedBotLogins:[]}));
   }
   const db=new Database(path,{readonly:true});const before=db.prepare('SELECT * FROM p_ruslan_analytics_reports').all(),beforeCounts=db.prepare('SELECT * FROM p_ruslan_subscriber_counts').all();

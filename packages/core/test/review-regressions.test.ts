@@ -55,7 +55,7 @@ test('cache hits avoid full history enumeration and irrelevant finance grouping'
 });
 test('category clipping preserves linked platform membership without inventing attendance',()=>{
  const s=new StreamStore(':memory:');try{
-  const sid=s.startSession('owner','categories',at,'platform',at);s.attachPlatformStream(sid,'youtube','yt','video',at,at,null,'Video');s.streamSample(sid,at,'game','Game','',4);s.streamSample(sid,at+10*m,'talk','Talk','',4);
+  const sid=s.startSession('owner','categories',at,'platform',at);s.attachPlatformStream(sid,'youtube','yt','video',at,at,null,'Video');s.streamSample(sid,at,'game','Game','',5);s.streamSample(sid,at+10*m,'talk','Talk','',5);
   s.recordPoll(sid,'owner',{startedAtMs:at,completedAtMs:at+m,status:'complete',userIds:['viewer'],userNames:{viewer:'Viewer'}});
   s.youtubeMessages('yt','chat',[{id:'link',snippet:{type:'textMessageEvent',publishedAt:new Date(at+9*m).toISOString()},authorDetails:{channelId:'yt-viewer',displayName:'Viewer'}}]);s.endSession(sid,at+20*m);
   const r=s.analytics({fromMs:at,toMs:at+20*m,youtubeAccount:'yt',category:'talk'});assert.equal(r.audience[0]?.observedMinutes,0);assert.deepEqual(r.audience[0]?.sources,['twitch','youtube']);assert.equal(r.composition.both,1);

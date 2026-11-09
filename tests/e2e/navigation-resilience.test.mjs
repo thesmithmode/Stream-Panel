@@ -8,7 +8,7 @@ test('stream scope never flashes channel totals, reload/back retain the route an
   const first=await app.db.call('observePlatformStream','twitch','owner','older',base,base,null,'Older');await app.db.call('endSession',first,base+m);
   await app.db.call('ingest',{source:'donationalerts',accountId:'da',externalId:'tip',type:'donation',occurredAtMs:base,receivedAtMs:base,sourceTime:null,timeQuality:'provider',transport:'rest',payload:{amountMinor:'1200000',currency:'RUB'}});
   const start=base+2*3600000,id=await app.db.call('observePlatformStream','twitch','owner','current',start,start,null,'Current');
-  for(let i=0;i<142;i++)await app.db.call('streamSample',id,start+i*m,'game','Game','Current',10);
+  for(let i=0;i<142;i++)await app.db.call('streamSample',id,start+i*m,'game','Game','Current',11);
   await app.db.call('recordPoll',id,'owner',{startedAtMs:start,completedAtMs:start+141*m,status:'complete',userIds:['viewer'],userNames:{viewer:'Viewer'}});await app.db.call('endSession',id,start+142*m);
   browser=await launchBrowser();const context=await browser.newContext({viewport:{width:390,height:844}}),page=await context.newPage();page.setDefaultTimeout(10000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));

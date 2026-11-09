@@ -12,11 +12,11 @@ test('stream continuation shows Moscow dates, a real break, participant interval
  try{
   const base=Date.parse('2026-09-13T08:04Z'),m=60000;
   const id=await app.db.call('observePlatformStream','twitch','owner','first',base,base,null,'First title');
-  await app.db.call('streamSample',id,base,'game','First game','First title',4);
+  await app.db.call('streamSample',id,base,'game','First game','First title',5);
   await app.db.call('recordPoll',id,'owner',{startedAtMs:base,completedAtMs:base+2*m,status:'complete',userIds:['viewer'],userNames:{viewer:'Silent Viewer'}});
   await app.db.call('endSession',id,base+3*m);
   assert.equal(await app.db.call('observePlatformStream','twitch','owner','second',base+10*m,base+10*m,null,'Second title'),id);
-  await app.db.call('streamSample',id,base+10*m,'other','Second game','Second title',5);
+  await app.db.call('streamSample',id,base+10*m,'other','Second game','Second title',6);
   await app.db.call('recordPoll',id,'owner',{startedAtMs:base+10*m,completedAtMs:base+12*m,status:'complete',userIds:['viewer']});
   await app.db.call('endSession',id,base+13*m);
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:850}});page.setDefaultTimeout(10000);

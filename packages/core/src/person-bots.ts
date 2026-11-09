@@ -112,7 +112,6 @@ export class PersonBots {
    if(bot)this.db.prepare('DELETE FROM person_neutral_marks WHERE identity_id IN(SELECT id FROM identities WHERE person_id=?)').run(id);
    if(bot)this.db.prepare("INSERT OR IGNORE INTO person_bot_marks SELECT id FROM identities WHERE person_id=? AND source='twitch' ORDER BY id LIMIT 1").run(id);
    else this.db.prepare('DELETE FROM person_bot_marks WHERE identity_id IN(SELECT id FROM identities WHERE person_id=?)').run(id);
-   this.refreshStatus(id);
    return this.state(id);
   }).immediate();
  }
@@ -127,15 +126,10 @@ export class PersonBots {
     this.db.prepare('INSERT OR IGNORE INTO person_human_cards SELECT ? WHERE NOT EXISTS(SELECT 1 FROM identities WHERE person_id=?) AND NOT EXISTS(SELECT 1 FROM youtube_identities WHERE person_id=?)').run(id,id,id);
    }else{this.db.prepare('DELETE FROM person_human_marks WHERE identity_id IN(SELECT id FROM identities WHERE person_id=?)').run(id);this.clearHumanCards(id);}
    this.db.prepare('UPDATE persons SET revision=revision+1 WHERE id=?').run(id);
-   this.refreshStatus(id);
    return this.state(id);
   }).immediate();
  }
  private clearHumanCards(id:string){this.db.prepare(`WITH RECURSIVE owners(id) AS(SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON o.id=m.target_person_id WHERE m.undone_at_ms IS NULL) DELETE FROM person_human_cards WHERE person_id IN(SELECT id FROM owners)`).run(id);}
- private refreshStatus(id:string){
-  const targets=this.db.prepare(`WITH RECURSIVE targets(id) AS(SELECT ? UNION SELECT m.target_person_id FROM person_merges m JOIN targets t ON t.id=m.source_person_id WHERE m.undone_at_ms IS NULL) SELECT id FROM targets`).all(id) as {id:string}[];
-  for(const target of targets)for(const statement of refresh('@person').split(';').filter(sql=>sql.trim()))this.db.prepare(statement).run({person:target.id});
- }
  decorate<T>(rows:T[],id:(row:T)=>string|null|undefined,extra:readonly string[]=[]):(T&{is_bot:number;is_donor:boolean;is_human:boolean})[]{
   const ids=JSON.stringify([...new Set(rows.map(id).filter(Boolean))]),keys=JSON.stringify([...botExclusionSet(extra)]);
   const states=this.db.prepare(`SELECT p.id,EXISTS(SELECT 1 FROM manual_neutral_people n WHERE n.person_id=p.id) neutral,EXISTS(SELECT 1 FROM human_people h WHERE h.person_id=p.id) human,EXISTS(SELECT 1 FROM donor_people d WHERE d.person_id=p.id) donor,

@@ -7,8 +7,8 @@
  const choices:Kind[]=['bot','unknown','human'];
  const labels={bot:'Бот',unknown:'Неизвестно',human:'Человек'};
  let root:HTMLDivElement|undefined,loadedId='';
- let metadata=$state<State|null>(null),busy=$state(false),error=$state('');
- const selected=$derived<Kind>(metadata?.automaticHuman||metadata?.manualHuman?'human':metadata?.manualBot||metadata?.knownBot?'bot':'unknown');
+ let metadata=$state<State|null>(null),busy=$state(false),error=$state(''),pendingKind=$state<Kind|null>(null);
+ const selected=$derived<Kind>(pendingKind??(metadata?.automaticHuman||metadata?.manualHuman?'human':metadata?.manualBot||metadata?.knownBot?'bot':'unknown'));
  $effect(()=>{
   const id=personId,currentRevision=revision,current=untrack(()=>({id:loadedId,revision:metadata?.revision}));
   if(id===current.id&&currentRevision===current.revision)return;
@@ -19,10 +19,10 @@
  function disabled(kind:Kind){return busy||!metadata||metadata.automaticHuman||(kind==='bot'&&!metadata.canMarkBot);}
  async function select(kind:Kind){
   if(disabled(kind)||kind===selected)return;
-  const id=personId,current=metadata!,restoreFocus=root?.contains(document.activeElement);busy=true;error='';
-  try{const result=await api<State>(`persons/${id}/classification`,{kind,revision:current.revision});if(personId===id){loadedId=id;metadata=result;await onChange();}}
+  const id=personId,current=metadata!,restoreFocus=root?.contains(document.activeElement);busy=true;pendingKind=kind;error='';
+  try{const result=await api<State>(`persons/${id}/classification`,{kind,revision:current.revision});if(personId===id){loadedId=id;metadata=result;pendingKind=null;busy=false;void onChange().catch(e=>{if(personId===id)error=(e as Error).message;});}}
   catch(e){if(personId===id)error=(e as Error).message==='REVISION_CONFLICT'?'Карточка изменилась. Откройте её заново и повторите отметку.':(e as Error).message;}
-  finally{busy=false;await tick();if(personId===id&&restoreFocus)root?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();}
+  finally{pendingKind=null;busy=false;await tick();if(personId===id&&restoreFocus)root?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();}
  }
  function keyboard(event:KeyboardEvent){
   if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;

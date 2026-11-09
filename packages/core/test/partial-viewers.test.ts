@@ -15,7 +15,7 @@ test('missing YouTube counters preserve known Twitch viewers through closed hist
   const id=store.observePlatformStream('twitch','owner','twitch-stream',base,base,null,'Monday')!;
   store.observePlatformStream('youtube','channel','youtube-stream',base,base,null,'Monday');
   for(const [i,count]of [8,4,0,3].entries()){
-   store.streamSample(id,base+i*minute+3000,'dota','Dota 2','Monday',count);
+   store.streamSample(id,base+i*minute+3000,'dota','Dota 2','Monday',((value:number|null)=>value===null||value<=0?value:value+1)(count));
    store.youtubeViewers(base+i*minute+20000,i===3?0:null,id);
   }
   store.endSession(id,base+5*minute);

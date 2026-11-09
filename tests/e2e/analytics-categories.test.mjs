@@ -11,8 +11,8 @@ test('every chart category selector refreshes donations, time patterns and clock
  try{
   const base=Math.floor((Date.now()-86400000)/3600000)*3600000,minute=60000;
   const sid=await a.db.call('startSession','channel','category-check',base,'platform',base);
-  await a.db.call('streamSample',sid,base,'game','Game','Game',2);
-  await a.db.call('streamSample',sid,base+10*minute,'talk','Talk','Talk',8);
+  await a.db.call('streamSample',sid,base,'game','Game','Game',3);
+  await a.db.call('streamSample',sid,base+10*minute,'talk','Talk','Talk',9);
   for(const [id,at] of [['one',base+minute],['two',base+11*minute],['three',base+12*minute]])await a.db.call('ingest',{source:'donationalerts',accountId:'da',externalId:id,type:'donation',actor:{externalId:'name:supporter',displayName:'Supporter'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'rest',payload:{amountMinor:'10000',currency:'RUB'}});
   await a.db.call('streamSample',sid,base+20*minute,'509658','IRL','IRL',null);
   await a.db.call('endSession',sid,base+30*minute);

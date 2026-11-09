@@ -48,7 +48,7 @@ test('killing the frontend restarts only its process and keeps the stream writab
  try{
   await writeFile(join(root,'index.html'),'stream');const id=s.observePlatformStream('twitch','owner','stream',0,0,null,'')!;
   await frontend.start();const previous=frontend.pid!;process.kill(previous,'SIGKILL');
-  s.streamSample(id,60000,'game','Game','After UI crash',4);
+  s.streamSample(id,60000,'game','Game','After UI crash',5);
   const deadline=Date.now()+5000;while(!frontend.pid||frontend.pid===previous){assert.ok(Date.now()<deadline);await new Promise(resolve=>setTimeout(resolve,30));}
   assert.equal(s.sessions()[0]!.id,id);assert.equal(s.sessions()[0]!.ended_at_ms,null);
   await frontend.stop();assert.equal(frontend.pid,undefined);await frontend.start();
