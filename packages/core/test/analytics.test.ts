@@ -14,8 +14,8 @@ test('analytics keeps owners/bots out, unions linked identities, splits categori
     const input = (id: string, actor: string, name: string, at: number, account = 'channel') => ({ source: 'twitch' as const, accountId: account, externalId: id, type: 'chat.message', actor: { externalId: actor, displayName: name }, occurredAtMs: at, receivedAtMs: at, timeQuality: 'provider' as const, sourceTime: null, transport: 'eventsub' as const, payload: { text: id } });
     try {
         const first = recordedStream(s,'channel', 'one', base, 'platform', base);
-        s.streamSample(first, base, 'game', 'Game', 'First game', 12);
-        s.streamSample(first, base + 5 * minute, 'talk', 'Talk', 'Switched', 15);
+        s.streamSample(first, base, 'game', 'Game', 'First game', 13);
+        s.streamSample(first, base + 5 * minute, 'talk', 'Talk', 'Switched', 16);
         const a = s.ingest(input('1', 'regular', 'Regular', base + minute));
         s.ingest(input('2', 'regular', 'Regular', base + 7 * minute));
         for (const [id, name] of [['owner', 'RenamedOwner'], ['jeetbot', 'jeetbot'], ['self', 'streamlabs'], ['typo', 'streemelements']])
@@ -26,10 +26,10 @@ test('analytics keeps owners/bots out, unions linked identities, splits categori
         s.recordPoll(first, 'channel', { startedAtMs: base + 5 * minute, completedAtMs: base + 6 * minute, status: 'failed', userIds: ['regular'] });
         s.recordPoll(first, 'channel', { startedAtMs: base + 7 * minute, completedAtMs: base + 8 * minute, status: 'complete', userIds: ['regular'] });
         s.youtubeMessages('yt-owner', 'chat', [{ id: 'yt1', snippet: { type: 'textMessageEvent', publishedAt: new Date(base + minute).toISOString(), displayMessage: 'hello' }, authorDetails: { channelId: 'yt-regular', displayName: 'YouTubeRegular' } }, { id: 'yt-self', snippet: { type: 'textMessageEvent', publishedAt: new Date(base + minute).toISOString() }, authorDetails: { channelId: 'yt-owner', displayName: 'Me' } }, { id: 'yt-bot', snippet: { type: 'textMessageEvent', publishedAt: new Date(base + minute).toISOString() }, authorDetails: { channelId: 'yt-bot', displayName: 'streamelements' } }]);
-        s.youtubeViewers(base, 4);
+        s.youtubeViewers(base, 5);
         s.endSession(first, base + 10 * minute, 'observed');
         const second = recordedStream(s,'channel', 'two', base + 10 * minute, 'platform', base + 10 * minute);
-        s.streamSample(second, base + 10 * minute, 'game', 'Game', 'Game again', 10);
+        s.streamSample(second, base + 10 * minute, 'game', 'Game', 'Game again', 11);
         s.recordPoll(second, 'channel', { startedAtMs: base + 10 * minute, completedAtMs: base + 11 * minute, status: 'complete', userIds: ['regular'] });
         s.ingest(input('3', 'regular', 'Regular', base + 11 * minute));
         s.youtubeMessages('yt-owner', 'chat2', [{ id: 'yt2', snippet: { type: 'textMessageEvent', publishedAt: new Date(base + 11 * minute).toISOString(), displayMessage: 'again' }, authorDetails: { channelId: 'yt-regular', displayName: 'YouTubeRegular' } }]);
@@ -75,7 +75,7 @@ test('analytics validates bounds and timezone, unknown categories remain unknown
         assert.equal(report.categories.some(x=>x.id===''),false);
         assert.equal(report.summary.streams,1);
         assert.equal(report.timeline[0]!.at,base);
-        assert.throws(() => s.streamSample(sid, -1, '', '', '', 1), /INVALID_TIMESTAMP/);
+        assert.throws(() => s.streamSample(sid, -1, '', '', '', 2), /INVALID_TIMESTAMP/);
         assert.throws(() => s.streamSample(sid, base, '', '', '', -1), /INVALID_STREAM_SAMPLE/);
         assert.throws(() => s.youtubeViewers(base, -1), /INVALID_VIEWER_COUNT/);
     }
@@ -196,7 +196,7 @@ test('empty and missing poll minutes are explicit and category averages use succ
  const s=new StreamStore(':memory:');
  try {
   const sid=recordedStream(s,'channel','coverage',base,'platform',base);
-  s.streamSample(sid,base,'game','Game','',12);
+  s.streamSample(sid,base,'game','Game','',13);
   s.recordPoll(sid,'channel',{startedAtMs:base,completedAtMs:base+minute,status:'complete',userIds:['human']});
   s.recordPoll(sid,'channel',{startedAtMs:base+2*minute,completedAtMs:base+3*minute,status:'complete',userIds:[]});
   s.endSession(sid,base+10*minute,'observed');
@@ -237,12 +237,12 @@ test('inference crossing the selected period is clipped without counting message
 test('asynchronous YouTube counts retain their actual sample minute rather than rewriting a past Twitch minute',()=>{
  const s=new StreamStore(':memory:');
  try {
-  const sid=recordedStream(s,'channel','async-count',base,'platform',base);s.streamSample(sid,base,'game','Game','',12);
-  s.youtubeViewers(base+minute,4);
+  const sid=recordedStream(s,'channel','async-count',base,'platform',base);s.streamSample(sid,base,'game','Game','',13);
+  s.youtubeViewers(base+minute,5);
   const result=s.analytics({...opts,source:'youtube'});
   assert.equal(result.timeline.find(x=>x.at===base)?.viewers,null);
   assert.equal(result.timeline.find(x=>x.at===base+minute)?.viewers,4);
-  s.youtubeViewers(base+4*minute+1,5);
+  s.youtubeViewers(base+4*minute+1,6);
   assert.equal(s.analytics({...opts,source:'youtube'}).timeline.find(x=>x.at===base+4*minute)?.viewers,null);
  }finally{s.close();}
 });
@@ -273,7 +273,7 @@ test('regular audience uses attendance share, excludes donation-only profiles an
  try {
   for(let n=0;n<3;n++){
    const start=base+n*5*minute,sid=recordedStream(s,'channel',`regular-share-${n}`,start,'platform',start);
-   s.streamSample(sid,start,'game','Game','',10);
+   s.streamSample(sid,start,'game','Game','',11);
    const ids=['regular',...(n<2?['two-thirds']:[]),...(n===0?['once']:[]),'owner','bot'];
    s.recordPoll(sid,'channel',{startedAtMs:start,completedAtMs:start+minute,status:'complete',userIds:ids,userNames:{regular:'Regular','two-thirds':'Two thirds',once:'Once',owner:'Owner',bot:'jeetbot'}});
    for(const actor of ['regular',...(n===0?['once']:[])])s.ingest({source:'twitch',accountId:'channel',externalId:`regular-msg-${n}-${actor}`,type:'chat.message',actor:{externalId:actor,displayName:actor},occurredAtMs:start,receivedAtMs:start,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
@@ -304,7 +304,7 @@ test('switching away and back within one minute never counts a regular attendee 
  const s=new StreamStore(':memory:');
  try {
   const sid=recordedStream(s,'channel','minute-return',base,'platform',base);
-  s.streamSample(sid,base,'game','Game','',2);s.streamSample(sid,base+10000,'talk','Talk','',2);s.streamSample(sid,base+20000,'game','Game','',2);
+  s.streamSample(sid,base,'game','Game','',3);s.streamSample(sid,base+10000,'talk','Talk','',3);s.streamSample(sid,base+20000,'game','Game','',3);
   s.recordPoll(sid,'channel',{startedAtMs:base,completedAtMs:base+minute,status:'complete',userIds:['human']});
   s.youtubeMessages('yt-owner','chat',[{id:'minute-return',snippet:{type:'textMessageEvent',publishedAt:new Date(base+5000).toISOString()},authorDetails:{channelId:'yt-human',displayName:'Human'}}]);
   s.endSession(sid,base+2*minute,'observed');
@@ -316,7 +316,7 @@ test('switching away and back within one minute never counts a regular attendee 
 test('stream and category donation efficiency use clipped period durations and convert currencies at the donation date',()=>{
  const s=new StreamStore(':memory:');try{
   const sid=s.observePlatformStream('twitch','channel','rates',base,base,null,'Rates')!;
-  s.streamSample(sid,base,'game','Game','Rates',10);s.streamSample(sid,base+minute,'talk','Talk','Rates',20);s.endSession(sid,base+2*minute);
+  s.streamSample(sid,base,'game','Game','Rates',11);s.streamSample(sid,base+minute,'talk','Talk','Rates',21);s.endSession(sid,base+2*minute);
   const person=String(s.createPerson('Supporter').id);
   s.createDonation({personId:person,amount:'10',currency:'RUB',occurredAtMs:base+45000,message:'',sourceName:'Cash'},base+3*minute);
   s.createDonation({personId:person,amount:'1.25',currency:'USD',occurredAtMs:base+75000,message:'',sourceName:'Transfer'},base+3*minute);
@@ -347,8 +347,8 @@ test('comparison deduplicates linked Twitch/YouTube chatters and exposes indepen
  const s=new StreamStore(':memory:');try{
   const sid=s.observePlatformStream('twitch','channel','metric-stream',base,base,null,'Metrics')!;
   s.observePlatformStream('youtube','yt-owner','metric-video',base,base,null,'Metrics');
-  s.streamSample(sid,base,'game','Game','Metrics',10);s.youtubeViewers(base,4,sid);
-  s.streamSample(sid,base+minute,'game','Game','Metrics',20);
+  s.streamSample(sid,base,'game','Game','Metrics',11);s.youtubeViewers(base,5,sid);
+  s.streamSample(sid,base+minute,'game','Game','Metrics',21);
   const tw=s.ingest({source:'twitch',accountId:'channel',externalId:'metric-tw',type:'chat.message',actor:{externalId:'metric-author',displayName:'Linked'},occurredAtMs:base,receivedAtMs:base,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
   s.youtubeMessages('yt-owner','metric-chat',[{id:'metric-yt',snippet:{type:'textMessageEvent',publishedAt:new Date(base).toISOString(),displayMessage:'hello'},authorDetails:{channelId:'metric-author-yt',displayName:'Linked'}}]);
   const yp=s.persons().find(p=>String(p.sources).includes('youtube'))!;
@@ -391,10 +391,10 @@ test('all viewers retain each known platform minute and mark missing counts as p
  const s=new StreamStore(':memory:');
  try {
   const sid=recordedStream(s,'channel','partial-counts',base,'platform',base);
-  s.streamSample(sid,base,'game','Game','',12);
-  s.youtubeViewers(base+minute,4);
-  s.streamSample(sid,base+2*minute,'game','Game','',8);
-  s.youtubeViewers(base+2*minute,3);
+  s.streamSample(sid,base,'game','Game','',13);
+  s.youtubeViewers(base+minute,5);
+  s.streamSample(sid,base+2*minute,'game','Game','',9);
+  s.youtubeViewers(base+2*minute,4);
   s.streamSample(sid,base+3*minute,'game','Game','',0);
   const rows=s.analytics(opts).timeline;
   for(const [offset,total,partial] of [[0,12,true],[1,4,true],[2,11,false],[3,0,true]] as const){

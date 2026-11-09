@@ -16,7 +16,7 @@ test('archive cleanup upgrades both profiles atomically while retaining chat cou
   const sid=store.observePlatformStream('twitch','owner','live',at,at,null,'Title')!;
   store.ingest({source:'twitch',accountId:'owner',externalId:'chat',type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'secret'}});
   store.ingest({source:'donationalerts',accountId:'da',externalId:'tip',type:'donation',actor:null,occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'rest',payload:{amountMinor:'22800',currency:'RUB'}});
-  store.streamSample(sid,at,'game','Game','Title',5);store.close();
+  store.streamSample(sid,at,'game','Game','Title',6);store.close();
   const db=openProfileDatabase(path,profile);
   for(const type of ['goal.begin','chat.notification','stream.offline']){
    db.prepare('INSERT INTO events VALUES (?,?,?,?,?,NULL,?,?,NULL,?,?,?)').run(type,'twitch','owner',type,type,at,at,'provider','eventsub',JSON.stringify({raw:{text:'trash'}}));

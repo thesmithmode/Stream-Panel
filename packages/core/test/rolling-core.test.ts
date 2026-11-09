@@ -9,14 +9,14 @@ test('rolling core ignores lifetime and selected period, requires a sample, resp
  try{
   for(let i=0;i<15;i++){
    const at=base-(60-i*4)*day,id=s.startSession('owner',String(i),at,'platform',at);
-   s.streamSample(id,at,'game','Game','',10);
+   s.streamSample(id,at,'game','Game','',11);
    const users=['loyal',...(i>=4?['new']:[])];
    s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+10*minute,status:'complete',userIds:users});
    s.endSession(id,at+10*minute);
   }
   for(let i=0;i<20;i++){
    const at=base-(120+i)*day,id=s.startSession('owner','old'+i,at,'platform',at);
-   s.streamSample(id,at,'old','Old','',10);s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+10*minute,status:'complete',userIds:['veteran']});s.endSession(id,at+10*minute);
+   s.streamSample(id,at,'old','Old','',11);s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+10*minute,status:'complete',userIds:['veteran']});s.endSession(id,at+10*minute);
   }
   const opts:AnalyticsOptions={fromMs:0,toMs:now,summaryOnly:true,rollingCore:true,ownerId:'owner'};
   assert.equal(ready(s,{...opts,coreWindowDays:30}).summary.core,0);
@@ -36,7 +36,7 @@ test('rolling core ignores lifetime and selected period, requires a sample, resp
 });
 test('fewer than twelve streams cannot automatically establish rolling core',()=>{
  const s=new StreamStore(':memory:'),now=Date.now(),at=now-40*day;
- try{const id=s.startSession('owner','single',at,'platform',at);s.streamSample(id,at,'game','Game','',10);s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+minute,status:'complete',userIds:['viewer']});s.endSession(id,at+minute);
+ try{const id=s.startSession('owner','single',at,'platform',at);s.streamSample(id,at,'game','Game','',11);s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+minute,status:'complete',userIds:['viewer']});s.endSession(id,at+minute);
  assert.equal(ready(s,{fromMs:0,toMs:now,summaryOnly:true,rollingCore:true}).summary.core,0);
  }finally{s.close();}
 });
@@ -44,7 +44,7 @@ test('rolling membership includes every page, excludes young cohorts, and keeps 
  const s=new StreamStore(':memory:'),other=new StreamStore(':memory:'),now=Date.now(),users=Array.from({length:105},(_,i)=>`viewer-${i}`);
  try{
   for(let i=0;i<12;i++){
-   const at=now-(50-i*4)*day,id=s.startSession('owner',String(i),at,'platform',at);s.streamSample(id,at,'game','Game','',10);
+   const at=now-(50-i*4)*day,id=s.startSession('owner',String(i),at,'platform',at);s.streamSample(id,at,'game','Game','',11);
    s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+minute,status:'complete',userIds:users});s.endSession(id,at+minute);
   }
   const opts:AnalyticsOptions={fromMs:now-10*day,toMs:now,summaryOnly:true,rollingCore:true,audienceOffset:100};
@@ -54,7 +54,7 @@ test('rolling membership includes every page, excludes young cohorts, and keeps 
 });
 test('thirty-day core window uses its full sample and preserves manual overrides',()=>{
  const s=new StreamStore(':memory:'),now=Date.now();try{
-  for(let i=0;i<12;i++){const at=now-(i+1)*day,id=s.startSession('owner',String(i),at,'platform',at);s.streamSample(id,at,'game','Game','',10);s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+minute,status:'complete',userIds:['viewer']});s.endSession(id,at+minute);}
+  for(let i=0;i<12;i++){const at=now-(i+1)*day,id=s.startSession('owner',String(i),at,'platform',at);s.streamSample(id,at,'game','Game','',11);s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+minute,status:'complete',userIds:['viewer']});s.endSession(id,at+minute);}
   const opts:AnalyticsOptions={fromMs:0,toMs:now,rollingCore:true,coreWindowDays:30};const r=ready(s,opts);assert.equal(r.summary.core,1);
   const id=r.audience[0]!.id;s.setPersonMetadata(id,[],true,s.personRevision(id));assert.equal(ready(s,opts).summary.core,1);
  }finally{s.close();}

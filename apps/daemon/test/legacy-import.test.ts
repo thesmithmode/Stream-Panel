@@ -91,7 +91,7 @@ test('current schema import preserves notes, deleted donation audit, stream cate
   const person=store.ingest({source:'twitch',accountId:'channel',externalId:'chat-message',type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:1000,receivedAtMs:1000,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}}).personId!;
   store.createPersonNote(person,'Keep this note',1001);
   const stream=store.observePlatformStream('twitch','channel','live-stream',900,1000,'https://www.twitch.tv/channel','Live')!;
-  store.streamSample(stream,1002,'game-42','Game 42','Live title',17);
+  store.streamSample(stream,1002,'game-42','Game 42','Live title',18);
   const donation=store.createDonation({personId:person,amount:'12.34',currency:'USD',occurredAtMs:1003,message:'Original donation',sourceName:'Cash'},1004);
   const updated=store.updateDonation(String(donation.id),{personId:person,amount:'15.00',currency:'USD',occurredAtMs:1005,message:'Corrected donation',sourceName:'Cash'},Number(donation.revision),1006);
   store.deleteDonation(String(donation.id),Number(updated.revision),1007);

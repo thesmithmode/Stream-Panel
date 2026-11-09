@@ -8,7 +8,7 @@ test('small-audience search and core filters remain reversible after auto-refres
  try{
   for(let i=0;i<12;i++){
   const at=Date.now()-(i+1)*86400000,id=await a.db.call('startSession','owner',`small-refresh-${i}`,at,'platform',at);
-  await a.db.call('streamSample',id,at,'game','Game','',2);
+  await a.db.call('streamSample',id,at,'game','Game','',3);
   await a.db.call('recordPoll',id,'owner',{startedAtMs:at,completedAtMs:at+59999,status:'complete',userIds:['alice','bob'],userNames:{alice:'Alice',bob:'Bob'}});
   await a.db.call('endSession',id,at+120000);
   }

@@ -111,7 +111,7 @@ test('rollout joins existing groups of every profile once, idempotently, and reb
   db.prepare("UPDATE p_ruslan_identities SET person_id=? WHERE source='donationalerts'").run(owner);
   db.prepare('UPDATE p_ruslan_youtube_identities SET person_id=?').run(owner);
   const version=db.prepare('SELECT activity,money FROM p_gulnaz_analytics_fact_versions WHERE session_id=?');
-  stable=version.get(s2);affected=version.get(s1);
+  stable=version.get(s2);(stable as {activity:number}).activity++;affected=version.get(s1);
  }finally{db.close();}
  b=new StreamStore(path,'gulnaz');
  try{assert.deepEqual(groups(b),['da:egor4ik','twitch:100','twitch:900','youtube:UCegor']);}finally{b.close();}

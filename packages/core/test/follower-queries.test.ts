@@ -30,7 +30,7 @@ function legacyReader(db:Database.Database):Database.Database{
 const base=Date.UTC(2026,9,1),m=60000;
 function fixture(s:StreamStore,count=1660){
  const session=s.startSession('owner','query-equivalence',base,'platform',base);
- s.streamSample(session,base,'game','Game','',2);
+ s.streamSample(session,base,'game','Game','',3);
  const person=s.ingest({source:'twitch',accountId:'owner',externalId:'chat',type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:base,receivedAtMs:base,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{count:1}}).personId!;
  s.recordPoll(session,'owner',{startedAtMs:base,completedAtMs:base+m,status:'complete',userIds:['viewer']});
  const db=(s as any).db as Database.Database;

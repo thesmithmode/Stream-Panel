@@ -48,7 +48,7 @@ test('overview counts a repeated chatter and linked YouTube account once, while 
 
 test('late donations, notes and followers reuse the durable overview activity snapshot',()=>{
  const s=new StreamStore(':memory:');try{
-  const at=Date.now()-3600000,id=s.startSession('owner','cached-overview',at,'platform',at);s.streamSample(id,at,'game','Game','',5);s.endSession(id,at+60000);
+  const at=Date.now()-3600000,id=s.startSession('owner','cached-overview',at,'platform',at);s.streamSample(id,at,'game','Game','',6);s.endSession(id,at+60000);
   const person=String(s.createPerson('Donor').id),before=s.channelOverview();
   (s as any).summary=()=>{throw Error('Historical activity was reread');};
   s.createPersonNote(person,'note',at);s.followingSnapshot('twitch','owner',[],true,at);
@@ -60,10 +60,10 @@ test('late donations, notes and followers reuse the durable overview activity sn
 test('online-only updates reuse overview attendance while real presence changes invalidate it',()=>{
  const s=new StreamStore(':memory:');try{
   const at=Date.now()-3600000,id=s.startSession('owner','overview-cache',at,'platform',at);
-  s.streamSample(id,at,'g','Game','',2);
+  s.streamSample(id,at,'g','Game','',3);
   let reads=0;const original=s.summary.bind(s);s.summary=(...args:Parameters<typeof s.summary>)=>{reads++;return original(...args);};
   const first=s.channelOverview();assert.equal(reads,1);
-  s.streamSample(id,at,'g','Game','',8);const next=s.channelOverview();assert.equal(reads,1);assert.equal(next.attendees,first.attendees);assert.equal(next.records.peakOnline?.value,8);
+  s.streamSample(id,at,'g','Game','',9);const next=s.channelOverview();assert.equal(reads,1);assert.equal(next.attendees,first.attendees);assert.equal(next.records.peakOnline?.value,8);
   s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+60000,status:'complete',userIds:['viewer']});assert.equal(s.channelOverview().attendees,1);assert.equal(reads,2);
  }finally{s.close();}
 });

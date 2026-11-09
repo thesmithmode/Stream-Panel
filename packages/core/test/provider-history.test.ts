@@ -11,7 +11,7 @@ test('latest YouTube metadata advances without creating a duplicate provider arc
   assert.throws(()=>s.providerSnapshot('unknown','channel','stream',{},1),/INVALID_PROVIDER_SNAPSHOT/);
   const id=s.observePlatformStream('twitch','owner','one',10,10,null,'First')!;
   s.providerSnapshot('twitch','owner','stream',{custom:'full'},10,id);
-  s.streamSample(id,10,'game','Game','First',1);s.streamSample(id,20,'other','Other','Second',2);
+  s.streamSample(id,10,'game','Game','First',2);s.streamSample(id,20,'other','Other','Second',3);
   assert.deepEqual(s.streamMetadata(id),[{at:10,categoryId:'game',categoryName:'Game',title:'First'},{at:20,categoryId:'other',categoryName:'Other',title:'Second'}]);
   assert.throws(()=>s.streamMetadata('missing'),/SESSION_NOT_FOUND/);
  }finally{s.close();}

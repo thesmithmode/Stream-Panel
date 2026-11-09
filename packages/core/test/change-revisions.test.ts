@@ -21,7 +21,7 @@ test('screen projections retain calculations while attendance pagination exclude
  const store=new StreamStore(':memory:');try{
   const at=Date.now()-600000,id=store.startSession('owner','one',at,'platform',at);
   store.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+60000,status:'complete',userIds:Array.from({length:122},(_,i)=>'viewer'+i)});
-  store.streamSample(id,at,'game','Game','Stream',3);
+  store.streamSample(id,at,'game','Game','Stream',4);
   store.ingest({source:'donationalerts',accountId:'owner',externalId:'support',type:'donation',actor:{externalId:daDonorExternalId('Supporter'),displayName:'Supporter'},occurredAtMs:at+1000,receivedAtMs:at+1000,sourceTime:null,timeQuality:'provider',transport:'rest',payload:{amountMinor:'100',currency:'RUB'}});
   store.endSession(id,at+120000);
   const query={fromMs:0,toMs:Date.now(),summaryOnly:true,clockCompact:true,clockDay:'all',clockResolution:15};

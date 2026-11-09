@@ -14,7 +14,7 @@ try {
  await navigate(page,'Обзор');await page.locator('.channel-metrics').waitFor();await page.clock.install();await page.clock.setSystemTime(Date.now()+180000);await navigate(page,'Аналитика');await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');
  assert.equal(instant,initial);assert.equal(calls.length,initial,'passing time alone must not miss the all-time cache');
  const reads=[];page.on('request',r=>reads.push(new URL(r.url()).pathname));
- await app.db.call('streamSample',id,Date.now()-60000,'g','Game','',7);
+ await app.db.call('streamSample',id,Date.now()-60000,'g','Game','',8);
  const changed=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v1/changes');await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await changed;await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');
  assert.equal(reads.filter(p=>p==='/api/v1/analytics/subscribers').length,0);
  for(const [name,path,selector] of [['Люди','/api/v1/persons/page','.person-row'],['Донаты','/api/v1/donations','[data-donation-id]']]){

@@ -30,7 +30,7 @@ test('quiet navigation preserves secondary functions, keyboard tabs, filters and
 test('overflow sheets do not stretch cards; disclosure controls remain aligned when expanded',{timeout:60000},async()=>{
  const a=await application();let browser;
  try{
-  const id=await seed(a),now=Date.now();await a.db.call('streamSample',id,now-600000,'dota','Dota 2','Агент Габена 219 вышел на охоту',8);await a.db.call('endSession',id,now);
+  const id=await seed(a),now=Date.now();await a.db.call('streamSample',id,now-600000,'dota','Dota 2','Агент Габена 219 вышел на охоту',9);await a.db.call('endSession',id,now);
   browser=await launchBrowser();const page=await browser.newPage();page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await goto(page,a.bootstrap());await navigate(page,'Стримы');const card=page.locator(`[data-session-id="${id}"]`);
   for(const width of [320,390,768,1440,1920]){

@@ -11,7 +11,7 @@ type Grouping={mergeSessions(ids:string[]):string;unmergeSessions(id:string):voi
 const grouping=(s:StreamStore)=>s as StreamStore&Grouping;
 function part(s:StreamStore,n:number){
  const start=at+n*120*m,id=s.startSession('owner',`part-${n}`,start,'platform',start);
- s.streamSample(id,start,'game','Game',`Part ${n}`,n?8:4);
+ s.streamSample(id,start,'game','Game',`Part ${n}`,((value:number|null)=>value===null||value<=0?value:value+1)(n?8:4));
  s.recordPoll(id,'owner',{startedAtMs:start,completedAtMs:start+m,status:'complete',userIds:['viewer'],userNames:{viewer:'Viewer'}});
  s.ingest({source:'twitch',accountId:'owner',externalId:`message-${n}`,type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:start+m,receivedAtMs:start+m,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{originChannelId:'owner'}});
  s.ingest({source:'donationalerts',accountId:'da',externalId:`tip-${n}`,type:'donation',actor:{externalId:'name:donor',displayName:'Donor'},occurredAtMs:start+m,receivedAtMs:start+m,sourceTime:null,timeQuality:'provider',transport:'rest',payload:{amountMinor:'100',currency:'RUB'}});
@@ -140,7 +140,7 @@ test('a live tail can be merged with adjacent earlier parts without stopping col
   const a=part(s,0),b=part(s,1),start=at+122*m,live=s.startSession('owner','current',start,'platform',start);
   const root=s.mergeSessions([live,b,a]);assert.equal(root,a);assert.equal(s.sessions().length,1);assert.equal(s.sessions()[0]!.ended_at_ms,null);
   assert.equal(s.activeLogicalStream()!.id,live);assert.equal(s.sessions(live)[0]!.id,root);
-  s.streamSample(live,start,'game','Game','Live',5);s.ingest({source:'twitch',accountId:'owner',externalId:'during-merge',type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:start+m,receivedAtMs:start+m,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{originChannelId:'owner'}});
+  s.streamSample(live,start,'game','Game','Live',6);s.ingest({source:'twitch',accountId:'owner',externalId:'during-merge',type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:start+m,receivedAtMs:start+m,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{originChannelId:'owner'}});
   assert.equal(s.summary(root,[],false).messages,3);assert.equal(completedReport(s,{...options,sessionId:live}).summary.messages,3);
   s.endSession(live,start+2*m);assert.equal(s.sessions()[0]!.ended_at_ms,start+2*m);assert.equal(s.sessions()[0]!.durationMs,6*m);
   s.unmergeSessions(root);assert.equal(s.sessions().length,3);
@@ -148,8 +148,8 @@ test('a live tail can be merged with adjacent earlier parts without stopping col
 });
 test('estimated boundaries may overlap without counting airtime or viewers twice',()=>{
  const s=new StreamStore(':memory:');try{
-  const first=s.startSession('owner','earlier',at,'platform',at);s.streamSample(first,at,'game','Game','Earlier',5);s.endSession(first,at+2*m);
-  const next=s.startSession('owner','later',at+m+30000,'platform',at+m+30000);s.streamSample(next,at+m+30000,'game','Game','Later',5);s.endSession(next,at+3*m);
+  const first=s.startSession('owner','earlier',at,'platform',at);s.streamSample(first,at,'game','Game','Earlier',6);s.endSession(first,at+2*m);
+  const next=s.startSession('owner','later',at+m+30000,'platform',at+m+30000);s.streamSample(next,at+m+30000,'game','Game','Later',6);s.endSession(next,at+3*m);
   const root=s.mergeSessions([first,next]),row=s.sessions(root)[0]!;assert.equal(row.durationMs,3*m);assert.equal(row.viewerPeak,5);assert.equal(row.viewerMean,5);
   assert.equal(completedReport(s,{...options,sessionId:root}).streamComparison[0]!.durationMs,3*m);
  }finally{s.close();}

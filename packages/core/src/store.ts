@@ -15,7 +15,7 @@ import {SharedIdentities,type SyncHint} from "./shared-identities.js";
 import {AudienceQueries} from "./audience-queries.js";
 import {ProviderStorage} from "./provider-storage.js";
 import {messageMetadata} from "./message-storage.js";
-import {registerDonationSum,donationTotals} from './donation-statistics.js';
+import {registerDonationSum,donationTotals,maximumDonation} from './donation-statistics.js';
 import {parseDonationTime} from './donation-time.js';
 import {personActivity} from "./person-activity.js";
 import {DonationLedger,type DonationInput} from "./donations.js";
@@ -403,7 +403,7 @@ export class StreamStore {
     const links=this.reads.prepare('SELECT session_id,started_at_ms,ended_at_ms FROM platform_streams').all() as {session_id:string;started_at_ms:number;ended_at_ms:number|null}[];
     const windowsBySession=new Map<string,typeof links>();for(const link of links){const list=windowsBySession.get(link.session_id)??[];list.push(link);windowsBySession.set(link.session_id,list);}
     const now=Date.now(),totals30=donationTotals(this.reads,now-30*86400000,now,excluded);
-    return {pendingExchangeDonations:new DonationFx(this.reads).pendingCount(excluded),records:this.records.read(excluded,excludedBotLogins===false),totals30,streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+windowsFromLinks(windowsBySession.get(s.id)??[],s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees:activity.attendees,messages:activity.messages,totals:donationTotals(this.reads,undefined,undefined,excluded),donations};
+    return {maximumDonation:maximumDonation(this.reads,excluded),pendingExchangeDonations:new DonationFx(this.reads).pendingCount(excluded),records:this.records.read(excluded,excludedBotLogins===false),totals30,streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+windowsFromLinks(windowsBySession.get(s.id)??[],s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees:activity.attendees,messages:activity.messages,totals:donationTotals(this.reads,undefined,undefined,excluded),donations};
   }
   personOptions(search='',offset=0,limit=50,includeBots=false,selected='',excluded:readonly string[]|false=[],exclude=''){return this.queries.personOptions(search,offset,limit,includeBots,selected,excluded,exclude);}
 
