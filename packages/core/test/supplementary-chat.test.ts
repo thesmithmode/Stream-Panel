@@ -9,7 +9,7 @@ test('supplementary names, recent events and live authors are visible without ch
   const id=s.observePlatformStream('youtube','primary','main-video',start,start,null,'Primary')!;
   s.youtubeMessages('primary','main-chat',[msg('main','main-viewer',start+1000)]);
   s.youtubeSnapshot('primary','channel',{statistics:{subscriberCount:'20'}},now);
-  s.youtubeViewers(now-1000,13,id);
+  s.youtubeViewers(now-1000,12,id);
   const options={sessionId:id,fromMs:0,toMs:now,youtubeAccount:'primary'};
   const before=s.analytics(options),summary=s.summary(),cards=s.sessions();
   s.youtubeSnapshot('secondary','collectionRole','secondary',now);

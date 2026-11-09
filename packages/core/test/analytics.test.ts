@@ -26,7 +26,7 @@ test('analytics keeps owners/bots out, unions linked identities, splits categori
         s.recordPoll(first, 'channel', { startedAtMs: base + 5 * minute, completedAtMs: base + 6 * minute, status: 'failed', userIds: ['regular'] });
         s.recordPoll(first, 'channel', { startedAtMs: base + 7 * minute, completedAtMs: base + 8 * minute, status: 'complete', userIds: ['regular'] });
         s.youtubeMessages('yt-owner', 'chat', [{ id: 'yt1', snippet: { type: 'textMessageEvent', publishedAt: new Date(base + minute).toISOString(), displayMessage: 'hello' }, authorDetails: { channelId: 'yt-regular', displayName: 'YouTubeRegular' } }, { id: 'yt-self', snippet: { type: 'textMessageEvent', publishedAt: new Date(base + minute).toISOString() }, authorDetails: { channelId: 'yt-owner', displayName: 'Me' } }, { id: 'yt-bot', snippet: { type: 'textMessageEvent', publishedAt: new Date(base + minute).toISOString() }, authorDetails: { channelId: 'yt-bot', displayName: 'streamelements' } }]);
-        s.youtubeViewers(base, 5);
+        s.youtubeViewers(base, 4);
         s.endSession(first, base + 10 * minute, 'observed');
         const second = recordedStream(s,'channel', 'two', base + 10 * minute, 'platform', base + 10 * minute);
         s.streamSample(second, base + 10 * minute, 'game', 'Game', 'Game again', 11);
@@ -238,11 +238,11 @@ test('asynchronous YouTube counts retain their actual sample minute rather than 
  const s=new StreamStore(':memory:');
  try {
   const sid=recordedStream(s,'channel','async-count',base,'platform',base);s.streamSample(sid,base,'game','Game','',13);
-  s.youtubeViewers(base+minute,5);
+  s.youtubeViewers(base+minute,4);
   const result=s.analytics({...opts,source:'youtube'});
   assert.equal(result.timeline.find(x=>x.at===base)?.viewers,null);
   assert.equal(result.timeline.find(x=>x.at===base+minute)?.viewers,4);
-  s.youtubeViewers(base+4*minute+1,6);
+  s.youtubeViewers(base+4*minute+1,5);
   assert.equal(s.analytics({...opts,source:'youtube'}).timeline.find(x=>x.at===base+4*minute)?.viewers,null);
  }finally{s.close();}
 });
@@ -347,7 +347,7 @@ test('comparison deduplicates linked Twitch/YouTube chatters and exposes indepen
  const s=new StreamStore(':memory:');try{
   const sid=s.observePlatformStream('twitch','channel','metric-stream',base,base,null,'Metrics')!;
   s.observePlatformStream('youtube','yt-owner','metric-video',base,base,null,'Metrics');
-  s.streamSample(sid,base,'game','Game','Metrics',11);s.youtubeViewers(base,5,sid);
+  s.streamSample(sid,base,'game','Game','Metrics',11);s.youtubeViewers(base,4,sid);
   s.streamSample(sid,base+minute,'game','Game','Metrics',21);
   const tw=s.ingest({source:'twitch',accountId:'channel',externalId:'metric-tw',type:'chat.message',actor:{externalId:'metric-author',displayName:'Linked'},occurredAtMs:base,receivedAtMs:base,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
   s.youtubeMessages('yt-owner','metric-chat',[{id:'metric-yt',snippet:{type:'textMessageEvent',publishedAt:new Date(base).toISOString(),displayMessage:'hello'},authorDetails:{channelId:'metric-author-yt',displayName:'Linked'}}]);
@@ -392,9 +392,9 @@ test('all viewers retain each known platform minute and mark missing counts as p
  try {
   const sid=recordedStream(s,'channel','partial-counts',base,'platform',base);
   s.streamSample(sid,base,'game','Game','',13);
-  s.youtubeViewers(base+minute,5);
+  s.youtubeViewers(base+minute,4);
   s.streamSample(sid,base+2*minute,'game','Game','',9);
-  s.youtubeViewers(base+2*minute,4);
+  s.youtubeViewers(base+2*minute,3);
   s.streamSample(sid,base+3*minute,'game','Game','',0);
   const rows=s.analytics(opts).timeline;
   for(const [offset,total,partial] of [[0,12,true],[1,4,true],[2,11,false],[3,0,true]] as const){

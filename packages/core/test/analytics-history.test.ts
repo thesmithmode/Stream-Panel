@@ -203,8 +203,8 @@ test('simulcast category switches filter YouTube metrics and donations in raw, h
  const s=new StreamStore(':memory:');try{
  const at=base+12*3600000,id=s.startSession('owner','categories',at,'platform',at);
  s.attachPlatformStream(id,'youtube','yt-owner','categories-video',at,at,null,'Same broadcast');
- s.streamSample(id,at,'dota','Dota 2','',11);s.youtubeViewers(at,5);
- s.streamSample(id,at+minute,'irl','IRL','',21);s.youtubeViewers(at+minute,9);
+ s.streamSample(id,at,'dota','Dota 2','',11);s.youtubeViewers(at,4);
+ s.streamSample(id,at+minute,'irl','IRL','',21);s.youtubeViewers(at+minute,8);
  s.youtubeMessages('yt-owner','chat',[{id:'dota-message',snippet:{type:'textMessageEvent',publishedAt:new Date(at+1000).toISOString()},authorDetails:{channelId:'viewer',displayName:'Viewer'}},{id:'irl-message',snippet:{type:'textMessageEvent',publishedAt:new Date(at+minute+1000).toISOString()},authorDetails:{channelId:'viewer',displayName:'Viewer'}}]);
  s.endSession(id,at+2*minute);
  const person=s.persons()[0]!.id as string;
