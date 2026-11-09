@@ -39,7 +39,7 @@ test('YouTube OAuth binds state and PKCE; refresh, owner filtering, durable curs
   for(let i=0;i<100 && yt.status.state!=='connected';i++)await new Promise(r=>setTimeout(r,10));
   assert.equal(yt.status.state,'connected',yt.status.detail);await yt.stop();
   assert.equal(config.value.youtube?.userId,'channel');assert.match(tokenBodies.at(-1)!,/code_verifier=/);
-  const data=await (db.call('youtubeData','channel') as Promise<any>);assert.equal(data.messages.length,1);assert.equal(data.snapshots.report.data.rows[0][1],42);
+  const data=await (db.call('youtubeData','channel') as Promise<any>);assert.equal(data.messages.length,1);assert.equal(data.snapshots.report.data.rows[0][1],42);assert.equal(data.snapshots.collectionRole.data,'primary');
   assert.equal(await yt.collectOnce(),90000);assert.equal((await (db.call('youtubeData','channel') as Promise<any>)).messages.length,1);
   assert.equal(calls.filter(x=>x.pathname.endsWith('/messages')).at(-1)?.searchParams.get('pageToken'),'cursor');
   config.value.youtube!.expiresAt=0;mode='invalid-token';await assert.rejects(yt.collectOnce(),/YOUTUBE_INVALID_TOKEN/);

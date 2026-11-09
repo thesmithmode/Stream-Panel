@@ -4,12 +4,14 @@ import type Database from 'better-sqlite3';
 export class SupplementaryChat {
  constructor(private db:Database.Database){}
  participants(session:string,botJson:string,now=Date.now(),activeOnly=false,includeExcluded=false){
+  const recording=this.db.prepare('SELECT started_at_ms,ended_at_ms FROM logical_sessions s WHERE id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)').get(session) as {started_at_ms:number;ended_at_ms:number|null}|undefined;
+  if(!recording)return [];
   return this.db.prepare(`SELECT y.person_id AS id,p.display_name AS name,y.display_name AS accountName,m.account_id AS accountId,
    count(*) AS messages,max(m.published_at_ms) AS lastMessageAt
    FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id
    JOIN persons p ON p.id=y.person_id
    JOIN youtube_snapshots role ON role.account_id=m.account_id AND role.key='collectionRole' AND role.payload_json='"secondary"'
-   WHERE m.published_at_ms<=? AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
+   WHERE m.published_at_ms>=? AND m.published_at_ms<=? AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
    AND EXISTS(SELECT 1 FROM logical_sessions s WHERE s.id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)
     AND m.published_at_ms>=s.started_at_ms AND m.published_at_ms<coalesce(s.ended_at_ms,?+1)
     AND (s.kind='manual' OR EXISTS(SELECT 1 FROM logical_platform_streams ps WHERE ps.session_id=s.id AND m.published_at_ms>=ps.started_at_ms AND m.published_at_ms<coalesce(ps.ended_at_ms,?+1))))
@@ -17,7 +19,7 @@ export class SupplementaryChat {
    AND (?=0 OR EXISTS(SELECT 1 FROM youtube_snapshots b,json_each(b.payload_json) video WHERE b.account_id=m.account_id AND b.key='broadcasts' AND b.updated_at_ms>? AND json_extract(video.value,'$.snippet.liveChatId')=m.chat_id))
    GROUP BY y.person_id,m.account_id
    HAVING ?=0 OR max(m.published_at_ms)>?
-   ORDER BY lastMessageAt DESC,y.person_id,m.account_id`).all(now,session,now,now,Number(includeExcluded),botJson,Number(activeOnly),now-180000,Number(activeOnly),now-600000) as {id:string;name:string;accountName:string;accountId:string;messages:number;lastMessageAt:number}[];
+   ORDER BY lastMessageAt DESC,y.person_id,m.account_id`).all(recording.started_at_ms,Math.min(now,recording.ended_at_ms??now),session,now,now,Number(includeExcluded),botJson,Number(activeOnly),now-180000,Number(activeOnly),now-600000) as {id:string;name:string;accountName:string;accountId:string;messages:number;lastMessageAt:number}[];
  }
  /** Only people known exclusively through supplementary YouTube receive this colour. */
  decorate<T>(rows:T[],personId:(row:T)=>string):(T&{youtubeSecondary:boolean})[]{

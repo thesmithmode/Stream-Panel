@@ -101,7 +101,7 @@ export class YouTubeConnection {
     this.config.value.youtube = tokens;
     this.config.value.youtubeAccountId = tokens.userId;
     await this.db.call("youtubeSnapshot", tokens.userId, this.mode.chatOnly?"chatChannel":"channel", items[0], this.now());
-    if(this.mode.chatOnly)await this.db.call("youtubeSnapshot",tokens.userId,"collectionRole","secondary",this.now());
+    await this.db.call("youtubeSnapshot",tokens.userId,"collectionRole",this.mode.chatOnly?"secondary":"primary",this.now());
     await this.config.save();
     void this.start();
   }

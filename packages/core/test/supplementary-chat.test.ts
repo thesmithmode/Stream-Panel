@@ -16,6 +16,7 @@ test('supplementary names, recent events and live authors are visible without ch
   s.youtubeSnapshot('secondary','broadcasts',[{id:'extra-video',snippet:{liveChatId:'extra-chat'}}],now);
   s.youtubeMessages('secondary','extra-chat',[msg('extra','extra-viewer',now-1000),msg('shared','main-viewer',now-500),msg('old','too-old',start-1000)] ,'extra-video');
   assert.deepEqual(s.analytics(options),before);assert.deepEqual(s.summary(),summary);assert.deepEqual(s.sessions(),cards);
+  assert.equal(s.supplementaryParticipants('missing',[],now).length,0);
   const participants=s.supplementaryParticipants(id,[],now);assert.equal(participants.length,2);assert.equal(participants[0]!.id,'youtube:main-viewer');
   const live=s.currentChat(id,[],false,now);assert.equal(live.people.length,2);
   assert.equal(live.people.find(p=>p.personId==='youtube:main-viewer')!.messages,2);
@@ -38,6 +39,7 @@ test('supplementary lists exclude owners and bots, respect manual intervals and 
   s.youtubeMessages('second','chat',[msg('bot','bot',now-1000),{...msg('owner','second',now-1000),authorDetails:{channelId:'second',displayName:'Owner',isChatOwner:true}},msg('viewer','normal',now-1000)]);
   assert.equal(s.supplementaryParticipants(id,['owner:youtube:bot'],now).length,1);
   assert.equal(new SupplementaryChat((s as any).db).participants(id,'["bot"]',now,false,true).length,3);
+  s.youtubeSnapshot('second','collectionRole','primary',now);assert.equal(s.supplementaryParticipants(id,[],now).length,0);assert.equal(s.person('youtube:normal').youtubeSecondary,false);
   s.deleteSession(id,now);assert.equal(s.supplementaryParticipants(id,[],now).length,0);
  }finally{s.close();}
 });
