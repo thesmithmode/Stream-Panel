@@ -58,7 +58,7 @@ export class StreamFacts {
  private scope(options:AnalyticsOptions,id:string,start:number,end:number|null){
   const q={...options,corePeople:undefined,rollingCore:undefined,sessionId:id,fromMs:Math.max(options.fromMs,start),toMs:Math.min(options.toMs,end??options.toMs)};
   const members=this.db.prepare('SELECT member_id FROM session_groups WHERE group_id=? ORDER BY member_id').all(id);
-  const fields={format:6,members,from:q.fromMs,to:end===null&&q.toMs>=Date.now()-120000?'live':q.toMs,source:q.source??'all',category:q.category??'',timezone:q.timezone??'Europe/Moscow',chatWindowMinutes:q.chatWindowMinutes??5,excluded:[...botExclusionSet(q.excludedLogins??[])].sort(),owner:q.ownerId??'',youtube:q.youtubeAccount??'',regularThresholdPercent:q.regularThresholdPercent??80};
+  const fields={...(end===null?{liveScope:q.toMs%60000===0?'minute-boundary':'partial-minute'}:{}),format:6,members,from:q.fromMs,to:end===null&&q.toMs>=Date.now()-120000?'live':q.toMs,source:q.source??'all',category:q.category??'',timezone:q.timezone??'Europe/Moscow',chatWindowMinutes:q.chatWindowMinutes??5,excluded:[...botExclusionSet(q.excludedLogins??[])].sort(),owner:q.ownerId??'',youtube:q.youtubeAccount??'',regularThresholdPercent:q.regularThresholdPercent??80};
   return {q,key:createHash('sha256').update(JSON.stringify(fields)).digest('hex'),complete:end!==null&&q.fromMs===start&&q.toMs===end};
 
  }

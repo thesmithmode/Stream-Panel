@@ -60,7 +60,7 @@ test('YouTube chat outside a confirmed YouTube broadcast stays raw and never inh
  }finally{s.close();}
 });
 
-test('YouTube owner flags, channel IDs and former bot aliases exclude personal aggregates without deleting raw events',()=>{
+test('YouTube owners stay out of statistics while all other YouTube accounts are humans regardless of nickname',()=>{
  const s=new StreamStore(':memory:');try{
   s.observePlatformStream('youtube','channel','video',at,at,null,'YouTube');
   s.youtubeMessages('channel','chat',[
@@ -68,12 +68,14 @@ test('YouTube owner flags, channel IDs and former bot aliases exclude personal a
    {...message('owner-flag','different-owner','Other owner'),authorDetails:{channelId:'different-owner',displayName:'Other owner',isChatOwner:true}},
    message('bot-before','bot','StreamElements'),message('bot-after','bot','NewName',at+minute)
   ]);
-  for(const id of ['channel','different-owner','bot']){
+  for(const id of ['channel','different-owner']){
    assert.equal(s.personStats(`youtube:${id}`).messageCount,0);
    assert.equal(s.personStats(`youtube:${id}`).estimatedChatMinutes,0);
-   assert.equal(s.persons().find(p=>p.id===`youtube:${id}`)!.is_bot,1);
   }
-  assert.equal(s.analytics({fromMs:at,toMs:at+3*minute,youtubeAccount:'channel'}).summary.entities,0);
+  for(const id of ['channel','different-owner','bot'])assert.equal(s.persons().find(p=>p.id===`youtube:${id}`)!.is_bot,0);
+  assert.equal(s.personStats('youtube:bot').messageCount,2);
+  assert.ok(Number(s.personStats('youtube:bot').estimatedChatMinutes)>0);
+  assert.equal(s.analytics({fromMs:at,toMs:at+3*minute,youtubeAccount:'channel'}).summary.entities,1);
   assert.equal(s.youtubeData('channel').messages.length,4);
  }finally{s.close();}
 });
@@ -137,16 +139,16 @@ test('stream summary includes every platform participant, deduplicates linked pe
   const session=s.observePlatformStream('youtube','channel','video',at,at,null,'Stream')!;
   s.observePlatformStream('twitch','owner','stream',at,at,null,'Stream');const tw=twitch(s);
   s.youtubeMessages('channel','chat',[message('first','author','Author'),message('second','author','Author',at+minute),message('other','other','Other'),message('bot','bot','StreamElements'),message('owner','channel','Owner')]);
-  let summary=s.summary(session);assert.equal(summary.messages,4);assert.equal(summary.uniquePersons,3);
-  assert.equal((summary.participants as any[]).length,3);
+  let summary=s.summary(session);assert.equal(summary.messages,5);assert.equal(summary.uniquePersons,4);
+  assert.equal((summary.participants as any[]).length,4);
   s.merge('youtube:author',tw,s.personRevision('youtube:author'),s.personRevision(tw),at+minute);
-  summary=s.summary(session);assert.equal(summary.messages,4);assert.equal(summary.uniquePersons,2);
+  summary=s.summary(session);assert.equal(summary.messages,5);assert.equal(summary.uniquePersons,3);
   assert.equal((summary.participants as any[]).find(p=>p.personId===tw).messages,3);
-  assert.equal(s.summary().messages,4);
+  assert.equal(s.summary().messages,5);
   s.endSession(session,at+3*minute);
   const other=s.observePlatformStream('youtube','elsewhere','different',at+4*minute,at+4*minute,null,'Separate')!;
   s.youtubeMessages('elsewhere','another',[message('third','third','Third',at+4*minute)]);
-  assert.equal(s.summary(session).messages,4);assert.equal(s.summary(other).messages,1);assert.equal(s.summary().messages,5);
+  assert.equal(s.summary(session).messages,5);assert.equal(s.summary(other).messages,1);assert.equal(s.summary().messages,6);
  }finally{s.close();}
 });
 

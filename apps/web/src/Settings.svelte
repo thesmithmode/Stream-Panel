@@ -1,12 +1,12 @@
 <script lang="ts">
  import Help from './Help.svelte';
  import {api} from './api';import BackupFiles from './BackupFiles.svelte';
- let {profile,status}:{profile:string;status:any}=$props();
+ let {profile,status,onChange}:{profile:string;status:any;onChange:()=>Promise<void>}=$props();
  const canManageBackups=$derived(status.user?.canManageBackups ?? !status.serverMode);
  let rules=$state<any>(null),busy=$state(false),message=$state(''),error=$state('');
  $effect(()=>{void profile;let cancelled=false;void api('settings').then(value=>{if(!cancelled)rules=value;}).catch(e=>{if(!cancelled)error=e.message;});return()=>{cancelled=true;};});
  async function backup(){busy=true;error='';message='';try{const result=await api('backup',{});message=result.cloudError?'Локальная копия сохранена. Облачная загрузка не удалась.':`Резервная копия: ${result.filename}`;}catch(e){error=(e as Error).message;}finally{busy=false;}}
- async function save(){busy=true;error='';message='';try{rules=await api('settings',rules);message='Настройки профиля сохранены.';}catch(e){error=(e as Error).message;}finally{busy=false;}}
+ async function save(){busy=true;error='';message='';try{rules=await api('settings',rules);await onChange();message='Настройки профиля сохранены.';}catch(e){error=(e as Error).message;}finally{busy=false;}}
 </script>
 <section class="panel profile-settings"><header><h2>Аналитика · {profile==='gulnaz'?'Гульназ':'Руслан'}</h2><Help id="profile-rules-help" label="О правилах аналитики" text="Ядро определяется за выбранный период при наличии минимум 12 эфиров. Ручная отметка ядра в карточке человека имеет приоритет. Порог — доля эфиров с суммарной активностью не менее 20% длительности. Активность связанных площадок объединяется."/></header>
  {#if rules}<form class="settings-body" onsubmit={e=>{e.preventDefault();void save();}}>
@@ -15,6 +15,8 @@
    <label>Порог посещаемости, %<input type="number" min="0" max="100" step="1" required bind:value={rules.regularThresholdPercent}/></label>
    <label>Окно активности YouTube, мин<input type="number" min="1" max="30" required bind:value={rules.chatWindowMinutes}/></label>
    <label>Часовой пояс аналитики<select bind:value={rules.timezone}><option value="Europe/Moscow">Москва</option><option value="UTC">UTC</option><option value="Asia/Yekaterinburg">Екатеринбург</option></select></label>
+   <label class="check"><input type="checkbox" bind:checked={rules.highlightBots}/>Выделять ботов голубым</label>
+   <label class="check"><input type="checkbox" bind:checked={rules.highlightHumans}/>Выделять людей красным</label>
   </div><button class="primary" disabled={busy}>{busy?'Сохраняем…':'Сохранить настройки'}</button>
  </form>{:else}<p class="settings-body" role="status">Загружаем настройки…</p>{/if}
  {#if message}<p class="settings-body" role="status">{message}</p>{/if}{#if error}<p class="settings-body notice error" role="alert">{error}</p>{/if}

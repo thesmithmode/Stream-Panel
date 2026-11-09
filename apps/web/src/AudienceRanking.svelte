@@ -36,7 +36,7 @@
   <tbody>{#each ranked.slice(0,limit) as person (person.id)}
    {@const regionId=`${id}-intervals-${person.id}`}
    {@const hasIntervals=showIntervals&&!!person.intervals?.length}
-   <tr class="participant-row" class:expanded={expanded.has(person.id)&&hasIntervals}>
+   <tr class="participant-row" class:expanded={expanded.has(person.id)&&hasIntervals} class:bot-person={person.is_bot} class:human-person={person.is_human}>
     <td><button class={`text-button person-name ${platformClass(person.accounts?.map(a=>a.source))}`} class:with-nicks={platformNicknames(person).length>0} title={person.name} onclick={()=>onPerson(person.id)}>{person.name}</button>
      {#if platformNicknames(person).length}<div class="platform-nicks">{#each platformNicknames(person) as account}<span class:twitch={account.source==='twitch'} class:youtube={account.source==='youtube'} title={`${account.source==='twitch'?'Twitch':'YouTube'} · ${account.name}`}>{account.name}</span>{/each}</div>{/if}
      {#if currencies.some(c=>BigInt(person.donations?.[c]??'0')!==0n)}<div class="phone-donations">{#each currencies as c}{#if BigInt(person.donations?.[c]??'0')!==0n}<span>{money(person.donations![c]!,c)}</span>{/if}{/each}</div>{/if}

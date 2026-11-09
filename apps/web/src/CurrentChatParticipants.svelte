@@ -42,7 +42,7 @@
  <th scope="col" aria-sort={sort===key?(descending?'descending':'ascending'):'none'}><button onclick={()=>order(key as ChatSort)} aria-label={`${desktop}${arrow(key as ChatSort)}`}><span class="desktop-label">{desktop}</span><span class="phone-label">{phone}</span>{arrow(key as ChatSort)}</button></th>
  {/each}
  </tr></thead><tbody>
- {#each rows.slice(0,limit) as person (person.personId)}<tr data-chatter-key={person.key}>
+ {#each rows.slice(0,limit) as person (person.personId)}<tr data-chatter-key={person.key} class:bot-person={person.is_bot} class:human-person={person.is_human}>
  <td><button class={`text-button person-name ${platformClass(person.accounts?.map(a=>a.source)??[person.source])}`} title={person.name} onclick={()=>onPerson(person.personId)}>{person.source==='youtube'&&person.name===person.accountName&&!person.name.startsWith('@')?'@':''}{person.name}</button>{#each person.accounts??[] as account}{#if (person.accounts?.length??0)>1||account.name!==person.name}<small class:twitch={account.source==='twitch'} class:youtube={account.source==='youtube'} style="display:block">{account.source==='youtube'&&!account.name.startsWith('@')?'@':''}{account.name}</small>{/if}{/each}</td>
  <td>{person.minutes===null?'—':durationLabel(person.minutes)}</td><td>{person.messages.toLocaleString('ru-RU')}</td><td><time title={person.lastMessageAt===null?'Не писал в текущем стриме':new Date(person.lastMessageAt).toLocaleString('ru-RU')}>{messageAge(person.lastMessageAt,now)}</time></td>
  </tr>{:else}<tr><td colspan="4" class="empty-small">{search?'Никто не найден':data.observedAt===null&&data.twitchState!=='inactive'?'Данные списка Twitch пока недоступны.':'Нет участников в последнем списке Twitch и недавних сообщений YouTube.'}</td></tr>{/each}

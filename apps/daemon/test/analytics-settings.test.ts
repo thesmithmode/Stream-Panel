@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {analyticsSettings} from '../src/analytics-settings.js';
+import {analyticsSettings,analyticsBotLogins,analyticsCalculationSettings} from '../src/analytics-settings.js';
 test('analytics settings preserve valid thresholds and reject invalid persistent rules',()=>{
  const defaults=analyticsSettings();assert.equal(defaults.regularThresholdPercent,80);assert.equal(defaults.coreWindowDays,90);
  for(const coreWindowDays of [30,90,180])assert.equal(analyticsSettings({coreWindowDays}).coreWindowDays,coreWindowDays);
@@ -14,4 +14,27 @@ test('existing profile threshold is raised once; subsequent saved preferences su
   const upgrade=new Configuration(dir);await upgrade.load();assert.equal(upgrade.value.analyticsSettings!.regularThresholdPercent,80);
   upgrade.value.analyticsSettings=analyticsSettings({regularThresholdPercent:70});await upgrade.save();const restart=new Configuration(dir);await restart.load();assert.equal(restart.value.analyticsSettings!.regularThresholdPercent,70);
  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('bot modes override profile defaults without conflating highlighting or accepting malformed filters',()=>{
+ const config={excludedBotLogins:['custom-bot'],analyticsSettings:analyticsSettings()};
+ assert.deepEqual(analyticsBotLogins({},config),['custom-bot']);
+ for(const includeBots of ['1','true'])assert.equal(analyticsBotLogins({includeBots},config),false);
+ config.analyticsSettings.includeBots=true;
+ assert.equal(analyticsBotLogins({},config),false);
+ for(const includeBots of ['0','false'])assert.deepEqual(analyticsBotLogins({includeBots},config),['custom-bot']);
+ for(const includeBots of ['bad',1,true,null])assert.throws(()=>analyticsBotLogins({includeBots},config),/INVALID_BOT_FILTER/);
+ for(const key of ['includeBots','highlightBots','highlightHumans'])assert.throws(()=>analyticsSettings({[key]:'true'}),/INVALID_ANALYTICS_SETTINGS/);
+});
+test('highlight and bot preferences persist independently in each profile configuration',async()=>{
+ const {mkdtemp,rm}=await import('node:fs/promises'),{join}=await import('node:path'),{tmpdir}=await import('node:os'),{Configuration}=await import('../src/config.js');
+ const dir=await mkdtemp(join(tmpdir(),'sp-bot-preferences-'));
+ try{
+  for(const profile of ['ruslan','gulnaz']){const c=new Configuration(join(dir,profile));await c.load();c.value.analyticsSettings=analyticsSettings({includeBots:profile==='gulnaz',highlightBots:profile==='ruslan',highlightHumans:profile==='gulnaz'});await c.save();}
+  for(const profile of ['gulnaz','ruslan']){const c=new Configuration(join(dir,profile));await c.load();assert.equal(c.value.analyticsSettings!.includeBots,profile==='gulnaz');assert.equal(c.value.analyticsSettings!.highlightBots,profile==='ruslan');assert.equal(c.value.analyticsSettings!.highlightHumans,profile==='gulnaz');}
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('highlighting leaves calculation settings and historical variants unchanged',()=>{
+ assert.deepEqual(analyticsCalculationSettings({highlightBots:false,highlightHumans:false,includeBots:true}),analyticsCalculationSettings());
 });

@@ -27,11 +27,11 @@ test('stream cards and detail count the same messages after owner, bot, shared-c
   for(const excluded of [[],['CustomBot']]){
    const card=s.sessions(id,0,100,excluded)[0]!;
    assert.equal(card.messageCount,s.summary(id,excluded,false).messages);
-   assert.equal(card.messageCount,excluded.length?2:3);
+   assert.equal(card.messageCount,excluded.length?4:5);
   }
  }finally{s.close();}
 });
-test('donation statistics exclude bot tips consistently while ledger retains them and old tips stay unlinked',()=>{
+test('DonationAlerts accounts count as humans regardless of bot-like nicknames and old tips stay unlinked',()=>{
  const s=new StreamStore(':memory:');try{
   const id=s.observePlatformStream('twitch','owner','stream',at,at,null,'Stream')!;
   const tip={source:'donationalerts' as const,accountId:'da',externalId:'live-tip',type:'donation',actor:{externalId:daDonorExternalId('StreamElements'),displayName:'StreamElements'},occurredAtMs:at+minute,receivedAtMs:at+minute,sourceTime:null,timeQuality:'provider' as const,transport:'rest' as const,payload:{amountMinor:'22800',currency:'RUB'}};
@@ -39,9 +39,9 @@ test('donation statistics exclude bot tips consistently while ledger retains the
   s.ingest(tip);s.ingest({...real,externalId:'real-tip'});s.ingest({...real,externalId:'before-stream',occurredAtMs:at-minute});
   s.endSession(id,at+2*minute);
   assert.equal(s.donations().total,3);
-  assert.equal(s.channelOverview().donations,2);assert.deepEqual(s.channelOverview().totals,{RUB:'45600'});
-  assert.equal(s.summary(id,[],false).donations,1);assert.equal(s.sessions(id)[0]!.donationCount,1);
-  assert.deepEqual(s.summary(id,[],false).totals,{RUB:'22800'});
+  assert.equal(s.channelOverview().donations,3);assert.deepEqual(s.channelOverview().totals,{RUB:'68400'});
+  assert.equal(s.summary(id,[],false).donations,2);assert.equal(s.sessions(id)[0]!.donationCount,2);
+  assert.deepEqual(s.summary(id,[],false).totals,{RUB:'45600'});
   assert.deepEqual(s.donation(eventKey({...tip,externalId:'before-stream'})).sessionIds,[]);
  }finally{s.close();}
 });

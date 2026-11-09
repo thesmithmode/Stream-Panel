@@ -84,7 +84,8 @@ export interface Event {
 }
 export interface PlatformLink {identityId:string;source:'twitch'|'youtube';url:string}
 export interface Person {
-  is_bot?: number;
+  is_bot?: number|boolean;
+  is_human?:boolean;is_donor?:boolean;
   id: string;
   display_name: string;
   revision: number;
@@ -154,6 +155,7 @@ export interface PersonStats {
   observedBeforeFollowMinutes: number | null;
 }
 export interface PersonTop {
+  is_bot?:boolean|number;is_human?:boolean;is_donor?:boolean;
   id: string;
   display_name: string;
   revision: number;

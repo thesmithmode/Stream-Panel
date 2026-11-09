@@ -27,3 +27,14 @@ test('shutdown cancels pending preparation without reporting a database failure 
  const stop=startAnalyticsWarmer(()=>[runtime] as any,()=>true,()=>failures++);stop();reject(new Error('DB_WORKER_STOPPED'));await settle();t.mock.timers.tick(60000);await settle();
  assert.equal(calls,1);assert.equal(failures,0);t.mock.timers.reset();
 });
+test('changing highlighting does not rebuild reports and the selected bot mode is warmed separately',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});let calls=0,last:unknown;
+ const cfg={excludedBotLogins:[],analyticsSettings:{highlightBots:true,highlightHumans:true,includeBots:false}};
+ const runtime={configuration:{value:cfg},db:{call:async(method:string,options?:unknown)=>method==='changes'?changes(1):method==='advanceAnalytics'?{pending:0}:(last=options,calls++,{preparing:false})}};
+ const stop=startAnalyticsWarmer(()=>[runtime] as any,()=>true,()=>{});
+ try{
+  await settle();assert.equal(calls,1);assert.equal('highlightBots' in (last as object),false);
+  cfg.analyticsSettings.highlightBots=false;cfg.analyticsSettings.highlightHumans=false;t.mock.timers.tick(60000);await settle();assert.equal(calls,1);
+  cfg.analyticsSettings.includeBots=true;t.mock.timers.tick(60000);await settle();assert.equal(calls,2);assert.equal((last as {excludedLogins:unknown}).excludedLogins,false);
+ }finally{stop();t.mock.timers.reset();}
+});
