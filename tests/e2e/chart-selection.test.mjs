@@ -9,7 +9,7 @@ import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';
 test('stream bar selection has four unclipped edges and survives focus changes',{timeout:60000},async()=>{
  const app=await application();let browser;
  try{
-  const id=await seed(app);await app.db.call('streamSample',id,Date.now()-300000,'game','Game','',9);await app.db.call('endSession',id,Date.now());
+  const id=await seed(app);await app.db.call('streamSample',id,Date.now()-300000,'game','Game','',10);await app.db.call('endSession',id,Date.now());
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:900}});page.setDefaultTimeout(8000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await goto(page,app.bootstrap());assert.equal(await page.title(),'Stream Panel');

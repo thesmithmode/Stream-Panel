@@ -10,7 +10,7 @@ import {refreshData} from '../helpers/navigation.mjs';
 test('desktop charts use readable heights, empty stream sections stay hidden and refresh controls follow the viewport',{timeout:60000},async()=>{
  const a=await application();let browser;
  try{
-  const sid=await seed(a),now=Date.now();await a.db.call('streamSample',sid,now-300000,'game','Game','Desktop workspace',12);
+  const sid=await seed(a),now=Date.now();await a.db.call('streamSample',sid,now-300000,'game','Game','Desktop workspace',13);
   browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1440,height:1000}});page.setDefaultTimeout(10000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/api/v1/insights?*',r=>r.fulfill({json:{insights:[]}}));

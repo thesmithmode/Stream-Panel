@@ -29,7 +29,7 @@ test('one toolbar controls subscriber windows, custom dates validate locally, an
   a.configuration.value.youtubeAccountId='yt';
   for(const [ago,total] of [[70,50],[20,55],[1,56]]){
    const at=now-ago*day,id=await a.db.call('observePlatformStream','twitch','owner',`review-${ago}`,at,at,null,'Обзор интерфейса');
-   await a.db.call('streamSample',id,at,'game','Game','',10);await a.db.call('endSession',id,at+60000);
+   await a.db.call('streamSample',id,at,'game','Game','',11);await a.db.call('endSession',id,at+60000);
    await a.db.call('followingSnapshot','twitch','owner',[],true,at,total);
    await a.db.call('youtubeSnapshot','yt','channel',{statistics:{subscriberCount:String(total-20)}},at);
   }

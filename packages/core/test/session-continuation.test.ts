@@ -10,12 +10,12 @@ test('a restart under 30 minutes preserves the recording and excludes its break 
  let store=new StreamStore(path);
  try {
   const first=store.observePlatformStream('twitch','owner','first',60000,60000,null,'First')!;
-  store.streamSample(first,60000,'game','Game','First',4);
+  store.streamSample(first,60000,'game','Game','First',5);
   store.endSession(first,180000);
   store.close();store=new StreamStore(path);
   const next=store.observePlatformStream('twitch','owner','second',600000,600000,null,'Second')!;
   assert.equal(next,first);
-  store.streamSample(next,600000,'game','Game','Second',5);
+  store.streamSample(next,600000,'game','Game','Second',6);
   store.endSession(next,720000);
   assert.equal(store.sessions().length,1);
   assert.equal(store.sessions()[0]!.started_at_ms,60000);

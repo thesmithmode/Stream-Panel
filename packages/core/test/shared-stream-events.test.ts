@@ -6,7 +6,7 @@ test('Twitch events attach to a YouTube-first logical stream and preserve timest
  try {
   const id=store.observePlatformStream('youtube','yt','video',at,at,null,'Live')!;
   store.observePlatformStream('twitch','tw','broadcast',at,at,null,'Live');
-  store.streamSample(id,at,'dota','Dota 2','First',10);
+  store.streamSample(id,at,'dota','Dota 2','First',11);
   const event=(externalId:string,type:string,time:number,payload:Record<string,unknown>)=>({source:'twitch' as const,accountId:'tw',externalId,type,actor:null,occurredAtMs:time,receivedAtMs:time,sourceTime:null,timeQuality:'provider' as const,transport:'eventsub' as const,payload});
   store.ingest(event('update','channel.update',at+60000,{categoryId:'wow',categoryName:'World of Warcraft',title:'Second'}));
   assert.equal(store.events(id).length,1);

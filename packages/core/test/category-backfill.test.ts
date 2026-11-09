@@ -15,12 +15,12 @@ test('late Twitch detection restores confirmed category changes without inventin
   const session=store.observePlatformStream('youtube','youtube-account','video',1000,1000,null,'YouTube')!;
   update(store,'before-start',900,'old');update(store,'wow-change',1100,'wow');update(store,'dota-change',1200,'dota');
   update(store,'future',2100,'future');update(store,'other-account',1300,'other','other-account');
-  store.streamSample(session,1200,'','','',15);store.youtubeViewers(1200,20,session);
+  store.streamSample(session,1200,'','','',16);store.youtubeViewers(1200,20,session);
   assert.equal(store.observePlatformStream('twitch','twitch-account','stream',1000,2000,null,'Twitch'),session);
   const rows=db.prepare('SELECT observed_at_ms,category_id,category_name,title,twitch_viewers,youtube_viewers FROM stream_samples WHERE session_id=? ORDER BY observed_at_ms').all(session);
   assert.deepEqual(rows,[
    {observed_at_ms:1100,category_id:'wow',category_name:'WOW',title:'Title wow',twitch_viewers:null,youtube_viewers:null},
-   {observed_at_ms:1200,category_id:'dota',category_name:'DOTA',title:'Title dota',twitch_viewers:15,youtube_viewers:20},
+   {observed_at_ms:1200,category_id:'dota',category_name:'DOTA',title:'Title dota',twitch_viewers:16,youtube_viewers:20},
   ]);
   assert.equal(store.observePlatformStream('twitch','twitch-account','stream',1000,2000,null,'Twitch'),session);
   assert.deepEqual(db.prepare('SELECT * FROM stream_samples WHERE session_id=? ORDER BY observed_at_ms').all(session).length,2);

@@ -40,7 +40,7 @@ test('merge displays source tags without moving their origin and undo retains th
 test('one core classification drives minute stacks, categories and stream comparison with manual include and exclude',()=>{
  const s=new StreamStore(':memory:');const at=Date.UTC(2026,9,1),m=60000;
  try {
-  const sid=s.startSession('channel','stream',at,'platform',at);s.streamSample(sid,at,'game','Game','',10);
+  const sid=s.startSession('channel','stream',at,'platform',at);s.streamSample(sid,at,'game','Game','',11);
   const id=s.ingest(event('viewer',at)).personId!;
   s.recordPoll(sid,'channel',{startedAtMs:at,completedAtMs:at+m,status:'complete',userIds:['viewer']});s.endSession(sid,at+2*m);
   const query={fromMs:at,toMs:at+2*m,minSessions:2,minMinutes:30,minMessages:5};
@@ -58,7 +58,7 @@ test('one core classification drives minute stacks, categories and stream compar
 test('manual core cannot resurrect a bot and donation-only supporters do not acquire attendance',()=>{
  const s=new StreamStore(':memory:');const at=Date.UTC(2026,9,1),m=60000;
  try {
-  const sid=s.startSession('channel','stream',at,'platform',at);s.streamSample(sid,at,'game','Game','',10);
+  const sid=s.startSession('channel','stream',at,'platform',at);s.streamSample(sid,at,'game','Game','',11);
   const bot=s.ingest({...event('bot',at),actor:{externalId:'bot',displayName:'StreamElements'}}).personId!;
   const donor=s.ingest({...event('donor',at),source:'donationalerts',type:'donation',actor:{externalId:'name:donor',displayName:'Donor'},payload:{amountMinor:'100',currency:'RUB'}}).personId!;
   s.setPersonMetadata(bot,[],true,s.personRevision(bot));s.setPersonMetadata(donor,['Supporter'],true,s.personRevision(donor));s.endSession(sid,at+2*m);

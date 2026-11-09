@@ -27,11 +27,11 @@ test('a shared worker crash fails both clients once and a replacement reads thei
 test('writes through another client invalidate long-lived analytics without crossing profile boundaries',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-worker-cache-')),path=join(dir,'data.sqlite'),a=new StoreClient(path,'ruslan'),b=new StoreClient(path,'ruslan'),other=new StoreClient(path,'gulnaz');
  try{
-  await Promise.all([a.ready,b.ready,other.ready]);const at=Date.UTC(2026,9,1),sid=String(await a.call('startSession','owner','shared-cache',at,'platform',at));await a.call('streamSample',sid,at,'game','Game','',3);await a.call('endSession',sid,at+60000);
+  await Promise.all([a.ready,b.ready,other.ready]);const at=Date.UTC(2026,9,1),sid=String(await a.call('startSession','owner','shared-cache',at,'platform',at));await a.call('streamSample',sid,at,'game','Game','',4);await a.call('endSession',sid,at+60000);
   const query={fromMs:at,toMs:at+120000};assert.equal((await a.call('analytics',query)).streamComparison[0]!.viewers.twitch.mean,3);
   const calls=a.queueStatus().operations.analytics!.calls;assert.equal((await a.call('analytics',query)).summary.streams,1);assert.equal(a.queueStatus().operations.analytics!.calls,calls);
   await other.call('analytics',query);const unrelatedCalls=other.queueStatus().operations.analytics!.calls;
-  await b.call('streamSample',sid,at,'game','Game','',9);assert.equal((await a.call('analytics',query)).streamComparison[0]!.viewers.twitch.mean,9);
+  await b.call('streamSample',sid,at,'game','Game','',10);assert.equal((await a.call('analytics',query)).streamComparison[0]!.viewers.twitch.mean,9);
   assert.equal((await other.call('analytics',query)).summary.streams,0);assert.equal(other.queueStatus().operations.analytics!.calls,unrelatedCalls,'writes never evict another profile cache');
  }finally{await Promise.all([a.stop(),b.stop(),other.stop()]);await rm(dir,{recursive:true,force:true});}
 });
@@ -39,7 +39,7 @@ test('writes through another client invalidate long-lived analytics without cros
 test('a failed analytics worker recovers once for concurrent readers while collection stays available',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-analytics-recovery-')),path=join(dir,'data.sqlite'),client=new StoreClient(path,'ruslan');
  try{
-  await client.ready;const at=Date.now()-60000,id=String(await client.call('startSession','owner','recovery',at,'platform',at));await client.call('streamSample',id,at,'game','Game','',3);await client.call('endSession',id,at+30000);
+  await client.ready;const at=Date.now()-60000,id=String(await client.call('startSession','owner','recovery',at,'platform',at));await client.call('streamSample',id,at,'game','Game','',4);await client.call('endSession',id,at+30000);
   const q={sessionId:id,fromMs:0,toMs:Date.now()};assert.equal((await client.call('analytics',q)).summary.streams,1);
   const collection=(client as any).worker,old=(client as any).analyticsClient.worker;assert.notEqual(collection,old);await old.terminate();
   assert.equal((await client.call('changes')).stream,null);

@@ -85,7 +85,7 @@ test('background publication never evicts an existing landing or user report at 
 test('real analytical responses survive a full file close and restart without aggregation',()=>{
  const dir=mkdtempSync(join(tmpdir(),'analytics-restart-')),path=join(dir,'data.sqlite');let s:StreamStore|undefined;
  try{
-  s=new StreamStore(path,'ruslan');const at=Date.UTC(2026,9,1),id=s.startSession('owner','stream',at,'platform',at);s.streamSample(id,at,'game','Game','',10);s.endSession(id,at+180000);
+  s=new StreamStore(path,'ruslan');const at=Date.UTC(2026,9,1),id=s.startSession('owner','stream',at,'platform',at);s.streamSample(id,at,'game','Game','',11);s.endSession(id,at+180000);
   const opts={fromMs:0,toMs:at+86400000,ownerId:'owner',summaryOnly:true,includeInsights:true};
   let first:any;do{first=s.analytics(opts);}while(first.preparing);s.close();s=undefined;
   s=new StreamStore(path,'ruslan');const h=(s as any).history as AnalyticsHistory;(h as any).aggregate=()=>{throw Error('restart rebuilt history');};

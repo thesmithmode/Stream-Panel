@@ -7,7 +7,7 @@ test('compact analytics and lazy clock endpoint preserve full API, filters, vali
   const auth=await a.app.inject({method:'POST',url:'/api/v1/bootstrap',headers:{host,origin:a.origin},payload:{key}});
   const headers={host,cookie:auth.cookies.map(c=>`${c.name}=${c.value}`).join('; ')};
   const at=Date.now()-86400000,id=await a.db.call('startSession','owner','clock',at,'platform',at);
-  await a.db.call('streamSample',id,at,'game','Game','',10);await a.db.call('endSession',id,at+3600000);
+  await a.db.call('streamSample',id,at,'game','Game','',11);await a.db.call('endSession',id,at+3600000);
   const query=new URLSearchParams({from:'0',to:String(Date.now()),mode:'summary',insights:'1',timezone:'Europe/Moscow'});
   const read=async(path,q=query)=>{for(let n=0;n<100;n++){const response=await a.app.inject({headers,url:`/api/v1/${path}?${q}`});assert.equal(response.statusCode,200,response.body);const result=response.json();if(!result.preparing)return result;}throw Error('not ready');};
   const full=await read('analytics');query.set('clockCompact','1');

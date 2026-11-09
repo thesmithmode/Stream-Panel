@@ -18,7 +18,7 @@ test("YouTube samples do not overwrite Twitch categories or attribute unknown-st
  try {
   const id = store.observePlatformStream("twitch","owner","t",at,at,"https://www.twitch.tv/owner","Live")!;
   store.observePlatformStream("youtube","channel","video",at,at,"https://www.youtube.com/watch?v=video","Live");
-  store.streamSample(id,at,"dota","Dota 2","Live",10);
+  store.streamSample(id,at,"dota","Dota 2","Live",11);
   store.youtubeViewers(at+60000,7,id);
   store.youtubeViewers(at+120000,99,null);
   const report:any = store.analytics({fromMs:at,toMs:at+180000,youtubeAccount:"channel"});

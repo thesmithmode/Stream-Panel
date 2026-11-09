@@ -8,7 +8,7 @@ test('large report pages, searches and clock visitor pages remain complete and r
  const setup=await createHostedApplication(dir,'http://127.0.0.1:47831',false);await setup.app.listen({host:'127.0.0.1',port:0});const port=setup.app.server.address().port;await setup.app.close();
  const origin=`http://127.0.0.1:${port}`,h=await createHostedApplication(dir,origin,false),db=h.runtimes.get('ruslan').db;
  const base=Math.floor((Date.now()-86400000)/86400000)*86400000+10*3600000,ids=Array.from({length:125},(_,i)=>`viewer${String(i).padStart(3,'0')}`);
- for(let n=0;n<2;n++){const at=base+n*3600000,sid=await db.call('startSession','owner',String(n),at,'platform',at);await db.call('streamSample',sid,at,'game','Game','',125);await db.call('recordPoll',sid,'owner',{startedAtMs:at,completedAtMs:at+59999,status:'complete',userIds:ids,userNames:Object.fromEntries(ids.map(id=>[id,id]))});await db.call('endSession',sid,at+120000);}
+ for(let n=0;n<2;n++){const at=base+n*3600000,sid=await db.call('startSession','owner',String(n),at,'platform',at);await db.call('streamSample',sid,at,'game','Game','',126);await db.call('recordPoll',sid,'owner',{startedAtMs:at,completedAtMs:at+59999,status:'complete',userIds:ids,userNames:Object.fromEntries(ids.map(id=>[id,id]))});await db.call('endSession',sid,at+120000);}
  await h.app.listen({host:'127.0.0.1',port});const browser=await launchBrowser(),context=await browser.newContext(),page=await context.newPage(),errors=[];
  page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(8000);
  const reportRequests=[],audienceResponses=[];

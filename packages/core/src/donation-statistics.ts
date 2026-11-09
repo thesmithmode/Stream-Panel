@@ -45,3 +45,12 @@ export function donationTotals(db:Database.Database,from:number|undefined,to:num
  const rows=db.prepare(`SELECT 'RUB' AS currency,sum_donation_minor(e.rub_amount_minor) AS amount FROM valued_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE e.type='donation' AND ${window.sql} AND (i.id IS NULL OR NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))) AND e.rub_amount_minor IS NOT NULL GROUP BY currency`).all(...window.args,botJson) as {currency:string;amount:string}[];
  return Object.fromEntries(rows.map(row=>[row.currency,row.amount]));
 }
+
+/** Compare exact integer strings, including amounts larger than SQLite integers. */
+export function maximumDonation(db:Database.Database,botJson:string){
+ return db.prepare(`SELECT e.id,e.rub_amount_minor AS amount,e.occurred_at_ms AS at,p.display_name AS name
+  FROM valued_events e LEFT JOIN identities i ON i.id=e.identity_id LEFT JOIN persons p ON p.id=i.person_id
+  WHERE e.type='donation' AND e.rub_amount_minor IS NOT NULL
+  AND (i.id IS NULL OR NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))))
+  ORDER BY length(ltrim(e.rub_amount_minor,'0')) DESC,ltrim(e.rub_amount_minor,'0') DESC,e.occurred_at_ms IS NULL,e.occurred_at_ms,e.id LIMIT 1`).get(botJson) as {id:string;amount:string;at:number|null;name:string|null}|undefined ?? null;
+}

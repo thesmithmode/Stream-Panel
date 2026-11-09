@@ -13,7 +13,7 @@ test('partial provider counters preserve values and secondary explanations in st
   const id=await app.db.call('observePlatformStream','twitch','owner','monday-stream',base,base,null,'Monday partial viewers');
   await app.db.call('observePlatformStream','youtube','channel','video_AAAAAA',base,base,null,'Monday partial viewers');
   for(const [i,count]of [8,4].entries()){
-   await app.db.call('streamSample',id,base+i*minute+3000,'dota','Dota 2','Monday partial viewers',count);
+   await app.db.call('streamSample',id,base+i*minute+3000,'dota','Dota 2','Monday partial viewers',((value)=>value===null||value<=0?value:value+1)(count));
    await app.db.call('youtubeViewers',base+i*minute+20000,null,id);
   }
   await app.db.call('endSession',id,base+2*minute);

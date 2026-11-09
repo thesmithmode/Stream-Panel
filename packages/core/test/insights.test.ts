@@ -50,7 +50,7 @@ test('incomplete, live, YouTube and sparse observations do not manufacture atten
 });
 test('source facts remain unchanged, owner exclusions and late corrections invalidate cached findings',()=>{
  const s=new StreamStore(':memory:');try{
-  for(let i=0;i<5;i++){const at=base+i*day,id=s.startSession('owner',String(i),at,'platform',at);s.streamSample(id,at,'dota','Dota','Title',5);s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+59*minute,status:'complete',userIds:['quiet','owner'],userNames:{quiet:'Quiet'}});s.endSession(id,at+60*minute);}
+  for(let i=0;i<5;i++){const at=base+i*day,id=s.startSession('owner',String(i),at,'platform',at);s.streamSample(id,at,'dota','Dota','Title',6);s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+59*minute,status:'complete',userIds:['quiet','owner'],userNames:{quiet:'Quiet'}});s.endSession(id,at+60*minute);}
   const db=(s as any).db,before=db.prepare('SELECT count(*) n FROM events').get(),opts={fromMs:base,toMs:base+6*day,includeInsights:true,summaryOnly:true,ownerId:'owner'};
   let r=s.analytics(opts);while(r.preparing)r=s.analytics(opts);
   assert.ok(r.insights?.some(c=>c.kind==='silent_regular'));assert.ok(!JSON.stringify(r.insights).includes('owner'));assert.deepEqual(db.prepare('SELECT count(*) n FROM events').get(),before);
