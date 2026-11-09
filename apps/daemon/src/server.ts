@@ -16,7 +16,7 @@ import { mkdir, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StoreClient } from "./db.js";
-import { Configuration } from "./config.js";
+import { Configuration, secondaryYouTubeConfiguration } from "./config.js";
 import {
   TwitchConnection,
   type SocketFactory,
@@ -89,7 +89,7 @@ export async function createApplication(
         ? detail.statusCode
         : undefined;
     const clientFailure =
-      /^(INVALID_|MISSING_|TWITCH_|DA_|ANALYTICS_|BOT_NOT_ELIGIBLE$|UNSUPPORTED_CURRENCY$|SAME_PERSON$|EMPTY_PERSON$|ALREADY_UNDONE$|PLATFORM_SESSION_MANAGED_AUTOMATICALLY$)/.test(
+      /^(INVALID_|MISSING_|TWITCH_|DA_|ANALYTICS_|BOT_NOT_ELIGIBLE$|UNSUPPORTED_CURRENCY$|SAME_PERSON$|EMPTY_PERSON$|ALREADY_UNDONE$|PLATFORM_SESSION_MANAGED_AUTOMATICALLY$|SESSION_ACTIVE$|YOUTUBE_)/.test(
         safe,
       );
     reply
@@ -113,7 +113,8 @@ export async function createApplication(
   const sessions = new Map<string, { csrf: string; expires: number }>();
   const origin = options.origin ?? `http://127.0.0.1:${port}`;
   const callback = `${origin}/oauth/donationalerts/callback`;
-  const youtube = new YouTubeConnection(configuration, db, `${origin}/oauth/youtube/callback`, options.profile ?? "local", transports.youtube?.request);
+  const youtube = new YouTubeConnection(configuration, db, `${origin}/oauth/youtube/callback`, options.profile ?? "local", transports.youtube?.request,Date.now,{otherAccount:()=>configuration.value.youtubeSecondary?.userId});
+  const youtubeSecondary=new YouTubeConnection(secondaryYouTubeConfiguration(configuration),db,`${origin}/oauth/youtube/callback`,options.profile??"local",transports.youtube?.request,Date.now,{chatOnly:true,otherAccount:()=>configuration.value.youtube?.userId});
   const same = (a: string, b: string) => {
     const left = Buffer.from(a),
       right = Buffer.from(b);
@@ -199,7 +200,7 @@ export async function createApplication(
   registerDonationsRoutes(app, db, configuration);
   registerStreamsRoutes(app, db, configuration);
   const dataEpoch=randomUUID();
-  const connectionRevision=()=>createHash('sha256').update(JSON.stringify([configuration.publicView(),...[twitch.status,youtube.status,da.status].map(({state,account,detail})=>({state,account,detail}))])).digest('hex');
+  const connectionRevision=()=>createHash('sha256').update(JSON.stringify([configuration.publicView(),...[twitch.status,youtube.status,youtubeSecondary.status,da.status].map(({state,account,detail})=>({state,account,detail}))])).digest('hex');
   const sync=()=>({twitch:{lastSyncAt:twitch.status.lastSyncAt??null,lastFollowersAt:twitch.status.lastFollowersAt??null,lastEventAt:twitch.status.lastEventAt??null},youtube:{lastSyncAt:youtube.status.lastSyncAt??null,lastFollowersAt:youtube.status.lastFollowersAt??null},donationalerts:{lastSyncAt:da.status.lastSyncAt??null,lastEventAt:da.status.lastEventAt??null}});
   app.get('/api/v1/changes',async request=>{
     const q=object(request.query);
@@ -231,6 +232,7 @@ export async function createApplication(
     database:db.queueStatus(),
     release:process.env.STREAM_PANEL_RELEASE??'development',
     youtube: youtube.status,
+    youtubeSecondary:youtubeSecondary.status,
     twitch: twitch.status,
     donationalerts: da.status,
     device: twitch.device,
@@ -243,13 +245,13 @@ export async function createApplication(
 
   app.post("/api/v1/youtube/connect", async request => {
     const b = object(request.body);
-    return youtube.beginAuth(string(b.clientId), string(b.clientSecret));
+    return (b.account==='secondary'?youtubeSecondary:youtube).beginAuth(string(b.clientId), string(b.clientSecret));
   });
-  app.post("/api/v1/youtube/disconnect", async () => { await youtube.disconnect(); return {ok:true}; });
+  app.post("/api/v1/youtube/disconnect", async request => { await (object(request.body).account==='secondary'?youtubeSecondary:youtube).disconnect(); return {ok:true}; });
   app.get("/api/v1/youtube/data", async () => db.call("youtubeData", configuration.value.youtube?.userId ?? configuration.value.youtubeAccountId ?? ""));
   app.get("/oauth/youtube/callback", async (request, reply) => {
-    try { const q = object(request.query); await youtube.finishAuth(string(q.code), string(q.state)); return reply.redirect(origin + "/"); }
-    catch { return reply.code(400).type("text/plain").send("YouTube: вход не завершён. Проверьте права и redirect URI; вернитесь в панель."); }
+    try { const q = object(request.query),state=string(q.state);const connection=youtubeSecondary.acceptsState(state)?youtubeSecondary:youtube.acceptsState(state)?youtube:null;if(!connection)throw new Error('INVALID_YOUTUBE_STATE');await connection.finishAuth(string(q.code),state); return reply.redirect(origin + "/"); }
+    catch(error) { return reply.code(400).type("text/plain").send((error as Error).message==='YOUTUBE_ACCOUNT_ALREADY_CONNECTED'?"Этот канал уже подключён. Вернитесь в панель и выберите второй канал Google.":"YouTube: вход не завершён. Проверьте права и redirect URI; вернитесь в панель."); }
   });
   app.post("/api/v1/twitch/connect", async (request) => {
     const b = object(request.body);
@@ -350,12 +352,12 @@ export async function createApplication(
       : options.staticFiles === false ? reply.code(404).send({ error: "NOT_FOUND" }) : reply.sendFile("index.html"),
   );
   app.addHook("onClose", async () => {
-    await Promise.all([twitch.stop(), da.stop(), youtube.stop()]);
+    await Promise.all([twitch.stop(), da.stop(), youtube.stop(),youtubeSecondary.stop()]);
     await db.stop();
   });
   if (connect) {
     void twitch.start();
-    void da.start(); void youtube.start();
+    void da.start(); void youtube.start();void youtubeSecondary.start();
   }
-  return { app, db, configuration, twitch, da, youtube, bootstrap };
+  return { app, db, configuration, twitch, da, youtube,youtubeSecondary, bootstrap };
 }

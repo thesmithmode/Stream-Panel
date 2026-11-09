@@ -23,8 +23,8 @@
  $effect(()=>{void search;limit=50;});
  onMount(()=>{
   const refresh=(event:Event)=>{if(document.hidden||!navigator.onLine)return;const force=(event as CustomEvent).detail?.force;if(force||Math.floor(Date.now()/60000)!==Math.floor(lastLoaded/60000))void load();};
-  window.addEventListener('sp:data-refresh',refresh);
-  return()=>{generation++;controller?.abort();window.removeEventListener('sp:data-refresh',refresh);};
+  window.addEventListener('sp:data-refresh',refresh);window.addEventListener('sp:clock-refresh',refresh);
+  return()=>{generation++;controller?.abort();window.removeEventListener('sp:data-refresh',refresh);window.removeEventListener('sp:clock-refresh',refresh);};
  });
 </script>
 <section class="panel current-chat" aria-label="Текущие зрители">
@@ -43,7 +43,7 @@
  {/each}
  </tr></thead><tbody>
  {#each rows.slice(0,limit) as person (person.personId)}<tr data-chatter-key={person.key} class:bot-person={person.is_bot} class:human-person={person.is_human}>
- <td><button class={`text-button person-name ${platformClass(person.accounts?.map(a=>a.source)??[person.source])}`} title={person.name} onclick={()=>onPerson(person.personId)}>{person.source==='youtube'&&person.name===person.accountName&&!person.name.startsWith('@')?'@':''}{person.name}</button>{#each person.accounts??[] as account}{#if (person.accounts?.length??0)>1||account.name!==person.name}<small class:twitch={account.source==='twitch'} class:youtube={account.source==='youtube'} style="display:block">{account.source==='youtube'&&!account.name.startsWith('@')?'@':''}{account.name}</small>{/if}{/each}</td>
+ <td><button class={`text-button person-name ${platformClass(person.accounts?.map(a=>a.source)??[person.source])}`} class:youtube-secondary={person.youtubeSecondary} title={person.name} onclick={()=>onPerson(person.personId)}>{person.source==='youtube'&&person.name===person.accountName&&!person.name.startsWith('@')?'@':''}{person.name}</button>{#each person.accounts??[] as account}{#if (person.accounts?.length??0)>1||account.name!==person.name}<small class:twitch={account.source==='twitch'} class:youtube={account.source==='youtube'} class:youtube-secondary={account.secondary} style="display:block">{account.source==='youtube'&&!account.name.startsWith('@')?'@':''}{account.name}</small>{/if}{/each}</td>
  <td>{person.minutes===null?'—':durationLabel(person.minutes)}</td><td>{person.messages.toLocaleString('ru-RU')}</td><td><time title={person.lastMessageAt===null?'Не писал в текущем стриме':new Date(person.lastMessageAt).toLocaleString('ru-RU')}>{messageAge(person.lastMessageAt,now)}</time></td>
  </tr>{:else}<tr><td colspan="4" class="empty-small">{search?'Никто не найден':data.observedAt===null&&data.twitchState!=='inactive'?'Данные списка Twitch пока недоступны.':'Нет участников в последнем списке Twitch и недавних сообщений YouTube.'}</td></tr>{/each}
  </tbody></table></div>

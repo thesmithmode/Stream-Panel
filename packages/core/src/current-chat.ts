@@ -3,10 +3,11 @@ import {AudienceQueries} from './audience-queries.js';
 import {unionSpans} from './analytics.js';
 
 export interface CurrentChatter {
+ youtubeSecondary?:boolean;
  is_bot?:boolean|number;is_human?:boolean;is_donor?:boolean;
  key:string; personId:string; name:string; accountName?:string; source:'twitch'|'youtube';
  minutes:number|null; messages:number; lastMessageAt:number|null;
- accounts?:{source:CurrentChatter['source'];name:string}[];
+ accounts?:{source:CurrentChatter['source'];name:string;secondary?:boolean}[];
 }
 export interface CurrentChat {
  live:boolean; twitchState:'inactive'|'waiting'|'current'|'stale';

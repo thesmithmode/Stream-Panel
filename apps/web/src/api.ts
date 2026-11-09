@@ -84,6 +84,7 @@ export interface Event {
 }
 export interface PlatformLink {identityId:string;source:'twitch'|'youtube';url:string}
 export interface Person {
+  youtubeSecondary?:boolean;
   is_bot?: number|boolean;
   is_human?:boolean;is_donor?:boolean;
   id: string;

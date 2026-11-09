@@ -20,6 +20,10 @@ export interface Config {
   youtubeAccountId?: string;
   youtubeClientSecret?: string;
   youtube?: Tokens;
+  youtubeSecondary?: Tokens;
+  youtubeSecondaryAccountId?:string;
+  youtubeSecondaryClientId?:string;
+  youtubeSecondaryClientSecret?:string;
   twitchClientId: string;
   twitch?: Tokens;
   daClientId: string;
@@ -111,6 +115,8 @@ export class Configuration {
   publicView() {
     return {
       youtubeClientId: this.value.youtubeClientId ?? "",
+      youtubeSecondaryClientId:this.value.youtubeSecondaryClientId??"",
+      hasYoutubeSecondarySecret:!!this.value.youtubeSecondaryClientSecret,
       hasYoutubeSecret: !!this.value.youtubeClientSecret,
       analyticsSettings: analyticsSettings(this.value.analyticsSettings),
       twitchClientId: this.value.twitchClientId,
@@ -122,4 +128,17 @@ export class Configuration {
       excludedBotLogins: this.value.excludedBotLogins,
     };
   }
+}
+
+/** Expose one account through the collector contract without copying mutable tokens. */
+export function secondaryYouTubeConfiguration(config:ConfigurationPort):ConfigurationPort {
+ const value=new Proxy(config.value,{
+  get(target,key){const mapped=secondaryKey(key);return Reflect.get(target,mapped);},
+  set(target,key,value){return Reflect.set(target,secondaryKey(key),value);},
+  deleteProperty(target,key){return Reflect.deleteProperty(target,secondaryKey(key));},
+ });
+ return {value,save:()=>config.save()};
+}
+function secondaryKey(key:string|symbol):string|symbol {
+ return ({youtube:'youtubeSecondary',youtubeAccountId:'youtubeSecondaryAccountId',youtubeClientId:'youtubeSecondaryClientId',youtubeClientSecret:'youtubeSecondaryClientSecret'} as Record<string,string>)[String(key)]??key;
 }

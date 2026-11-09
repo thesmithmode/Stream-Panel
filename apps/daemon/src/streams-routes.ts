@@ -4,7 +4,7 @@ import type { ConfigurationPort } from './config.js';
 import type { StorePort } from './store-contract.js';
 import { object, string } from './provider-values.js';
 import { analyticsSettings,analyticsBotLogins } from './analytics-settings.js';
-type Store = StorePort<'currentChat' | 'matchingStream' | 'subscriberHistory' | 'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteManualSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'streamMetadata' | 'summary'>;
+type Store = StorePort<'supplementaryParticipants' | 'currentChat' | 'matchingStream' | 'subscriberHistory' | 'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'streamMetadata' | 'summary'>;
 export function registerStreamsRoutes(app: FastifyInstance, db: Store, configuration: ConfigurationPort) {
     const botsFor=(query:unknown)=>analyticsBotLogins(object(query),configuration.value);
     app.get('/api/v1/events/recent',request=>{const q=object(request.query);return db.call('recentEvents',Number(q.offset??0),Number(q.limit??100),{...(string(q.session)?{session:string(q.session)}:{}),...(string(q.person)?{person:string(q.person)}:{}),messagesOnly:string(q.messages)==='1'});});
@@ -47,12 +47,13 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
       const q=object(request.query);if(q.includeExcluded!==undefined&&!['0','1'].includes(string(q.includeExcluded)))throw Error('INVALID_CHAT_FILTER');
       return conditionalResponse(request,reply,await db.call('currentChat',string(object(request.params).id),botsFor(request.query),string(q.includeExcluded)==='1'));
     });
+    app.get('/api/v1/sessions/:id/supplementary-chat',request=>db.call('supplementaryParticipants',string(object(request.params).id),botsFor(request.query)));
     app.get("/api/v1/sessions/:id/followers", async (request) => db.call("followingAnalytics", string(object(request.params).id)));
     app.get("/api/v1/sessions/:id/metadata", async (request) => db.call('streamMetadata', string(object(request.params).id)));
     app.post('/api/v1/sessions/merge',async request=>({id:await db.call('mergeSessions',object(request.body).sessionIds as string[])}));
     app.post('/api/v1/sessions/:id/unmerge',async request=>{await db.call('unmergeSessions',string(object(request.params).id));return {ok:true};});
     app.post("/api/v1/sessions/:id/delete", async (request) => {
-        await db.call("deleteManualSession", string(object(request.params).id), Date.now());
+        await db.call("deleteSession", string(object(request.params).id), Date.now());
         return { ok: true };
     });
     app.get("/api/v1/summary", async (request) => db.call("summary", string(object(request.query).session) || undefined, botsFor(request.query), string(object(request.query).compact) !== "1"));

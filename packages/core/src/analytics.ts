@@ -494,7 +494,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             cell.observedKnownMinutes+=elapsed;
     }
     const accountsByPerson=new Map<string,{source:string;name:string}[]>();
-    for(const row of db.prepare("SELECT person_id,source,display_name FROM identities WHERE source='twitch' AND person_id IN(SELECT value FROM json_each(?)) UNION ALL SELECT person_id,'youtube' AS source,display_name FROM youtube_identities WHERE person_id IN(SELECT value FROM json_each(?))").all(JSON.stringify([...entities.keys()]),JSON.stringify([...entities.keys()])) as {person_id:string;source:string;display_name:string}[]){
+    for(const row of db.prepare("SELECT person_id,source,display_name FROM identities WHERE source='twitch' AND person_id IN(SELECT value FROM json_each(?)) UNION ALL SELECT person_id,'youtube' AS source,display_name FROM youtube_identities y WHERE person_id IN(SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM youtube_snapshots role WHERE role.account_id=y.account_id AND role.key='collectionRole' AND role.payload_json='\"secondary\"')").all(JSON.stringify([...entities.keys()]),JSON.stringify([...entities.keys()])) as {person_id:string;source:string;display_name:string}[]){
         const accounts=accountsByPerson.get(row.person_id)??[];accounts.push({source:row.source,name:row.display_name});accountsByPerson.set(row.person_id,accounts);
     }
     const messageMinutesByPerson=new Map<string,{session:string;at:number}[]>();

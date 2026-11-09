@@ -29,11 +29,13 @@
   import Following from "./Following.svelte";
   import PersonMetadata from "./PersonMetadata.svelte";
   let {
+    section='',onSection,
     period = "",
     initialId = "",
     onChange,
     onSelect,
   }: {
+    section?:string;onSection:(section:string)=>void;
     period?: string;
     initialId?: string;
     onSelect:(id:string)=>void;
@@ -99,6 +101,7 @@
         ),
   );
   const visible=$derived(sortBy==='default'?rows:rows.filter(person=>(botFilter==='all'||Boolean(person.is_bot)===(botFilter==='bots'))).filter(person=>person.display_name.toLocaleLowerCase('ru-RU').includes(search.trim().toLocaleLowerCase('ru-RU'))));
+  $effect(()=>{detailTab=['overview','activity','messages','donations','notes','accounts'].includes(section)?section:'overview';});
   const personTabs=[["overview","Обзор"],["activity","Активность"],["messages","Сообщения"],["donations","Донаты"],["notes","Заметки"],["accounts","Аккаунты"]] as const;
   let directoryScroll=0,forceDirectory=false;
   function clearSelection(){selectedId='';detail=null;stats=null;detailLoading=false;showFollowing=false;}
@@ -154,8 +157,8 @@
     if(notify)await onChange();
   }
   async function select(id: string) {
-    if(selectedId!==id)onSelect(id);
-    if(selectedId!==id){detailTab="overview";showDonorLinks=false;showFollowing=false;}
+    if(selectedId!==id&&initialId!==id)onSelect(id);
+    if(selectedId!==id){showDonorLinks=false;showFollowing=false;}
     selectedId = id;
     selectedSession = period;
     error = "";
@@ -187,7 +190,7 @@
     try {
       const editingTab=detailTab;
       await action();
-      detailTab=editingTab;
+      detailTab=editingTab;onSection(detailTab);
       await onChange();
       await loadAudit();
     } catch (e) {
@@ -260,7 +263,7 @@
         ><span class="avatar sr-only"
           >{person.display_name.slice(0, 1).toUpperCase()}</span
         ><span
-          ><strong class={platformClass(person.sources)}>{person.display_name}</strong><small class:sr-only={!person.sources?.includes(',')}>{sourcesLabel(person.sources)}</small
+          ><strong class={platformClass(person.sources)} class:youtube-secondary={person.youtubeSecondary}>{person.display_name}</strong><small class:sr-only={!person.sources?.includes(',')}>{sourcesLabel(person.sources)}</small
           ></span
         >{#if sortBy!=='default'}<span class="count">{rankLabels.get(person.id)}</span>{/if}</button
       >{/each}
@@ -278,12 +281,12 @@
         <h3>Выберите человека</h3>
         <p>Активность, донаты и связи аккаунтов.</p>
       </div>{:else}<header>
-        <h2 class={platformClass(detail.identities.map((i:any)=>i.source))}>{detail.display_name}</h2>
+        <h2 class={platformClass(detail.identities.map((i:any)=>i.source))} class:youtube-secondary={detail.youtubeSecondary}>{detail.display_name}</h2>
 
        <PersonBot personId={detail.id} revision={detail.revision} onChange={()=>refreshPerson(detail.id)} />
       </header>
 
-      <div class="person-tab-wrap"><SectionTabs items={personTabs} bind:value={detailTab} label="Разделы человека" panelId="person-tabpanel"/></div>
+      <div class="person-tab-wrap"><SectionTabs items={personTabs} bind:value={detailTab} onchange={()=>onSection(detailTab)} label="Разделы человека" panelId="person-tabpanel"/></div>
       <div class="settings-body person-scroll" id="person-tabpanel" role="tabpanel" aria-label={personTabs.find(([key])=>key===detailTab)?.[1]}>
       {#if detailTab==='overview'}
       {#if stats}<div class="kpi-strip" aria-label="Показатели человека">
@@ -324,7 +327,7 @@
         </div>{/if}
         <h3>Связанные аккаунты</h3>
         <div class="account-summary">{#each accounts as identity}<span><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong><PlatformProfileLink link={accountLink(identity.ids)} name={identity.display_name}/></span>{/each}</div>
-        <div class="actions"><button class="outline small" onclick={()=>{detailTab='donations';showDonorLinks=true;}}>Привязать донаты</button></div>
+        <div class="actions"><button class="outline small" onclick={()=>{detailTab='donations';onSection(detailTab);showDonorLinks=true;}}>Привязать донаты</button></div>
         <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} sessionId="" onPerson={(id)=>void select(id)} />{/if}</details>
       {:else if detailTab==='messages'}
        <RecentEvents personId={detail.id} messagesOnly onPerson={onSelect} />

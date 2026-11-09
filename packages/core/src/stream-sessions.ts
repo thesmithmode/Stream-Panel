@@ -117,6 +117,21 @@ export class StreamSessions {
       .run(id, atMs);
   }
 
+  /** Hide the complete logical recording; immutable provider links prevent rediscovery. */
+  deleteSession(id:string,atMs:number):void {
+    assertTimestamp(atMs);
+    this.db.transaction(()=>{
+      const members=this.db.prepare("SELECT member_id AS id FROM session_groups WHERE group_id=? UNION SELECT ? AS id").all(id,id) as {id:string}[];
+      const rows=members.map(member=>this.db.prepare('SELECT id,kind,ended_at_ms FROM sessions WHERE id=?').get(member.id) as {id:string;kind:string;ended_at_ms:number|null}|undefined).filter(row=>row!==undefined);
+      if(!rows.length)throw new Error('SESSION_NOT_FOUND');
+      if(rows.some(row=>row.kind==='platform'&&row.ended_at_ms===null))throw new Error('SESSION_ACTIVE');
+      for(const row of rows){
+        if(row.kind==='manual'){this.deleteManualSession(row.id,atMs);continue;}
+        this.db.prepare("INSERT OR IGNORE INTO session_tombstones VALUES (?,?,?)").run(row.id,atMs,'[]');
+      }
+    }).immediate();
+  }
+
   deleteManualSession(id: string, atMs: number): void {
     assertTimestamp(atMs);
     this.db.transaction(()=>{
@@ -131,7 +146,7 @@ export class StreamSessions {
       for(const event of events){
         if(event.occurred_at_ms===null)continue;
         const candidates=this.db.prepare(`SELECT DISTINCT ps.session_id FROM platform_streams ps JOIN sessions s ON s.id=ps.session_id
-          WHERE s.kind='platform' AND ps.started_at_ms<=?
+          WHERE s.kind='platform' AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND ps.started_at_ms<=?
            AND (ps.ended_at_ms IS NULL OR ps.ended_at_ms>?) AND (s.ended_at_ms IS NULL OR s.ended_at_ms>?)
            AND (?='donationalerts' OR (ps.platform=? AND ps.account_id=?)) LIMIT 2`).all(event.occurred_at_ms,event.occurred_at_ms,event.occurred_at_ms,event.source,event.source,event.account_id) as {session_id:string}[];
         if(candidates.length===1)this.db.prepare("INSERT INTO event_sessions VALUES (?,?)").run(event.id,candidates[0]!.session_id);

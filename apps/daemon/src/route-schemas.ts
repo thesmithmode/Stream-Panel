@@ -45,8 +45,8 @@ export function registerRouteSchemas(app: FastifyInstance) {
         }, ["identityIds", "name", "revision"]),
         "/api/v1/merges/:id/undo": body(),
         "/api/v1/splits/:id/undo": body(),
-        "/api/v1/youtube/connect": body({ clientId: text, clientSecret: { type: "string", maxLength: 256 } }, ["clientId"]),
-        "/api/v1/youtube/disconnect": body(),
+        "/api/v1/youtube/connect": body({ account:{type:"string",enum:["primary","secondary"]},clientId: text, clientSecret: { type: "string", maxLength: 256 } }, ["clientId"]),
+        "/api/v1/youtube/disconnect": body({account:{type:"string",enum:["primary","secondary"]}}),
         "/api/v1/twitch/connect": body({ clientId: text, extended: { type: "boolean" } }, ["clientId"]),
         "/api/v1/twitch/disconnect": body(),
         "/api/v1/donationalerts/connect": body({

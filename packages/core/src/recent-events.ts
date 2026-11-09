@@ -5,7 +5,7 @@ import {assertTimestamp,type EventInput,eventKey} from './domain.js';
 export const EVENT_RETENTION_MS=48*60*60*1000;
 export const EVENT_CLEANUP_BATCH=500;
 type RecentInput=Omit<EventInput,'source'|'sourceTime'|'timeQuality'|'transport'>&{source:EventInput['source']|'youtube'};
-type RecentRow={id:string;source:string;account_id:string;external_id:string;type:string;actor_id:string|null;actor_name:string|null;person_name?:string|null;at_ms:number;received_at_ms:number;payload_json:string};
+type RecentRow={youtubeSecondary:number;id:string;source:string;account_id:string;external_id:string;type:string;actor_id:string|null;actor_name:string|null;person_name?:string|null;at_ms:number;received_at_ms:number;payload_json:string};
 export type RecentFilter={session?:string;person?:string;messagesOnly?:boolean};
 
 /** Disposable content only. Permanent facts, deduplication and report revisions are independent. */
@@ -42,11 +42,11 @@ export class RecentEvents {
    where.push(`EXISTS(SELECT 1 FROM (SELECT source,account_id,external_id,person_id FROM identities UNION ALL SELECT 'youtube',account_id,external_id,person_id FROM youtube_identities) i WHERE i.source=r.source AND i.account_id=r.account_id AND i.external_id=r.actor_id AND i.person_id=?)`);args.push(filter.person);
   }
   if(filter.session){
-   where.push(`((r.source<>'youtube' AND EXISTS(SELECT 1 FROM events e JOIN logical_event_sessions es ON es.event_id=e.id WHERE e.source=r.source AND e.account_id=r.account_id AND e.type=r.type AND e.external_id=r.external_id AND es.session_id=?)) OR (r.source='youtube' AND EXISTS(SELECT 1 FROM logical_platform_streams p WHERE p.platform='youtube' AND p.session_id=? AND p.account_id=r.account_id AND r.at_ms>=p.started_at_ms AND r.at_ms<coalesce(p.ended_at_ms,?) AND (json_extract(r.payload_json,'$.videoId')=p.external_id OR (json_extract(r.payload_json,'$.videoId') IS NULL AND 1=(SELECT count(*) FROM logical_platform_streams q WHERE q.platform='youtube' AND q.account_id=r.account_id AND r.at_ms>=q.started_at_ms AND r.at_ms<coalesce(q.ended_at_ms,?)))))))`);
-   args.push(filter.session,filter.session,now,now);
+   where.push(`((r.source='youtube' AND EXISTS(SELECT 1 FROM youtube_snapshots role WHERE role.account_id=r.account_id AND role.key='collectionRole' AND role.payload_json='"secondary"') AND EXISTS(SELECT 1 FROM logical_platform_streams ps JOIN logical_sessions s ON s.id=ps.session_id WHERE s.id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND r.at_ms>=ps.started_at_ms AND r.at_ms<coalesce(ps.ended_at_ms,?))) OR (r.source<>'youtube' AND EXISTS(SELECT 1 FROM events e JOIN logical_event_sessions es ON es.event_id=e.id WHERE e.source=r.source AND e.account_id=r.account_id AND e.type=r.type AND e.external_id=r.external_id AND es.session_id=?)) OR (r.source='youtube' AND EXISTS(SELECT 1 FROM logical_platform_streams p WHERE p.platform='youtube' AND p.session_id=? AND p.account_id=r.account_id AND r.at_ms>=p.started_at_ms AND r.at_ms<coalesce(p.ended_at_ms,?) AND (json_extract(r.payload_json,'$.videoId')=p.external_id OR (json_extract(r.payload_json,'$.videoId') IS NULL AND 1=(SELECT count(*) FROM logical_platform_streams q WHERE q.platform='youtube' AND q.account_id=r.account_id AND r.at_ms>=q.started_at_ms AND r.at_ms<coalesce(q.ended_at_ms,?)))))))`);
+   args.push(filter.session,now,filter.session,filter.session,now,now);
   }
   // Resolve membership and the human name at read time, including merge/split changes.
-  return (this.db.prepare(`SELECT r.*,coalesce(i.person_id,y.person_id) AS person_id,coalesce(p.display_name,r.actor_name) AS person_name
+  return (this.db.prepare(`SELECT r.*,EXISTS(SELECT 1 FROM youtube_snapshots role WHERE r.source='youtube' AND role.account_id=r.account_id AND role.key='collectionRole' AND role.payload_json='"secondary"') AS youtubeSecondary,coalesce(i.person_id,y.person_id) AS person_id,coalesce(p.display_name,r.actor_name) AS person_name
    FROM recent_events r
    LEFT JOIN identities i ON r.source<>'youtube' AND i.source=r.source AND i.account_id=r.account_id AND i.external_id=r.actor_id
    LEFT JOIN youtube_identities y ON r.source='youtube' AND y.account_id=r.account_id AND y.external_id=r.actor_id

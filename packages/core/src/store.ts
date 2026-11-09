@@ -1,3 +1,4 @@
+import {SupplementaryChat} from './supplementary-chat.js';
 import {DonationFx,type CbrRate} from './donation-fx.js';
 import {CurrentChatQueries} from './current-chat.js';
 import {AnalyticsReportCache} from './analytics-report-cache.js';
@@ -92,6 +93,7 @@ export class StreamStore {
     nowMs: number,
   ) {return this.streams.startSession(accountId,streamId,startedAtMs,kind,nowMs);}
   endSession(id: string, atMs: number, quality = "observed") {return this.streams.endSession(id,atMs,quality);}
+  deleteSession(id:string,atMs:number){return this.streams.deleteSession(this.groups.root(id),atMs);}
   deleteManualSession(id: string, atMs: number) {return this.streams.deleteManualSession(id,atMs);}
   sessions(sessionId?: string,offset=0,limit=100,excludedBotLogins:readonly string[]|false=[]) {
     return this.streams.sessions(sessionId?this.groups.root(sessionId):undefined,offset,limit,this.queries.botJson(excludedBotLogins));
@@ -123,7 +125,16 @@ export class StreamStore {
   activeLogicalStream() {return this.streams.activeLogicalStream();}
   currentChat(sessionId:string,excluded:readonly string[]|false=[],includeExcluded=false,now=Date.now()){
     const result=this.currentChatQueries.read(this.groups.root(sessionId),excluded,includeExcluded,now,this.changeStamp());
-    return {...result,people:this.bots.decorate(result.people,p=>p.personId)};
+    const people=result.people.map(p=>({...p,accounts:p.accounts?.map(a=>({...a,secondary:false}))}));
+    if(result.live)for(const row of new SupplementaryChat(this.db).participants(this.groups.root(sessionId),this.botJson(excluded),now,true,includeExcluded)){
+      const account={source:'youtube' as const,name:row.accountName,secondary:true},existing=people.find(p=>p.personId===row.id);
+      if(existing){existing.messages+=row.messages;existing.lastMessageAt=Math.max(existing.lastMessageAt??0,row.lastMessageAt);existing.accounts?.push(account);}
+      else people.push({key:`youtube:${row.accountId}:${row.id}`,personId:row.id,name:row.name,accountName:row.accountName,source:'youtube',minutes:null,messages:row.messages,lastMessageAt:row.lastMessageAt,accounts:[account]});
+    }
+    return {...result,people:new SupplementaryChat(this.db).decorate(this.bots.decorate(people,p=>p.personId),p=>p.personId)};
+  }
+  supplementaryParticipants(session:string,excluded:readonly string[]|false=[],now=Date.now()){
+    return this.bots.decorate(new SupplementaryChat(this.db).participants(this.groups.root(session),this.botJson(excluded),now),p=>p.id);
   }
   changeStamp(){return (this.db.prepare('SELECT coalesce(sum(revision),0) value FROM ui_revisions').get() as {value:number}).value;}
   streamMatchContext(sessionId:string){
@@ -212,9 +223,9 @@ export class StreamStore {
     fromMs=0,
   ) {return this.queries.persons(search,excludedBotLogins,fromMs);}
   personsPage(search = "", excludedBotLogins: readonly string[] | false = [], fromMs=0, offset=0, limit=50, botFilter="humans") {
-    const page=this.queries.personsPage(search,excludedBotLogins,fromMs,offset,limit,botFilter);return {...page,items:this.bots.decorate(page.items,p=>String(p.id),excludedBotLogins===false?[]:excludedBotLogins)};
+    const page=this.queries.personsPage(search,excludedBotLogins,fromMs,offset,limit,botFilter);return {...page,items:new SupplementaryChat(this.db).decorate(this.bots.decorate(page.items,p=>String(p.id),excludedBotLogins===false?[]:excludedBotLogins),p=>String(p.id))};
   }
-  person(id: string,includeEvents=true) {const person=this.queries.person(id,includeEvents);return {...person,...this.bots.decorate([person],p=>String(p.id))[0]};}
+  person(id: string,includeEvents=true) {const person=this.queries.person(id,includeEvents);return {...person,...new SupplementaryChat(this.db).decorate(this.bots.decorate([person],p=>String(p.id)),p=>String(p.id))[0]};}
   events(
     sessionId?: string,
     personId?: string,
@@ -404,11 +415,11 @@ export class StreamStore {
   advanceAnalytics(options:AnalyticsOptions){return this.history.advance(options);}
   warmAnalytics(options:AnalyticsOptions,bakeCategories=false){const result=this.history.warm(options,bakeCategories);if(!result.preparing)this.channelOverview(options.excludedLogins);return result;}
 
-  youtubeQuota(day: string, profile: string, cost = 1): boolean {
-    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(day) || !profile || !Number.isInteger(cost) || cost < 1 || cost > 4000) throw new Error("INVALID_QUOTA");
+  youtubeQuota(day: string, profile: string, cost = 1,budget=4000): boolean {
+    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(day) || !profile || !Number.isInteger(cost) || cost < 1 || cost > 4000||!Number.isInteger(budget)||budget<1||budget>4000) throw new Error("INVALID_QUOTA");
     return this.db.transaction(() => {
       const row = this.db.prepare("SELECT used FROM sp_youtube_quota WHERE day=? AND profile=?").get(day, profile) as {used: number} | undefined;
-      if ((row?.used ?? 0) + cost > 4000) return false;
+      if ((row?.used ?? 0) + cost > budget) return false;
       this.db.prepare("INSERT INTO sp_youtube_quota VALUES (?,?,?) ON CONFLICT(day,profile) DO UPDATE SET used=used+excluded.used").run(day, profile, cost);
       this.db.prepare("DELETE FROM sp_youtube_quota WHERE day!=?").run(day);
       return true;

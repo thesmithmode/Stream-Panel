@@ -1257,3 +1257,5 @@ main{align-self:start;}
 .bot-statistics{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;}
 .bot-statistics input,.profile-settings .check input{width:auto;}
 .profile-settings .check{display:flex;align-items:center;gap:8px;}
+
+:root .app-shell .youtube-secondary {color:#d94444!important;}
