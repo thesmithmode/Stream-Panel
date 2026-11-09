@@ -2,6 +2,7 @@
  import {personAccounts} from './person-accounts';
  import PlatformProfileLink from './PlatformProfileLink.svelte';
  import type {PlatformLink} from './api';
+ import PersonBot from './PersonBot.svelte';
  import PersonPicker from './PersonPicker.svelte';
   import {screenData} from './screen-data';
   import SectionTabs from "./SectionTabs.svelte";
@@ -28,11 +29,13 @@
   import Following from "./Following.svelte";
   import PersonMetadata from "./PersonMetadata.svelte";
   let {
+    section='',onSection,
     period = "",
     initialId = "",
     onChange,
     onSelect,
   }: {
+    section?:string;onSection:(section:string)=>void;
     period?: string;
     initialId?: string;
     onSelect:(id:string)=>void;
@@ -40,6 +43,7 @@
   } = $props();
   function selectAccount(ids:string[],checked:boolean){selectedIdentities=checked?[...new Set([...selectedIdentities,...ids])]:selectedIdentities.filter(id=>!ids.includes(id));}
   let detailTab=$state("overview"),showFollowing=$state(false),detailLoading=$state(false),showDonorLinks=$state(false);
+  let botFilter=$state("humans");
   let search = $state(""),
     selectedId = $state(""),
     detail = $state<any>(null),
@@ -82,6 +86,7 @@
       : tops.map(
           (t) =>
             ({
+              is_bot:t.is_bot,is_human:t.is_human,is_donor:t.is_donor,
               id: t.id,
               display_name: t.display_name,
               revision: t.revision,
@@ -95,7 +100,8 @@
             }) as Person,
         ),
   );
-  const visible=$derived(sortBy==='default'?rows:rows.filter(person=>person.display_name.toLocaleLowerCase('ru-RU').includes(search.trim().toLocaleLowerCase('ru-RU'))));
+  const visible=$derived(sortBy==='default'?rows:rows.filter(person=>(botFilter==='all'||Boolean(person.is_bot)===(botFilter==='bots'))).filter(person=>person.display_name.toLocaleLowerCase('ru-RU').includes(search.trim().toLocaleLowerCase('ru-RU'))));
+  $effect(()=>{detailTab=['overview','activity','messages','donations','notes','accounts'].includes(section)?section:'overview';});
   const personTabs=[["overview","Обзор"],["activity","Активность"],["messages","Сообщения"],["donations","Донаты"],["notes","Заметки"],["accounts","Аккаунты"]] as const;
   let directoryScroll=0,forceDirectory=false;
   function clearSelection(){selectedId='';detail=null;stats=null;detailLoading=false;showFollowing=false;}
@@ -105,12 +111,12 @@
   $effect(()=>{if(detailTab==='accounts'&&detail)untrack(()=>{void loadAudit().catch(e=>error=e.message);const id=detail.id;void api<string[]>(`persons/${id}/candidates`).then(value=>{if(selectedId===id)candidates=value;}).catch(e=>error=e.message);});});
   $effect(()=>{search;period;sortBy;peopleOffset=0;});
   $effect(() => {
-    const term=search.trim(), offset=peopleOffset, currentPeriod=period;void rankRefresh;
+    const term=search.trim(), offset=peopleOffset, currentPeriod=period, bots=botFilter;void rankRefresh;
     const forced=forceDirectory;forceDirectory=false;
     if(sortBy!=='default'){peopleLoading=false;return;}
     peopleLoading=true;
     const timer=setTimeout(()=>{
-      const query=new URLSearchParams({search:term,period:currentPeriod,offset:String(offset),limit:'50'});
+      const query=new URLSearchParams({search:term,period:currentPeriod,bots,offset:String(offset),limit:'50'});
       void directory.run(signal=>screenData<{items:Person[];total:number}>(`persons/page?${query}`,'people',signal,forced),result=>{
         pageRows=result.items;peopleTotal=result.total;peopleLoading=false;peopleLoaded=true;
         if(offset>=result.total&&offset>0)peopleOffset=Math.max(0,Math.floor(Math.max(0,result.total-1)/50)*50);
@@ -151,8 +157,8 @@
     if(notify)await onChange();
   }
   async function select(id: string) {
-    if(selectedId!==id)onSelect(id);
-    if(selectedId!==id){detailTab="overview";showDonorLinks=false;showFollowing=false;}
+    if(selectedId!==id&&initialId!==id)onSelect(id);
+    if(selectedId!==id){showDonorLinks=false;showFollowing=false;}
     selectedId = id;
     selectedSession = period;
     error = "";
@@ -184,7 +190,7 @@
     try {
       const editingTab=detailTab;
       await action();
-      detailTab=editingTab;
+      detailTab=editingTab;onSection(detailTab);
       await onChange();
       await loadAudit();
     } catch (e) {
@@ -233,6 +239,7 @@
         >{/each}
     </div>
     {#if sortBy==='donations'}<div class="donor-filters">{#if donorCurrencies.length>1}<label>Сортировать по валюте<select aria-label="Валюта сортировки донатеров" bind:value={donorCurrency}>{#each [...new Set(['RUB',...donorCurrencies])] as c}<option value={c}>{c}</option>{/each}</select></label>{/if}</div>{/if}
+    <label>Показывать<select aria-label="Фильтр ботов" bind:value={botFilter} onchange={()=>{peopleOffset=0;sortBy="default";}}><option value="all">Всех</option><option value="humans">Без ботов</option><option value="bots">Только ботов</option></select></label>
     <div class="search">
       <input
         aria-label="Поиск человека"
@@ -250,13 +257,13 @@
         >
       </div>{/if}{#each visible as person (person.id)}<button
         class:chosen={selectedId === person.id}
-        class="person-row"
+        class="person-row" class:bot-person={person.is_bot} class:human-person={person.is_human}
         aria-label={person.display_name}
         onclick={() => openPerson(person.id)}
         ><span class="avatar sr-only"
           >{person.display_name.slice(0, 1).toUpperCase()}</span
         ><span
-          ><strong class={platformClass(person.sources)}>{person.display_name}</strong><small class:sr-only={!person.sources?.includes(',')}>{sourcesLabel(person.sources)}</small
+          ><strong class={platformClass(person.sources)} class:youtube-secondary={person.youtubeSecondary}>{person.display_name}</strong><small class:sr-only={!person.sources?.includes(',')}>{sourcesLabel(person.sources)}</small
           ></span
         >{#if sortBy!=='default'}<span class="count">{rankLabels.get(person.id)}</span>{/if}</button
       >{/each}
@@ -274,11 +281,12 @@
         <h3>Выберите человека</h3>
         <p>Активность, донаты и связи аккаунтов.</p>
       </div>{:else}<header>
-        <h2 class={platformClass(detail.identities.map((i:any)=>i.source))}>{detail.display_name}</h2>
+        <h2 class={platformClass(detail.identities.map((i:any)=>i.source))} class:youtube-secondary={detail.youtubeSecondary}>{detail.display_name}</h2>
 
+       <PersonBot personId={detail.id} revision={detail.revision} onChange={()=>refreshPerson(detail.id)} />
       </header>
 
-      <div class="person-tab-wrap"><SectionTabs items={personTabs} bind:value={detailTab} label="Разделы человека" panelId="person-tabpanel"/></div>
+      <div class="person-tab-wrap"><SectionTabs items={personTabs} bind:value={detailTab} onchange={()=>onSection(detailTab)} label="Разделы человека" panelId="person-tabpanel"/></div>
       <div class="settings-body person-scroll" id="person-tabpanel" role="tabpanel" aria-label={personTabs.find(([key])=>key===detailTab)?.[1]}>
       {#if detailTab==='overview'}
       {#if stats}<div class="kpi-strip" aria-label="Показатели человека">
@@ -319,7 +327,7 @@
         </div>{/if}
         <h3>Связанные аккаунты</h3>
         <div class="account-summary">{#each accounts as identity}<span><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong><PlatformProfileLink link={accountLink(identity.ids)} name={identity.display_name}/></span>{/each}</div>
-        <div class="actions"><button class="outline small" onclick={()=>{detailTab='donations';showDonorLinks=true;}}>Привязать донаты</button></div>
+        <div class="actions"><button class="outline small" onclick={()=>{detailTab='donations';onSection(detailTab);showDonorLinks=true;}}>Привязать донаты</button></div>
         <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} sessionId="" onPerson={(id)=>void select(id)} />{/if}</details>
       {:else if detailTab==='messages'}
        <RecentEvents personId={detail.id} messagesOnly onPerson={onSelect} />
@@ -426,7 +434,7 @@
  .person-scroll{min-height:0;overflow-y:auto;flex:1;padding:14px;}
  .people-back{display:none;}
  .person-detail>.empty{min-height:160px;padding:20px;}
- .person-detail>header{padding:14px;border:0;}
+ .person-detail>header{padding:14px;border:0;display:flex;align-items:center;gap:12px;}.person-detail>header h2{flex:1;min-width:0;margin:0;}
  .person-detail .kpi-strip{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:0;margin-bottom:16px;gap:12px;}
  .person-detail .kpi{background:none;border:0;padding:0;min-height:48px;}
  .person-detail .kpi span{font-size:12px;}.person-detail .kpi strong{font-size:20px;color:#fff;}

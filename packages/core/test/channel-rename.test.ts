@@ -34,7 +34,7 @@ test('renamed Twitch and YouTube owners stay excluded in their profile and remai
       const audience=s.analytics(options).audience;
       assert.ok(!audience.some(p=>p.id===ownerPerson),profile);
       assert.ok(audience.some(p=>p.id===guest),profile);
-      assert.ok(!s.persons().filter(p=>!p.is_bot).some(p=>p.id===ownerPerson),profile);
+      assert.equal(s.personStats(ownerPerson,sid).messageCount,0,profile);
       assert.equal(s.eventCount(),3,'provider facts survive owner exclusion');
       assert.equal(s.youtubeData(ytOwner).messages.length,3);
       assert.deepEqual(s.candidatePersons('Fullrandomname_twitch'),[ruslan]);

@@ -1,4 +1,5 @@
 <script lang="ts">
+ import {withSupplementaryChat} from './audience-ranking';
  import CurrentChatParticipants from './CurrentChatParticipants.svelte';
  import {dateTime} from './format';
  import {missingTwitchPresence} from './presence-quality';
@@ -24,11 +25,13 @@
     type Summary,
   } from "./api";
   let {
+    section='',onSection,
     summary,
     sessionFilter = "",
     onPerson,
     session,changed,onStream,
   }: {
+    section?:string;onSection:(section:string)=>void;
     summary: Summary;
     sessionFilter?: string;
     connect: () => void;
@@ -48,7 +51,10 @@
   }
   let resolution=$state(loadResolution());
   function setResolution(value:number){resolution=value;try{localStorage.setItem(`sp-stream-resolution-${getProfile()}`,String(value));}catch{/* Preferences are optional. */}}
+  let supplemental=$state<any[]>([]);
+  const participants=$derived(withSupplementaryChat(audienceData?.audience??[],supplemental));
   let activeTab=$state('summary');
+  $effect(()=>{activeTab=['summary','people','current','events'].includes(section)?section:'summary';});
   const decimal=(n:number)=>n.toLocaleString('ru-RU',{maximumFractionDigits:1});
   let metadata=$state<Array<{at:number;title:string;categoryName:string}>>([]);
   let audienceRequest=0,lastAudienceSession='';
@@ -57,14 +63,14 @@
     return untrack(()=>{
     if(current===lastAudienceSession&&(document.hidden||!navigator.onLine))return;
     const id=++audienceRequest;audienceBusy=audienceData===null;audienceError='';
-    if(current!==lastAudienceSession){audienceData=null;metadata=[];lastAudienceSession=current;}
+    if(current!==lastAudienceSession){audienceData=null;metadata=[];supplemental=[];lastAudienceSession=current;}
     if(!current){audienceData=null;audienceBusy=false;return;}
     const query=new URLSearchParams({session:current,source:'all',category:'',timezone:'Europe/Moscow'});
     audienceData=cachedAnalytics(getProfile(),query)??audienceData;
     audienceBusy=audienceData===null;
     const controller=new AbortController();
-    void Promise.all([loadAnalytics(getProfile(),query,false,controller.signal),api<Array<{at:number;title:string;categoryName:string}>>(`sessions/${current}/metadata`,undefined,controller.signal)]).then(([result,history])=>{
-      if(id===audienceRequest){audienceData=result;metadata=history.filter((row,i)=>!i||row.title!==history[i-1]!.title||row.categoryName!==history[i-1]!.categoryName);}
+    void Promise.all([api<any[]>(`sessions/${encodeURIComponent(current)}/supplementary-chat`,undefined,controller.signal),loadAnalytics(getProfile(),query,false,controller.signal),api<Array<{at:number;title:string;categoryName:string}>>(`sessions/${current}/metadata`,undefined,controller.signal)]).then(([extra,result,history])=>{
+      if(id===audienceRequest){supplemental=extra;audienceData=result;metadata=history.filter((row,i)=>!i||row.title!==history[i-1]!.title||row.categoryName!==history[i-1]!.categoryName);}
     }).catch(error=>{if(id===audienceRequest){audienceError=error instanceof ConnectionError?'Не удалось загрузить участников и график. Проверьте соединение и повторите обновление.':(error as Error).message;}}).finally(()=>{if(id===audienceRequest)audienceBusy=false;});
     return()=>{audienceRequest++;controller.abort();};
     });
@@ -84,7 +90,7 @@
  {#if summary.donations>0}<div><span>Донаты</span><strong>{Object.keys(summary.totals).length?Object.entries(summary.totals).map(([c,a])=>money(a,c)).join(' · '):'—'}</strong></div>{/if}
  <div><span>Сообщения</span><strong>{summary.messages.toLocaleString('ru-RU')}</strong></div>
 </section>
-<SectionTabs items={[["summary","Итоги"],["people","Участники"],["current","Текущие зрители"],["events","События"]]} bind:value={activeTab} label="Разделы эфира" panelId="stream-tabpanel"/>
+<SectionTabs items={[["summary","Итоги"],["people","Участники"],["current","Текущие зрители"],["events","События"]]} bind:value={activeTab} onchange={()=>onSection(activeTab)} label="Разделы эфира" panelId="stream-tabpanel"/>
 <div id="stream-tabpanel" role="tabpanel" aria-label={activeTab==='summary'?'Итоги':activeTab==='people'?'Участники':activeTab==='current'?'Текущие зрители':'События'}>
 {#if activeTab==='summary'}
 <section class="panel series-panel">
@@ -105,7 +111,7 @@
 {:else if activeTab==='people'}
 {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceBusy}<p role="status">Загружаем участников…</p>{:else}
 {#if missingPresence}<p class="notice" role="status">Сообщения Twitch сохранены, но данных о присутствии участников нет. Время в чате недоступно: прочерк не означает отсутствие человека.</p>{/if}
-<AudienceRanking people={audienceData?.audience??[]} {onPerson} showIntervals {missingPresence} streamStart={session?.started_at_ms??0} streamEnd={session?.ended_at_ms??Date.now()}/>
+<AudienceRanking people={participants} {onPerson} showIntervals {missingPresence} streamStart={session?.started_at_ms??0} streamEnd={session?.ended_at_ms??Date.now()}/>
 {/if}
 {:else if sessionFilter}<section class="panel"><header><h2>События стрима · 48 ч</h2></header><div class="settings-body"><RecentEvents sessionId={sessionFilter} {onPerson}/></div></section>{/if}
 </div>

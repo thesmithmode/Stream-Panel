@@ -1250,3 +1250,12 @@ main{align-self:start;}
  .sidebar-bottom .manual-refresh svg{margin:0}.manual-refresh span{white-space:nowrap}@media(min-width:721px) and (max-width:1100px){.refresh-controls{padding:8px}.refresh-controls .manual-refresh{gap:4px;font-size:10px;padding:6px 2px}}
  .profile-label{padding:0 2px}.profile-label>span{padding-left:8px}
 }
+
+/* Per-profile highlighting changes the row fill, preserving platform text colors. */
+.highlight-bots .bot-person{background:rgba(65,177,236,.16)!important;}
+.highlight-humans .human-person{background:rgba(239,104,112,.13)!important;}
+.bot-statistics{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;}
+.bot-statistics input,.profile-settings .check input{width:auto;}
+.profile-settings .check{display:flex;align-items:center;gap:8px;}
+
+:root .app-shell .youtube-secondary {color:#d94444!important;}

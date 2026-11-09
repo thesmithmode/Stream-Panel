@@ -11,6 +11,7 @@
   let twitchClient = $state(""),
     extended = $state(true),
     youtubeClient = $state(""), youtubeSecret = $state(""),
+    secondaryClient=$state(""),secondarySecret=$state(""),
     daClient = $state(""),
     daSecret = $state(""),
     daToken = $state(""),
@@ -23,6 +24,7 @@
   $effect(() => {
     const cfg = status?.config;
     if (!cfg || seeded) return;
+    secondaryClient=cfg.youtubeSecondaryClientId??cfg.youtubeClientId??"";
     if (cfg.youtubeClientId) youtubeClient = cfg.youtubeClientId;
     if (cfg.twitchClientId) twitchClient = cfg.twitchClientId;
     if (cfg.daClientId) daClient = cfg.daClientId;
@@ -43,6 +45,10 @@
     YOUTUBE_REQUEST_FAILED: "Ошибка сервиса Google. Панель повторит запрос автоматически.",
     YOUTUBE_CONNECTION_FAILED: "Временная ошибка соединения. Панель повторит запрос автоматически.",
   } as Record<string, string>)[status.youtube?.detail] ?? status.youtube?.detail ?? "Подключите канал этого профиля");
+  async function secondaryLogin(){
+    const result=await api("youtube/connect",{account:"secondary",clientId:secondaryClient,clientSecret:secondarySecret});secondarySecret="";
+    window.open(result.url,"_blank","noopener,noreferrer");message="Выберите второй канал в Google.";
+  }
   async function youtubeLogin() {
     const result = await api("youtube/connect", {clientId: youtubeClient || status.config.youtubeClientId, clientSecret: youtubeSecret});
     youtubeSecret = "";
@@ -300,6 +306,21 @@
     </div>
   </section>
 
+  <section class="panel settings" aria-label="Дополнительный YouTube">
+   <header><h2>YouTube · второй канал</h2><span class="state" class:online={status.youtubeSecondary?.state==='connected'}>{statusLabel(status.youtubeSecondary?.state??'disconnected')}</span></header>
+   <div class="settings-body">
+    <p class="small muted">Участники и события второго канала. Аналитика — по основному каналу; ники второго отмечены тёмно-красным.</p>
+    {#if status.youtubeSecondary?.account}<p class="small">{status.youtubeSecondary.account}</p>{/if}
+    {#if status.youtubeSecondary?.state==='error'}<p class="notice error" role="alert">{status.youtubeSecondary.detail}</p>{/if}
+    {#if !['connected','connecting','authorizing'].includes(status.youtubeSecondary?.state)}
+     <label>Второй YouTube Client ID<input bind:value={secondaryClient} autocomplete="off"/></label>
+     <label>Второй YouTube Client secret<input type="password" bind:value={secondarySecret} autocomplete="new-password" placeholder={status.config.hasYoutubeSecondarySecret?'Сохранён; можно оставить пустым':'Client secret'}/></label>
+     <p class="small muted">Redirect: <code>{status.config.youtubeRedirectUri??''}</code></p>
+     <button class="primary" disabled={busy} onclick={()=>run(secondaryLogin)}>Подключить второй YouTube</button>
+    {/if}
+    {#if ['connected','connecting','error','authorizing'].includes(status.youtubeSecondary?.state)}<button class="outline" disabled={busy} onclick={()=>run(async()=>{if(await confirmAction('Отключить второй YouTube?','История сохранится.','Отключить'))await api('youtube/disconnect',{account:'secondary'});})}>Отключить второй YouTube</button>{/if}
+   </div>
+  </section>
 </div>
 {#if error}<p role="alert" class="notice error">{error}</p>{/if}{#if message}<p
     role="status"

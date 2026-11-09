@@ -298,7 +298,7 @@ test("person stats, tops and insights endpoints return shaped aggregates", async
 });
 
 
-test("manual stream deletion requires authentication, CSRF and strict payload, and preserves automatic streams",async()=>{
+test("stream deletion requires authentication, CSRF and strict payload, and rejects live streams",async()=>{
  const f=await fixture();
  try{
   const now=Date.now(),manual=await (f.a.db.call('startSession','local','mistake',now,'manual',now) as Promise<string>);
@@ -313,7 +313,7 @@ test("manual stream deletion requires authentication, CSRF and strict payload, a
   assert.equal((await (f.a.db.call('sessions') as Promise<any[]>)).length,0);
   const real=await (f.a.db.call('observePlatformStream','twitch','channel','real',now,now,null,'Actual stream') as Promise<string>);
   const denied=await f.a.app.inject({method:'POST',url:`/api/v1/sessions/${real}/delete`,headers:f.headers,payload:{}});
-  assert.equal(denied.statusCode,400);assert.equal(denied.json().error,'PLATFORM_SESSION_MANAGED_AUTOMATICALLY');
+  assert.equal(denied.statusCode,400);assert.equal(denied.json().error,'SESSION_ACTIVE');
   assert.equal((await (f.a.db.call('sessions') as Promise<any[]>)).length,1);
  }finally{await f.close();}
 });

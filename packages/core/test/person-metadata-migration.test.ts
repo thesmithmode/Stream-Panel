@@ -90,7 +90,7 @@ test('legacy YouTube authors migrate into isolated Person memberships and retain
    try{
     assert.equal(store.persons().filter(p=>String(p.sources).includes('youtube')).length,2);
     assert.equal((store.person('youtube:author').aliases as any[]).length,2);
-    assert.equal(store.persons().find(p=>p.id==='youtube:author')!.is_bot,1);
+    assert.equal(store.persons().find(p=>p.id==='youtube:author')!.is_bot,0);
     assert.equal(store.personStats('youtube:owner').messageCount,0);
     assert.equal(store.youtubeData('channel').messages.length,3);
    }finally{store.close();}

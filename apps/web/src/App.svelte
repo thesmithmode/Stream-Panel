@@ -23,6 +23,7 @@
 
   import Connections from "./Connections.svelte";
   let peoplePeriod = $state("");
+  let routeSection=$state(""),returnTo=$state("");
   import People from "./People.svelte";
   import {
     api,
@@ -77,7 +78,7 @@
     const key=screenKey();screens.delete(key);screens.set(key,{revision:getDataRevision(profile),status,changes,sessions,summary});
     while(screens.size>24)screens.delete(screens.keys().next().value!);
   }
-  function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
+  function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile,section:routeSection,returnTo,period:tab==='people'?peoplePeriod:undefined});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
   function clearScope(){
     scopeMount++;
     changes=null;selectedSessions=[];sessionPage=0;refreshTask?.controller.abort();busy=false;scopeReady=false;summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};
@@ -89,10 +90,10 @@
       scopeReady=true;
     }
   }
-  function restoreRoute(){const route=readRoute(location.search,getProfile()),selected=accessibleProfile(route.profile),denied=selected!==route.profile;epoch++;tab=denied&&route.view==='stream'?'sessions':route.view;sessionFilter=denied?'':route.session;personId=denied?'':route.person;setProfile(selected);profile=selected;clearScope();}
+  function restoreRoute(){const route=readRoute(location.search,getProfile()),selected=accessibleProfile(route.profile),denied=selected!==route.profile;epoch++;tab=denied&&route.view==='stream'?'sessions':route.view;sessionFilter=denied?'':route.session;personId=denied?'':route.person;routeSection=route.section??'';if(route.view==='analytics')analyticsSection=['dynamics','time','audience'].includes(routeSection)?routeSection:'dynamics';returnTo=denied?'':route.returnTo??'';peoplePeriod=route.period??'';setProfile(selected);profile=selected;clearScope();}
   function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}connectionLost=!navigator.onLine;if(document.hidden||!navigator.onLine)return;error=authMessage((e as Error).message);}
 
-  const authMessage = (code: string) => ({ INVALID_SESSION_GROUP: "Выберите эфиры в пределах 31 дня (до 100 частей). Активным может быть только последний.", SESSION_GROUP_NOT_FOUND:"Объединение уже отменено. Обновите список.", INVALID_LOGIN: "Неверный логин или пароль", LOGIN_RATE_LIMIT: "Слишком много попыток. Попробуйте позже.", LOGIN_REQUIRED: "Войдите в свой профиль", LOCAL_LOGIN_REQUIRED: "Войдите в свой профиль" }[code] ?? code);
+  const authMessage = (code: string) => ({ INVALID_SESSION_GROUP: "Выберите эфиры в пределах 31 дня (до 100 частей). Активным может быть только последний.", SESSION_ACTIVE:"Сначала дождитесь завершения эфира.", SESSION_GROUP_NOT_FOUND:"Объединение уже отменено. Обновите список.", INVALID_LOGIN: "Неверный логин или пароль", LOGIN_RATE_LIMIT: "Слишком много попыток. Попробуйте позже.", LOGIN_REQUIRED: "Войдите в свой профиль", LOCAL_LOGIN_REQUIRED: "Войдите в свой профиль" }[code] ?? code);
   async function login() {
     busy = true; error = "";
     try {
@@ -173,10 +174,15 @@
   }
   function navigate(next:string,person='') {
     if(next==='analytics'){if(tab!=='analytics')analyticsBack=tab==='stream'?'sessions':tab;analyticsSection='dynamics';}
-    moreOpen=false;epoch++;if(next!=='stream')sessionFilter='';tab=next;personId=person;clearScope();saveRoute();
+    routeSection='';returnTo='';moreOpen=false;epoch++;if(next!=='stream')sessionFilter='';tab=next;personId=person;clearScope();saveRoute();
     window.scrollTo({top:0,behavior:'instant'});void action(async()=>{},false);
   }
-  function openPerson(id:string){navigate('people',id);}
+  function openPerson(id:string){
+    const origin=returnTo||routeUrl({view:tab as View,session:sessionFilter,person:personId,profile,section:routeSection,period:tab==='people'?peoplePeriod:undefined});
+    navigate('people',id);returnTo=origin;saveRoute(true);
+  }
+  function returnFromPerson(){if(!returnTo)return;history.pushState(null,'',returnTo);restoreRoute();void action(async()=>{},false);}
+  function sectionChanged(section:string){routeSection=section;saveRoute(true);}
   async function mergeSelected(){
     const ids=[...selectedSessions],current=epoch;
     if(!await confirmAction('Объединить стримы?',`Выбрано: ${ids.length}. Статистика будет общей, перерывы сохранятся. Объединение можно отменить.`,'Объединить')||current!==epoch)return;
@@ -199,7 +205,7 @@
       destination=await api<string|null>(`sessions/match?${new URLSearchParams({startedAt:String(stream.started_at_ms),latest:latest===stream.id?'1':'0'})}`,undefined,undefined,next);}
     }}catch(e){if(current===epoch)reportFailure(e);return;}
     if(current!==epoch||profile!==selectedProfile)return;
-    epoch++;if(tab==='stream'&&!destination)tab='sessions';setProfile(next);profile=next;
+    routeSection='';returnTo='';epoch++;if(tab==='stream'&&!destination)tab='sessions';setProfile(next);profile=next;
     status = null; sessions = []; personId = sessionFilter = ""; error = "";
     summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
     sessionFilter=destination??"";clearScope();saveRoute();await action(async () => {},false);
@@ -262,11 +268,12 @@
  <button class="refresh-toggle" aria-label={`Автообновление ${autoRefresh?'Вкл':'Выкл'}`} aria-pressed={autoRefresh} onclick={toggleRefresh}><span class="refresh-label">Автообновление</span><span class="toggle-track" class:enabled={autoRefresh} aria-hidden="true"><span></span></span></button>
  {#if autoRefresh}<label>Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}><option value={60}>1 мин</option><option value={300}>5 мин</option><option value={900}>15 мин</option></select></label>{/if}
  <button class="outline manual-refresh" disabled={busy} onclick={()=>void action(async()=>{})}><Icon name="refresh" size={18}/><span>{busy?'Обновляем…':'Обновить данные'}</span></button>
+ <label class="bot-statistics"><input type="checkbox" checked={status?.config?.analyticsSettings?.includeBots??false} disabled={busy||!authorized} onchange={event=>{const includeBots=event.currentTarget.checked;void action(async()=>{const rules=await api("settings");await api("settings",{...rules,includeBots});clearAnalyticsCache();});}}/>Учитывать ботов</label>
  {#if connectionLost}<p role="status">Нет связи с сервером</p>{/if}
  </div></section>
 {/snippet}
 
-<div class="app-shell">
+<div class="app-shell" class:highlight-bots={status?.config?.analyticsSettings?.highlightBots??true} class:highlight-humans={status?.config?.analyticsSettings?.highlightHumans??true}>
   <aside class:analytics-context={tab==='analytics'&&scopeReady&&authorized&&!loading} class="sidebar" aria-label="Навигация">
     <a class="brand" href="/">Stream <span>Panel</span></a>
     <nav aria-label="Разделы">
@@ -277,7 +284,7 @@
   </aside>
   <main class:analytics-page={tab==='analytics'} class:sessions-page={tab==='sessions'} class:stream-page={tab==='stream'} class:people-page={tab==='people'}>
     <div class="page-heading">
-      {#if tab==='stream'}<button aria-label="К списку стримов" class="back-link text-button" onclick={()=>navigate('sessions')}><Icon name="back"/>Стримы</button>{:else}<h1>{titles[tab]}</h1>{/if}
+      {#if tab==='people'&&returnTo}<button class="back-link text-button" onclick={returnFromPerson}><Icon name="back"/>Назад к {readRoute(new URL(returnTo,location.origin).search).view==='stream'?'стриму':'предыдущему разделу'}</button>{:else if tab==='stream'}<button aria-label="К списку стримов" class="back-link text-button" onclick={()=>navigate('sessions')}><Icon name="back"/>Стримы</button>{:else}<h1>{titles[tab]}</h1>{/if}
       {#if authorized}<label class="heading-profile">{#if tab==='analytics'}<button class="icon-button analytics-menu-trigger" aria-label="Ещё" aria-expanded={moreOpen} onclick={()=>moreOpen=true}><Icon name="more"/></button>{/if}<span class="dot" class:off={connectionLost||!autoRefresh} title={connectionLost?'Нет связи':autoRefresh?'Автообновление включено':'Автообновление выключено'}></span><select aria-label="Профиль" value={profile} disabled={busy} onchange={event=>void switchProfile(event.currentTarget.value as Profile)}>{#each allowedProfiles as allowed}<option value={allowed}>{allowed==='ruslan'?'Руслан':'Гульназ'}</option>{/each}</select></label>{/if}
     </div>
     {#if loading}<div class="panel empty">
@@ -304,7 +311,7 @@
             <PeriodSelect label="Период аналитики" value={peoplePeriod?Number(peoplePeriod):'all'} onchange={value=>{peoplePeriod=value==='all'?'':String(value);epoch++;saveRoute();void action(async()=>{});}}/>
           </div>{/if}
       {#if tab === "overview"}<ChannelOverview {profile} timezone={status.config.analyticsSettings?.timezone??"Europe/Moscow"} connect={()=>navigate("connections")} />
-      {:else if tab === "stream"}<Overview onStream={id=>{sessionFilter=id;navigate("stream");}} session={sessions.find(s=>s.id===sessionFilter)}
+      {:else if tab === "stream"}<Overview section={routeSection} onSection={sectionChanged} onStream={id=>{sessionFilter=id;navigate("stream");}} session={sessions.find(s=>s.id===sessionFilter)}
           {summary}
           {sessionFilter}
           connect={() => navigate("connections")}
@@ -312,9 +319,9 @@
           changed={()=>refresh(true)}
         />
       {:else if tab === "analytics"}
-        <Analytics bind:section={analyticsSection} onBack={()=>navigate(analyticsBack)} profile={profile} defaultTimezone={status.config.analyticsSettings?.timezone??"Europe/Moscow"} onPerson={openPerson} onStream={id=>{sessionFilter=id;navigate("stream");}} />
+        <Analytics onSection={sectionChanged} bind:section={analyticsSection} onBack={()=>navigate(analyticsBack)} profile={profile} defaultTimezone={status.config.analyticsSettings?.timezone??"Europe/Moscow"} onPerson={openPerson} onStream={id=>{sessionFilter=id;navigate("stream");}} />
       {:else if tab === "donations"}<StreamDonations onPerson={openPerson} changed={()=>refresh(true)} />
-      {:else if tab === "settings"}<Settings {profile} {status} />
+      {:else if tab === "settings"}<Settings {profile} {status} onChange={()=>action(async()=>{clearAnalyticsCache();})} />
       {:else if tab === "connections"}<Connections
           {status}
           onChange={()=>refresh(true)}
@@ -322,7 +329,8 @@
       {:else if tab === "people"}<People
           period={peoplePeriod}
           initialId={personId}
-          onSelect={(id)=>{personId=id;saveRoute();}}
+          section={routeSection} onSection={sectionChanged}
+          onSelect={(id)=>{personId=id;routeSection="overview";saveRoute();}}
           onChange={()=>refresh(true)}
         />
       {:else if tab === "sessions"}

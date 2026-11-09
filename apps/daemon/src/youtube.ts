@@ -18,7 +18,9 @@ export class YouTubeConnection {
   private refreshing: Promise<void> | undefined;
   private initialCountChecked = false;
   constructor(private config: ConfigurationPort, private db: YoutubeStore, private redirect: string,
-    private profile: string, private request: typeof fetch = fetch, private now = Date.now) {}
+    private profile: string, private request: typeof fetch = fetch, private now = Date.now,private mode:{chatOnly?:boolean;otherAccount?:()=>string|undefined}={}) {}
+  acceptsState(state:string){return !!this.pending&&this.pending.state===state;}
+  private requiredScopes(){return this.mode.chatOnly?scopes.slice(0,1):scopes;}
   private async json(url: string, init: RequestInit = {}) {
     const controller = new AbortController(); this.requests.add(controller);
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -72,7 +74,7 @@ export class YouTubeConnection {
     const state = randomBytes(32).toString("hex"), verifier = randomBytes(32).toString("base64url");
     this.pending = { state, verifier, expires: this.now() + 600000, clientId, secret: secret || this.config.value.youtubeClientSecret! };
     this.status = { state: "authorizing", account: "", detail: "Завершите вход в Google" };
-    const query = new URLSearchParams({ client_id: clientId, redirect_uri: this.redirect, response_type: "code", scope: scopes.join(" "), access_type: "offline", prompt: "consent", state, code_challenge_method: "S256", code_challenge: createHash("sha256").update(verifier).digest("base64url") });
+    const query = new URLSearchParams({ client_id: clientId, redirect_uri: this.redirect, response_type: "code", scope: this.requiredScopes().join(" "), access_type: "offline", prompt: "consent", state, code_challenge_method: "S256", code_challenge: createHash("sha256").update(verifier).digest("base64url") });
     return { url: `https://accounts.google.com/o/oauth2/v2/auth?${query}` };
   }
   async finishAuth(code: string, state: string) {
@@ -83,7 +85,7 @@ export class YouTubeConnection {
     const data = await this.token({ grant_type: "authorization_code", code, redirect_uri: this.redirect, code_verifier: pending.verifier }, pending.clientId, pending.secret);
     if (generation !== this.generation || attempt !== this.authAttempt) return;
     const granted = string(data.scope).split(" ");
-    if (!scopes.every(s => granted.includes(s)) || !string(data.access_token) || !string(data.refresh_token)) throw new Error("YOUTUBE_SCOPES_REQUIRED");
+    if (!this.requiredScopes().every(s => granted.includes(s)) || !string(data.access_token) || !string(data.refresh_token)) throw new Error("YOUTUBE_SCOPES_REQUIRED");
     const tokens: Tokens = { access: string(data.access_token), refresh: string(data.refresh_token), expiresAt: this.now() + Number(data.expires_in) * 1000, userId: "", scopes: granted };
     if (!Number.isFinite(tokens.expiresAt) || tokens.expiresAt <= this.now()) throw new Error("YOUTUBE_INVALID_TOKEN");
     const channels = await this.api("channels", { part: "snippet,statistics,brandingSettings,contentDetails,topicDetails", mine: "true", maxResults: "50" }, tokens);
@@ -91,20 +93,22 @@ export class YouTubeConnection {
     const items = Array.isArray(channels.items) ? channels.items : [];
     if (items.length !== 1 || channels.nextPageToken || !string(object(items[0]).id)) throw new Error("YOUTUBE_SELECT_ONE_CHANNEL");
     tokens.userId = string(object(items[0]).id);
+    if(tokens.userId===this.mode.otherAccount?.())throw new Error("YOUTUBE_ACCOUNT_ALREADY_CONNECTED");
     await this.stop();
     if (this.generation !== generation + 1 || this.authAttempt !== attempt + 1) return;
     this.config.value.youtubeClientId = pending.clientId;
     this.config.value.youtubeClientSecret = pending.secret;
     this.config.value.youtube = tokens;
     this.config.value.youtubeAccountId = tokens.userId;
-    await this.db.call("youtubeSnapshot", tokens.userId, "channel", items[0], this.now());
+    await this.db.call("youtubeSnapshot", tokens.userId, this.mode.chatOnly?"chatChannel":"channel", items[0], this.now());
+    await this.db.call("youtubeSnapshot",tokens.userId,"collectionRole",this.mode.chatOnly?"secondary":"primary",this.now());
     await this.config.save();
     void this.start();
   }
   private async api(resource: string, params: Record<string,string>, tokens: Tokens) {
     const generation=this.generation;
     const day = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(this.now());
-    if (!await this.db.call("youtubeQuota", day, this.profile, 1)) throw new Error("YOUTUBE_DAILY_BUDGET");
+    if (!await this.db.call("youtubeQuota", day, this.mode.chatOnly?`${this.profile}:secondary`:this.profile, 1,this.mode.chatOnly?1000:4000)) throw new Error("YOUTUBE_DAILY_BUDGET");
     const data=await this.authorizedJson(`https://www.googleapis.com/youtube/v3/${resource}?${new URLSearchParams(params)}`, tokens);
     if(generation!==this.generation)return {};
 
@@ -148,6 +152,7 @@ export class YouTubeConnection {
     }
     const previous = await this.db.call("youtubeData", tokens.userId);
     if (!valid()) return 300000;
+    if(this.mode.chatOnly)return this.collectChatOnly(tokens,previous,generation);
     let channelSnapshot: Record<string, unknown> | undefined;
     let refreshedMetadata=false;
     if (this.now() - (previous.snapshots['cursor:channelMetadata']?.updatedAt??previous.snapshots.channel?.updatedAt??0) >= 21600000) {
@@ -267,6 +272,24 @@ export class YouTubeConnection {
     if(!valid())return 300000;
     this.status = { ...this.status,lastSyncAt:this.now(),state: "connected", account: tokens.userId, detail: broadcasts.length ? "Чат активных эфиров собирается" : "Канал подключён; активных эфиров нет" };
     return Math.min(interval, 3600000);
+  }
+  /** Supplementary chat never creates sessions, viewer samples or analytical reports. */
+  private async collectChatOnly(tokens:Tokens,previous:{snapshots:Record<string,{data:unknown;updatedAt:number}>},generation:number):Promise<number> {
+    const valid=()=>generation===this.generation&&this.config.value.youtube===tokens;
+    const broadcasts=await this.activeBroadcasts(tokens,valid);if(!broadcasts||!valid())return 300000;
+    await this.db.call('youtubeSnapshot',tokens.userId,'collectionRole','secondary',this.now());if(!valid())return 300000;
+    await this.db.call('youtubeSnapshot',tokens.userId,'broadcasts',broadcasts,this.now());if(!valid())return 300000;
+    let interval=broadcasts.length?60000:300000;
+    for(const broadcast of broadcasts){
+      const chat=string(broadcast.snippet?.liveChatId);if(!chat)continue;
+      const cursor=string(previous.snapshots[`cursor:${chat}`]?.data);
+      const response=await this.api('liveChat/messages',{part:'id,snippet,authorDetails',liveChatId:chat,maxResults:'2000',...(cursor?{pageToken:cursor}:{})},tokens);if(!valid())return 300000;
+      await this.db.call('youtubeMessages',tokens.userId,chat,Array.isArray(response.items)?response.items:[],broadcast.id);if(!valid())return 300000;
+      await this.db.call('youtubeSnapshot',tokens.userId,`cursor:${chat}`,string(response.nextPageToken),this.now());if(!valid())return 300000;
+      interval=Math.max(interval,Number(response.pollingIntervalMillis)||60000);
+    }
+    this.status={...this.status,state:'connected',account:tokens.userId,detail:'Дополнительный чат подключён',lastSyncAt:this.now()};
+    return Math.min(interval,3600000);
   }
   private async collectArchivedVideos(tokens:Tokens,ids:string[],valid:()=>boolean,at:number){
     try{

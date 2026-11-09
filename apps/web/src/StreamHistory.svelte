@@ -35,7 +35,7 @@
     {#each (session.confirmedUrls??[]).filter(validUrl) as entry,index}<a href={entry.url} target="_blank" rel="noopener noreferrer">{entry.platform==='twitch'?'Twitch':'YouTube'}{(session.confirmedUrls??[]).filter(e=>e.platform===entry.platform).length>1?` · часть ${(session.confirmedUrls??[]).filter(validUrl).slice(0,index+1).filter(e=>e.platform===entry.platform).length}`:''}</a>{/each}
     {#each session.breaks??[] as pause}<span class="small">Перерыв: {streamRange(pause.from,pause.to)}</span>{/each}
     {#if (session.memberIds?.length??0)>1}<button disabled={busy} onclick={()=>{close();onunmerge(session.id);}}>Разъединить</button>{/if}
-    {#if session.kind==='manual'}<button class="danger" disabled={busy} onclick={()=>{close();ondelete(session.id);}}>Удалить</button>{/if}
+    {#if session.kind==='manual'||session.ended_at_ms!==null}<button class="danger" disabled={busy} onclick={()=>{close();ondelete(session.id);}}>Удалить</button>{/if}
    {/snippet}</ActionMenu>
   </article>
  {:else}<div class="empty-small">Стримов пока нет</div>{/each}

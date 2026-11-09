@@ -1,5 +1,5 @@
 export type RankMetric = 'observedMinutes' | 'messages' | 'estimatedChatMinutes';
-export interface RankPerson {id:string;name:string;observedMinutes?:number;messages?:number;estimatedChatMinutes?:number;activityMinutes?:number;accounts?:Array<{source:string;name:string}>;donations?:Record<string,string>;core?:boolean;intervals?:Array<{from:number;to:number;kind:string}>;}
+export interface RankPerson {youtubeSecondary?:boolean;is_bot?:boolean|number;is_human?:boolean;is_donor?:boolean;id:string;name:string;observedMinutes?:number;messages?:number;estimatedChatMinutes?:number;activityMinutes?:number;accounts?:Array<{source:string;name:string;secondary?:boolean}>;donations?:Record<string,string>;core?:boolean;intervals?:Array<{from:number;to:number;kind:string}>;}
 export function audienceRanking(people:RankPerson[],metric:RankMetric) {
  return people.filter(person=>Number.isFinite(person[metric])&&(person[metric]??0)>0)
   .slice().sort((a,b)=>(b[metric]??0)-(a[metric]??0)||a.name.localeCompare(b.name,'ru')||a.id.localeCompare(b.id));
@@ -49,4 +49,15 @@ export function intervalSource(kind:string,accounts:RankPerson['accounts']):{pla
 export function durationLabel(minutes:number):string {
  const rounded=Math.max(0,Math.round(minutes));
  return rounded>=60?`${Math.floor(rounded/60)} ч${rounded%60?` ${rounded%60} мин`:''}`:`${rounded} мин`;
+}
+
+/** Add supplementary names to the stream list without mutating cached analytical facts. */
+export function withSupplementaryChat(people:RankPerson[],extra:Array<{id:string;name:string;accountName:string;messages:number}>):RankPerson[]{
+ const rows=people.map(p=>({...p,accounts:[...(p.accounts??[])]}));
+ for(const person of extra){
+  const account={source:'youtube',name:person.accountName,secondary:true},existing=rows.find(p=>p.id===person.id);
+  if(existing){existing.accounts.push(account);}
+  else rows.push({id:person.id,name:person.name,messages:person.messages,observedMinutes:0,estimatedChatMinutes:0,activityMinutes:0,accounts:[account],youtubeSecondary:true});
+ }
+ return rows;
 }

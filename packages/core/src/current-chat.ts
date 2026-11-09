@@ -3,9 +3,11 @@ import {AudienceQueries} from './audience-queries.js';
 import {unionSpans} from './analytics.js';
 
 export interface CurrentChatter {
+ youtubeSecondary?:boolean;
+ is_bot?:boolean|number;is_human?:boolean;is_donor?:boolean;
  key:string; personId:string; name:string; accountName?:string; source:'twitch'|'youtube';
  minutes:number|null; messages:number; lastMessageAt:number|null;
- accounts?:{source:CurrentChatter['source'];name:string}[];
+ accounts?:{source:CurrentChatter['source'];name:string;secondary?:boolean}[];
 }
 export interface CurrentChat {
  live:boolean; twitchState:'inactive'|'waiting'|'current'|'stale';
@@ -19,7 +21,7 @@ type Poll={id:string;status:string;completed_at_ms:number};
 export class CurrentChatQueries {
  private cache=new Map<string,CurrentChat>();
  constructor(private readonly db:Database.Database,private readonly audience:AudienceQueries){}
- read(sessionId:string,excluded:readonly string[],includeExcluded:boolean,now:number,revision:number):CurrentChat {
+ read(sessionId:string,excluded:readonly string[]|false,includeExcluded:boolean,now:number,revision:number):CurrentChat {
   const key=JSON.stringify([sessionId,excluded,includeExcluded,Math.floor(now/60000),revision]);
   const cached=this.cache.get(key);if(cached)return cached;
   const session=this.db.prepare('SELECT started_at_ms,ended_at_ms FROM sessions WHERE id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id)').get(sessionId) as {started_at_ms:number;ended_at_ms:number|null}|undefined;
@@ -47,7 +49,7 @@ export class CurrentChatQueries {
   // recent authors from a still-active YouTube broadcast; never invent duration.
   const observedPeople=JSON.stringify([...new Set(result.people.map(p=>p.personId))]);
   for(const account of new Set(links.filter(l=>l.platform==='youtube').map(l=>l.account_id))){
-   const rows=this.db.prepare(`SELECT y.external_id,y.person_id,y.display_name,(SELECT display_name FROM persons WHERE id=y.person_id) person_name,count(*) messages,max(m.published_at_ms) lastMessageAt FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE m.account_id=? AND m.published_at_ms<=? AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent') AND EXISTS(SELECT 1 FROM platform_streams p WHERE p.session_id=? AND p.platform='youtube' AND p.account_id=m.account_id AND m.published_at_ms>=p.started_at_ms AND (p.ended_at_ms IS NULL OR m.published_at_ms<p.ended_at_ms)) AND (?=1 OR (y.is_owner=0 AND y.external_id<>y.account_id AND y.match_key NOT IN(SELECT value FROM json_each(?)))) GROUP BY y.external_id HAVING (?=1 AND max(m.published_at_ms)>?) OR y.person_id IN(SELECT value FROM json_each(?))`).all(account,now,sessionId,Number(includeExcluded),bots,Number(active.some(l=>l.platform==='youtube'&&l.account_id===account)),now-600000,observedPeople) as {external_id:string;person_id:string;display_name:string;person_name:string;messages:number;lastMessageAt:number}[];
+   const rows=this.db.prepare(`SELECT y.external_id,y.person_id,y.display_name,(SELECT display_name FROM persons WHERE id=y.person_id) person_name,count(*) messages,max(m.published_at_ms) lastMessageAt FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE m.account_id=? AND m.published_at_ms<=? AND json_extract(m.payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent') AND EXISTS(SELECT 1 FROM platform_streams p WHERE p.session_id=? AND p.platform='youtube' AND p.account_id=m.account_id AND m.published_at_ms>=p.started_at_ms AND (p.ended_at_ms IS NULL OR m.published_at_ms<p.ended_at_ms)) AND (?=1 OR (y.is_owner=0 AND y.external_id<>y.account_id AND NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||y.person_id OR ((value=y.match_key OR value='person:'||y.person_id) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))))) GROUP BY y.external_id HAVING (?=1 AND max(m.published_at_ms)>?) OR y.person_id IN(SELECT value FROM json_each(?))`).all(account,now,sessionId,Number(includeExcluded),bots,Number(active.some(l=>l.platform==='youtube'&&l.account_id===account)),now-600000,observedPeople) as {external_id:string;person_id:string;display_name:string;person_name:string;messages:number;lastMessageAt:number}[];
    for(const row of rows)result.people.push({key:`youtube:${account}:${row.external_id}`,personId:row.person_id,name:row.person_name||row.display_name,accountName:row.display_name,source:'youtube',minutes:null,messages:row.messages,lastMessageAt:row.lastMessageAt});
   }
   const ids=JSON.stringify([...new Set(result.people.map(p=>p.personId))]);

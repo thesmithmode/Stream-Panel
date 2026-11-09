@@ -36,3 +36,10 @@ test('platform nicknames appear only when they add something to the group name a
  assert.deepEqual(intervalSource('chat_proxy',[tw,yt,{source:'youtube',name:'Second'}]),{platform:'YouTube',nick:'@egorbarinov6515, Second',estimate:true});
  assert.deepEqual(intervalSource('chat_proxy',undefined),{platform:'YouTube',nick:'',estimate:true});
 });
+
+test('supplementary identities extend only participant display and preserve cached primary measurements',async()=>{
+ const {withSupplementaryChat}=await import('./audience-ranking.ts');
+ const original=[{id:'a',name:'A',messages:3,accounts:[{source:'youtube',name:'A'}]}];
+ const result=withSupplementaryChat(original,[{id:'a',name:'A',accountName:'A second',messages:5},{id:'b',name:'B',accountName:'B',messages:2}]);
+ assert.equal(original[0]!.accounts.length,1);assert.equal(result[0]!.messages,3);assert.equal(result[0]!.accounts!.length,2);assert.equal(result[1]!.youtubeSecondary,true);
+});

@@ -1,3 +1,4 @@
+import {SupplementaryChat} from './supplementary-chat.js';
 import {DonationFx,type CbrRate} from './donation-fx.js';
 import {CurrentChatQueries} from './current-chat.js';
 import {AnalyticsReportCache} from './analytics-report-cache.js';
@@ -37,7 +38,9 @@ import { windowsFromLinks } from './session-windows.js';
 import { type PresencePoll } from "./presence.js";
 
 
+import {PersonBots} from './person-bots.js';
 export class StreamStore {
+  private readonly bots:PersonBots;
   private currentChatQueries:CurrentChatQueries;
   private history:AnalyticsHistory;
   private records:ChannelRecords;
@@ -58,6 +61,7 @@ export class StreamStore {
     this.reads=logicalReadDatabase(this.db);
     this.groups=new SessionGroups(this.db);
     this.annotations = new PersonAnnotations(this.db);
+    this.bots=new PersonBots(this.reads);
     this.streams=new StreamSessions(this.db,this.reads);
     this.links=new IdentityLinks(this.db,id=>this.annotations.personRevision(id));
     this.queries=new AudienceQueries(this.reads);
@@ -69,7 +73,7 @@ export class StreamStore {
       migrateDatabase(this.db);
     this.history=new AnalyticsHistory(this.reads);
     this.overviewActivity=new AnalyticsReportCache(this.reads);
-    this.records=new ChannelRecords(this.reads,(id,bots)=>({...this.streams.sessions(id,0,1,bots)[0],...this.history.recordMetrics(id,JSON.parse(bots) as string[])}));
+    this.records=new ChannelRecords(this.reads,(id,bots,includeBots)=>({...this.streams.sessions(id,0,1,bots)[0],...this.history.recordMetrics(id,includeBots?false:JSON.parse(bots) as string[])}));
       // Person = link umbrella. Collapse historical per-tip DA identity dupes.
       this.db.transaction(() => {this.collapseDuplicateDaDonors();this.reconcileNicknameLinks();}).immediate();
       // Account groups are shared by all profiles: join them and apply the others' changes.
@@ -89,8 +93,9 @@ export class StreamStore {
     nowMs: number,
   ) {return this.streams.startSession(accountId,streamId,startedAtMs,kind,nowMs);}
   endSession(id: string, atMs: number, quality = "observed") {return this.streams.endSession(id,atMs,quality);}
+  deleteSession(id:string,atMs:number){return this.streams.deleteSession(this.groups.root(id),atMs);}
   deleteManualSession(id: string, atMs: number) {return this.streams.deleteManualSession(id,atMs);}
-  sessions(sessionId?: string,offset=0,limit=100,excludedBotLogins:readonly string[]=[]) {
+  sessions(sessionId?: string,offset=0,limit=100,excludedBotLogins:readonly string[]|false=[]) {
     return this.streams.sessions(sessionId?this.groups.root(sessionId):undefined,offset,limit,this.queries.botJson(excludedBotLogins));
   }
   mergeSessions(ids:string[]){return this.groups.merge(ids);}
@@ -118,8 +123,18 @@ export class StreamStore {
     confirmedPresentIds?: string[],
   ) {return this.streams.observePlatformStream(platform,accountId,externalId,startedAtMs,observedAtMs,url,title,confirmedPresentIds);}
   activeLogicalStream() {return this.streams.activeLogicalStream();}
-  currentChat(sessionId:string,excluded:readonly string[]=[],includeExcluded=false,now=Date.now()){
-    return this.currentChatQueries.read(this.groups.root(sessionId),excluded,includeExcluded,now,this.changeStamp());
+  currentChat(sessionId:string,excluded:readonly string[]|false=[],includeExcluded=false,now=Date.now()){
+    const result=this.currentChatQueries.read(this.groups.root(sessionId),excluded,includeExcluded,now,this.changeStamp());
+    const people=result.people.map(p=>({...p,accounts:p.accounts?.map(a=>({...a,secondary:false}))}));
+    if(result.live)for(const row of new SupplementaryChat(this.db).participants(this.groups.root(sessionId),this.botJson(excluded),now,true,includeExcluded)){
+      const account={source:'youtube' as const,name:row.accountName,secondary:true},existing=people.find(p=>p.personId===row.id);
+      if(existing){existing.messages+=row.messages;existing.lastMessageAt=Math.max(existing.lastMessageAt??0,row.lastMessageAt);existing.accounts?.push(account);}
+      else people.push({key:`youtube:${row.accountId}:${row.id}`,personId:row.id,name:row.name,accountName:row.accountName,source:'youtube',minutes:null,messages:row.messages,lastMessageAt:row.lastMessageAt,accounts:[account]});
+    }
+    return {...result,people:new SupplementaryChat(this.db).decorate(this.bots.decorate(people,p=>p.personId),p=>p.personId)};
+  }
+  supplementaryParticipants(session:string,excluded:readonly string[]|false=[],now=Date.now()){
+    return this.bots.decorate(new SupplementaryChat(this.db).participants(this.groups.root(session),this.botJson(excluded),now),p=>p.id);
   }
   changeStamp(){return (this.db.prepare('SELECT coalesce(sum(revision),0) value FROM ui_revisions').get() as {value:number}).value;}
   streamMatchContext(sessionId:string){
@@ -204,13 +219,13 @@ export class StreamStore {
   merges() {return this.links.merges();}
   persons(
     search = "",
-    excludedBotLogins: readonly string[] = [],
+    excludedBotLogins: readonly string[] | false = [],
     fromMs=0,
   ) {return this.queries.persons(search,excludedBotLogins,fromMs);}
-  personsPage(search = "", excludedBotLogins: readonly string[] = [], fromMs=0, offset=0, limit=50) {
-    return this.queries.personsPage(search,excludedBotLogins,fromMs,offset,limit);
+  personsPage(search = "", excludedBotLogins: readonly string[] | false = [], fromMs=0, offset=0, limit=50, botFilter="humans") {
+    const page=this.queries.personsPage(search,excludedBotLogins,fromMs,offset,limit,botFilter);return {...page,items:new SupplementaryChat(this.db).decorate(this.bots.decorate(page.items,p=>String(p.id),excludedBotLogins===false?[]:excludedBotLogins),p=>String(p.id))};
   }
-  person(id: string,includeEvents=true) {return this.queries.person(id,includeEvents);}
+  person(id: string,includeEvents=true) {const person=this.queries.person(id,includeEvents);return {...person,...new SupplementaryChat(this.db).decorate(this.bots.decorate([person],p=>String(p.id)),p=>String(p.id))[0]};}
   events(
     sessionId?: string,
     personId?: string,
@@ -218,12 +233,12 @@ export class StreamStore {
     toMs?: number,
     type?:string,
     source?:string,
-  ) {return this.queries.events(sessionId?this.groups.root(sessionId):undefined,personId,fromMs,toMs,type,source);}
-  recentEvents(offset=0,limit=100,filter:RecentFilter={}) {return new RecentEvents(this.db).list(offset,limit,Date.now(),{...filter,...(filter.session?{session:this.groups.root(filter.session)}:{})});}
+  ) {return this.bots.decorate(this.queries.events(sessionId?this.groups.root(sessionId):undefined,personId,fromMs,toMs,type,source),p=>p.person_id as string|null);}
+  recentEvents(offset=0,limit=100,filter:RecentFilter={}) {return this.bots.decorate(new RecentEvents(this.db).list(offset,limit,Date.now(),{...filter,...(filter.session?{session:this.groups.root(filter.session)}:{})}),p=>p.person_id);}
   purgeRecentEvents() {return new RecentEvents(this.db).purge();}
   summary(
     sessionId?: string,
-    excludedBotLogins: readonly string[] = [],
+    excludedBotLogins: readonly string[] | false = [],
     details = true,
   ) {return this.queries.summary(sessionId?this.groups.root(sessionId):undefined,excludedBotLogins,details);}
   grid(
@@ -233,28 +248,28 @@ export class StreamStore {
     toMs: number,
   ) {return this.queries.grid(this.groups.root(sessionId),personId,fromMs,toMs);}
   private sessionRow(sessionId: string) {return this.queries.sessionRow(sessionId);}
-  private botJson(excludedBotLogins: readonly string[] = []) {return this.queries.botJson(excludedBotLogins);}
+  private botJson(excludedBotLogins: readonly string[] | false = []) {return this.queries.botJson(excludedBotLogins);}
   private notBotClause(alias = "i") {return this.queries.notBotClause(alias);}
   personStats(
     personId: string,
     sessionId?: string,
-    excludedBotLogins: readonly string[] = [],
+    excludedBotLogins: readonly string[] | false = [],
     chatWindowMinutes=5,
     fromMs=0,
   ) {return this.queries.personStats(personId,sessionId?this.groups.root(sessionId):undefined,excludedBotLogins,chatWindowMinutes,fromMs);}
   personsTop(
     sortBy: "messages" | "donations" | "observed_minutes" = "messages",
     sessionId?: string,
-    excludedBotLogins: readonly string[] = [],
+    excludedBotLogins: readonly string[] | false = [],
     limit = 50,
     fromMs=0,toMs?:number,currency='RUB',
-  ) {return this.queries.personsTop(sortBy,sessionId?this.groups.root(sessionId):undefined,excludedBotLogins,limit,fromMs,toMs,currency);}
-  insights(sessionId?:string,excludedBotLogins:readonly string[]=[],options:Partial<AnalyticsOptions>={}) {
+  ) {return this.bots.decorate(this.queries.personsTop(sortBy,sessionId?this.groups.root(sessionId):undefined,excludedBotLogins,limit,fromMs,toMs,currency),p=>String(p.id));}
+  insights(sessionId?:string,excludedBotLogins:readonly string[]|false=[],options:Partial<AnalyticsOptions>={}) {
     const id=sessionId?this.groups.root(sessionId):undefined;
     const session=id?this.reads.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id)').get(id) as {start:number;end:number|null}|undefined:undefined;
     if(id&&!session)throw new Error('SESSION_NOT_FOUND');
     const now=Date.now(),to=session?Math.min(session.end??options.toMs??(now-session.start>=60000?Math.floor(now/60000)*60000:now),now,options.toMs??now):options.toMs??now;
-    const settings={...options,fromMs:session?session.start:options.fromMs??0,toMs:to,excludedLogins:[...excludedBotLogins],includeInsights:true,...(id?{sessionId:id}:{})};
+    const settings:AnalyticsOptions={...options,fromMs:session?session.start:options.fromMs??0,toMs:to,excludedLogins:excludedBotLogins===false?false:[...excludedBotLogins],includeInsights:true,...(id?{sessionId:id}:{})};
     const report=id?this.history.streamReport(settings):this.history.report(settings);
     return {insights:report.insights??[],preparing:report.preparing===true,comparisonToMs:to};
   }
@@ -370,7 +385,7 @@ export class StreamStore {
     // Join only the latest contemporaneous Twitch sample; never borrow an old category.
     this.db.prepare("INSERT INTO stream_samples SELECT x.session_id,?,x.category_id,x.category_name,x.title,NULL,? FROM stream_samples x JOIN sessions s ON s.id=x.session_id WHERE s.ended_at_ms IS NULL AND x.twitch_viewers IS NOT NULL AND x.observed_at_ms<=? AND x.observed_at_ms>=? ORDER BY x.observed_at_ms DESC LIMIT 1 ON CONFLICT(session_id,observed_at_ms) DO UPDATE SET youtube_viewers=excluded.youtube_viewers").run(at,viewers,at,at-180000);
   }
-  channelOverview(excludedBotLogins:readonly string[]=[]){
+  channelOverview(excludedBotLogins:readonly string[]|false=[]){
     const sessions=this.reads.prepare("SELECT id,started_at_ms AS start,ended_at_ms AS end FROM sessions s WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)").all() as {id:string;start:number;end:number|null}[];
     const excluded=this.botJson(excludedBotLogins);
     const revision=this.reads.prepare("SELECT revision FROM ui_revisions WHERE domain='overviewAttendance'").get();
@@ -384,27 +399,27 @@ export class StreamStore {
       )`).get(excluded,JSON.stringify((summary.participants as {personId:string}[]).map(p=>p.personId))) as {n:number}).n;
       activity={messages:Number(summary.messages),attendees};this.overviewActivity.save(key,scope,activity);
     }
-    const donations=(this.reads.prepare("SELECT count(*) n FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE e.type='donation' AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))").get(excluded) as {n:number}).n;
+    const donations=(this.reads.prepare("SELECT count(*) n FROM effective_events e LEFT JOIN identities i ON i.id=e.identity_id WHERE e.type='donation' AND (i.id IS NULL OR NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))))").get(excluded) as {n:number}).n;
     const links=this.reads.prepare('SELECT session_id,started_at_ms,ended_at_ms FROM platform_streams').all() as {session_id:string;started_at_ms:number;ended_at_ms:number|null}[];
     const windowsBySession=new Map<string,typeof links>();for(const link of links){const list=windowsBySession.get(link.session_id)??[];list.push(link);windowsBySession.set(link.session_id,list);}
     const now=Date.now(),totals30=donationTotals(this.reads,now-30*86400000,now,excluded);
-    return {pendingExchangeDonations:new DonationFx(this.reads).pendingCount(excluded),records:this.records.read(excluded),totals30,streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+windowsFromLinks(windowsBySession.get(s.id)??[],s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees:activity.attendees,messages:activity.messages,totals:donationTotals(this.reads,undefined,undefined,excluded),donations};
+    return {pendingExchangeDonations:new DonationFx(this.reads).pendingCount(excluded),records:this.records.read(excluded,excludedBotLogins===false),totals30,streams:sessions.length,durationMinutes:sessions.reduce((n,s)=>n+windowsFromLinks(windowsBySession.get(s.id)??[],s.start,s.end??Date.now()).reduce((m,w)=>m+(w.to-w.from)/60000,0),0),attendees:activity.attendees,messages:activity.messages,totals:donationTotals(this.reads,undefined,undefined,excluded),donations};
   }
-  personOptions(search='',offset=0,limit=50,includeBots=false,selected='',excluded:readonly string[]=[],exclude=''){return this.queries.personOptions(search,offset,limit,includeBots,selected,excluded,exclude);}
+  personOptions(search='',offset=0,limit=50,includeBots=false,selected='',excluded:readonly string[]|false=[],exclude=''){return this.queries.personOptions(search,offset,limit,includeBots,selected,excluded,exclude);}
 
-  analytics(options: AnalyticsOptions):ReturnType<AnalyticsHistory['query']> {
-    return this.history.query(options.sessionId?{...options,sessionId:this.groups.root(options.sessionId)}:options);
+  analytics(options: AnalyticsOptions) {
+    const report=this.history.query(options.sessionId?{...options,sessionId:this.groups.root(options.sessionId)}:options);return {...report,audience:this.bots.decorate(report.audience,p=>p.id)};
   }
 
   clockAudience(options:AnalyticsOptions){return this.history.clockAudience(options);}
   advanceAnalytics(options:AnalyticsOptions){return this.history.advance(options);}
   warmAnalytics(options:AnalyticsOptions,bakeCategories=false){const result=this.history.warm(options,bakeCategories);if(!result.preparing)this.channelOverview(options.excludedLogins);return result;}
 
-  youtubeQuota(day: string, profile: string, cost = 1): boolean {
-    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(day) || !profile || !Number.isInteger(cost) || cost < 1 || cost > 4000) throw new Error("INVALID_QUOTA");
+  youtubeQuota(day: string, profile: string, cost = 1,budget=4000): boolean {
+    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(day) || !profile || !Number.isInteger(cost) || cost < 1 || cost > 4000||!Number.isInteger(budget)||budget<1||budget>4000) throw new Error("INVALID_QUOTA");
     return this.db.transaction(() => {
       const row = this.db.prepare("SELECT used FROM sp_youtube_quota WHERE day=? AND profile=?").get(day, profile) as {used: number} | undefined;
-      if ((row?.used ?? 0) + cost > 4000) return false;
+      if ((row?.used ?? 0) + cost > budget) return false;
       this.db.prepare("INSERT INTO sp_youtube_quota VALUES (?,?,?) ON CONFLICT(day,profile) DO UPDATE SET used=used+excluded.used").run(day, profile, cost);
       this.db.prepare("DELETE FROM sp_youtube_quota WHERE day!=?").run(day);
       return true;
@@ -525,6 +540,10 @@ export class StreamStore {
     }).immediate();
   }
 
+  personBot(personId:string,extra:readonly string[]=[]){return this.bots.state(personId,extra);}
+  setPersonBot(personId:string,bot:boolean,revision:number){return this.bots.set(personId,bot,revision);}
+  setPersonClassification(personId:string,kind:'bot'|'unknown'|'human',revision:number){return this.bots.setClassification(personId,kind,revision);}
+  setPersonHuman(personId:string,human:boolean,revision:number){return this.bots.setHuman(personId,human,revision);}
   personMetadata(personId:string) {return this.annotations.personMetadata(personId);}
   setPersonMetadata(personId:string,tags:string[],manualCore:boolean|null,revision:number) {return this.annotations.setPersonMetadata(personId,tags,manualCore,revision);}
   personNotes(personId:string) {return this.annotations.personNotes(personId);}
@@ -535,7 +554,7 @@ export class StreamStore {
 
   ingestLiveDonation(event:EventInput,expectedSessionId:string,allowUnknownTime=false) {return this.eventIngestion.ingestLiveDonation(event,expectedSessionId,allowUnknownTime);}
 
-  donationCandidates(id:string,excludedBotLogins:readonly string[]=[]):{id:string;name:string;messages:number;lastMessageAt:number}[]{
+  donationCandidates(id:string,excludedBotLogins:readonly string[]|false=[]):{id:string;name:string;messages:number;lastMessageAt:number}[]{
     const donation=this.donation(id);
     // Unknown timestamps cannot establish a reliable ±2 minute window.
     if(donation.occurredAtMs===null)return [];

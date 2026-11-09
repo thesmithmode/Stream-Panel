@@ -117,6 +117,21 @@ export class StreamSessions {
       .run(id, atMs);
   }
 
+  /** Hide the complete logical recording; immutable provider links prevent rediscovery. */
+  deleteSession(id:string,atMs:number):void {
+    assertTimestamp(atMs);
+    this.db.transaction(()=>{
+      const members=this.db.prepare("SELECT member_id AS id FROM session_groups WHERE group_id=? UNION SELECT ? AS id").all(id,id) as {id:string}[];
+      const rows=members.map(member=>this.db.prepare('SELECT id,kind,ended_at_ms FROM sessions WHERE id=?').get(member.id) as {id:string;kind:string;ended_at_ms:number|null}|undefined).filter(row=>row!==undefined);
+      if(!rows.length)throw new Error('SESSION_NOT_FOUND');
+      if(rows.some(row=>row.kind==='platform'&&row.ended_at_ms===null))throw new Error('SESSION_ACTIVE');
+      for(const row of rows){
+        if(row.kind==='manual'){this.deleteManualSession(row.id,atMs);continue;}
+        this.db.prepare("INSERT OR IGNORE INTO session_tombstones VALUES (?,?,?)").run(row.id,atMs,'[]');
+      }
+    }).immediate();
+  }
+
   deleteManualSession(id: string, atMs: number): void {
     assertTimestamp(atMs);
     this.db.transaction(()=>{
@@ -131,7 +146,7 @@ export class StreamSessions {
       for(const event of events){
         if(event.occurred_at_ms===null)continue;
         const candidates=this.db.prepare(`SELECT DISTINCT ps.session_id FROM platform_streams ps JOIN sessions s ON s.id=ps.session_id
-          WHERE s.kind='platform' AND ps.started_at_ms<=?
+          WHERE s.kind='platform' AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND ps.started_at_ms<=?
            AND (ps.ended_at_ms IS NULL OR ps.ended_at_ms>?) AND (s.ended_at_ms IS NULL OR s.ended_at_ms>?)
            AND (?='donationalerts' OR (ps.platform=? AND ps.account_id=?)) LIMIT 2`).all(event.occurred_at_ms,event.occurred_at_ms,event.occurred_at_ms,event.source,event.source,event.account_id) as {session_id:string}[];
         if(candidates.length===1)this.db.prepare("INSERT INTO event_sessions VALUES (?,?)").run(event.id,candidates[0]!.session_id);
@@ -160,7 +175,7 @@ export class StreamSessions {
     const messagesBySession=new Map(counts.map(row=>[row.session_id,row.n]));
     const samples=this.reads.prepare('SELECT session_id,observed_at_ms,twitch_viewers,youtube_viewers FROM stream_samples WHERE session_id IN(SELECT value FROM json_each(?)) ORDER BY observed_at_ms').all(ids) as {session_id:string;observed_at_ms:number;twitch_viewers:number|null;youtube_viewers:number|null}[];
     const platforms=this.reads.prepare('SELECT session_id,platform,started_at_ms AS "from",coalesce(ended_at_ms,?) AS "to" FROM platform_streams WHERE session_id IN(SELECT value FROM json_each(?))').all(Date.now(),ids) as {session_id:string;platform:string;from:number;to:number}[];
-    const tips=this.reads.prepare("SELECT es.session_id,'RUB' AS currency,e.rub_amount_minor AS amount FROM valued_events e LEFT JOIN identities i ON i.id=e.identity_id JOIN event_sessions es ON es.event_id=e.id WHERE e.type='donation' AND es.session_id IN(SELECT value FROM json_each(?)) AND (i.id IS NULL OR i.match_key NOT IN(SELECT value FROM json_each(?)))").all(ids,botJson) as {session_id:string;currency:string|null;amount:string|null}[];
+    const tips=this.reads.prepare("SELECT es.session_id,'RUB' AS currency,e.rub_amount_minor AS amount FROM valued_events e LEFT JOIN identities i ON i.id=e.identity_id JOIN event_sessions es ON es.event_id=e.id WHERE e.type='donation' AND es.session_id IN(SELECT value FROM json_each(?)) AND (i.id IS NULL OR NOT EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))))").all(ids,botJson) as {session_id:string;currency:string|null;amount:string|null}[];
     const group=<T extends {session_id:string}>(values:T[])=>{const groups=new Map<string,T[]>();for(const value of values){const list=groups.get(value.session_id)??[];list.push(value);groups.set(value.session_id,list);}return groups;};
     const samplesBySession=group(samples),platformsBySession=group(platforms),tipsBySession=group(tips);
     return rows.map(({platforms_json, urls_json, members_json, ...row}) => {

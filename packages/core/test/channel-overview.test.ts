@@ -21,13 +21,13 @@ test('overview donation window uses exact timestamps, corrections and historical
    ['unknown',null,'RUB','500','Viewer'],['bot',at-1000,'RUB','600','jeetbot']
   ] as const)s.ingest({source:'donationalerts',accountId:'donations',externalId:id,type:'donation',actor:{externalId:`name:${name.toLowerCase()}`,displayName:name},occurredAtMs:time,receivedAtMs:at,sourceTime:null,timeQuality:time===null?'unknown':'provider',transport:'rest',payload:{currency,amountMinor:amount}});
   s.saveExchangeRates('2026-10-21','2026-10-21',[{currency:'EUR',value:'100.0000',nominal:1}],at);
-  const data=s.channelOverview();assert.deepEqual(data.totals30,{RUB:'30100'});assert.deepEqual(data.totals,{RUB:'31200'});
+  const data=s.channelOverview();assert.deepEqual(data.totals30,{RUB:'30700'});assert.deepEqual(data.totals,{RUB:'31800'});
   assert.equal('hours' in data,false);
   const person=s.persons().find(p=>p.display_name==='Viewer')!;
   const input={personId:String(person.id),amount:'4.00',currency:'RUB',occurredAtMs:at-1000,message:'',sourceName:'Manual'};
-  const donation=s.createDonation(input,at);assert.equal(s.channelOverview().totals30.RUB,'30500');
+  const donation=s.createDonation(input,at);assert.equal(s.channelOverview().totals30.RUB,'31100');
   const corrected=s.updateDonation(String(donation.id),{...input,occurredAtMs:at-31*day},Number(donation.revision),at);
-  assert.equal(s.channelOverview().totals30.RUB,'30100');s.deleteDonation(String(corrected.id),Number(corrected.revision),at);assert.deepEqual(s.channelOverview().totals,data.totals);
+  assert.equal(s.channelOverview().totals30.RUB,'30700');s.deleteDonation(String(corrected.id),Number(corrected.revision),at);assert.deepEqual(s.channelOverview().totals,data.totals);
  }finally{Date.now=now;s.close();}
 });
 

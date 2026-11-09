@@ -9,7 +9,7 @@ import type Database from 'better-sqlite3';
 import {currencyRates} from './rates.js';
 import {streamMetrics} from './stream-metrics.js';
 import {windowsFromLinks,sessionBreaks} from './session-windows.js';
-import { botExclusionSet, isExcludedBot } from './bots.js';
+import {databaseBotExclusions} from "./person-bots.js";
 export interface AnalyticsOptions {
     /** Internal, server-selected rolling membership; never accepted from query input. */
     rollingCore?: boolean | undefined;
@@ -47,7 +47,7 @@ export interface AnalyticsOptions {
     coreRule?: 'either' | 'both' | 'frequency';
     chatWindowMinutes?: number;
     timezone?: string;
-    excludedLogins?: string[];
+    excludedLogins?: string[]|false;
     ownerId?: string;
     youtubeAccount?: string;
 }
@@ -120,12 +120,12 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     if(options.sessionId&&!recording)throw new Error('SESSION_NOT_FOUND');
     const from=recording?Math.max(options.fromMs,recording.started_at_ms):options.fromMs,to=recording?Math.min(options.toMs,recording.ended_at_ms??options.toMs):options.toMs;
     const {source,category,timezone,regularThresholdPercent,minSessions,minMinutes,minMessages,window,rule,clock}=validateAnalyticsOptions(options,from,to);
-    const excluded = botExclusionSet(options.excludedLogins ?? []), botJson = JSON.stringify([...excluded]);
+    const excluded = databaseBotExclusions(db,options.excludedLogins ?? []), botJson = JSON.stringify([...excluded]);
     const sessions = db.prepare('SELECT * FROM sessions WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id) AND started_at_ms<? AND coalesce(ended_at_ms,?)>? AND (? IS NULL OR id=?) ORDER BY started_at_ms LIMIT 1001').all(to, to, from, options.sessionId??null,options.sessionId??null) as any[];
     if (sessions.length > 1000)
         throw new Error('ANALYTICS_RANGE_TOO_LARGE');
     const sessionIds = JSON.stringify(sessions.map(s => s.id));
-    const visible = `SELECT p.id,p.display_name FROM persons p WHERE NOT EXISTS(SELECT 1 FROM identities ib WHERE ib.person_id=p.id AND (ib.match_key IN(SELECT value FROM json_each(?)) OR EXISTS(SELECT 1 FROM identity_aliases a WHERE a.identity_id=ib.id AND ltrim(a.candidate_key,'@#') IN(SELECT value FROM json_each(?))) OR (ib.source='twitch' AND (ib.external_id=? OR ib.external_id=ib.account_id)))) AND NOT EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR y.match_key IN(SELECT value FROM json_each(?)) OR a.match_key IN(SELECT value FROM json_each(?))))`;
+    const visible = `SELECT p.id,p.display_name FROM persons p WHERE NOT EXISTS(SELECT 1 FROM identities ib WHERE ib.person_id=p.id AND (EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||ib.person_id OR ((value=ib.match_key OR value='person:'||ib.person_id) AND ib.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) OR (ib.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people) AND EXISTS(SELECT 1 FROM identity_aliases a WHERE a.identity_id=ib.id AND ltrim(a.candidate_key,'@#') IN(SELECT value FROM json_each(?)))) OR (ib.source='twitch' AND (ib.external_id=? OR ib.external_id=ib.account_id)))) AND NOT EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||y.person_id OR ((value=y.match_key OR value='person:'||y.person_id) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) OR (y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people) AND a.match_key IN(SELECT value FROM json_each(?)))))`;
     const people = db.prepare(visible).all(botJson, botJson, options.ownerId ?? '', botJson,botJson) as {
         id: string;
         display_name: string;
@@ -291,7 +291,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     }
     if (!options.donationsOnly && source !== 'twitch' && options.youtubeAccount) {
         const personLinks=new Map((db.prepare('SELECT external_id,person_id FROM youtube_identities WHERE account_id=?').all(options.youtubeAccount) as {external_id:string;person_id:string}[]).map(row=>[row.external_id,row.person_id]));
-        const excludedAuthors = new Set((db.prepare(`SELECT DISTINCT author_id FROM youtube_messages WHERE account_id=? AND (json_extract(payload_json,'$.authorDetails.isChatOwner')=1 OR lower(ltrim(trim(json_extract(payload_json,'$.authorDetails.displayName')),'@#')) IN(SELECT value FROM json_each(?)))`).all(options.youtubeAccount,botJson) as {author_id:string}[]).map(row=>row.author_id));
+        const excludedAuthors = new Set((db.prepare(`SELECT DISTINCT author_id FROM youtube_messages WHERE account_id=? AND json_extract(payload_json,'$.authorDetails.isChatOwner')=1`).all(options.youtubeAccount) as {author_id:string}[]).map(row=>row.author_id));
         const chats = db.prepare(`WITH scoped AS (
     SELECT *, (SELECT ps.session_id FROM platform_streams ps JOIN sessions s ON s.id=ps.session_id WHERE ps.platform='youtube' AND ps.account_id=m.account_id AND ps.started_at_ms<=m.published_at_ms AND coalesce(ps.ended_at_ms,s.ended_at_ms,?)>m.published_at_ms ORDER BY ps.started_at_ms DESC LIMIT 1) AS sid
     FROM youtube_messages m WHERE account_id=? AND author_id!=? AND author_id!='' AND published_at_ms>=? AND published_at_ms<? AND json_extract(payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
@@ -301,7 +301,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         if (chats.length > 50000)
             throw new Error('ANALYTICS_RANGE_TOO_LARGE');
         for (const chat of chats) {
-            if (excludedAuthors.has(chat.author_id) || isExcludedBot(chat.name ?? '', excluded) || !chat.sid)
+            if (excludedAuthors.has(chat.author_id) || !chat.sid)
                 continue;
             const personId=personLinks.get(chat.author_id);
             if(!personId||!allowed.has(personId))continue;
@@ -494,7 +494,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
             cell.observedKnownMinutes+=elapsed;
     }
     const accountsByPerson=new Map<string,{source:string;name:string}[]>();
-    for(const row of db.prepare("SELECT person_id,source,display_name FROM identities WHERE source='twitch' AND person_id IN(SELECT value FROM json_each(?)) UNION ALL SELECT person_id,'youtube' AS source,display_name FROM youtube_identities WHERE person_id IN(SELECT value FROM json_each(?))").all(JSON.stringify([...entities.keys()]),JSON.stringify([...entities.keys()])) as {person_id:string;source:string;display_name:string}[]){
+    for(const row of db.prepare("SELECT person_id,source,display_name FROM identities WHERE source='twitch' AND person_id IN(SELECT value FROM json_each(?)) UNION ALL SELECT person_id,'youtube' AS source,display_name FROM youtube_identities y WHERE person_id IN(SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM youtube_snapshots role WHERE role.account_id=y.account_id AND role.key='collectionRole' AND role.payload_json='\"secondary\"')").all(JSON.stringify([...entities.keys()]),JSON.stringify([...entities.keys()])) as {person_id:string;source:string;display_name:string}[]){
         const accounts=accountsByPerson.get(row.person_id)??[];accounts.push({source:row.source,name:row.display_name});accountsByPerson.set(row.person_id,accounts);
     }
     const messageMinutesByPerson=new Map<string,{session:string;at:number}[]>();
@@ -526,13 +526,13 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     });
     const report=source!=='twitch'&&options.youtubeAccount ? db.prepare("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {payload_json:string;updated_at_ms:number}|undefined : undefined;
     const youtubeReport=report ? {data:JSON.parse(report.payload_json),updatedAt:report.updated_at_ms} : null;
-    return { activityClock:clockActivity([...timeline.values()].map(point=>({...point,donations:minuteDonationCounts.get(point.at)??0,donationAmounts:minuteDonations.get(point.at)??{}})),selected,timezone), donationTiming:options.activityOnly?emptyDonationTiming(category):donationTiming(db,from,to,timezone,category),activityWindows:selected, patterns,composition,breaks, youtubeReport, streamComparison, availableCategories: [...new Map(segments.filter(s=>s.categoryId&&s.name!=='Категория неизвестна').map(s => [s.categoryId, { id: s.categoryId, name: s.name }])).values()], filters: { fromMs: from, toMs: to, source, category, minSessions, minMinutes, minMessages, regularThresholdPercent, coreRule: rule, chatWindowMinutes: window, timezone }, summary: { entities: audience.length, attendees: attendees.length, regulars, regularShare: audience.length?regulars/audience.length:null, core: audience.filter(e => e.core).length, streams: new Set(selected.map(x => x.session)).size, chatters:audience.filter(e=>e.messages>0).length, messages: audience.reduce((sum, e) => sum + e.messages, 0) }, audience, categories: [...categories.values()].filter(c=>c.id&&c.name!=='Категория неизвестна').map(c => ({ ...c, donationCount:categoryDonationCounts.get(c.id)??0,donationTotals:categoryDonations.get(c.id)??{},donationsPerHourMinor:currencyRates(categoryDonations.get(c.id)??{},Math.round(c.minutes*60000)),meanOnline:c.viewerKnownMinutes?c.viewerTotal/c.viewerKnownMinutes:null,viewerCoverageRatio:c.minutes?c.viewerKnownMinutes/c.minutes:null,sessions: c.sessions.size, audience: c.audience.size, core: c.core.size, messagesPerHour: c.minutes ? c.messages * 60 / c.minutes : 0, observedPerMinute: c.minutes ? c.observedMinutes / c.minutes : 0, observedPerKnownMinute: c.observedKnownMinutes ? c.observedMinutes / c.observedKnownMinutes : null, coverageRatio: c.minutes ? c.observedKnownMinutes/c.minutes : null })), timeline: [...timeline.values()].sort((a, b) => a.at - b.at), hours: [...hourly.values()].map(cell=>({...cell,donationsPerHourMinor:currencyRates(cell.donationTotals,Math.round(cell.sampleMinutes*60000))})).sort((a, b) => ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(a.day) - ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(b.day) || a.hour - b.hour), sessions, excluded: [...excluded] };
+    return { activityClock:clockActivity([...timeline.values()].map(point=>({...point,donations:minuteDonationCounts.get(point.at)??0,donationAmounts:minuteDonations.get(point.at)??{}})),selected,timezone), donationTiming:options.activityOnly?emptyDonationTiming(category):donationTiming(db,from,to,timezone,category),activityWindows:selected, patterns,composition,breaks, youtubeReport, streamComparison, availableCategories: [...new Map(segments.filter(s=>s.categoryId&&s.name!=='Категория неизвестна').map(s => [s.categoryId, { id: s.categoryId, name: s.name }])).values()], filters: { includeBots:options.excludedLogins===false, fromMs: from, toMs: to, source, category, minSessions, minMinutes, minMessages, regularThresholdPercent, coreRule: rule, chatWindowMinutes: window, timezone }, summary: { entities: audience.length, attendees: attendees.length, regulars, regularShare: audience.length?regulars/audience.length:null, core: audience.filter(e => e.core).length, streams: new Set(selected.map(x => x.session)).size, chatters:audience.filter(e=>e.messages>0).length, messages: audience.reduce((sum, e) => sum + e.messages, 0) }, audience, categories: [...categories.values()].filter(c=>c.id&&c.name!=='Категория неизвестна').map(c => ({ ...c, donationCount:categoryDonationCounts.get(c.id)??0,donationTotals:categoryDonations.get(c.id)??{},donationsPerHourMinor:currencyRates(categoryDonations.get(c.id)??{},Math.round(c.minutes*60000)),meanOnline:c.viewerKnownMinutes?c.viewerTotal/c.viewerKnownMinutes:null,viewerCoverageRatio:c.minutes?c.viewerKnownMinutes/c.minutes:null,sessions: c.sessions.size, audience: c.audience.size, core: c.core.size, messagesPerHour: c.minutes ? c.messages * 60 / c.minutes : 0, observedPerMinute: c.minutes ? c.observedMinutes / c.minutes : 0, observedPerKnownMinute: c.observedKnownMinutes ? c.observedMinutes / c.observedKnownMinutes : null, coverageRatio: c.minutes ? c.observedKnownMinutes/c.minutes : null })), timeline: [...timeline.values()].sort((a, b) => a.at - b.at), hours: [...hourly.values()].map(cell=>({...cell,donationsPerHourMinor:currencyRates(cell.donationTotals,Math.round(cell.sampleMinutes*60000))})).sort((a, b) => ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(a.day) - ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(b.day) || a.hour - b.hour), sessions, excluded: [...excluded] };
 }
 
 /** Progress metadata is built without reading facts. */
 export function analyticsMetadata(options:AnalyticsOptions):ReturnType<typeof audienceAnalytics>{
  const {source,category,timezone,minSessions,minMinutes,minMessages,regularThresholdPercent,rule,window}=validateAnalyticsOptions(options);
- return {filters:{fromMs:options.fromMs,toMs:options.toMs,source,category,timezone,minSessions,minMinutes,minMessages,regularThresholdPercent,coreRule:rule,chatWindowMinutes:window},
+ return {filters:{includeBots:options.excludedLogins===false,fromMs:options.fromMs,toMs:options.toMs,source,category,timezone,minSessions,minMinutes,minMessages,regularThresholdPercent,coreRule:rule,chatWindowMinutes:window},
  summary:{entities:0,attendees:0,regulars:0,regularShare:null,core:0,streams:0,chatters:0,messages:0},
  composition:{core:0,followers:0,nonFollowers:0,unknown:0,twitch:0,youtube:0,both:0},
  donationTiming:{count:0,unknownCount:0,totals:{},hours:[],basis:category?'Донаты во время эфиров выбранной категории; категория YouTube совпадает с Twitch.':'Все донаты профиля с подтверждённым временем; донаты вне эфиров тоже учитываются.'},

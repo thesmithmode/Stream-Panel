@@ -35,7 +35,7 @@ test('analytics keeps owners/bots out, unions linked identities, splits categori
         s.youtubeMessages('yt-owner', 'chat2', [{ id: 'yt2', snippet: { type: 'textMessageEvent', publishedAt: new Date(base + 11 * minute).toISOString(), displayMessage: 'again' }, authorDetails: { channelId: 'yt-regular', displayName: 'YouTubeRegular' } }]);
         s.endSession(second, end, 'observed');
         const result = s.analytics(opts), regular = result.audience.find(x => x.id === a.personId)!, yt = result.audience.find(x => x.source === 'youtube')!;
-        assert.equal(result.summary.entities, 2);
+        assert.equal(result.summary.entities, 3);
         assert.equal(result.summary.core, 2);
         assert.equal(regular.observedMinutes, 7);
         assert.equal(regular.visits, 3);
@@ -44,11 +44,11 @@ test('analytics keeps owners/bots out, unions linked identities, splits categori
         assert.equal(yt.estimatedChatMinutes, 10);
         assert.equal(result.timeline.find(x => x.at === base + 3 * minute)?.presenceKnown, true);
         assert.equal(result.timeline.find(x => x.at === base + 5 * minute)?.presenceKnown, false);
-        assert.equal(result.categories.find(x => x.id === 'game')?.messages, 4);
+        assert.equal(result.categories.find(x => x.id === 'game')?.messages, 5);
         assert.equal(result.categories.find(x => x.id === 'talk')?.messages, 1);
         assert.equal(result.timeline.find(x => x.at === base)?.viewers, 16);
         assert.equal(s.analytics({ ...opts, source: 'twitch' }).audience.length, 1);
-        assert.equal(s.analytics({ ...opts, source: 'youtube' }).audience.length, 1);
+        assert.equal(s.analytics({ ...opts, source: 'youtube' }).audience.length, 2);
         assert.equal(s.analytics({ ...opts, category: 'talk' }).audience[0]?.observedMinutes, 2);
         assert.equal(s.analytics({ ...opts, coreRule: 'both', minMessages: 10 }).summary.core, 2);
         assert.equal(s.analytics({ ...opts, coreRule: 'frequency', minSessions: 1, minMinutes: 1000 }).summary.core, 2);
@@ -209,7 +209,7 @@ test('empty and missing poll minutes are explicit and category averages use succ
  } finally {s.close();}
 });
 
-test('YouTube bot renames and chat owner flag never turn excluded authors into audience',()=>{
+test('YouTube names are human even after bot-like aliases while chat owners remain excluded',()=>{
  const s=new StreamStore(':memory:');
  try {
   recordedStream(s,'channel','yt-exclusions',base,'platform',base);
@@ -218,8 +218,8 @@ test('YouTube bot renames and chat owner flag never turn excluded authors into a
    {id:'b',snippet:{type:'textMessageEvent',publishedAt:new Date(base+2*minute).toISOString()},authorDetails:{channelId:'bot-id',displayName:'NewName'}},
    {id:'c',snippet:{type:'textMessageEvent',publishedAt:new Date(base+minute).toISOString()},authorDetails:{channelId:'other-owner',displayName:'Owner',isChatOwner:true}},
   ]);
-  assert.equal(s.analytics({...opts,fromMs:base+2*minute}).summary.entities,0);
-  assert.equal(s.analytics(opts).summary.entities,0);
+  assert.equal(s.analytics({...opts,fromMs:base+2*minute}).summary.entities,1);
+  assert.equal(s.analytics(opts).summary.entities,1);
  }finally{s.close();}
 });
 
