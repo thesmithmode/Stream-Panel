@@ -173,3 +173,12 @@ test('neutral explicitly clears detected bot coloring and cached exclusions, inc
   s.setPersonClassification(known,'bot',s.personRevision(known));assert.equal(s.person(known).is_bot,1);assert.equal(s.analytics(q).summary.attendees,1);
  }finally{s.close();}
 });
+
+
+test('classification changes preserve personal message and presence history',()=>{
+ const s=new StreamStore(':memory:');try{
+  broadcast(s,'history',at,['viewer']);const id=s.candidatePersons('viewer')[0]!;
+  const before=s.personStats(id);assert.ok(Number(before.totalObservedMinutes)>0);assert.ok(Number(before.messageCount)>0);
+  for(const kind of ['bot','human','unknown'] as const){s.setPersonClassification(id,kind,s.personRevision(id));const after=s.personStats(id);assert.equal(after.totalObservedMinutes,before.totalObservedMinutes);assert.equal(after.messageCount,before.messageCount);assert.equal(after.sessionsWithAttendance,before.sessionsWithAttendance);}
+ }finally{s.close();}
+});
