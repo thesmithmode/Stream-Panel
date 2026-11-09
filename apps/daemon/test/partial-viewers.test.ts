@@ -7,9 +7,11 @@ import {createApplication} from '../src/server.js';
 import {YouTubeConnection} from '../src/youtube.js';
 import type {Configuration} from '../src/config.js';
 
-test('real YouTube collection with omitted concurrentViewers keeps Twitch visible in HTTP history and analytics',async()=>{
+test('real YouTube collection with omitted concurrentViewers keeps Twitch visible in HTTP history and analytics',async(t)=>{
  const dir=await mkdtemp(join(tmpdir(),'sp-partial-http-')),a=await createApplication(dir,47831,false);
  const base=Date.parse('2026-10-19T06:00:00Z'),now=base+10000,video='video_AAAAAA';
+ // Read one complete fixture minute, rather than extending this live stream to the wall clock.
+ t.mock.method(Date,'now',()=>base+60000);
  const configuration={value:{youtube:{access:'access',refresh:'refresh',userId:'channel',scopes:['https://www.googleapis.com/auth/youtube.readonly'],expiresAt:now+3600000}},save:async()=>{}} as unknown as Configuration;
  let viewers:string|undefined;
  const request:typeof fetch=async input=>{
