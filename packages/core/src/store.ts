@@ -541,9 +541,11 @@ export class StreamStore {
   }
 
   personBot(personId:string,extra:readonly string[]=[]){return this.bots.state(personId,extra);}
-  setPersonBot(personId:string,bot:boolean,revision:number){return this.bots.set(personId,bot,revision);}
-  setPersonClassification(personId:string,kind:'bot'|'unknown'|'human',revision:number){return this.bots.setClassification(personId,kind,revision);}
-  setPersonHuman(personId:string,human:boolean,revision:number){return this.bots.setHuman(personId,human,revision);}
+  personBots(ids:readonly string[],extra:readonly string[]=[]){return this.bots.states(ids,extra);}
+  setPersonBot(personId:string,bot:boolean,revision:number){return this.shareClassification(personId,()=>this.bots.set(personId,bot,revision));}
+  setPersonClassification(personId:string,kind:'bot'|'unknown'|'human',revision:number){return this.shareClassification(personId,()=>this.bots.setClassification(personId,kind,revision));}
+  setPersonHuman(personId:string,human:boolean,revision:number){return this.shareClassification(personId,()=>this.bots.setHuman(personId,human,revision));}
+  private shareClassification(person:string,run:()=>ReturnType<PersonBots['state']>){return this.db.transaction(()=>{const result=run();if(!result.automaticHuman&&this.shared)for(const profile of this.shared.shareClassification(person,result.manualHuman?'human':result.manualBot?'bot':'unknown'))this.sharedTouched.add(profile);return result;}).immediate();}
   personMetadata(personId:string) {return this.annotations.personMetadata(personId);}
   setPersonMetadata(personId:string,tags:string[],manualCore:boolean|null,revision:number) {return this.annotations.setPersonMetadata(personId,tags,manualCore,revision);}
   personNotes(personId:string) {return this.annotations.personNotes(personId);}

@@ -62,6 +62,7 @@ export const storeOperations={
   updatePersonNote:"write",
   deletePersonNote:"write",
   personBot:"cached",
+  personBots:"read",
   setPersonBot:"write",
   setPersonHuman:"write",
   setPersonClassification:"write",

@@ -4,7 +4,7 @@ import type { StorePort } from './store-contract.js';
 import { object, string } from './provider-values.js';
 import { analyticsSettings,analyticsBotLogins,analyticsCalculationSettings } from './analytics-settings.js';
 import {PersonPlatformLinks,type PlatformIdentity} from './person-platform-links.js';
-type Store = StorePort<'setPersonClassification' | 'setPersonHuman' | 'personBot' | 'setPersonBot' | 'bindDonorNickname' | 'candidatePersons' | 'createPersonNote' | 'deletePersonNote' | 'donorBindings' | 'donorNicknames' | 'insights' | 'merge' | 'merges' | 'person' | 'personActivity' | 'personFollowing' | 'personMetadata' | 'personNotes' | 'personStats' | 'persons' | 'personsPage' | 'personOptions' | 'personsTop' | 'renamePerson' | 'setPersonMetadata' | 'splitIdentities' | 'splits' | 'undoMerge' | 'undoSplit' | 'updatePersonNote'>;
+type Store = StorePort<'personBots' | 'setPersonClassification' | 'setPersonHuman' | 'personBot' | 'setPersonBot' | 'bindDonorNickname' | 'candidatePersons' | 'createPersonNote' | 'deletePersonNote' | 'donorBindings' | 'donorNicknames' | 'insights' | 'merge' | 'merges' | 'person' | 'personActivity' | 'personFollowing' | 'personMetadata' | 'personNotes' | 'personStats' | 'persons' | 'personsPage' | 'personOptions' | 'personsTop' | 'renamePerson' | 'setPersonMetadata' | 'splitIdentities' | 'splits' | 'undoMerge' | 'undoSplit' | 'updatePersonNote'>;
 export function registerPeopleRoutes(app: FastifyInstance, db: Store, configuration: ConfigurationPort, resolveTwitch:(ids:string[])=>Promise<{id:string;login:string}[]>) {
     const platformLinks=new PersonPlatformLinks(resolveTwitch);
     const botsFor=(query:unknown)=>analyticsBotLogins(object(query),configuration.value);
@@ -13,6 +13,7 @@ export function registerPeopleRoutes(app: FastifyInstance, db: Store, configurat
         return platformLinks.list(person.identities as PlatformIdentity[],configuration.value.twitch?.userId??'');
     });
     app.get("/api/v1/persons/:id/following", async (request) => db.call("personFollowing", string(object(request.params).id), string(object(request.query).session)));
+    app.get('/api/v1/persons/classifications',request=>db.call('personBots',string(object(request.query).ids).split(',').filter(Boolean),configuration.value.excludedBotLogins));
     app.post('/api/v1/persons/:id/classification',request=>{const b=object(request.body),kind=string(b.kind);if(kind!=='bot'&&kind!=='unknown'&&kind!=='human')throw Error('INVALID_PERSON_CLASSIFICATION');return db.call('setPersonClassification',string(object(request.params).id),kind,Number(b.revision));});
     app.get('/api/v1/persons/:id/bot',request=>db.call('personBot',string(object(request.params).id),configuration.value.excludedBotLogins));
     app.post('/api/v1/persons/:id/bot',request=>{const b=object(request.body);if(typeof b.bot!=='boolean')throw Error('INVALID_BOT_MARK');return db.call('setPersonBot',string(object(request.params).id),b.bot,Number(b.revision));});

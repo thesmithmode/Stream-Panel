@@ -13,7 +13,7 @@ test('manual bot marks, filters, cached statistics and independent highlight pre
   const errors=[];page.on('pageerror',e=>errors.push(e.message));await startCoverage(page);await goto(page,app.bootstrap());
   const classify=async(label,value)=>{const target=value?label:'Неизвестно';const saved=page.waitForResponse(r=>r.url().endsWith('/classification')&&r.request().method()==='POST'&&r.status()===200);await page.getByRole('radio',{name:target,exact:true}).click();await saved;await page.waitForFunction(target=>{const button=document.querySelector(`.classification button[aria-label="${target}"]`);return button&&!button.disabled&&button.getAttribute('aria-checked')==='true';},target);};
   const open=async()=>{await navigate(page,'Люди');await page.getByLabel('Фильтр ботов').selectOption('all');await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();};
-  await open();await classify('Бот',true);
+  await open();assert.equal(await page.locator('.classification-control.locked').count(),0);assert.match(await page.locator('.classification').evaluate(e=>getComputedStyle(e).backgroundImage),/linear-gradient.*40, 126, 172.*155, 61, 73/);await page.locator('.classification-control').screenshot({path:'/tmp/sp-switch-enabled.png'});await classify('Бот',true);
   assert.equal(await page.locator('.person-detail.bot-person,.person-detail.human-person').count(),0);
   const person=(await app.db.call('persons')).find(p=>p.display_name==='Тестовый зритель');
   assert.equal((await app.db.call('personBot',person.id)).manualBot,true);
@@ -49,6 +49,7 @@ test('manual bot marks, filters, cached statistics and independent highlight pre
   // Donated money makes a Twitch card ineligible at the API as well as in the UI.
   await app.db.call('createDonation',{personId:person.id,amount:'1',currency:'RUB',occurredAtMs:Date.now(),message:'',sourceName:'Manual'},Date.now());
   await reload(page);await page.getByRole('radio',{name:'Человек',exact:true}).waitFor();assert.equal(await page.getByRole('radio',{name:'Человек',exact:true}).getAttribute('aria-checked'),'true');assert.equal(await page.getByRole('radio',{name:'Человек',exact:true}).isDisabled(),true);assert.equal(await page.locator('.person-detail.bot-person,.person-detail.human-person').count(),0);assert.equal(await page.getByRole('radio',{name:'Бот',exact:true}).isDisabled(),true);
+  await page.locator('.classification-control.locked').waitFor();assert.equal(await page.getByRole('img',{name:/Статус «Человек» закреплён/}).count(),1);assert.equal(await page.locator('.classification-control').evaluate(e=>getComputedStyle(e).filter),'grayscale(1)');await page.locator('.classification-control').screenshot({path:'/tmp/sp-switch-locked.png'});await assertUiLayout(page);
   const bot=await app.db.call('personBot',person.id),status=await request('status');
   const denied=await page.evaluate(async({id,revision,csrf})=>(await fetch(`/api/v1/persons/${id}/bot`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({bot:true,revision})})).status,{id:person.id,revision:bot.revision,csrf:status.value.csrf});
   assert.equal(denied,400);
