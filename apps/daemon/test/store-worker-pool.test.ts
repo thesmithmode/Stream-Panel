@@ -63,3 +63,16 @@ test('a merge in one profile reaches cached reads of the other profile at once a
   assert.equal(b.queueStatus().operations.persons!.calls,calls,'nothing keeps invalidating after the change settled');
  }finally{await Promise.all([a.stop(),b.stop()]);await rm(dir,{recursive:true,force:true});}
 });
+
+test('classification sync invalidates peer profile caches immediately and preserves personal history',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-shared-label-cache-')),path=join(dir,'db'),a=new StoreClient(path,'ruslan'),b=new StoreClient(path,'gulnaz');
+ try{
+  await Promise.all([a.ready,b.ready]);const at=Date.now()-3600000;
+  for(const client of [a,b]){const sid=await client.call('startSession','owner','labels',at,'platform',at);await client.call('ingest',{source:'twitch',accountId:'owner',externalId:'message',type:'chat.message',actor:{externalId:'42',displayName:'Viewer'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'Hello'}});await client.call('endSession',String(sid),at+60000);}
+  const x=(await a.call('persons'))[0]!,y=(await b.call('persons'))[0]!;
+  assert.equal((await b.call('personBot',String(y.id))).manualBot,false);const before=await b.call('personStats',String(y.id));assert.equal((await b.call('personsPage','',[],0,0,50,'bots')).total,0);
+  await a.call('setPersonClassification',String(x.id),'bot',Number(x.revision));assert.equal((await b.call('personBot',String(y.id))).manualBot,true);assert.equal((await b.call('personsPage','',[],0,0,50,'bots')).total,1);assert.equal((await b.call('personStats',String(y.id))).messageCount,before.messageCount);
+  const current=await b.call('personBot',String(y.id));await b.call('setPersonClassification',String(y.id),'human',current.revision);assert.equal((await a.call('personBot',String(x.id))).manualHuman,true);
+  const calls=a.queueStatus().operations.personBot!.calls;await a.call('personBot',String(x.id));assert.equal(a.queueStatus().operations.personBot!.calls,calls,'stable shared state retains cache hits');
+ }finally{await Promise.all([a.stop(),b.stop()]);await rm(dir,{recursive:true,force:true});}
+});

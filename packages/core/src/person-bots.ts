@@ -91,16 +91,17 @@ export class PersonBots {
    return this.state(id);
   }).immediate();
  }
- state(id:string,extra:readonly string[]=[]){
-  const p=this.db.prepare(`SELECT p.revision,EXISTS(SELECT 1 FROM bot_eligible_people e WHERE e.person_id=p.id) canMarkBot,
+ states(ids:readonly string[],extra:readonly string[]=[]){
+  if(!Array.isArray(ids)||ids.length>100||ids.some(id=>typeof id!=='string'||!id||id.length>256))throw Error('INVALID_PERSON_IDS');
+  const rows=this.db.prepare(`SELECT p.id,p.revision,EXISTS(SELECT 1 FROM bot_eligible_people e WHERE e.person_id=p.id) canMarkBot,
    EXISTS(SELECT 1 FROM manual_bot_people b WHERE b.person_id=p.id) manualBot,
    EXISTS(SELECT 1 FROM donor_people d WHERE d.person_id=p.id) isDonor,
    EXISTS(SELECT 1 FROM automatic_human_people h WHERE h.person_id=p.id) automaticHuman,
    EXISTS(SELECT 1 FROM manual_human_people h WHERE h.person_id=p.id) manualHuman,
-   (EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND i.source='twitch' AND i.match_key IN(SELECT value FROM json_each(?))) AND NOT EXISTS(SELECT 1 FROM manual_neutral_people n WHERE n.person_id=p.id)) knownBot FROM persons p WHERE p.id=?`).get(JSON.stringify([...botExclusionSet(extra)]),id) as {revision:number;canMarkBot:number;manualBot:number;isDonor:number;automaticHuman:number;manualHuman:number;knownBot:number}|undefined;
-  if(!p)throw Error('PERSON_NOT_FOUND');
-  return {...p,canMarkBot:!!p.canMarkBot,manualBot:!!p.manualBot,isDonor:!!p.isDonor,automaticHuman:!!p.automaticHuman,manualHuman:!!p.manualHuman,knownBot:!!p.knownBot&&!p.automaticHuman&&!p.manualHuman};
+   (EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND i.source='twitch' AND i.match_key IN(SELECT value FROM json_each(?))) AND NOT EXISTS(SELECT 1 FROM manual_neutral_people n WHERE n.person_id=p.id)) knownBot FROM persons p WHERE p.id IN(SELECT value FROM json_each(?))`).all(JSON.stringify([...botExclusionSet(extra)]),JSON.stringify(ids)) as {id:string;revision:number;canMarkBot:number;manualBot:number;isDonor:number;automaticHuman:number;manualHuman:number;knownBot:number}[];
+  return Object.fromEntries(rows.map(({id,...p})=>[id,{...p,canMarkBot:!!p.canMarkBot,manualBot:!!p.manualBot,isDonor:!!p.isDonor,automaticHuman:!!p.automaticHuman,manualHuman:!!p.manualHuman,knownBot:!!p.knownBot&&!p.automaticHuman&&!p.manualHuman}]));
  }
+ state(id:string,extra:readonly string[]=[]){const states=this.states([id],extra);if(!Object.hasOwn(states,id))throw Error('PERSON_NOT_FOUND');return states[id]!;}
  set(id:string,bot:boolean,revision:number){
   if(typeof bot!=='boolean'||!Number.isSafeInteger(revision)||revision<0)throw Error('INVALID_BOT_MARK');
   return this.db.transaction(()=>{
