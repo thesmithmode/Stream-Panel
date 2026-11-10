@@ -111,7 +111,7 @@
 {:else if activeTab==='people'}
 {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceBusy}<p role="status">Загружаем участников…</p>{:else}
 {#if missingPresence}<p class="notice" role="status">Сообщения Twitch сохранены, но данных о присутствии участников нет. Время в чате недоступно: прочерк не означает отсутствие человека.</p>{/if}
-<AudienceRanking people={participants} {onPerson} showIntervals {missingPresence} streamStart={session?.started_at_ms??0} streamEnd={session?.ended_at_ms??Date.now()}/>
+<AudienceRanking people={participants} {onPerson} onClassificationChange={changed} showIntervals {missingPresence} streamStart={session?.started_at_ms??0} streamEnd={session?.ended_at_ms??Date.now()}/>
 {/if}
 {:else if sessionFilter}<section class="panel"><header><h2>События стрима · 48 ч</h2></header><div class="settings-body"><RecentEvents sessionId={sessionFilter} {onPerson}/></div></section>{/if}
 </div>

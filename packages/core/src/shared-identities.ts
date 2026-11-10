@@ -1,3 +1,4 @@
+import {SharedClassifications} from './shared-classifications.js';
 import type Database from "better-sqlite3";
 import {randomUUID} from "node:crypto";
 import {IdentityLinks} from "./identity-links.js";
@@ -58,8 +59,8 @@ export class SharedIdentities {
 
   /** Cheap check before taking the write lock. */
   pending():boolean {
-    const joined=this.joined(),applied=this.applied();
-    return this.profiles().some(p=>!joined.has(p.name)||!applied.has(p.name)||p.db.prepare("SELECT 1 FROM identity_sync_queue LIMIT 1").get()!==undefined);
+    const joined=this.joined(),applied=this.applied(),profiles=this.profiles();
+    return new SharedClassifications(this.raw).pending(profiles)||profiles.some(p=>!joined.has(p.name)||!applied.has(p.name)||p.db.prepare("SELECT 1 FROM identity_sync_queue LIMIT 1").get()!==undefined);
   }
 
   /** Applies every queued membership change to all profiles. Returns the profiles whose persons changed. */
@@ -67,11 +68,12 @@ export class SharedIdentities {
     return this.raw.transaction(()=>{
       const profiles=this.profiles(),joined=this.joined(),applied=this.applied(),now=Date.now();
       const initialNames=profiles.some(p=>Number(p.db.pragma('user_version',{simple:true}))>=30&&!this.raw.prepare('SELECT 1 FROM sp_identity_names_applied WHERE profile=?').get(p.name));
+      const classifications=new SharedClassifications(this.raw),classificationKeys=new Set(classifications.seed(profiles));
       const changed=new Set<string>(),moved=new Set<string>(),names=new Map<string,string>(),touched=new Set<string>();
       for(const profile of profiles){
         if(joined.has(profile.name)){
           const queued=(profile.db.prepare("SELECT person_id FROM identity_sync_queue ORDER BY person_id").all() as {person_id:string}[]).map(row=>row.person_id);
-          if(queued.length)this.publish(profile,queued,profile.name===this.profile?hint:{},now,changed,moved,names);
+          if(queued.length){for(const row of profile.db.prepare('SELECT link_key FROM identity_link_keys WHERE person_id IN(SELECT value FROM json_each(?))').all(JSON.stringify(queued)) as {link_key:string}[])classificationKeys.add(row.link_key);this.publish(profile,queued,profile.name===this.profile?hint:{},now,changed,moved,names);}
         }else{
           // A profile that starts sharing contributes all of its existing groups (union).
           this.join(profile,now,changed);
@@ -100,6 +102,8 @@ export class SharedIdentities {
           h.profile.db.prepare('INSERT OR IGNORE INTO person_names VALUES (?)').run(h.id);
         }
       }
+      for(const key of changed)classificationKeys.add(key);
+      for(const name of classifications.apply(profiles,classificationKeys))touched.add(name);
       for(const profile of profiles){
         if(Number(profile.db.pragma('user_version',{simple:true}))>=30)this.raw.prepare('INSERT OR IGNORE INTO sp_identity_names_applied VALUES (?)').run(profile.name);
         profile.db.prepare("DELETE FROM identity_sync_queue").run();
@@ -108,6 +112,8 @@ export class SharedIdentities {
       return [...touched];
     }).immediate();
   }
+
+  shareClassification(person:string,kind:'bot'|'unknown'|'human'):string[]{return new SharedClassifications(this.raw).publish(this.profiles(),this.profile,person,kind);}
 
   /** Copies a DonationAlerts nickname binding to every other profile that holds the bound group. */
   shareDonorBinding(key:string,name:string,at:number):string[] {

@@ -77,12 +77,12 @@ test('ID-based exclusions do not hide a different YouTube user with the same nic
  }finally{s.close();}
 });
 
-test('identity-anchored marks survive merge, split, undo and restart while staying profile-scoped',()=>{
+test('identity-anchored marks survive merge, split, undo and restart while sharing manual decisions across profiles',()=>{
  const dir=mkdtempSync(join(tmpdir(),'sp-bots-')),path=join(dir,'data.sqlite');let a=new StreamStore(path,'ruslan');const b=new StreamStore(path,'gulnaz');
  try{
   const id=viewer(a,'suspect'),peer=viewer(b,'suspect'),other=viewer(a,'other');mark(a,id);
-  assert.equal(b.personBot(peer).manualBot,false);
-  b.setPersonHuman(peer,true,b.personRevision(peer));assert.equal(a.personBot(id).manualHuman,false);assert.equal(b.personBot(peer).manualHuman,true);
+  assert.equal(b.personBot(peer).manualBot,true);
+  b.setPersonHuman(peer,true,b.personRevision(peer));assert.equal(a.personBot(id).manualHuman,true);assert.equal(b.personBot(peer).manualHuman,true);mark(a,id);
   const merge=a.merge(id,other,a.personRevision(id),a.personRevision(other),at+1);
   assert.equal(a.personBot(other).manualBot,true);
   a.undoMerge(merge,at+2);assert.equal(a.personBot(id).manualBot,true);assert.equal(a.personBot(other).manualBot,false);

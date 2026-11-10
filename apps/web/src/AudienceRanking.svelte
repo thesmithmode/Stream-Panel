@@ -1,12 +1,26 @@
 <script lang="ts">
  import Help from './Help.svelte';
+ import PersonBot from './PersonBot.svelte';
+ import {loadClassifications,type ClassificationState} from './classification';
+ import {getProfile} from './api';
  import Icon from './Icon.svelte';
  import {platformClass} from './period';
  import {type RankPerson,presenceMinutes,rankTable,intervalRows,durationLabel,platformNicknames,intervalSource} from './audience-ranking';
  import {intervalRange} from './stream-time';
  import {money} from './api';
- let {people,onPerson,showIntervals=false,missingPresence=false,streamStart=0,streamEnd=0}:{people:RankPerson[];onPerson:(id:string)=>void;showIntervals?:boolean;missingPresence?:boolean;streamStart?:number;streamEnd?:number}=$props();
+ let {people,onPerson,showIntervals=false,missingPresence=false,streamStart=0,streamEnd=0,onClassificationChange}:{onClassificationChange?:()=>Promise<void>;people:RankPerson[];onPerson:(id:string)=>void;showIntervals?:boolean;missingPresence?:boolean;streamStart?:number;streamEnd?:number}=$props();
  const id=$props.id();
+ let classificationProfile='';
+ let classificationStates=$state<Record<string,ClassificationState>>({}),classificationError=$state(''),classificationRefresh=$state(0);
+ $effect(()=>{
+  const ids=ranked.slice(0,limit).map(p=>p.id),profile=getProfile();void classificationRefresh;void people;
+  if(!onClassificationChange)return;
+  if(classificationProfile!==profile){classificationStates={};classificationProfile=profile;}
+  const controller=new AbortController();classificationError='';
+  void loadClassifications(ids,controller.signal,profile).then(states=>{if(!controller.signal.aborted)classificationStates=states;}).catch(error=>{if(!controller.signal.aborted)classificationError=(error as Error).message;});
+  return()=>controller.abort();
+ });
+ async function classificationChanged(){await onClassificationChange?.();}
  let metric=$state('presence'),descending=$state(true),limit=$state(50),expanded=$state(new Set<string>()),viewport=$state(1024);
  const currencies=$derived([...new Set(people.flatMap(p=>Object.keys(p.donations??{})))].sort());
  const ranked=$derived(rankTable(people,metric,descending));
@@ -26,6 +40,7 @@
 <section class="panel audience-ranking" aria-label="Рейтинг участников">
  <header><h2>Участники чата</h2><Help id={`${id}-help`} label="О времени участников" text="Время в эфире объединяет интервалы Twitch и YouTube без двойного подсчёта пересечений. Twitch — наблюдаемое присутствие в чате, YouTube — оценка по сообщениям. Площадки не раскрывают персональное время просмотра видео. Нажмите время или стрелку рядом, чтобы раскрыть интервалы. Пауза означает отсутствие сохранённых сигналов площадки, а не подтверждённый уход зрителя. Среднее число участников считается по всей длительности эфира; пропуски наблюдений могут его занижать."/></header>
  {#if currencies.length}<div class="phone-donation-sort" aria-label="Сортировка по донатам">{#each currencies as currency}<button class="text-button" aria-label={`Донаты, ${currency}${arrow(`donation:${currency}`)}`} aria-pressed={metric===`donation:${currency}`} onclick={()=>sort(`donation:${currency}`)}>Донаты · {currency}{arrow(`donation:${currency}`)}</button>{/each}</div>{/if}
+ {#if classificationError}<p class="notice error" role="alert">{classificationError} <button class="text-button" onclick={()=>classificationRefresh++}>Повторить</button></p>{/if}
  <div class="table-scroll"><table>
   <thead><tr>
    <th scope="col" aria-sort={metric==='name'?(descending?'descending':'ascending'):'none'}><button onclick={()=>sort('name')}>Участник{arrow('name')}</button></th>
@@ -37,7 +52,8 @@
    {@const regionId=`${id}-intervals-${person.id}`}
    {@const hasIntervals=showIntervals&&!!person.intervals?.length}
    <tr class="participant-row" class:expanded={expanded.has(person.id)&&hasIntervals} class:bot-person={person.is_bot} class:human-person={person.is_human}>
-    <td><button class={`text-button person-name ${platformClass(person.accounts?.map(a=>a.source))}`} class:youtube-secondary={person.youtubeSecondary} class:with-nicks={platformNicknames(person).length>0} title={person.name} onclick={()=>onPerson(person.id)}>{person.name}</button>
+    <td><div class="participant-name-line"><button class={`text-button person-name ${platformClass(person.accounts?.map(a=>a.source))}`} class:youtube-secondary={person.youtubeSecondary} class:with-nicks={platformNicknames(person).length>0} title={person.name} onclick={()=>onPerson(person.id)}>{person.name}</button>
+     {#if onClassificationChange}<PersonBot personId={person.id} personName={person.name} revision={classificationStates[person.id]?.revision??0} state={classificationStates[person.id]??null} compact onChange={classificationChanged}/>{/if}</div>
      {#if platformNicknames(person).length}<div class="platform-nicks">{#each platformNicknames(person) as account}<span class:twitch={account.source==='twitch'} class:youtube={account.source==='youtube'} class:youtube-secondary={account.secondary} title={`${account.source==='twitch'?'Twitch':'YouTube'} · ${account.name}`}>{account.name}</span>{/each}</div>{/if}
      {#if currencies.some(c=>BigInt(person.donations?.[c]??'0')!==0n)}<div class="phone-donations">{#each currencies as c}{#if BigInt(person.donations?.[c]??'0')!==0n}<span>{money(person.donations![c]!,c)}</span>{/if}{/each}</div>{/if}
     </td>
@@ -74,6 +90,8 @@
  th{font-size:12px;color:var(--muted);white-space:nowrap;font-weight:400;}
  th button{background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0;min-height:44px;}
  td{font-size:13px;white-space:nowrap;font-variant-numeric:tabular-nums;}
+ .participant-name-line{display:flex;align-items:center;gap:8px;min-width:0;}
+ .participant-name-line .person-name{flex:1;min-width:0;}
  .person-name{display:block;max-width:100%;min-height:44px;font-size:14px;text-align:left;white-space:normal;overflow-wrap:anywhere;}
  .person-name.with-nicks{min-height:30px;padding-top:6px;}
  .platform-nicks{display:flex;flex-wrap:wrap;gap:0 8px;padding-bottom:6px;font-size:11px;line-height:14px;white-space:normal;overflow-wrap:anywhere;}
