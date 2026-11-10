@@ -44,7 +44,7 @@ test('stream audience ranks silent minutes, selects exact minute members, and su
   assert.equal(await rank.getByRole('button',{name:'Talkative Viewer',exact:true}).evaluate(el=>getComputedStyle(el).color),'rgb(169, 112, 255)','renamed Twitch participants keep their platform color');
   await assertUiLayout(page);
   assert.equal(await page.locator('.stream-feed').count(),0);
-  assert.equal(await page.locator('.following').isVisible(),false,'subscriptions live under the results disclosure');
+  assert.equal(await page.locator('.following').isVisible(),false,'subscriptions are shown in the results tab');
   assert.ok((await rank.locator('tbody tr').nth(1).textContent()).includes('3 мин'));
   assert.equal(await rank.getByRole('button',{name:'Other Stream Viewer',exact:true}).count(),0);
   assert.equal(await rank.getByRole('button',{name:'streamelements',exact:true}).count(),0);

@@ -15,11 +15,7 @@ test('person detail tabs retain immutable donations, paginate and recover from u
   const reads=[];page.on('request',request=>{if(request.method()==='GET')reads.push(new URL(request.url()).pathname);});await goto(page,app.bootstrap());
   await page.getByRole('button',{name:'Люди',exact:true}).click();await page.locator('.person-row').filter({hasText:'Viewer'}).click();await page.getByLabel('Показатели человека').waitFor();
   assert.equal(reads.filter(path=>path===`/api/v1/persons/${viewer}/stats`).length,1,'opening a person must not fetch statistics twice');
-  assert.equal(reads.filter(path=>path.endsWith('/following')).length,0,'collapsed following details must not query history');
-  const followingResponse=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/v1/persons/${viewer}/following`);
-  await page.locator('summary').filter({hasText:'Подписки на канал'}).click();await followingResponse;await page.getByRole('region',{name:'Подписки на канал'}).waitFor();
-  assert.equal(reads.filter(path=>path===`/api/v1/persons/${viewer}/following`).length,1);
-  await page.locator('summary').filter({hasText:'Подписки на канал'}).click();
+  assert.equal(await page.getByRole('region',{name:'Подписки на канал',exact:true}).count(),0);
   await page.getByRole('tablist',{name:'Разделы человека'}).getByRole('tab',{name:'Активность',exact:true}).click();await page.getByText('Активность YouTube оценена по сообщениям.',{exact:true}).waitFor();assert.equal(await page.getByText('Баллы канала и награды',{exact:true}).count(),0);
 
   for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:800});await assertUiLayout(page);}await page.setViewportSize({width:1280,height:800});await page.screenshot({path:'/tmp/sp-points-desktop.png',fullPage:true});

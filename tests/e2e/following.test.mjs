@@ -25,21 +25,22 @@ test('stream subscriptions show platform totals, exact follow dates and independ
   assert.equal(await following.locator('.meter').count(),0);await following.getByRole('button',{name:'О подписках на канал',exact:true}).click();await page.getByRole('dialog',{name:'О подписках на канал'}).waitFor();await page.keyboard.press('Escape');
   await following.getByRole('button',{name:'Follow Viewer',exact:true}).click();await page.getByRole('heading',{name:'Follow Viewer',exact:true}).waitFor();
   await wideLast('.person-detail .kpi-strip > .kpi');
-  await page.locator('summary').filter({hasText:'Подписки на канал'}).click();const card=page.getByRole('region',{name:'Подписки на канал'});await card.getByText('Последняя известная дата подписки:',{exact:false}).first().waitFor();
-  assert.ok((await card.locator('article').first().textContent()).includes('Не подписан'));assert.ok((await card.locator('article').first().textContent()).includes('Последняя известная дата подписки')); assert.ok((await card.locator('article').nth(1).textContent()).includes('Неизвестно'));
-  await card.locator('summary').first().click();assert.equal(await card.getByText('Первое сообщение',{exact:true}).count(),0);
+  const card=page.locator('.account-summary');await card.locator('.follow-status').first().waitFor();
+  assert.equal(await card.locator('.follow-status').count(),1,'unknown YouTube subscription stays invisible');
+  assert.equal(await card.locator('.follow-status').first().textContent(),'Не подписан');
+  assert.equal(await page.getByRole('region',{name:'Подписки на канал',exact:true}).count(),0,'no duplicate framed subscription panel');
+  await card.locator('.follow-history summary').first().click();assert.equal(await card.locator('.follow-history li').count(),3);
   const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(evidence){await mkdir(evidence,{recursive:true});await page.screenshot({path:join(evidence,'following-mobile.png'),fullPage:true});}
-  const selectPerson=async name=>{await page.getByRole('button',{name:'К списку людей',exact:true}).click();await page.getByRole('button',{name,exact:true}).click();await page.getByRole('heading',{name,exact:true}).waitFor();await page.locator('summary').filter({hasText:'Подписки на канал'}).click();};
+  const selectPerson=async name=>{await page.getByRole('button',{name:'К списку людей',exact:true}).click();await page.getByRole('button',{name,exact:true}).click();await page.getByRole('heading',{name,exact:true}).waitFor();};
   await selectPerson('Silent');await card.getByText('Не подписан',{exact:true}).waitFor();await wideLast('.person-detail .kpi-strip > .kpi');
-  // A follower whose date is private remains positive with an unknown date.
   await app.db.call('followingSnapshot','youtube','youtube',[{id:'author',name:'YT Viewer',followedAtMs:null}],true,at+6*m,null);
-  await selectPerson('Follow Viewer');await card.locator('article').nth(1).getByText('Подписан',{exact:true}).waitFor();
-  await page.getByLabel('Период аналитики').selectOption('7');await selectPerson('Follow Viewer');await card.locator('article').first().getByText('Не подписан',{exact:true}).waitFor();
+  await selectPerson('Follow Viewer');await card.getByText('Подписан',{exact:true}).waitFor();
+  await page.getByLabel('Период аналитики').selectOption('7');await selectPerson('Follow Viewer');await card.getByText('Не подписан',{exact:true}).waitFor();
   await page.getByLabel('Период аналитики').selectOption('all');
-  const none=await app.db.call('createPerson','No linked account');await navigate(page,'Обзор');await page.getByRole('button',{name:'Люди',exact:true}).click();await page.getByRole('button',{name:'No linked account',exact:true}).click();await page.getByRole('heading',{name:'No linked account',exact:true}).waitFor();await page.locator('summary').filter({hasText:'Подписки на канал'}).click();await card.getByText('Нет связанных аккаунтов Twitch или YouTube.',{exact:true}).waitFor();
-  const unknown=await app.db.call('ingest',{source:'twitch',accountId:'no-follow-access',externalId:'no-follow-data',type:'chat.message',actor:{externalId:'no-follow-viewer',displayName:'Unverified subscriber'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
-  await navigate(page,'Обзор');await page.getByRole('button',{name:'Люди',exact:true}).click();await page.getByRole('button',{name:'Unverified subscriber',exact:true}).click();await page.locator('summary').filter({hasText:'Подписки на канал'}).click();await card.getByText('Неизвестно',{exact:true}).waitFor();assert.equal(await card.getByText('Проверено',{exact:false}).count(),0);assert.equal(await card.locator('summary').count(),0);
-  await page.route('**/api/v1/persons/*/following?*',route=>route.fulfill({status:400,json:{error:'FOLLOW_CHECK_UNAVAILABLE'}}));await selectPerson('Silent');await card.getByText('FOLLOW_CHECK_UNAVAILABLE',{exact:true}).waitFor();
+  const none=await app.db.call('createPerson','No linked account');await navigate(page,'Обзор');await page.getByRole('button',{name:'Люди',exact:true}).click();await page.getByRole('button',{name:'No linked account',exact:true}).click();await page.getByRole('heading',{name:'No linked account',exact:true}).waitFor();assert.equal(await card.locator('.follow-status').count(),0);
+  await app.db.call('ingest',{source:'twitch',accountId:'no-follow-access',externalId:'no-follow-data',type:'chat.message',actor:{externalId:'no-follow-viewer',displayName:'Unverified subscriber'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
+  await selectPerson('Unverified subscriber');assert.equal(await card.locator('.follow-status').count(),0);assert.equal(await card.getByText('Неизвестно',{exact:true}).count(),0);
+  await page.route('**/api/v1/persons/*/following?*',route=>route.fulfill({status:400,json:{error:'FOLLOW_CHECK_UNAVAILABLE'}}));await selectPerson('Silent');assert.equal(await card.getByText('FOLLOW_CHECK_UNAVAILABLE',{exact:true}).count(),0);
   assert.ok(new URL(page.url()).searchParams.get('person')!==none.id);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });

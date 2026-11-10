@@ -26,7 +26,8 @@
   import PersonNotes from "./PersonNotes.svelte";
   import RecentEvents from './RecentEvents.svelte';
   import PersonDonations from "./PersonDonations.svelte";
-  import Following from "./Following.svelte";
+  import AccountFollowStatus from "./AccountFollowStatus.svelte";
+  import type {FollowState} from "../../../packages/core/src/following";
   import PersonMetadata from "./PersonMetadata.svelte";
   let {
     includeBots=false,section='',onSection,
@@ -42,7 +43,7 @@
     onChange: () => Promise<void>;
   } = $props();
   function selectAccount(ids:string[],checked:boolean){selectedIdentities=checked?[...new Set([...selectedIdentities,...ids])]:selectedIdentities.filter(id=>!ids.includes(id));}
-  let detailTab=$state("overview"),showFollowing=$state(false),detailLoading=$state(false),showDonorLinks=$state(false);
+  let detailTab=$state("overview"),detailLoading=$state(false),showDonorLinks=$state(false);
   const botFilter=$derived(includeBots?"all":"humans");
   let search = $state(""),
     selectedId = $state(""),
@@ -73,6 +74,15 @@
     return()=>controller.abort();
   });
   const accountLink=(ids:string[])=>platformLinks.find(link=>ids.includes(link.identityId));
+  let following=$state<FollowState[]>([]);
+  $effect(()=>{
+    const id=detail?.id;following=[];if(!id)return;
+    const request=latestRequest();
+    const load=()=>void request.run(signal=>api<FollowState[]>(`persons/${id}/following?session=`,undefined,signal),rows=>following=rows,()=>{});
+    load();window.addEventListener('sp:data-refresh',load);return()=>{request.cancel();window.removeEventListener('sp:data-refresh',load);};
+  });
+  function accountFollowing(ids:string[]){const matches=following.filter(row=>row.status!==null&&detail?.identities.some((i:any)=>ids.includes(i.id)&&i.source===row.source&&i.external_id===row.externalId&&i.account_id===row.account));return matches.sort((a,b)=>(b.checkedAtMs??0)-(a.checkedAtMs??0))[0];}
+
 
   let donorCurrency=$state('RUB'),rankRefresh=$state(0);
   const donorCurrencies=$derived([...new Set(tops.flatMap(p=>Object.keys(p.donationTotals)))].sort());
@@ -104,7 +114,7 @@
   $effect(()=>{detailTab=['overview','activity','messages','donations','notes','accounts'].includes(section)?section:'overview';});
   const personTabs=[["overview","Обзор"],["activity","Активность"],["messages","Сообщения"],["donations","Донаты"],["notes","Заметки"],["accounts","Аккаунты"]] as const;
   let directoryScroll=0,forceDirectory=false;
-  function clearSelection(){selectedId='';detail=null;stats=null;detailLoading=false;showFollowing=false;}
+  function clearSelection(){selectedId='';detail=null;stats=null;detailLoading=false;}
   async function backToDirectory(){clearSelection();onSelect('');await tick();window.scrollTo({top:directoryScroll});}
   async function openPerson(id:string){directoryScroll=window.scrollY;await select(id);if(matchMedia('(max-width:900px)').matches)window.scrollTo({top:0});}
   function sourcesLabel(sources:string|null){return (sources?.split(',')??[]).map(source=>({twitch:'Twitch',youtube:'YouTube',donationalerts:'DonationAlerts'}[source.trim()]??source.trim())).join(' · ');}
@@ -158,7 +168,7 @@
   }
   async function select(id: string) {
     if(selectedId!==id&&initialId!==id)onSelect(id);
-    if(selectedId!==id){showDonorLinks=false;showFollowing=false;}
+    if(selectedId!==id){showDonorLinks=false;}
     selectedId = id;
     selectedSession = period;
     error = "";
@@ -325,9 +335,8 @@
 
         </div>{/if}
         <h3>Связанные аккаунты</h3>
-        <div class="account-summary">{#each accounts as identity}<span><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong><PlatformProfileLink link={accountLink(identity.ids)} name={identity.display_name}/></span>{/each}</div>
+        <div class="account-summary">{#each accounts as identity}<span><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong><AccountFollowStatus row={accountFollowing(identity.ids)}/><PlatformProfileLink link={accountLink(identity.ids)} name={identity.display_name}/></span>{/each}</div>
         <div class="actions"><button class="outline small" onclick={()=>{detailTab='donations';onSection(detailTab);showDonorLinks=true;}}>Привязать донаты</button></div>
-        <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} sessionId="" onPerson={(id)=>void select(id)} />{/if}</details>
       {:else if detailTab==='messages'}
        <RecentEvents personId={detail.id} messagesOnly onPerson={onSelect} />
       {:else if detailTab==='accounts'}
@@ -355,7 +364,7 @@
             /><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong><span class="small muted"
               >{identity.source === "donationalerts" ? "Донатер" : "Участник"} · {identity.source === "twitch" ? "Twitch" : identity.source === "youtube" ? "YouTube" : "DonationAlerts"}</span
             >{#if identity.aliases.length}<small class="account-aliases">Имена: {identity.aliases.join(", ")}</small>{/if}</label
-          ><PlatformProfileLink link={accountLink(identity.ids)} name={identity.display_name}/></div>{/each}
+          ><AccountFollowStatus row={accountFollowing(identity.ids)}/><PlatformProfileLink link={accountLink(identity.ids)} name={identity.display_name}/></div>{/each}
         {#if selectedIdentities.length}<div class="inline">
             <input
               aria-label="Имя нового человека"
@@ -417,7 +426,6 @@
        <PersonNotes personId={detail.id} />
       {:else}
        <PersonActivity personId={detail.id} />
-       <details bind:open={showFollowing}><summary>Подписки на канал</summary>{#if showFollowing}<Following personId={detail.id} sessionId="" onPerson={(id)=>void select(id)} />{/if}</details>
       {/if}
       </div>{/if}
   </section>

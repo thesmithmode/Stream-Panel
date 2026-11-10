@@ -462,6 +462,7 @@ export class StreamStore {
   subscriberHistory(query:SubscriberQuery){return new SubscriberHistory(this.db).query(query);}
   youtubePublications(account:string,items:Publication[],at:number){new SubscriberHistory(this.db).publications(account,items,at);}
   personFollowing(personId:string,sessionId=''){sessionId=sessionId?this.groups.root(sessionId):'';if(!this.db.prepare('SELECT 1 FROM persons WHERE id=?').get(personId))throw new Error('PERSON_NOT_FOUND');if(sessionId)this.sessionRow(sessionId);return personFollowing(this.reads,personId,sessionId);}
+  followerChanges(fromMs:number,toMs:number){if(!Number.isSafeInteger(fromMs)||!Number.isSafeInteger(toMs)||fromMs<0||toMs<=fromMs||toMs>8640000000000000)throw Error('INVALID_PERIOD');return followingAnalytics(this.reads,'',{fromMs,toMs});}
   followingAnalytics(sessionId:string){sessionId=this.groups.root(sessionId);this.sessionRow(sessionId);return followingAnalytics(this.reads,sessionId);}
   streamMetadata(sessionId:string){
     sessionId=this.groups.root(sessionId);this.sessionRow(sessionId);

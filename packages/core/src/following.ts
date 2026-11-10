@@ -49,12 +49,28 @@ export function personFollowing(db:Database.Database,person:string,session:strin
    FROM snapshots s JOIN follower_checks c ON c.snapshot_id=s.snapshot_id
   ), compared AS (SELECT *,row_number() OVER(ORDER BY at,id) AS position,lag(status) OVER(ORDER BY at,id) AS priorStatus,lag(followedAtMs) OVER(ORDER BY at,id) AS priorDate FROM states)
   SELECT at,status,followedAtMs FROM compared WHERE position=1 OR status IS NOT priorStatus OR followedAtMs IS NOT priorDate ORDER BY at,id`).all(i.externalId,i.source,i.account) as {at:number;status:number|null;followedAtMs:number|null}[];
-  const history=[...changes.map(p=>({...p,status:p.status===null?null:p.status===1})),...liveFollows.map(f=>({...f,status:true}))].sort((a,b)=>a.at-b.at).filter((p,n,a)=>!n||p.status!==a[n-1]!.status||p.followedAtMs!==a[n-1]!.followedAtMs).map(p=>({at:p.at,status:p.status,followedAtMs:p.followedAtMs}));
+  const history=[...changes.map(p=>({...p,status:p.status===null?null:p.status===1})),...liveFollows.map(f=>({...f,status:true}))].filter(p=>p.status!==null).sort((a,b)=>a.at-b.at).filter((p,n,a)=>!n||p.status!==a[n-1]!.status).map(p=>({at:p.at,status:p.status,followedAtMs:p.followedAtMs}));
   return {...i,...latest,streamStatus:historic.status,streamCheckedAtMs:historic.checkedAtMs,followedDuringStreamMs,history};
  });
 }
-export function followingAnalytics(db:Database.Database,id:string){
- const stream=db.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=?').get(id) as {start:number;end:number|null};const end=stream.end??Date.now(),windows=sessionWindows(db,id,stream.start,end);
+function streamUnfollowers(db:Database.Database,start:number,end:number,windows:{from:number;to:number}[]){
+ const baseline=db.prepare(`WITH versions AS MATERIALIZED(
+  SELECT p.account_id,p.payload_json,c.observed_at_ms at,c.id FROM provider_snapshots p JOIN follower_checks c ON c.id=(SELECT id FROM follower_checks WHERE snapshot_id=p.id AND observed_at_ms<? ORDER BY observed_at_ms DESC,id DESC LIMIT 1)
+  WHERE p.source='twitch' AND p.key='followers' AND json_extract(p.payload_json,'$.complete')=1
+ ), ranked AS(SELECT *,row_number() OVER(PARTITION BY account_id ORDER BY at DESC,id DESC) position FROM versions)
+ SELECT account_id,payload_json,at FROM ranked WHERE position=1`).all(start) as {account_id:string;payload_json:string;at:number}[];
+ const checks=db.prepare("SELECT account_id,payload_json,observed_at_ms at FROM follower_observations WHERE source='twitch' AND key='followers' AND observed_at_ms>=? AND observed_at_ms<=? ORDER BY observed_at_ms,id").all(start,end) as {account_id:string;payload_json:string;at:number}[];
+ const known=new Map<string,Map<string,Follower>>(),payloads=new Map<string,Snapshot>(),changes:{source:string;account:string;externalId:string;name:string;at:number;personId:string|null}[]=[];
+ for(const check of [...baseline,...checks]){
+  let data=payloads.get(check.payload_json);if(!data){data=JSON.parse(check.payload_json) as Snapshot;payloads.set(check.payload_json,data);}
+  const prior=known.get(check.account_id),current=new Map(data.followers.map(f=>[f.id,f]));
+  if(prior&&data.complete&&windows.some(w=>check.at>=w.from&&check.at<=w.to))for(const [id,f] of prior)if(!current.has(id))changes.push({source:'twitch',account:check.account_id,externalId:id,name:f.name,at:check.at,personId:null});
+  if(data.complete)known.set(check.account_id,current);else{const members=prior??new Map<string,Follower>();for(const [id,f] of current)members.set(id,f);known.set(check.account_id,members);}
+ }
+ return changes;
+}
+export function followingAnalytics(db:Database.Database,id:string,range?:{fromMs:number;toMs:number}){
+ const stream=range?{start:range.fromMs,end:range.toMs}:db.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=?').get(id) as {start:number;end:number|null};const end=stream.end??Date.now(),windows=range?[{from:stream.start,to:end}]:sessionWindows(db,id,stream.start,end);
  const polls=db.prepare(streamFollowerObservationsSql).all(stream.start,end) as (Poll&{source:string;account:string})[];
  const signups=new Map<string,{source:string;account:string;externalId:string;name:string;at:number;personId:string|null}>();
  const add=(source:string,account:string,f:Follower)=>{
@@ -65,12 +81,13 @@ export function followingAnalytics(db:Database.Database,id:string){
  const events=db.prepare("SELECT e.source,e.account_id AS account,i.external_id AS id,i.display_name AS name,e.occurred_at_ms AS at FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE e.type='follow' AND e.occurred_at_ms BETWEEN ? AND ?").all(stream.start,end) as {source:string;account:string;id:string;name:string;at:number}[];
  for(const e of events)add(e.source,e.account,{id:e.id,name:e.name,followedAtMs:e.at});
  // Resolve all identities in one indexed join, even when many snapshots repeat a follower.
- const requested=JSON.stringify([...signups.values()].map(f=>({source:f.source,account:f.account,id:f.externalId})));
+ const unfollowers=streamUnfollowers(db,stream.start,end,windows);
+ const requested=JSON.stringify([...signups.values(),...unfollowers].map(f=>({source:f.source,account:f.account,id:f.externalId})));
  const linked=db.prepare(`WITH requested AS (SELECT DISTINCT json_extract(value,'$.source') source,json_extract(value,'$.account') account,json_extract(value,'$.id') external_id FROM json_each(?))
  SELECT r.source,r.account,r.external_id AS externalId,i.person_id AS personId,(SELECT display_name FROM persons WHERE id=i.person_id) AS personName FROM requested r JOIN identities i ON i.source=r.source AND i.account_id=r.account AND i.external_id=r.external_id WHERE r.source<>'youtube'
  UNION ALL SELECT r.source,r.account,r.external_id AS externalId,i.person_id AS personId,(SELECT display_name FROM persons WHERE id=i.person_id) AS personName FROM requested r JOIN youtube_identities i ON i.account_id=r.account AND i.external_id=r.external_id WHERE r.source='youtube'`).all(requested) as {source:string;account:string;externalId:string;personId:string;personName:string}[];
  const people=new Map(linked.map(i=>[JSON.stringify([i.source,i.account,i.externalId]),i]));
- for(const f of signups.values()){const person=people.get(JSON.stringify([f.source,f.account,f.externalId]));f.personId=person?.personId??null;if(person?.personName)f.name=person.personName;}
+ for(const f of [...signups.values(),...unfollowers]){const person=people.get(JSON.stringify([f.source,f.account,f.externalId]));f.personId=person?.personId??null;if(person?.personName)f.name=person.personName;}
  const newFollowers=[...signups.values()].sort((a,b)=>b.at-a.at||Number(b.personId!==null)-Number(a.personId!==null)||a.externalId.localeCompare(b.externalId));
  const observations=polls.filter(p=>p.at>=stream.start&&p.at<=end).map(p=>{const data=JSON.parse(p.payload_json) as Snapshot;return {at:p.at,source:p.source,account:p.account,total:p.source==='youtube'?data.total:data.total??(data.complete?data.followers.length:null),visibleCount:data.followers.length,complete:data.complete};});
  const accounts=new Map<string,{source:string;account:string}>();
@@ -83,5 +100,5 @@ export function followingAnalytics(db:Database.Database,id:string){
   const comparable=source==='twitch'&&first!==undefined&&last!==undefined&&first.at<last.at;
   return {source,account,knownNew:newFollowers.filter(f=>f.source===source&&f.account===account).length,change:comparable?last.total!-first.total!:null,fromAt:comparable?first.at:null,toAt:comparable?last.at:null,startTotal:comparable?first.total:null,endTotal:comparable?last.total:null};
  });
- return {newFollowers,platforms,polls:observations};
+ return {newFollowers,unfollowers:unfollowers.sort((a,b)=>b.at-a.at),platforms,polls:observations};
 }
