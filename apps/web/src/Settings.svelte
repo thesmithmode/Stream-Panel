@@ -15,6 +15,7 @@
    <label>Порог посещаемости, %<input type="number" min="0" max="100" step="1" required bind:value={rules.regularThresholdPercent}/></label>
    <label>Окно активности YouTube, мин<input type="number" min="1" max="30" required bind:value={rules.chatWindowMinutes}/></label>
    <label>Часовой пояс аналитики<select bind:value={rules.timezone}><option value="Europe/Moscow">Москва</option><option value="UTC">UTC</option><option value="Asia/Yekaterinburg">Екатеринбург</option></select></label>
+   <label class="check"><input type="checkbox" bind:checked={rules.includeBots}/>Отображать ботов</label>
    <label class="check"><input type="checkbox" bind:checked={rules.highlightBots}/>Выделять ботов голубым</label>
    <label class="check"><input type="checkbox" bind:checked={rules.highlightHumans}/>Выделять людей красным</label>
   </div><button class="primary" disabled={busy}>{busy?'Сохраняем…':'Сохранить настройки'}</button>

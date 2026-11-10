@@ -1,3 +1,4 @@
+import {PersonBots} from './person-bots.js';
 import {readActivityInput,type ActivityInput} from './activity-input.js';
 import {classifyCore} from './core-classification.js';
 import {botExclusionSet} from './bots.js';
@@ -105,9 +106,10 @@ export class StreamFacts {
    const core=classifyCore(p.coreSessionIds.length,value.summary.streams,f.regularThresholdPercent,override==null?null:override===1,options?.corePeople?.includes(p.id));
    return {...p,name:names.get(p.id)??p.name,tags:tags.filter(t=>t.person_id===p.id).map(t=>t.label),manualCore:override==null?null:override===1,core,regular:core,follower:following.has(p.id)?true:negative.has(p.id)&&!p.sources.includes('youtube')?false:null};});
   const attendees=audience.filter(p=>p.attendanceSessionIds.length),core=audience.filter(p=>p.core).length;
-  const composition={core:attendees.filter(p=>p.core).length,followers:attendees.filter(p=>!p.core&&p.follower===true).length,nonFollowers:attendees.filter(p=>!p.core&&p.follower===false).length,unknown:attendees.filter(p=>!p.core&&p.follower===null).length,twitch:attendees.filter(p=>p.sources.includes('twitch')).length,youtube:attendees.filter(p=>p.sources.includes('youtube')).length,both:attendees.filter(p=>p.sources.length>1).length};
+  const botIds=new Set(new PersonBots(this.db).decorate(audience,p=>p.id,options?.excludedLogins||[]).filter(p=>p.is_bot).map(p=>p.id));
+  const composition={...(attendees.some(p=>botIds.has(p.id))?{bots:attendees.filter(p=>botIds.has(p.id)).length}:{}),core:attendees.filter(p=>!botIds.has(p.id)&&p.core).length,followers:attendees.filter(p=>!botIds.has(p.id)&&!p.core&&p.follower===true).length,nonFollowers:attendees.filter(p=>!botIds.has(p.id)&&!p.core&&p.follower===false).length,unknown:attendees.filter(p=>!botIds.has(p.id)&&!p.core&&p.follower===null).length,twitch:attendees.filter(p=>p.sources.includes('twitch')).length,youtube:attendees.filter(p=>p.sources.includes('youtube')).length,both:attendees.filter(p=>p.sources.length>1).length};
   const timeline=value.timeline.map(p=>({...p,regularParticipants:0,followerParticipants:0,regularObserved:0,followerObserved:0,regularEstimated:0,followerEstimated:0,regularMessages:0,followerMessages:0,unknownMessages:0,regularTwitchMessages:0,followerTwitchMessages:0,unknownTwitchMessages:0,regularYoutubeMessages:0,followerYoutubeMessages:0,unknownYoutubeMessages:0})),minutes=new Map(timeline.map(p=>[p.at,p]));
-  for(const person of audience){const seen=new Set<number>(),kinds=new Set<string>();for(const span of person.intervals)for(let at=Math.floor(span.from/60000)*60000;at<span.to;at+=60000){const point=minutes.get(at);if(!point)continue;
+  for(const person of audience){if(botIds.has(person.id))continue;const seen=new Set<number>(),kinds=new Set<string>();for(const span of person.intervals)for(let at=Math.floor(span.from/60000)*60000;at<span.to;at+=60000){const point=minutes.get(at);if(!point)continue;
     if(!seen.has(at)){seen.add(at);if(person.core)point.regularParticipants++;else if(person.follower)point.followerParticipants++;}
     const signal=`${span.kind}:${at}`;if(kinds.has(signal))continue;kinds.add(signal);
     if(span.kind==='observed'){if(person.core)point.regularObserved++;else if(person.follower)point.followerObserved++;}else{if(person.core)point.regularEstimated++;else if(person.follower)point.followerEstimated++;}}

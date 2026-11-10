@@ -64,6 +64,7 @@
    {@const height=(b.value??0)/maximum*170}
    <g class:chosen={selected===b.minute} role="button" tabindex="0" aria-label={description(b)} onclick={()=>selected=b.minute} onkeydown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selected=b.minute;}}}>
     <rect x={45+(b.minute-start)/span*(plotWidth-70)} y={b.value===null?196:200-height} width={Math.max(.3,step/span*(plotWidth-70)*.9)} height={b.value===null?4:height} fill={b.value===null?'#737c8a':'var(--teal)'} opacity={b.value===null?.35:1}><title>{description(b)}</title></rect>
+    {#if 'botValue' in b&&Number(b.botValue)>0&&b.value!==null}<rect class="bot-segment" x={45+(b.minute-start)/span*(plotWidth-70)} y={200-Math.min(b.value,Number(b.botValue))/maximum*170} width={Math.max(.3,step/span*(plotWidth-70)*.9)} height={Math.min(b.value,Number(b.botValue))/maximum*170} fill="#69bce9"/>{/if}
     <rect x={45+(b.minute-start)/span*(plotWidth-70)} y="25" width={step/span*(plotWidth-70)} height="175" fill="transparent"><title>{description(b)}</title></rect>
    </g>
   {/each}

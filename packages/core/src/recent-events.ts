@@ -2,7 +2,7 @@ import {donationValuation} from './donation-fx.js';
 import type Database from 'better-sqlite3';
 import {assertTimestamp,type EventInput,eventKey} from './domain.js';
 
-export const EVENT_RETENTION_MS=48*60*60*1000;
+export const EVENT_RETENTION_MS=7*24*60*60*1000;
 export const EVENT_CLEANUP_BATCH=500;
 type RecentInput=Omit<EventInput,'source'|'sourceTime'|'timeQuality'|'transport'>&{source:EventInput['source']|'youtube'};
 type RecentRow={youtubeSecondary:number;id:string;source:string;account_id:string;external_id:string;type:string;actor_id:string|null;actor_name:string|null;person_name?:string|null;at_ms:number;received_at_ms:number;payload_json:string};

@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS person_human_marks(identity_id TEXT PRIMARY KEY REFER
 CREATE TABLE IF NOT EXISTS person_human_cards(person_id TEXT PRIMARY KEY REFERENCES persons(id)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS person_bot_status(person_id TEXT PRIMARY KEY,is_bot INTEGER NOT NULL,is_human INTEGER NOT NULL) WITHOUT ROWID;
 CREATE VIEW IF NOT EXISTS donor_people AS SELECT DISTINCT i.person_id FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE e.type='donation';
-CREATE VIEW IF NOT EXISTS automatic_human_people AS SELECT person_id FROM youtube_identities UNION SELECT person_id FROM identities WHERE source='donationalerts' UNION SELECT person_id FROM donor_people UNION SELECT person_id FROM donor_bindings;
+CREATE VIEW IF NOT EXISTS automatic_human_people AS SELECT person_id FROM youtube_identities WHERE match_key NOT IN('streamelements','streemelements') UNION SELECT person_id FROM identities WHERE source='donationalerts' UNION SELECT person_id FROM donor_people UNION SELECT person_id FROM donor_bindings;
 CREATE VIEW IF NOT EXISTS manual_human_people AS WITH RECURSIVE cards(person_id) AS(SELECT person_id FROM person_human_cards UNION SELECT m.target_person_id FROM person_merges m JOIN cards c ON m.source_person_id=c.person_id WHERE m.undone_at_ms IS NULL) SELECT person_id FROM cards UNION SELECT i.person_id FROM person_human_marks m JOIN identities i ON i.id=m.identity_id;
 CREATE VIEW IF NOT EXISTS human_people AS SELECT person_id FROM automatic_human_people UNION SELECT person_id FROM manual_human_people;
 CREATE VIEW IF NOT EXISTS bot_eligible_people AS SELECT p.id person_id FROM persons p
@@ -98,7 +98,7 @@ export class PersonBots {
    EXISTS(SELECT 1 FROM donor_people d WHERE d.person_id=p.id) isDonor,
    EXISTS(SELECT 1 FROM automatic_human_people h WHERE h.person_id=p.id) automaticHuman,
    EXISTS(SELECT 1 FROM manual_human_people h WHERE h.person_id=p.id) manualHuman,
-   (EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND i.source='twitch' AND i.match_key IN(SELECT value FROM json_each(?))) AND NOT EXISTS(SELECT 1 FROM manual_neutral_people n WHERE n.person_id=p.id)) knownBot FROM persons p WHERE p.id IN(SELECT value FROM json_each(?))`).all(JSON.stringify([...botExclusionSet(extra)]),JSON.stringify(ids)) as {id:string;revision:number;canMarkBot:number;manualBot:number;isDonor:number;automaticHuman:number;manualHuman:number;knownBot:number}[];
+   ((EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND i.source='twitch' AND i.match_key IN(SELECT value FROM json_each(?))) OR EXISTS(SELECT 1 FROM youtube_identities y WHERE y.person_id=p.id AND y.match_key IN('streamelements','streemelements'))) AND NOT EXISTS(SELECT 1 FROM manual_neutral_people n WHERE n.person_id=p.id)) knownBot FROM persons p WHERE p.id IN(SELECT value FROM json_each(?))`).all(JSON.stringify([...botExclusionSet(extra)]),JSON.stringify(ids)) as {id:string;revision:number;canMarkBot:number;manualBot:number;isDonor:number;automaticHuman:number;manualHuman:number;knownBot:number}[];
   return Object.fromEntries(rows.map(({id,...p})=>[id,{...p,canMarkBot:!!p.canMarkBot,manualBot:!!p.manualBot,isDonor:!!p.isDonor,automaticHuman:!!p.automaticHuman,manualHuman:!!p.manualHuman,knownBot:!!p.knownBot&&!p.automaticHuman&&!p.manualHuman}]));
  }
  state(id:string,extra:readonly string[]=[]){const states=this.states([id],extra);if(!Object.hasOwn(states,id))throw Error('PERSON_NOT_FOUND');return states[id]!;}
@@ -134,7 +134,7 @@ export class PersonBots {
  decorate<T>(rows:T[],id:(row:T)=>string|null|undefined,extra:readonly string[]=[]):(T&{is_bot:number;is_donor:boolean;is_human:boolean})[]{
   const ids=JSON.stringify([...new Set(rows.map(id).filter(Boolean))]),keys=JSON.stringify([...botExclusionSet(extra)]);
   const states=this.db.prepare(`SELECT p.id,EXISTS(SELECT 1 FROM manual_neutral_people n WHERE n.person_id=p.id) neutral,EXISTS(SELECT 1 FROM human_people h WHERE h.person_id=p.id) human,EXISTS(SELECT 1 FROM donor_people d WHERE d.person_id=p.id) donor,
-   (EXISTS(SELECT 1 FROM manual_bot_people b WHERE b.person_id=p.id) OR EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND i.source='twitch' AND i.match_key IN(SELECT value FROM json_each(?)))) bot
+   (EXISTS(SELECT 1 FROM manual_bot_people b WHERE b.person_id=p.id) OR EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND i.source='twitch' AND i.match_key IN(SELECT value FROM json_each(?))) OR EXISTS(SELECT 1 FROM youtube_identities y WHERE y.person_id=p.id AND y.match_key IN('streamelements','streemelements'))) bot
    FROM persons p WHERE p.id IN(SELECT value FROM json_each(?))`).all(keys,ids) as {id:string;donor:number;bot:number;human:number;neutral:number}[];
   const map=new Map(states.map(s=>[s.id,s]));
   return rows.map(row=>{const s=map.get(id(row)??'');return {...row,is_bot:Number(!!s?.bot&&!s?.human&&!s?.neutral),is_donor:!!s?.donor,is_human:!!s?.human};});

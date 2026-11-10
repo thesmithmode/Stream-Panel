@@ -17,7 +17,7 @@
   if(!onClassificationChange)return;
   if(classificationProfile!==profile){classificationStates={};classificationProfile=profile;}
   const controller=new AbortController();classificationError='';
-  void loadClassifications(ids,controller.signal,profile).then(states=>{if(!controller.signal.aborted)classificationStates=states;}).catch(error=>{if(!controller.signal.aborted)classificationError=(error as Error).message;});
+  void loadClassifications(ids,controller.signal,profile).then(states=>{if(!controller.signal.aborted){const next={...states};for(const [id,state] of Object.entries(classificationStates))if(next[id]&&(state.pending||state.revision>next[id]!.revision))next[id]=state;classificationStates=next;}}).catch(error=>{if(!controller.signal.aborted)classificationError=(error as Error).message;});
   return()=>controller.abort();
  });
  async function classificationChanged(){await onClassificationChange?.();}
@@ -51,9 +51,9 @@
   <tbody>{#each ranked.slice(0,limit) as person (person.id)}
    {@const regionId=`${id}-intervals-${person.id}`}
    {@const hasIntervals=showIntervals&&!!person.intervals?.length}
-   <tr class="participant-row" class:expanded={expanded.has(person.id)&&hasIntervals} class:bot-person={person.is_bot} class:human-person={person.is_human}>
+   <tr class="participant-row" class:expanded={expanded.has(person.id)&&hasIntervals} class:bot-person={classificationStates[person.id]?(classificationStates[person.id]!.manualBot||classificationStates[person.id]!.knownBot):person.is_bot} class:human-person={classificationStates[person.id]?(classificationStates[person.id]!.manualHuman||classificationStates[person.id]!.automaticHuman):person.is_human}>
     <td><div class="participant-name-line"><button class={`text-button person-name ${platformClass(person.accounts?.map(a=>a.source))}`} class:youtube-secondary={person.youtubeSecondary} class:with-nicks={platformNicknames(person).length>0} title={person.name} onclick={()=>onPerson(person.id)}>{person.name}</button>
-     {#if onClassificationChange}<PersonBot personId={person.id} personName={person.name} revision={classificationStates[person.id]?.revision??0} state={classificationStates[person.id]??null} compact onChange={classificationChanged}/>{/if}</div>
+     {#if onClassificationChange}<PersonBot personId={person.id} personName={person.name} revision={classificationStates[person.id]?.revision??0} state={classificationStates[person.id]??null} compact onState={state=>classificationStates={...classificationStates,[person.id]:state}} onChange={classificationChanged}/>{/if}</div>
      {#if platformNicknames(person).length}<div class="platform-nicks">{#each platformNicknames(person) as account}<span class:twitch={account.source==='twitch'} class:youtube={account.source==='youtube'} class:youtube-secondary={account.secondary} title={`${account.source==='twitch'?'Twitch':'YouTube'} · ${account.name}`}>{account.name}</span>{/each}</div>{/if}
      {#if currencies.some(c=>BigInt(person.donations?.[c]??'0')!==0n)}<div class="phone-donations">{#each currencies as c}{#if BigInt(person.donations?.[c]??'0')!==0n}<span>{money(person.donations![c]!,c)}</span>{/if}{/each}</div>{/if}
     </td>

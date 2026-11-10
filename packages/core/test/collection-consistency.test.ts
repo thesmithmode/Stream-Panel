@@ -27,7 +27,7 @@ test('stream cards and detail count the same messages after owner, bot, shared-c
   for(const excluded of [[],['CustomBot']]){
    const card=s.sessions(id,0,100,excluded)[0]!;
    assert.equal(card.messageCount,s.summary(id,excluded,false).messages);
-   assert.equal(card.messageCount,excluded.length?4:5);
+   assert.equal(card.messageCount,excluded.length?2:3);
   }
  }finally{s.close();}
 });

@@ -43,7 +43,7 @@
   let audienceData=$state<any>(null),audienceError=$state(''),audienceBusy=$state(false);
   let audienceMetric=$state<ChartMetric>('viewers');
   const viewerMetrics=$derived(audienceData?.streamComparison?.[0]?.viewers);
-  const viewers=$derived(viewerMetrics?.known?.partialMinutes?viewerMetrics.known:viewerMetrics?.all);
+  const viewers=$derived(viewerMetrics?(viewerMetrics.known?.partialMinutes?viewerMetrics.known:viewerMetrics.all):session?{mean:session.viewerKnownMean??session.viewerMean,peak:session.viewerKnownPeak??session.viewerPeak}:undefined);
   const viewerPartial=$derived((viewerMetrics?.known?.partialMinutes??0)>0);
   const missingPresence=$derived(missingTwitchPresence(audienceData?.timeline??[]));
   function loadResolution(){
@@ -59,19 +59,20 @@
   let metadata=$state<Array<{at:number;title:string;categoryName:string}>>([]);
   let audienceRequest=0,lastAudienceSession='';
   $effect(()=>{
-    const current=sessionFilter;void summary;
+    const current=sessionFilter,needsAudience=activeTab==='summary'||activeTab==='people',needsSupplement=activeTab==='people';void summary;
     return untrack(()=>{
     if(current===lastAudienceSession&&(document.hidden||!navigator.onLine))return;
     const id=++audienceRequest;audienceBusy=audienceData===null;audienceError='';
     if(current!==lastAudienceSession){audienceData=null;metadata=[];supplemental=[];lastAudienceSession=current;}
     if(!current){audienceData=null;audienceBusy=false;return;}
+    if(!needsAudience){audienceBusy=false;return;}
     const query=new URLSearchParams({session:current,source:'all',category:'',timezone:'Europe/Moscow'});
     audienceData=cachedAnalytics(getProfile(),query)??audienceData;
     audienceBusy=audienceData===null;
     const controller=new AbortController();
-    void Promise.all([api<any[]>(`sessions/${encodeURIComponent(current)}/supplementary-chat`,undefined,controller.signal),loadAnalytics(getProfile(),query,false,controller.signal),api<Array<{at:number;title:string;categoryName:string}>>(`sessions/${current}/metadata`,undefined,controller.signal)]).then(([extra,result,history])=>{
-      if(id===audienceRequest){supplemental=extra;audienceData=result;metadata=history.filter((row,i)=>!i||row.title!==history[i-1]!.title||row.categoryName!==history[i-1]!.categoryName);}
-    }).catch(error=>{if(id===audienceRequest){audienceError=error instanceof ConnectionError?'Не удалось загрузить участников и график. Проверьте соединение и повторите обновление.':(error as Error).message;}}).finally(()=>{if(id===audienceRequest)audienceBusy=false;});
+    void loadAnalytics(getProfile(),query,false,controller.signal).then(result=>{if(id===audienceRequest)audienceData=result;}).catch(error=>{if(id===audienceRequest)audienceError=error instanceof ConnectionError?'Не удалось загрузить участников и график. Проверьте соединение и повторите обновление.':(error as Error).message;}).finally(()=>{if(id===audienceRequest)audienceBusy=false;});
+    if(needsSupplement)void api<any[]>(`sessions/${encodeURIComponent(current)}/supplementary-chat`,undefined,controller.signal).then(extra=>{if(id===audienceRequest)supplemental=extra;}).catch(()=>{});
+    void api<Array<{at:number;title:string;categoryName:string}>>(`sessions/${current}/metadata`,undefined,controller.signal).then(history=>{if(id===audienceRequest)metadata=history.filter((row,i)=>!i||row.title!==history[i-1]!.title||row.categoryName!==history[i-1]!.categoryName);}).catch(()=>{});
     return()=>{audienceRequest++;controller.abort();};
     });
   });
@@ -113,7 +114,7 @@
 {#if missingPresence}<p class="notice" role="status">Сообщения Twitch сохранены, но данных о присутствии участников нет. Время в чате недоступно: прочерк не означает отсутствие человека.</p>{/if}
 <AudienceRanking people={participants} {onPerson} onClassificationChange={changed} showIntervals {missingPresence} streamStart={session?.started_at_ms??0} streamEnd={session?.ended_at_ms??Date.now()}/>
 {/if}
-{:else if sessionFilter}<section class="panel"><header><h2>События стрима · 48 ч</h2></header><div class="settings-body"><RecentEvents sessionId={sessionFilter} {onPerson}/></div></section>{/if}
+{:else if sessionFilter}<section class="panel"><header><h2>События стрима · 7 дней</h2></header><div class="settings-body"><RecentEvents sessionId={sessionFilter} {onPerson}/></div></section>{/if}
 </div>
 <style>
  .stream-title-row{display:flex;gap:16px;align-items:start}.stream-title-row h1{flex:1;min-width:0;font-size:26px;line-height:1.3;margin:0 0 12px;overflow-wrap:anywhere}.stream-meta{color:var(--muted);margin:0 0 6px;font-size:14px}.series-panel>header{display:flex;align-items:center;justify-content:space-between}

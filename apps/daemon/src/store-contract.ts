@@ -19,6 +19,7 @@ export const storeOperations={
   followingSnapshot:"write",
   personFollowing:"cached",
   followingAnalytics:"cached",
+  followerChanges:"cached",
   youtubeQuota:"maintenance",
   youtubeSnapshot:"write",
   providerSnapshot:"write",

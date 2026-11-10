@@ -1,6 +1,7 @@
 export type ViewerPlatform='all'|'twitch'|'youtube';
 export interface StreamMetric {
  id?:string; startedAt:number; endedAt?:number; durationMs?:number; messages?:number; meanChatters?:number|null; categories?:string[];
+ botMessages?:number;botViewers?:StreamMetric['viewers'];
  viewers?:Partial<Record<ViewerPlatform|'known',{mean?:number|null;knownMinutes?:number;partialMinutes?:number}>>;
 }
 export function onlineMetric(stream:StreamMetric,platform:ViewerPlatform='all'){
@@ -8,15 +9,15 @@ export function onlineMetric(stream:StreamMetric,platform:ViewerPlatform='all'){
 }
 export function dailyMetrics(streams:StreamMetric[],timezone:string,platform:ViewerPlatform='all'){
  const formatter=new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'});
- const groups=new Map<string,{date:string;streams:StreamMetric[];onlineTotal:number;onlineMinutes:number;activeTotal:number;activeMs:number;partial:boolean}>();
+ const groups=new Map<string,{date:string;streams:StreamMetric[];botOnlineTotal:number;botActiveTotal:number;onlineTotal:number;onlineMinutes:number;activeTotal:number;activeMs:number;partial:boolean}>();
  for(const stream of [...streams].sort((a,b)=>a.startedAt-b.startedAt)){
-  const date=formatter.format(stream.startedAt),row=groups.get(date)??{date,streams:[],onlineTotal:0,onlineMinutes:0,activeTotal:0,activeMs:0,partial:false};
+  const date=formatter.format(stream.startedAt),row=groups.get(date)??{date,streams:[],botOnlineTotal:0,botActiveTotal:0,onlineTotal:0,onlineMinutes:0,activeTotal:0,activeMs:0,partial:false};
   row.streams.push(stream);
   const duration=stream.durationMs??Math.max(0,(stream.endedAt??stream.startedAt)-stream.startedAt);
   const online=onlineMetric(stream,platform),minutes=online?.knownMinutes??duration/60000;
-  if(online?.mean!=null&&Number.isFinite(online.mean)&&minutes>0){row.onlineTotal+=online.mean*minutes;row.onlineMinutes+=minutes;row.partial||=!!online.partialMinutes;}
-  if(stream.messages!=null&&Number.isFinite(stream.messages)&&duration>0){row.activeTotal+=stream.messages;row.activeMs+=duration;}
+  if(online?.mean!=null&&Number.isFinite(online.mean)&&minutes>0){row.botOnlineTotal+=((platform==='all'?stream.botViewers?.known:stream.botViewers?.[platform])?.mean??0)*minutes;row.onlineTotal+=online.mean*minutes;row.onlineMinutes+=minutes;row.partial||=!!online.partialMinutes;}
+  if(stream.messages!=null&&Number.isFinite(stream.messages)&&duration>0){row.botActiveTotal+=stream.botMessages??0;row.activeTotal+=stream.messages;row.activeMs+=duration;}
   groups.set(date,row);
  }
- return [...groups.values()].map(row=>({...row,online:row.onlineMinutes?row.onlineTotal/row.onlineMinutes:null,active:row.activeMs?row.activeTotal*3600000/row.activeMs:null}));
+ return [...groups.values()].map(row=>({...row,botOnline:row.onlineMinutes?row.botOnlineTotal/row.onlineMinutes:0,botActive:row.activeMs?row.botActiveTotal*3600000/row.activeMs:0,online:row.onlineMinutes?row.onlineTotal/row.onlineMinutes:null,active:row.activeMs?row.activeTotal*3600000/row.activeMs:null}));
 }

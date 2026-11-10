@@ -73,8 +73,7 @@ test('live chat combines silent Twitch members and recent YouTube authors, sorts
   await panel.getByRole('searchbox',{name:'Поиск по нику'}).fill('@youtube');assert.equal(await panel.locator('tbody tr').count(),1);
   await panel.getByRole('searchbox',{name:'Поиск по нику'}).fill('');
   assert.equal(await panel.locator('.chat-note').count(),0);assert.equal(await panel.getByLabel('Показать владельца и ботов').count(),0);
-  await panel.locator('.action-menu summary').click();await page.getByRole('dialog',{name:'Текущий чат',exact:true}).getByLabel('Показать владельца и ботов').check();await page.getByRole('dialog',{name:'Текущий чат',exact:true}).getByRole('button',{name:'Закрыть',exact:true}).click();await panel.getByRole('button',{name:'rlod',exact:true}).waitFor();
-  await panel.locator('.action-menu summary').click();await page.getByRole('dialog',{name:'Текущий чат',exact:true}).getByLabel('Показать владельца и ботов').uncheck();await page.getByRole('dialog',{name:'Текущий чат',exact:true}).getByRole('button',{name:'Закрыть',exact:true}).click();await panel.getByRole('button',{name:'rlod',exact:true}).waitFor({state:'detached'});
+  assert.equal(await panel.locator('.action-menu').count(),0,'one global bot setting lives in profile settings');
   const cache=await page.evaluate(async(id)=>{const path=`/api/v1/sessions/${id}/current-chat?includeExcluded=0`;const response=await fetch(path);return (await fetch(path,{headers:{'If-None-Match':response.headers.get('etag')}})).status;},sid);
   assert.equal(cache,304);assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{if(browser)await browser.close();await a.close();}

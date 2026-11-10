@@ -393,7 +393,8 @@ export class AnalyticsHistory {
         if(session.ended_at_ms===null)return this.facts.present(this.streamReport(options),options);
         const canonical={...options,fromMs:Math.max(options.fromMs,session.started_at_ms),toMs:Math.min(options.toMs,session.ended_at_ms)};
         validateAnalyticsOptions(canonical);
-        const scope='session-v3:'+createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.entries(canonical).sort(([a],[b])=>a.localeCompare(b))))).digest('hex');
+        const factualKeys=['sessionId','fromMs','toMs','source','category','timezone','chatWindowMinutes','excludedLogins','ownerId','youtubeAccount','regularThresholdPercent'] as const;
+        const scope='session-v4:'+createHash('sha256').update(JSON.stringify(factualKeys.map(key=>[key,canonical[key]??null]))).digest('hex');
         const key=createHash('sha256').update(JSON.stringify([scope,session.revision])).digest('hex');
         const retained=this.completed.get(key);
         if(retained){this.completed.delete(key);this.completed.set(key,retained);return this.facts.present(retained.value,options);}
@@ -609,14 +610,14 @@ export class AnalyticsHistory {
                     negative.add(row.person_id);
         }
         const summary={entities:people.size,attendees:0,regulars:0,regularShare:null as number|null,core:0,streams:selectedStreams,chatters:0,messages:0};
-        const composition={core:0,followers:0,nonFollowers:0,unknown:0,twitch:0,youtube:0,both:0};
+        const composition:{bots?:number;core:number;followers:number;nonFollowers:number;unknown:number;twitch:number;youtube:number;both:number}={core:0,followers:0,nonFollowers:0,unknown:0,twitch:0,youtube:0,both:0};
         for (const person of people.values()) {
             person.follower = followers.has(person.id) ? true : negative.has(person.id) && !person.sources.includes('youtube') ? false : null;
             person.tags = (this.statement(`WITH RECURSIVE owners(id) AS(SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT t.label FROM person_tags t JOIN owners o ON o.id=t.person_id ORDER BY t.label`).all(person.id) as {
                 label: string;
             }[]).map(t => t.label);
             people.set(person.id,person);summary.core+=Number(person.core);summary.chatters+=Number(person.messages>0);summary.messages+=person.messages;
-            if(person.attendanceSessionIds.length){summary.attendees++;composition.core+=Number(person.core);composition.followers+=Number(!person.core&&person.follower===true);composition.nonFollowers+=Number(!person.core&&person.follower===false);composition.unknown+=Number(!person.core&&person.follower===null);composition.twitch+=Number(person.sources.includes('twitch'));composition.youtube+=Number(person.sources.includes('youtube'));composition.both+=Number(person.sources.length>1);}
+            if(person.attendanceSessionIds.length){summary.attendees++;if(person.is_bot)composition.bots=(composition.bots??0)+1;composition.core+=Number(!person.is_bot&&person.core);composition.followers+=Number(!person.is_bot&&!person.core&&person.follower===true);composition.nonFollowers+=Number(!person.is_bot&&!person.core&&person.follower===false);composition.unknown+=Number(!person.is_bot&&!person.core&&person.follower===null);composition.twitch+=Number(person.sources.includes('twitch'));composition.youtube+=Number(person.sources.includes('youtube'));composition.both+=Number(person.sources.length>1);}
             if(performance.now()-sliceStart>250){yield {preparing:true as const,ready:processed,total:total*2};sliceStart=performance.now();}
         }
         summary.regulars=summary.core;summary.regularShare=summary.entities?summary.core/summary.entities:null;
@@ -703,9 +704,10 @@ export class AnalyticsHistory {
             for (const category of report.categories) {
                 let row = categoryRows.get(category.id);
                 if (!row) {
-                    row = { ...category, minutes: 0, messages: 0, observedMinutes: 0, observedKnownMinutes: 0, viewerTotal:0, viewerKnownMinutes:0, viewerPartialMinutes:0, estimatedChatMinutes: 0, sessions: 0, donationCount: 0, donationTotals: {} };
+                    row = { ...category, minutes: 0, messages: 0, observedMinutes: 0, observedKnownMinutes: 0, botObserved:0,botEstimated:0,botMessages:0,botViewersTotal:0,viewerTotal:0, viewerKnownMinutes:0, viewerPartialMinutes:0, estimatedChatMinutes: 0, sessions: 0, donationCount: 0, donationTotals: {} };
                     categoryRows.set(category.id, row);
                 }
+                for(const field of ['botObserved','botEstimated','botMessages','botViewersTotal'] as const)row[field]=(row[field]??0)+(category[field]??0);
                 for (const key of ['minutes', 'messages', 'observedMinutes', 'observedKnownMinutes', 'estimatedChatMinutes', 'viewerTotal', 'viewerKnownMinutes', 'viewerPartialMinutes', 'sessions', 'donationCount'] as const)
                     row[key] += category[key];
                 sumMoney(row.donationTotals, category.donationTotals);
@@ -717,9 +719,10 @@ export class AnalyticsHistory {
                 const key = cell.day + ':' + cell.hour;
                 let row = hours.get(key);
                 if (!row) {
-                    row = { ...cell, observed: 0, estimated: 0, messages: 0, sampleMinutes: 0, observedKnownMinutes: 0, viewersTotal: 0, viewerSamples: 0, knownViewersTotal:0,knownViewerSamples:0,viewerPartialMinutes:0, donationCount: 0, donationTotals: {} };
+                    row = { ...cell, observed: 0, estimated: 0, messages: 0, sampleMinutes: 0, observedKnownMinutes: 0, viewersTotal: 0, viewerSamples: 0, botObserved:0,botEstimated:0,botMessages:0,botViewersTotal:0,knownViewersTotal:0,knownViewerSamples:0,viewerPartialMinutes:0, donationCount: 0, donationTotals: {} };
                     hours.set(key, row);
                 }
+                for(const field of ['botObserved','botEstimated','botMessages','botViewersTotal'] as const)row[field]=(row[field]??0)+(cell[field]??0);
                 for(const field of ['knownViewersTotal','knownViewerSamples','viewerPartialMinutes'] as const)row[field]=(row[field]??0)+(cell[field]??0);
                 for (const field of ['observed', 'estimated', 'messages', 'sampleMinutes', 'observedKnownMinutes', 'viewersTotal', 'viewerSamples', 'donationCount'] as const)
                     row[field] += cell[field];
