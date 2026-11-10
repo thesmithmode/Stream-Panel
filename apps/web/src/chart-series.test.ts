@@ -28,7 +28,7 @@ test('YouTube estimate segments remain bounded by the total and tolerate legacy 
 
 test('known legacy sample without the selected metric contributes a zero instead of NaN',()=>{
  const [point]=chartSeries([{at:0,presenceKnown:true}],'observed');
- assert.deepEqual(point,{followerValue:0,at:0,known:true,isBreak:false,value:0,regularValue:0,width:60000});
+ assert.deepEqual(point,{botValue:0,followerValue:0,at:0,known:true,isBreak:false,value:0,regularValue:0,width:60000});
 });
 
  test('requested chart resolution aggregates accurately and caps long periods',()=>{
