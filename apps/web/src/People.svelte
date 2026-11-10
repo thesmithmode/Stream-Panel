@@ -29,13 +29,13 @@
   import Following from "./Following.svelte";
   import PersonMetadata from "./PersonMetadata.svelte";
   let {
-    section='',onSection,
+    includeBots=false,section='',onSection,
     period = "",
     initialId = "",
     onChange,
     onSelect,
   }: {
-    section?:string;onSection:(section:string)=>void;
+    includeBots?:boolean;section?:string;onSection:(section:string)=>void;
     period?: string;
     initialId?: string;
     onSelect:(id:string)=>void;
@@ -43,7 +43,7 @@
   } = $props();
   function selectAccount(ids:string[],checked:boolean){selectedIdentities=checked?[...new Set([...selectedIdentities,...ids])]:selectedIdentities.filter(id=>!ids.includes(id));}
   let detailTab=$state("overview"),showFollowing=$state(false),detailLoading=$state(false),showDonorLinks=$state(false);
-  let botFilter=$state("humans");
+  const botFilter=$derived(includeBots?"all":"humans");
   let search = $state(""),
     selectedId = $state(""),
     detail = $state<any>(null),
@@ -100,7 +100,7 @@
             }) as Person,
         ),
   );
-  const visible=$derived(sortBy==='default'?rows:rows.filter(person=>(botFilter==='all'||Boolean(person.is_bot)===(botFilter==='bots'))).filter(person=>person.display_name.toLocaleLowerCase('ru-RU').includes(search.trim().toLocaleLowerCase('ru-RU'))));
+  const visible=$derived(sortBy==='default'?rows:rows.filter(person=>(botFilter==='all'||!person.is_bot)).filter(person=>person.display_name.toLocaleLowerCase('ru-RU').includes(search.trim().toLocaleLowerCase('ru-RU'))));
   $effect(()=>{detailTab=['overview','activity','messages','donations','notes','accounts'].includes(section)?section:'overview';});
   const personTabs=[["overview","Обзор"],["activity","Активность"],["messages","Сообщения"],["donations","Донаты"],["notes","Заметки"],["accounts","Аккаунты"]] as const;
   let directoryScroll=0,forceDirectory=false;
@@ -239,7 +239,6 @@
         >{/each}
     </div>
     {#if sortBy==='donations'}<div class="donor-filters">{#if donorCurrencies.length>1}<label>Сортировать по валюте<select aria-label="Валюта сортировки донатеров" bind:value={donorCurrency}>{#each [...new Set(['RUB',...donorCurrencies])] as c}<option value={c}>{c}</option>{/each}</select></label>{/if}</div>{/if}
-    <label>Показывать<select aria-label="Фильтр ботов" bind:value={botFilter} onchange={()=>{peopleOffset=0;sortBy="default";}}><option value="all">Всех</option><option value="humans">Без ботов</option><option value="bots">Только ботов</option></select></label>
     <div class="search">
       <input
         aria-label="Поиск человека"
@@ -283,7 +282,7 @@
       </div>{:else}<header>
         <h2 class={platformClass(detail.identities.map((i:any)=>i.source))} class:youtube-secondary={detail.youtubeSecondary}>{detail.display_name}</h2>
 
-       <PersonBot personId={detail.id} revision={detail.revision} onChange={()=>refreshPerson(detail.id)} />
+       <PersonBot personId={detail.id} revision={detail.revision} onState={state=>{const human=state.manualHuman||state.automaticHuman,bot=Number(!human&&(state.manualBot||state.knownBot));pageRows=pageRows.map(p=>p.id===detail.id?{...p,is_bot:bot,is_human:human}:p);tops=tops.map(p=>p.id===detail.id?{...p,is_bot:bot,is_human:human}:p);}} onChange={()=>refreshPerson(detail.id)} />
       </header>
 
       <div class="person-tab-wrap"><SectionTabs items={personTabs} bind:value={detailTab} onchange={()=>onSection(detailTab)} label="Разделы человека" panelId="person-tabpanel"/></div>

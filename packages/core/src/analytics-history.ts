@@ -393,7 +393,8 @@ export class AnalyticsHistory {
         if(session.ended_at_ms===null)return this.facts.present(this.streamReport(options),options);
         const canonical={...options,fromMs:Math.max(options.fromMs,session.started_at_ms),toMs:Math.min(options.toMs,session.ended_at_ms)};
         validateAnalyticsOptions(canonical);
-        const scope='session-v3:'+createHash('sha256').update(JSON.stringify(Object.fromEntries(Object.entries(canonical).sort(([a],[b])=>a.localeCompare(b))))).digest('hex');
+        const factualKeys=['sessionId','fromMs','toMs','source','category','timezone','chatWindowMinutes','excludedLogins','ownerId','youtubeAccount','regularThresholdPercent'] as const;
+        const scope='session-v4:'+createHash('sha256').update(JSON.stringify(factualKeys.map(key=>[key,canonical[key]??null]))).digest('hex');
         const key=createHash('sha256').update(JSON.stringify([scope,session.revision])).digest('hex');
         const retained=this.completed.get(key);
         if(retained){this.completed.delete(key);this.completed.set(key,retained);return this.facts.present(retained.value,options);}
@@ -703,9 +704,10 @@ export class AnalyticsHistory {
             for (const category of report.categories) {
                 let row = categoryRows.get(category.id);
                 if (!row) {
-                    row = { ...category, minutes: 0, messages: 0, observedMinutes: 0, observedKnownMinutes: 0, viewerTotal:0, viewerKnownMinutes:0, viewerPartialMinutes:0, estimatedChatMinutes: 0, sessions: 0, donationCount: 0, donationTotals: {} };
+                    row = { ...category, minutes: 0, messages: 0, observedMinutes: 0, observedKnownMinutes: 0, botObserved:0,botEstimated:0,botMessages:0,botViewersTotal:0,viewerTotal:0, viewerKnownMinutes:0, viewerPartialMinutes:0, estimatedChatMinutes: 0, sessions: 0, donationCount: 0, donationTotals: {} };
                     categoryRows.set(category.id, row);
                 }
+                for(const field of ['botObserved','botEstimated','botMessages','botViewersTotal'] as const)row[field]=(row[field]??0)+(category[field]??0);
                 for (const key of ['minutes', 'messages', 'observedMinutes', 'observedKnownMinutes', 'estimatedChatMinutes', 'viewerTotal', 'viewerKnownMinutes', 'viewerPartialMinutes', 'sessions', 'donationCount'] as const)
                     row[key] += category[key];
                 sumMoney(row.donationTotals, category.donationTotals);
@@ -717,9 +719,10 @@ export class AnalyticsHistory {
                 const key = cell.day + ':' + cell.hour;
                 let row = hours.get(key);
                 if (!row) {
-                    row = { ...cell, observed: 0, estimated: 0, messages: 0, sampleMinutes: 0, observedKnownMinutes: 0, viewersTotal: 0, viewerSamples: 0, knownViewersTotal:0,knownViewerSamples:0,viewerPartialMinutes:0, donationCount: 0, donationTotals: {} };
+                    row = { ...cell, observed: 0, estimated: 0, messages: 0, sampleMinutes: 0, observedKnownMinutes: 0, viewersTotal: 0, viewerSamples: 0, botObserved:0,botEstimated:0,botMessages:0,botViewersTotal:0,knownViewersTotal:0,knownViewerSamples:0,viewerPartialMinutes:0, donationCount: 0, donationTotals: {} };
                     hours.set(key, row);
                 }
+                for(const field of ['botObserved','botEstimated','botMessages','botViewersTotal'] as const)row[field]=(row[field]??0)+(cell[field]??0);
                 for(const field of ['knownViewersTotal','knownViewerSamples','viewerPartialMinutes'] as const)row[field]=(row[field]??0)+(cell[field]??0);
                 for (const field of ['observed', 'estimated', 'messages', 'sampleMinutes', 'observedKnownMinutes', 'viewersTotal', 'viewerSamples', 'donationCount'] as const)
                     row[field] += cell[field];

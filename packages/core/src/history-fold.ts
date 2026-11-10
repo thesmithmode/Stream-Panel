@@ -22,6 +22,7 @@ export interface HistoryFold {
  insights?:InsightState;
 }
 const money=(target:Record<string,string>,input:Record<string,string>)=>{for(const [currency,n] of Object.entries(input))target[currency]=(BigInt(target[currency]??'0')+BigInt(n)).toString();};
+const botFields=['botObserved','botEstimated','botMessages','botViewersTotal'] as const;
 const categoryFields=['minutes','messages','observedMinutes','observedKnownMinutes','estimatedChatMinutes','viewerTotal','viewerKnownMinutes','viewerPartialMinutes','sessions','donationCount'] as const;
 const hourFields=['knownViewersTotal','knownViewerSamples','viewerPartialMinutes','observed','estimated','messages','sampleMinutes','observedKnownMinutes','viewersTotal','viewerSamples','donationCount'] as const;
 /** Prepare expensive minute/interval inputs once. Parents consume only sufficient statistics. */
@@ -51,9 +52,9 @@ export function mergeHistory(left:HistoryFold,right:HistoryFold,timezone:string)
   for(const arrival of p.arrivalHours){const prior=row.arrivalHours.find(a=>a.day===arrival.day&&a.hour===arrival.hour);if(prior)prior.visits+=arrival.visits;else row.arrivalHours.push(arrival);}
  }
  const categories=new Map(left.categories.map(c=>[c.id,c]));
- for(const c of right.categories){const row=categories.get(c.id);if(!row){categories.set(c.id,c);continue;}for(const field of categoryFields)row[field]+=c[field];money(row.donationTotals,c.donationTotals);}
+ for(const c of right.categories){const row=categories.get(c.id);if(!row){categories.set(c.id,c);continue;}for(const field of categoryFields)row[field]+=c[field];for(const field of botFields)row[field]=(row[field]??0)+(c[field]??0);money(row.donationTotals,c.donationTotals);}
  const members=new Map(left.categoryPeople.map(([id,people])=>[id,new Set(people)]));for(const [id,people] of right.categoryPeople){const ids=members.get(id)??new Set<string>();people.forEach(p=>ids.add(p));members.set(id,ids);}
- const hours=new Map(left.hours.map(c=>[`${c.day}:${c.hour}`,c]));for(const c of right.hours){const key=`${c.day}:${c.hour}`,row=hours.get(key);if(!row){hours.set(key,c);continue;}for(const field of hourFields)row[field]=(row[field]??0)+(c[field]??0);money(row.donationTotals,c.donationTotals);}
+ const hours=new Map(left.hours.map(c=>[`${c.day}:${c.hour}`,c]));for(const c of right.hours){const key=`${c.day}:${c.hour}`,row=hours.get(key);if(!row){hours.set(key,c);continue;}for(const field of hourFields)row[field]=(row[field]??0)+(c[field]??0);for(const field of botFields)row[field]=(row[field]??0)+(c[field]??0);money(row.donationTotals,c.donationTotals);}
  const clock=new Map(left.clock.map(c=>[`${c.day}:${c.resolution}:${c.minute}`,c]));for(const c of right.clock){const key=`${c.day}:${c.resolution}:${c.minute}`,row=clock.get(key);if(!row){clock.set(key,c);continue;}row.streams+=c.streams;row.airtimeMs+=c.airtimeMs;row.personTimeMs+=c.personTimeMs;}
  const daily=new HistoryTimeline(timezone,new Map());daily.append(left.daily);daily.append(right.daily);
  let insights:InsightState|undefined;

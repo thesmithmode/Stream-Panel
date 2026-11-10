@@ -19,6 +19,15 @@ test('stream participants classify inline in compact rows, load one batch, lock 
   await locked.locator('.classification-control.locked').waitFor();assert.equal(await locked.getByRole('radio',{name:'Бот',exact:true}).isDisabled(),true);assert.equal(await locked.getByRole('img',{name:/Статус «Человек» закреплён/}).count(),1);
   const before=(await row.boundingBox()).height;
   for(const width of [320,390,1440]){await page.setViewportSize({width,height:900});await assertUiLayout(page);assert.ok((await row.boundingBox()).height<=Math.max(before,60),'classification does not create a second row');const box=await row.locator('.classification').boundingBox();const lockedBox=await locked.locator('.classification').boundingBox();assert.ok(Math.abs(box.x-lockedBox.x)<1,'lock does not shift aligned controls');assert.equal(box.width,59);assert.equal(lockedBox.width,59);assert.ok(box.x>=0&&box.x+box.width<=width);await rank.screenshot({path:`/tmp/sp-participant-classification-${width}.png`});}
+  let release;const held=new Promise(resolve=>release=resolve);
+  await page.route('**/classification',async route=>{await held;await route.continue();});
+  const humanSaved=page.waitForResponse(r=>r.url().endsWith('/classification')&&r.status()===200);
+  await row.getByRole('radio',{name:'Человек',exact:true}).click();
+  assert.equal(await row.getByRole('radio',{name:'Человек',exact:true}).getAttribute('aria-checked'),'true');
+  assert.equal(await row.evaluate(e=>e.classList.contains('human-person')),true,'row changes before the server responds');
+  assert.notEqual(await row.evaluate(e=>getComputedStyle(e).backgroundColor),'rgba(0, 0, 0, 0)');
+  release();await humanSaved;await page.waitForFunction(()=>document.querySelector('.participant-row .classification[aria-busy="false"]'));
+  await page.unroute('**/classification');
   const saved=page.waitForResponse(r=>r.url().endsWith('/classification')&&r.request().method()==='POST'&&r.status()===200);
   await row.getByRole('radio',{name:'Бот',exact:true}).click();await saved;
   const person=people.find(p=>p.display_name==='Тестовый зритель');assert.equal((await app.db.call('personBot',person.id)).manualBot,true);

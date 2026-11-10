@@ -14,7 +14,7 @@ function mark(s:StreamStore,id:string,value=true){return s.setPersonBot(id,value
 const raw=(s:StreamStore)=>(s as unknown as {db:Database.Database}).db;
 function broadcast(s:StreamStore,stream:string,time:number,users:string[]){const id=s.startSession('owner',stream,time,'platform',time);s.streamSample(id,time,'game','Game','',11);for(const user of users)viewer(s,user,time);s.recordPoll(id,'owner',{startedAtMs:time,completedAtMs:time+minute,status:'complete',userIds:users});s.endSession(id,time+2*minute);return id;}
 
-test('manual marks rebuild only affected stream facts, separate both modes and never alter platform online',()=>{
+test('manual marks rebuild only affected stream facts, separate both modes and subtract observed bots from online',()=>{
  const s=new StreamStore(':memory:');try{
   const a=broadcast(s,'a',at,['suspect','human']),b=broadcast(s,'b',at+3*minute,['other']);
   const id=s.candidatePersons('suspect')[0]!,q={fromMs:at,toMs:at+5*minute,summaryOnly:true};
@@ -29,7 +29,7 @@ test('manual marks rebuild only affected stream facts, separate both modes and n
   assert.equal(clean.summary.attendees,2);assert.equal(all.summary.attendees,3);
   assert.equal(clean.summary.messages,2);assert.equal(all.summary.messages,3);
   assert.equal(all.audience.find(p=>p.id===id)!.is_bot,1);
-  assert.deepEqual(clean.streamComparison.map(p=>p.viewers),all.streamComparison.map(p=>p.viewers));
+  assert.equal(clean.streamComparison.find(p=>p.id===a)!.viewers.twitch.mean,9);assert.equal(all.streamComparison.find(p=>p.id===a)!.viewers.twitch.mean,10);assert.equal(all.streamComparison.find(p=>p.id===a)!.botViewers.twitch.mean,1);
   assert.deepEqual(raw(s).prepare('SELECT payload FROM analytics_stream_facts WHERE session_id=?').get(b),bPayload);
   assert.equal(s.analytics(q).summary.attendees,2);
   assert.equal(s.channelOverview().records.peakChat?.value,1);assert.equal(s.channelOverview(false).records.peakChat?.value,2);

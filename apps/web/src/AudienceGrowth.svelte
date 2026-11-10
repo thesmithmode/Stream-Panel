@@ -29,6 +29,7 @@
  const current=$derived(displayed[selected]);
  const dateTicks=$derived(Array.from({length:Math.min(5,displayed.length)},(_,i)=>Math.round(i*(displayed.length-1)/Math.max(1,Math.min(5,displayed.length)-1))));
  const value=(row:typeof displayed[number])=>row.point?.[metric]??null;
+ const botValue=(row:typeof displayed[number])=>Math.min(value(row)??0,(metric==='online'?row.point?.botOnline:row.point?.botActive)??0);
  const axis=$derived(countAxis(Math.max(0,...displayed.map(row=>value(row)??0))));
  const maximum=$derived(axis.maximum),ticks=$derived(axis.ticks);
  const width=$derived(Math.max(280,availableWidth)),plotLeft=$derived(countAxisInset(maximum,36));
@@ -43,7 +44,7 @@
  const format=(value:number|null)=>value===null?'нет данных':value.toLocaleString('ru-RU',{maximumFractionDigits:2});
  const label=$derived(metric==='online'?'Средний онлайн':'Сообщения в час');
  const color=$derived(metric==='active'?'var(--accent)':platform==='twitch'?'var(--twitch,#a970ff)':platform==='youtube'?'var(--youtube,#ff5959)':'var(--teal)');
- const title=(row:typeof displayed[number])=>`${fullDate(row.date)} · ${label}: ${format(value(row))}${row.point?.partial&&metric==='online'?' · неполные данные площадок':''}`;
+ const title=(row:typeof displayed[number])=>`${fullDate(row.date)} · ${label}: ${format(value(row))}${botValue(row)?` · боты: ${format(botValue(row))}`:''}${row.point?.partial&&metric==='online'?' · неполные данные площадок':''}`;
 </script>
 <svelte:window bind:innerWidth={viewportWidth}/>
 <section class="panel chart-panel audience-growth">
@@ -59,7 +60,7 @@
  <svg viewBox={`0 0 ${width} ${plotHeight}`} height={plotHeight} role="group" aria-label={`${label} по дням`}>
  {#each ticks as tick}<line x1={plotLeft} x2={width-12} y1={y(tick)} y2={y(tick)} stroke="currentColor" opacity=".12"/><text x="1" y={y(tick)-6} fill="currentColor" font-size="10">{format(tick)}</text>{/each}
  {#each displayed as row,i}<g role="button" tabindex="0" data-missing={value(row)===null} aria-label={title(row)} aria-pressed={selected===i} onclick={()=>selected=i} onkeydown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selected=i;}}}>
- {#if value(row)!==null}<rect class="daily-bar" x={x(i)-barWidth/2} y={y(value(row)!)} width={barWidth} height={Math.max(1,baseline-y(value(row)!))} rx="2" fill={color} opacity={selected===i?1:.7}/>{:else}<line x1={x(i)-2} x2={x(i)+2} y1={baseline} y2={baseline} stroke="var(--muted)"/>{/if}
+ {#if value(row)!==null}<rect class="daily-bar" x={x(i)-barWidth/2} y={y(value(row)!)} width={barWidth} height={Math.max(1,baseline-y(value(row)!))} rx="2" fill={color} opacity={selected===i?1:.7}/>{#if botValue(row)>0}<rect class="bot-segment" x={x(i)-barWidth/2} y={y(botValue(row))} width={barWidth} height={baseline-y(botValue(row))} fill="#69bce9"/>{/if}{:else}<line x1={x(i)-2} x2={x(i)+2} y1={baseline} y2={baseline} stroke="var(--muted)"/>{/if}
  <rect x={plotLeft+i*barStep} y="16" width={barStep} height={baseline-12} fill="transparent"><title>{title(row)}</title></rect>
  </g>{#if dateTicks.includes(i)}<text x={x(i)} y={baseline+28} text-anchor={i===0?'start':i===displayed.length-1?'end':'middle'} fill="currentColor" font-size="10">{shortDate(row.date)}</text>{/if}{/each}
  </svg></div>
