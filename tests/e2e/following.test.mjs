@@ -45,3 +45,43 @@ test('stream subscriptions show platform totals, exact follow dates and independ
   assert.ok(new URL(page.url()).searchParams.get('person')!==none.id);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });
+
+test('follow history shows dates, newest events first, colors and reversible compact pagination',{timeout:90000},async()=>{
+ const app=await application();let browser;
+ try{
+  const at=Date.UTC(2026,10,8,20,30),day=86400000;
+  const id=await app.db.call('observePlatformStream','twitch','owner','history',at,at,null,'History');
+  await app.db.call('endSession',id,at+day);
+  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const events=Array.from({length:45},(_,i)=>({source:'twitch',account:'owner',externalId:`viewer-${i}`,personId:null,name:`Viewer ${i}`,at:at+i*3600000}));
+  // Interleave both directions and shuffle input so sorting must use full timestamps.
+  await page.route(`**/api/v1/sessions/${id}/followers`,route=>route.fulfill({json:{newFollowers:events.filter((_,i)=>i%2===0).reverse(),unfollowers:events.filter((_,i)=>i%2===1),platforms:[]}}));
+  await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`[data-session-id="${id}"] .stream-open`).click();
+  const panel=page.getByRole('region',{name:'Подписчики за стрим'}),rows=panel.locator('.follower-row');await panel.getByText('Viewer 44',{exact:true}).waitFor();
+  assert.equal(await rows.count(),10);assert.match(await rows.first().textContent(),/Viewer 44.*10\.11\.2026 · 19:30/);assert.match(await rows.nth(1).textContent(),/Viewer 43.*Отписался/);
+  assert.deepEqual(await rows.locator('time').evaluateAll(nodes=>nodes.map(n=>Date.parse(n.dateTime))),events.slice(35).reverse().map(e=>e.at));
+  assert.equal(await rows.first().locator('.follower-name').evaluate(n=>getComputedStyle(n).color),'rgb(120, 219, 169)');
+  assert.equal(await rows.nth(1).locator('.follower-name').evaluate(n=>getComputedStyle(n).color),'rgb(237, 137, 144)');
+  for(const count of [20,30,40]){await panel.getByRole('button',{name:'Показать ещё 10',exact:true}).click();assert.equal(await rows.count(),count);}
+  await panel.getByRole('button',{name:'Показать ещё 5',exact:true}).click();assert.equal(await rows.count(),45);
+  await panel.getByRole('button',{name:'Свернуть',exact:true}).click();assert.equal(await rows.count(),10);
+  for(const width of [390,1280]){await page.setViewportSize({width,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await panel.screenshot({path:`/tmp/sp-following-history-${width}.png`});}
+  assert.deepEqual(errors,[]);await saveCoverage(page);
+ }finally{await browser?.close();await app.close();}
+});
+
+test('every subscriber nickname opens an internal profile, including previously unlinked Twitch and YouTube subscribers',{timeout:90000},async()=>{
+ const app=await application();let browser;
+ try{
+  const at=Date.now()-3600000,id=await app.db.call('observePlatformStream','twitch','owner','subscriber-profiles',at,at,null,'Subscribers');
+  for(const source of ['twitch','youtube'])await app.db.call('followingSnapshot',source,'owner',[{id:'subscriber',name:`${source} subscriber`,followedAtMs:at+60000}],true,at+120000);
+  await app.db.call('endSession',id,at+180000);
+  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  for(const source of ['twitch','youtube']){
+   await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`[data-session-id="${id}"] .stream-open`).click();
+   const panel=page.getByRole('region',{name:'Подписчики за стрим'});await panel.getByRole('button',{name:`${source} subscriber`,exact:true}).click();await page.getByRole('heading',{name:`${source} subscriber`,exact:true}).waitFor();
+   assert.ok(new URL(page.url()).searchParams.get('person'));assert.equal(new URL(page.url()).origin,app.origin);await page.locator('.account-summary').getByText('Подписан',{exact:true}).waitFor();
+  }
+  assert.deepEqual(errors,[]);await saveCoverage(page);
+ }finally{await browser?.close();await app.close();}
+});
