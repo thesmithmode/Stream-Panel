@@ -22,6 +22,12 @@ export class CloudBackup {
  private async call(path:string,method='GET',body?:BodyInit,type='application/json',missing=false,conflict=false){
   const response=await this.request(`${this.base}/storage/v1/${path}`,{method,redirect:'error',headers:{Authorization:`Bearer ${this.secret}`,apikey:this.secret,'Content-Type':type},...(body===undefined?{}:{body}),signal:AbortSignal.timeout(60000)});
   if(missing&&response.status===404)return null;
+  // Legacy Storage endpoints can report a missing object with HTTP 400.
+  // Only an explicit missing-object code permits trying the chunk manifest.
+  if(missing&&response.status===400){
+   const problem=JSON.parse((await this.bytes(response,16*1024)).toString());
+   if(problem?.code==='NoSuchKey'||problem?.code==='not_found'||problem?.error==='not_found')return null;
+  }
   if(conflict&&response.status===409)return response;
   if(!response.ok)throw new Error('BACKUP_UPLOAD_FAILED');return response;
  }
