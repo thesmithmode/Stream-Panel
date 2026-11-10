@@ -610,14 +610,14 @@ export class AnalyticsHistory {
                     negative.add(row.person_id);
         }
         const summary={entities:people.size,attendees:0,regulars:0,regularShare:null as number|null,core:0,streams:selectedStreams,chatters:0,messages:0};
-        const composition={core:0,followers:0,nonFollowers:0,unknown:0,twitch:0,youtube:0,both:0};
+        const composition:{bots?:number;core:number;followers:number;nonFollowers:number;unknown:number;twitch:number;youtube:number;both:number}={core:0,followers:0,nonFollowers:0,unknown:0,twitch:0,youtube:0,both:0};
         for (const person of people.values()) {
             person.follower = followers.has(person.id) ? true : negative.has(person.id) && !person.sources.includes('youtube') ? false : null;
             person.tags = (this.statement(`WITH RECURSIVE owners(id) AS(SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT t.label FROM person_tags t JOIN owners o ON o.id=t.person_id ORDER BY t.label`).all(person.id) as {
                 label: string;
             }[]).map(t => t.label);
             people.set(person.id,person);summary.core+=Number(person.core);summary.chatters+=Number(person.messages>0);summary.messages+=person.messages;
-            if(person.attendanceSessionIds.length){summary.attendees++;composition.core+=Number(person.core);composition.followers+=Number(!person.core&&person.follower===true);composition.nonFollowers+=Number(!person.core&&person.follower===false);composition.unknown+=Number(!person.core&&person.follower===null);composition.twitch+=Number(person.sources.includes('twitch'));composition.youtube+=Number(person.sources.includes('youtube'));composition.both+=Number(person.sources.length>1);}
+            if(person.attendanceSessionIds.length){summary.attendees++;if(person.is_bot)composition.bots=(composition.bots??0)+1;composition.core+=Number(!person.is_bot&&person.core);composition.followers+=Number(!person.is_bot&&!person.core&&person.follower===true);composition.nonFollowers+=Number(!person.is_bot&&!person.core&&person.follower===false);composition.unknown+=Number(!person.is_bot&&!person.core&&person.follower===null);composition.twitch+=Number(person.sources.includes('twitch'));composition.youtube+=Number(person.sources.includes('youtube'));composition.both+=Number(person.sources.length>1);}
             if(performance.now()-sliceStart>250){yield {preparing:true as const,ready:processed,total:total*2};sliceStart=performance.now();}
         }
         summary.regulars=summary.core;summary.regularShare=summary.entities?summary.core/summary.entities:null;

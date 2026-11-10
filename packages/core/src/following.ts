@@ -59,7 +59,10 @@ function streamUnfollowers(db:Database.Database,start:number,end:number,windows:
   WHERE p.source='twitch' AND p.key='followers' AND json_extract(p.payload_json,'$.complete')=1
  ), ranked AS(SELECT *,row_number() OVER(PARTITION BY account_id ORDER BY at DESC,id DESC) position FROM versions)
  SELECT account_id,payload_json,at FROM ranked WHERE position=1`).all(start) as {account_id:string;payload_json:string;at:number}[];
- const checks=db.prepare("SELECT account_id,payload_json,observed_at_ms at FROM follower_observations WHERE source='twitch' AND key='followers' AND observed_at_ms>=? AND observed_at_ms<=? ORDER BY observed_at_ms,id").all(start,end) as {account_id:string;payload_json:string;at:number}[];
+ const checks=db.prepare(`WITH checks AS(
+ SELECT p.account_id,c.snapshot_id,c.observed_at_ms at,c.id,lag(c.snapshot_id) OVER(PARTITION BY p.account_id ORDER BY c.observed_at_ms,c.id) prior
+ FROM follower_checks c JOIN provider_snapshots p ON p.id=c.snapshot_id WHERE p.source='twitch' AND p.key='followers' AND c.observed_at_ms>=? AND c.observed_at_ms<=?)
+ SELECT c.account_id,p.payload_json,c.at FROM checks c JOIN provider_snapshots p ON p.id=c.snapshot_id WHERE c.prior IS NOT c.snapshot_id ORDER BY c.at,c.id`).all(start,end) as {account_id:string;payload_json:string;at:number}[];
  const known=new Map<string,Map<string,Follower>>(),payloads=new Map<string,Snapshot>(),changes:{source:string;account:string;externalId:string;name:string;at:number;personId:string|null}[]=[];
  for(const check of [...baseline,...checks]){
   let data=payloads.get(check.payload_json);if(!data){data=JSON.parse(check.payload_json) as Snapshot;payloads.set(check.payload_json,data);}
@@ -71,13 +74,17 @@ function streamUnfollowers(db:Database.Database,start:number,end:number,windows:
 }
 export function followingAnalytics(db:Database.Database,id:string,range?:{fromMs:number;toMs:number}){
  const stream=range?{start:range.fromMs,end:range.toMs}:db.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=?').get(id) as {start:number;end:number|null};const end=stream.end??Date.now(),windows=range?[{from:stream.start,to:end}]:sessionWindows(db,id,stream.start,end);
- const polls=db.prepare(streamFollowerObservationsSql).all(stream.start,end) as (Poll&{source:string;account:string})[];
+ const compact=streamFollowerObservationsSql.replace('AS at,payload_json','AS at,(SELECT snapshot_id FROM follower_checks WHERE id=p.id) AS snapshotId');
+ const checks=db.prepare(compact).all(stream.start,end) as {at:number;source:string;account:string;snapshotId:string}[];
+ const payloads=new Map((db.prepare('SELECT id,payload_json FROM provider_snapshots WHERE id IN(SELECT value FROM json_each(?))').all(JSON.stringify([...new Set(checks.map(c=>c.snapshotId))])) as {id:string;payload_json:string}[]).map(p=>[p.id,p.payload_json]));
+ const parsed=new Map<string,Snapshot>();const snapshot=(payload:string)=>{let value=parsed.get(payload);if(!value){value=JSON.parse(payload) as Snapshot;parsed.set(payload,value);}return value;};
+ const polls=checks.map(c=>({...c,payload_json:payloads.get(c.snapshotId)!}));
  const signups=new Map<string,{source:string;account:string;externalId:string;name:string;at:number;personId:string|null}>();
  const add=(source:string,account:string,f:Follower)=>{
   if(f.followedAtMs===null||!windows.some(w=>f.followedAtMs!>=w.from&&f.followedAtMs!<=w.to))return;
   signups.set(`${source}:${account}:${f.id}:${Math.floor(f.followedAtMs/1000)}`,{source,account,externalId:f.id,name:f.name,at:f.followedAtMs,personId:null});
  };
- for(const p of polls)for(const f of (JSON.parse(p.payload_json) as Snapshot).followers)add(p.source,p.account,f);
+ for(const p of polls)for(const f of snapshot(p.payload_json).followers)add(p.source,p.account,f);
  const events=db.prepare("SELECT e.source,e.account_id AS account,i.external_id AS id,i.display_name AS name,e.occurred_at_ms AS at FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE e.type='follow' AND e.occurred_at_ms BETWEEN ? AND ?").all(stream.start,end) as {source:string;account:string;id:string;name:string;at:number}[];
  for(const e of events)add(e.source,e.account,{id:e.id,name:e.name,followedAtMs:e.at});
  // Resolve all identities in one indexed join, even when many snapshots repeat a follower.
@@ -89,7 +96,7 @@ export function followingAnalytics(db:Database.Database,id:string,range?:{fromMs
  const people=new Map(linked.map(i=>[JSON.stringify([i.source,i.account,i.externalId]),i]));
  for(const f of [...signups.values(),...unfollowers]){const person=people.get(JSON.stringify([f.source,f.account,f.externalId]));f.personId=person?.personId??null;if(person?.personName)f.name=person.personName;}
  const newFollowers=[...signups.values()].sort((a,b)=>b.at-a.at||Number(b.personId!==null)-Number(a.personId!==null)||a.externalId.localeCompare(b.externalId));
- const observations=polls.filter(p=>p.at>=stream.start&&p.at<=end).map(p=>{const data=JSON.parse(p.payload_json) as Snapshot;return {at:p.at,source:p.source,account:p.account,total:p.source==='youtube'?data.total:data.total??(data.complete?data.followers.length:null),visibleCount:data.followers.length,complete:data.complete};});
+ const observations=polls.filter(p=>p.at>=stream.start&&p.at<=end).map(p=>{const data=snapshot(p.payload_json);return {at:p.at,source:p.source,account:p.account,total:p.source==='youtube'?data.total:data.total??(data.complete?data.followers.length:null),visibleCount:data.followers.length,complete:data.complete};});
  const accounts=new Map<string,{source:string;account:string}>();
  for(const p of polls)accounts.set(`${p.source}:${p.account}`,p);
  for(const f of newFollowers)accounts.set(`${f.source}:${f.account}`,f);

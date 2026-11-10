@@ -30,6 +30,7 @@ test('stream subscriptions show platform totals, exact follow dates and independ
   assert.equal(await card.locator('.follow-status').first().textContent(),'Не подписан');
   assert.equal(await page.getByRole('region',{name:'Подписки на канал',exact:true}).count(),0,'no duplicate framed subscription panel');
   await card.locator('.follow-history summary').first().click();assert.equal(await card.locator('.follow-history li').count(),3);
+  await page.locator('.person-detail').screenshot({path:'/tmp/sp-follow-compact.png'});
   const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(evidence){await mkdir(evidence,{recursive:true});await page.screenshot({path:join(evidence,'following-mobile.png'),fullPage:true});}
   const selectPerson=async name=>{await page.getByRole('button',{name:'К списку людей',exact:true}).click();await page.getByRole('button',{name,exact:true}).click();await page.getByRole('heading',{name,exact:true}).waitFor();};
   await selectPerson('Silent');await card.getByText('Не подписан',{exact:true}).waitFor();await wideLast('.person-detail .kpi-strip > .kpi');
@@ -39,7 +40,7 @@ test('stream subscriptions show platform totals, exact follow dates and independ
   await page.getByLabel('Период аналитики').selectOption('all');
   const none=await app.db.call('createPerson','No linked account');await navigate(page,'Обзор');await page.getByRole('button',{name:'Люди',exact:true}).click();await page.getByRole('button',{name:'No linked account',exact:true}).click();await page.getByRole('heading',{name:'No linked account',exact:true}).waitFor();assert.equal(await card.locator('.follow-status').count(),0);
   await app.db.call('ingest',{source:'twitch',accountId:'no-follow-access',externalId:'no-follow-data',type:'chat.message',actor:{externalId:'no-follow-viewer',displayName:'Unverified subscriber'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
-  await selectPerson('Unverified subscriber');assert.equal(await card.locator('.follow-status').count(),0);assert.equal(await card.getByText('Неизвестно',{exact:true}).count(),0);
+  await navigate(page,'Обзор');await navigate(page,'Люди');await page.getByRole('button',{name:'Unverified subscriber',exact:true}).click();await page.getByRole('heading',{name:'Unverified subscriber',exact:true}).waitFor();assert.equal(await card.locator('.follow-status').count(),0);assert.equal(await card.getByText('Неизвестно',{exact:true}).count(),0);
   await page.route('**/api/v1/persons/*/following?*',route=>route.fulfill({status:400,json:{error:'FOLLOW_CHECK_UNAVAILABLE'}}));await selectPerson('Silent');assert.equal(await card.getByText('FOLLOW_CHECK_UNAVAILABLE',{exact:true}).count(),0);
   assert.ok(new URL(page.url()).searchParams.get('person')!==none.id);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}

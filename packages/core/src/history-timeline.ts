@@ -20,7 +20,7 @@ export class HistoryTimeline {
     private dates = new Map<string, number>();
     private formatter: Intl.DateTimeFormat;
     constructor(private timezone: string, private people: Pick<ReadonlyMap<string, {
-        core: boolean;
+        is_bot?:number;core: boolean;
         follower: boolean | null;
     }>,'get'>) { this.formatter = dateTimeFormatter('sv-SE', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }); }
     private day(at: number) { const label = this.formatter.format(at); let start = this.dates.get(label); if (start === undefined) {
@@ -103,7 +103,7 @@ export class HistoryTimeline {
     }
     values(): Report['timeline'] {
         const roles=new Map<number,number[]>();
-        for(const [id,cells] of this.personDays){const person=this.people.get(id),offset=person?.core?0:person?.follower?6:-1;if(offset<0)continue;
+        for(const [id,cells] of this.personDays){const person=this.people.get(id),offset=person?.core?0:person?.follower?6:-1;if(offset<0||person?.is_bot)continue;
             for(const [at,values] of cells){const row=roles.get(at)??Array<number>(12).fill(0);roles.set(at,row);values.forEach((n,i)=>row[offset+i]!+=n);}
         }
         return [...this.rows.values()].sort((a, b) => a.at - b.at).map(row => {

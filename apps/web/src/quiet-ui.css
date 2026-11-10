@@ -198,7 +198,7 @@ button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,s
  .dynamics-grid>.panel{display:grid;grid-template-rows:subgrid;grid-row:1/span 5;align-content:start}
  .dynamics-grid>.panel>header{grid-row:1}
  .dynamics-grid .daily-chart-toolbar,.dynamics-grid .subscriber-totals{grid-row:2;align-self:center}
- .dynamics-grid .growth-range,.dynamics-grid .subscriber-range{grid-row:3}
+ .dynamics-grid .growth-navigation,.dynamics-grid .subscriber-range{grid-row:3}
  .dynamics-grid .growth-plot,.dynamics-grid .subscriber-plot{grid-row:4}
  .dynamics-grid .growth-selection,.dynamics-grid .subscriber-details{grid-row:5}
  .dynamics-grid .growth-caption{grid-row:3/span 3;align-self:start}

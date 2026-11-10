@@ -20,7 +20,7 @@
  const maximum=$derived(Math.max(1,...rows.map(row=>value(row.cell)??0)));
  const units=$derived(metric==='amount'?`${available}${calculation==='average'?'/ч':''}`:calculation==='average'?['messages','donations'].includes(metric)?'в час эфира':'в среднем':metric==='viewers'?'зритель·мин':['observed','estimated'].includes(metric)?'человек·мин':'всего');
  const format=(n:number|null)=>n===null?'Нет данных':metric==='amount'?money(String(Math.round(n)),available):n.toLocaleString('ru-RU',{maximumFractionDigits:1});
- const groups=$derived([{label:'Ядро',count:data.composition.core,color:'#e4c568'},{label:'Подписчики вне ядра',count:data.composition.followers,color:'#9b86dc'},{label:'Не подписаны',count:data.composition.nonFollowers,color:'#5fc4aa'},{label:'Статус неизвестен',count:data.composition.unknown,color:'#666f80'}]);
+ const groups=$derived([...(data.composition.bots?[{label:'Боты',count:data.composition.bots,color:'#69bce9'}]:[]),{label:'Ядро',count:data.composition.core,color:'#e4c568'},{label:'Подписчики вне ядра',count:data.composition.followers,color:'#9b86dc'},{label:'Не подписаны',count:data.composition.nonFollowers,color:'#5fc4aa'},{label:'Статус неизвестен',count:data.composition.unknown,color:'#666f80'}]);
  const total=$derived(groups.reduce((n,g)=>n+g.count,0));
 
 </script>

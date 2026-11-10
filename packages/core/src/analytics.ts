@@ -59,6 +59,7 @@ type Span = {
     kind: 'observed' | 'chat_proxy';
 };
 type Entity = {
+    is_bot?:number;
     id: string;
     name: string;
     source: 'twitch' | 'youtube';
@@ -134,7 +135,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     }[];
     const entities = new Map<string, Entity>();
     const entity = (id: string, name: string, platform: 'twitch' | 'youtube') => { let e = entities.get(id); if (!e) {
-        e = { id, name, source: platform, sources:[platform], messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, sessionIds: new Set(), attendanceSessionIds: new Set(), coreSessionIds: [], regular: false, intervals: [], donations: {}, core: false, tags:[], manualCore:null, follower:null,arrivalHours:[] };
+        e = { is_bot:Number(botPeople.has(id)),id, name, source: platform, sources:[platform], messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, sessionIds: new Set(), attendanceSessionIds: new Set(), coreSessionIds: [], regular: false, intervals: [], donations: {}, core: false, tags:[], manualCore:null, follower:null,arrivalHours:[] };
         entities.set(id, e);
     } else if(!e.sources.includes(platform)) e.sources.push(platform); return e; };
     const allowed = new Map(people.map(p => [p.id, p.display_name]));
@@ -540,7 +541,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     const audience = [...entities.values()].filter(e => e.sessionIds.size || e.messages).sort((a, b) => Number(b.core) - Number(a.core) || b.observedMinutes - a.observedMinutes || b.messages - a.messages).map(e => ({ ...e,...coreSessions(e.coreSessionIds,e.coreSessionIds.length),messageCounts:messageCounts.get(e.id)??[],messageMinutes:messageMinutesByPerson.get(e.id)??[], accounts:(accountsByPerson.get(e.id)??[]).filter(account=>e.sources.includes(account.source as 'twitch'|'youtube')), sessionIds: [...e.sessionIds], attendanceSessionIds: [...e.attendanceSessionIds], attendanceRatio: selectedStreamCount?e.attendanceSessionIds.size/selectedStreamCount:0, visits: e.intervals.length, observedMinutesPerSession: e.attendanceSessionIds.size ? e.observedMinutes/e.attendanceSessionIds.size : 0, sessionRatio: e.sessionIds.size/selectedStreamCount, observedMinutes: Math.round(e.observedMinutes * 10) / 10, estimatedChatMinutes: Math.round(e.estimatedChatMinutes * 10) / 10 }));
     const attendees=audience.filter(e=>e.attendanceSessionIds.length>0),regulars=audience.filter(e=>e.core).length;
     const patterns=timePatterns([...hourly.values()]);
-    const composition={core:attendees.filter(e=>e.core).length,followers:attendees.filter(e=>!e.core&&e.follower===true).length,nonFollowers:attendees.filter(e=>!e.core&&e.follower===false).length,unknown:attendees.filter(e=>!e.core&&e.follower===null).length,twitch:attendees.filter(e=>e.sources.includes('twitch')).length,youtube:attendees.filter(e=>e.sources.includes('youtube')).length,both:attendees.filter(e=>e.sources.length>1).length};
+    const composition={...(attendees.some(e=>e.is_bot)?{bots:attendees.filter(e=>e.is_bot).length}:{}),core:attendees.filter(e=>!e.is_bot&&e.core).length,followers:attendees.filter(e=>!e.is_bot&&!e.core&&e.follower===true).length,nonFollowers:attendees.filter(e=>!e.is_bot&&!e.core&&e.follower===false).length,unknown:attendees.filter(e=>!e.is_bot&&!e.core&&e.follower===null).length,twitch:attendees.filter(e=>e.sources.includes('twitch')).length,youtube:attendees.filter(e=>e.sources.includes('youtube')).length,both:attendees.filter(e=>e.sources.length>1).length};
     const seen = new Set<string>();
     const streamComparison = sessions.filter(s => selectedBySession.has(s.id)).map(s => {
         const visitors = audience.filter(e => e.attendanceSessionIds.includes(s.id)), newInPeriod = visitors.filter(e => !seen.has(e.id)).length;

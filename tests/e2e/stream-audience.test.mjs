@@ -143,12 +143,12 @@ test('participant request failures show an error rather than an empty ranking an
   const base=Date.now()-600000,id=await app.db.call('startSession','failure','failure',base,'platform',base);
   await app.db.call('endSession',id,base+60000);
   browser=await launchBrowser();const page=await browser.newPage();
-  await page.route('**/api/v1/sessions/*/metadata',route=>route.abort());
+  await page.route('**/api/v1/analytics?*',route=>route.abort());
   await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();
   await page.locator(`[data-session-id="${id}"] .stream-open`).click();await page.getByRole('tab',{name:'Участники',exact:true}).click();
   await page.getByRole('alert').filter({hasText:'Не удалось загрузить участников'}).waitFor();
   assert.equal(await page.getByRole('region',{name:'Рейтинг участников'}).count(),0);
-  await page.unroute('**/api/v1/sessions/*/metadata');await page.reload();
+  await page.unroute('**/api/v1/analytics?*');await page.reload();
   await page.getByRole('tab',{name:'Участники',exact:true}).click();await page.getByRole('region',{name:'Рейтинг участников'}).waitFor();
   assert.equal(await page.getByRole('alert').count(),0);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
