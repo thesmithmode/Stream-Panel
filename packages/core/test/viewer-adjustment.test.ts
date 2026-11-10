@@ -4,7 +4,6 @@ import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {StreamStore} from '../src/store.js';
-import {CURRENT_SCHEMA_VERSION} from '../src/schema.js';
 
 test('viewer correction covers historical and future samples once, preserving YouTube, raw facts, zero and unknown',()=>{
  const dir=mkdtempSync(join(tmpdir(),'sp-viewer-adjustment-')),path=join(dir,'db');let s=new StreamStore(path,'ruslan');
@@ -12,7 +11,7 @@ test('viewer correction covers historical and future samples once, preserving Yo
   const at=Date.now()-3600000,id=s.startSession('owner','history',at,'platform',at);
   const db=(s as any).db;
   // Restore the preceding read projection and schema to exercise a real upgrade.
-  db.exec(`DROP VIEW logical_stream_samples; CREATE VIEW logical_stream_samples AS SELECT * FROM stream_samples; PRAGMA user_version=${CURRENT_SCHEMA_VERSION-1};`);
+  db.exec(`DROP VIEW logical_stream_samples; CREATE VIEW logical_stream_samples AS SELECT * FROM stream_samples; PRAGMA user_version=${32};`);
   s.streamSample(id,at,'','','',1);s.streamSample(id,at+60000,'','','',0);s.streamSample(id,at+120000,'','','',null);s.youtubeViewers(at+120000,1);
   s.endSession(id,at+180000);s.channelOverview();s.close();s=new StreamStore(path,'ruslan');
   assert.equal(s.sessions()[0]!.viewerKnownPeak,0);assert.equal(s.channelOverview().records.peakOnline?.value,0);

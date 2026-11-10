@@ -1,8 +1,8 @@
 <script lang="ts">
  import {untrack,tick} from 'svelte';
- import {api} from './api';
+ import {api,getProfile} from './api';
  import type {ClassificationState as State} from './classification';
- let {personId,revision,onChange,state:providedState,compact=false,personName=''}:{personId:string;revision:number;onChange:()=>Promise<void>;state?:State|null;compact?:boolean;personName?:string}=$props();
+ let {personId,revision,onChange,state:providedState,compact=false,personName='',onState}:{personId:string;revision:number;onChange:()=>Promise<void>;state?:State|null;compact?:boolean;personName?:string;onState?:(state:State)=>void}=$props();
  type Kind='bot'|'unknown'|'human';
  const choices:Kind[]=['bot','unknown','human'];
  const labels={bot:'Бот',unknown:'Неизвестно',human:'Человек'};
@@ -12,20 +12,37 @@
  const lockReason='Статус «Человек» закреплён связанными аккаунтами или донатами. Изменение недоступно.';
  const selected=$derived<Kind>(pendingKind??(metadata?.automaticHuman||metadata?.manualHuman?'human':metadata?.manualBot||metadata?.knownBot?'bot':'unknown'));
  $effect(()=>{
-  if(providedState!==undefined){metadata=providedState;loadedId=providedState?personId:'';return;}
+  if(providedState!==undefined){if(personId!==loadedId||!metadata||providedState&&providedState.revision>metadata.revision){metadata=providedState;loadedId=providedState?personId:'';}return;}
   const id=personId,currentRevision=revision,current=untrack(()=>({id:loadedId,revision:metadata?.revision}));
   if(id===current.id&&currentRevision===current.revision)return;
   if(id!==current.id)metadata=null;error='';const controller=new AbortController();
   void api<State>(`persons/${id}/bot`,undefined,controller.signal).then(value=>{if(!controller.signal.aborted){loadedId=id;metadata=value;}}).catch(e=>{if(!controller.signal.aborted)error=e.message;});
   return()=>controller.abort();
  });
- function disabled(kind:Kind){return busy||!metadata||metadata.automaticHuman||(kind==='bot'&&!metadata.canMarkBot);}
+ function disabled(kind:Kind){return !metadata||metadata.automaticHuman||(kind==='bot'&&!metadata.canMarkBot);}
+ function optimistic(kind:Kind,current:State):State{return {...current,pending:true,manualBot:kind==='bot',knownBot:false,manualHuman:kind==='human'};}
  async function select(kind:Kind){
   if(disabled(kind)||kind===selected)return;
-  const id=personId,current=metadata!,restoreFocus=root?.contains(document.activeElement);busy=true;pendingKind=kind;error='';
-  try{const result=await api<State>(`persons/${id}/classification`,{kind,revision:current.revision});if(personId===id){loadedId=id;metadata=result;pendingKind=null;busy=false;void onChange().catch(e=>{if(personId===id)error=(e as Error).message;});}}
-  catch(e){if(personId===id)error=(e as Error).message==='REVISION_CONFLICT'?'Карточка изменилась. Откройте её заново и повторите отметку.':(e as Error).message;}
-  finally{pendingKind=null;busy=false;await tick();if(personId===id&&restoreFocus)root?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();}
+  pendingKind=kind;error='';onState?.(optimistic(kind,metadata!));
+  if(busy)return;
+  const id=personId,profile=getProfile(),restoreFocus=root?.contains(document.activeElement);busy=true;
+  try{
+   while(pendingKind!==null&&personId===id){
+    const desired:Kind=pendingKind;
+    const result=await api<State>(`persons/${id}/classification`,{kind:desired,revision:metadata!.revision},undefined,profile);
+    if(personId!==id||getProfile()!==profile)return;
+    metadata=result;loadedId=id;
+    if(pendingKind===desired){pendingKind=null;onState?.(result);}
+   }
+   void onChange().catch(e=>{if(personId===id)error=(e as Error).message;});
+  }catch(e){
+   if(personId===id&&getProfile()===profile){
+    pendingKind=null;error=(e as Error).message;
+    // A timeout can follow a committed write: reconcile with the canonical state.
+    try{metadata=await api<State>(`persons/${id}/bot`,undefined,undefined,profile);}catch{/* Keep the last confirmed state and show the save failure. */}
+    if(personId===id&&metadata)onState?.(metadata);
+   }
+  }finally{busy=false;await tick();if(personId===id&&restoreFocus)root?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();}
  }
  function keyboard(event:KeyboardEvent){
   if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;

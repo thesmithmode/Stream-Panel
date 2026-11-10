@@ -32,7 +32,7 @@ export function registerPeopleRoutes(app: FastifyInstance, db: Store, configurat
     app.get('/api/v1/persons/options',request=>{const q=object(request.query);return db.call('personOptions',string(q.search),Number(q.offset??0),Number(q.limit??50),string(q.includeBots)==='1',string(q.selected),configuration.value.excludedBotLogins,string(q.exclude));});
     app.get('/api/v1/persons/page', request => {
         const q = object(request.query);
-        return db.call('personsPage', string(q.search), configuration.value.excludedBotLogins, peopleFrom(q), Number(q.offset ?? 0), Number(q.limit ?? 50),string(q.bots)||"humans");
+        return db.call('personsPage', string(q.search), configuration.value.excludedBotLogins, peopleFrom(q), Number(q.offset ?? 0), Number(q.limit ?? 50),string(q.bots)||(botsFor(q)===false?"all":"humans"));
     });
     app.get("/api/v1/persons", async (request) => db.call("persons", string(object(request.query).search), botsFor(request.query), peopleFrom(request.query)));
     app.get("/api/v1/persons/tops", async (request) => {

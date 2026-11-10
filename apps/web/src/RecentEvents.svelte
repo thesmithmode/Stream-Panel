@@ -26,7 +26,7 @@
  });
 </script>
 <div class="recent-events" aria-busy={busy}>
- <p class="small muted">48 часов · МСК · новые сверху</p>
+ <p class="small muted">7 дней · МСК · новые сверху</p>
  {#if error}<p role="alert">{error}</p>{/if}
  {#if busy&&!loaded}<p role="status">Загружаем…</p>{:else}
   {#each rows as row,index (row.id)}
@@ -34,7 +34,7 @@
    <article class:bot-person={row.is_bot} class:human-person={row.is_human}><time datetime={new Date(row.at_ms).toISOString()} title={date(row.at_ms)}>{clock.format(row.at_ms)}</time>{' '}{#if row.person_id}<a class="event-author" class:twitch={row.source==='twitch'} class:youtube={row.source==='youtube'} class:youtube-secondary={row.youtubeSecondary} title={`${row.actor_name??'Без автора'} · ${sourceName(row.source)}`} aria-label={`${row.actor_name??'Без автора'} · ${sourceName(row.source)}`} href={routeUrl({view:'people',session:'',person:row.person_id,profile:getProfile()})} onclick={event=>{if(event.button===0&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey&&!event.altKey){event.preventDefault();onPerson(row.person_id!);}}}>{row.person_name??row.actor_name??'Без автора'}:</a>{:else}<strong class="event-author" class:twitch={row.source==='twitch'} class:youtube={row.source==='youtube'} class:youtube-secondary={row.youtubeSecondary} title={`${row.actor_name??'Без автора'} · ${sourceName(row.source)}`} aria-label={`${row.actor_name??'Без автора'} · ${sourceName(row.source)}`}>{row.person_name??row.actor_name??'Без автора'}:</strong>{/if}{' '}<span class="event-text">{#if row.payload.redacted}Сообщение удалено модерацией.{:else if typeof row.payload.text==='string'&&row.payload.text}{#if isAudioDonation(row.payload)}<AudioDonation text={row.payload.text}/>{:else}{row.payload.text}{/if}{:else}{labels[row.type]??'Событие'}{/if}</span>
     {#if typeof row.payload.amountMinor==='string'&&/^-?\d+$/.test(row.payload.amountMinor)&&typeof row.payload.currency==='string'}{' '}<strong class="event-amount">{donationMoney({amountMinor:row.payload.amountMinor,currency:row.payload.currency,rubAmountMinor:typeof row.payload.rubAmountMinor==='string'?row.payload.rubAmountMinor:null,exchangeRateDate:typeof row.payload.exchangeRateDate==='string'?row.payload.exchangeRateDate:null})}</strong>{/if}
    </article>
-  {:else}{#if loaded}<p class="muted">{messagesOnly?'Нет сохранённых сообщений за последние 48 часов.':'Нет сохранённых событий этого стрима за последние 48 часов.'}</p>{/if}{/each}
+  {:else}{#if loaded}<p class="muted">{messagesOnly?'Нет сохранённых сообщений за последние 7 дней.':'Нет сохранённых событий этого стрима за последние 7 дней.'}</p>{/if}{/each}
  {/if}
  <div class="actions"><button class="outline small" disabled={busy||offset===0} onclick={()=>offset=Math.max(0,offset-limit)}>Назад</button><span class="small">Страница {offset/limit+1}</span><button class="outline small" disabled={busy||rows.length<limit} onclick={()=>offset+=limit}>Далее</button><button class="outline small" disabled={busy} onclick={()=>refresh++}>Обновить</button></div>
 </div>

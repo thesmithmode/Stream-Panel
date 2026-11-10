@@ -1,3 +1,4 @@
+import {botExclusionSet} from './bots.js';
 import {personBotSchema} from './person-bots.js';
 import {viewerAdjustmentSchema} from './viewer-adjustment.js';
 import {donationFxSchema} from './donation-fx.js';
@@ -601,7 +602,21 @@ DELETE FROM donation_audit WHERE kind='assignment';
 DELETE FROM membership_operations WHERE kind='donation_assignment';
 PRAGMA user_version=30;
 `;
-export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24,schemaV25,changeRevisionSchema,analyticsRevisionSchema,overviewRevisionSchema,sharedIdentitySchema,schemaV30,donationFxSchema,personBotSchema,viewerAdjustmentSchema] as const;
+// Service chatbots do not establish humanity simply by having a YouTube account.
+const botAnalyticsSchema=`
+DROP VIEW automatic_human_people;
+CREATE VIEW automatic_human_people AS SELECT person_id FROM youtube_identities WHERE match_key NOT IN('streamelements','streemelements') UNION SELECT person_id FROM identities WHERE source='donationalerts' UNION SELECT person_id FROM donor_people UNION SELECT person_id FROM donor_bindings;
+DELETE FROM analytics_reports;
+WITH bots AS(SELECT person_id FROM manual_bot_people UNION SELECT person_id FROM identities WHERE match_key IN(SELECT value FROM json_each('${JSON.stringify([...botExclusionSet()])}')) UNION SELECT person_id FROM youtube_identities WHERE match_key IN('streamelements','streemelements'))
+UPDATE analytics_fact_versions SET activity=activity+1 WHERE session_id IN(
+ SELECT es.session_id FROM event_sessions es JOIN events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE i.person_id IN(SELECT person_id FROM bots)
+ UNION SELECT p.session_id FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id WHERE i.person_id IN(SELECT person_id FROM bots)
+ UNION SELECT p.session_id FROM platform_streams p JOIN youtube_messages m ON m.account_id=p.account_id AND m.published_at_ms>=p.started_at_ms AND m.published_at_ms<coalesce(p.ended_at_ms,9223372036854775807) JOIN youtube_identities i ON i.account_id=m.account_id AND i.external_id=m.author_id WHERE p.platform='youtube' AND i.person_id IN(SELECT person_id FROM bots));
+UPDATE analytics_global_revision SET revision=revision+1;
+UPDATE ui_revisions SET revision=revision+1;
+PRAGMA user_version=34;
+`;
+export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24,schemaV25,changeRevisionSchema,analyticsRevisionSchema,overviewRevisionSchema,sharedIdentitySchema,schemaV30,donationFxSchema,personBotSchema,viewerAdjustmentSchema,botAnalyticsSchema] as const;
 export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;
 
 

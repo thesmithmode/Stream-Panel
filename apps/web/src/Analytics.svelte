@@ -11,6 +11,7 @@
   import Help from "./Help.svelte";
   import Sheet from "./Sheet.svelte";
   import Icon from "./Icon.svelte";
+  import Following from "./Following.svelte";
   import SubscriberGrowth from "./SubscriberGrowth.svelte";
   import AudienceGrowth from "./AudienceGrowth.svelte";
   import {num,pct} from './format';
@@ -176,10 +177,11 @@
   </div>
   {/if}
   {#if section==='audience'}{#if data.composition}<TimePatterns {data} section="audience"/>{/if}
+  <Following fromMs={data.filters?.fromMs??0} toMs={data.filters?.toMs??Date.now()} {onPerson}/>
   {#if view.audience}<section class="panel returning-audience"><header><h2>Возвращаемость участников</h2><Help id="analytics-audience" label="О минутах в чате" text="Наблюдаемые минуты Twitch учитывают молчавших участников и исключают неизвестные промежутки. Оценка YouTube показана отдельно. Выберите сортировку по минутам или сообщениям; нажмите имя для подробностей."/><span>{data.audiencePage?(pagedAudience?.audiencePage?.total??data.audiencePage.total):visible.length} участников</span></header>
     <p class="small regular-summary">Ядро аудитории: <strong>{data.composition?.core??0} из {data.summary.attendees??data.summary.entities??0} ({data.summary.attendees?pct((data.composition?.core??0)/data.summary.attendees):"нет данных"})</strong></p>
     <div class="analytics-controls"><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label>Сортировка<select aria-label="Сортировка" bind:value={view.sort}><option value="observedMinutes">Минуты в чате</option><option value="estimatedChatMinutes">Оценка активности YouTube</option><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option><option value="attendanceRatio">Доля посещённых эфиров</option></select></label><label class="check"><input type="checkbox" bind:checked={view.coreOnly} /> Только ядро</label></div>
-    <div class="table-wrap compact-audience"><table class="compact-audience-table"><thead><tr><th>Участник</th><th>Эфиры</th><th>Минуты в чате</th><th>Сообщения</th></tr></thead><tbody>{#each visible.slice(0,data.audiencePage?100:200) as e (e.id)}<tr class="audience-row" class:bot-person={e.is_bot} class:human-person={e.is_human}>
+    <div class="table-wrap compact-audience" role="region" aria-label="Таблица возвращаемости"><table class="compact-audience-table"><thead><tr><th>Участник</th><th>Эфиры</th><th>Минуты в чате</th><th>Сообщения</th></tr></thead><tbody>{#each visible.slice(0,data.audiencePage?100:200) as e (e.id)}<tr class="audience-row" class:bot-person={e.is_bot} class:human-person={e.is_human}>
       <td class="audience-name" data-label="Участник"><div><button class={`text-button ${platformClass(e.sources??[e.source])}`} disabled={busy} onclick={()=>onPerson(e.id)}>{e.name}</button>{#if e.core}<span class="core-badge">Ядро</span>{:else if e.follower}<span class="follower-badge">Подписчик</span>{/if}{#each e.tags??[] as tag}<span class="person-tag">{tag}</span>{/each}</div><small>{(e.sources??[e.source]).map((source:string)=>source==='youtube'?'YouTube':source==='donationalerts'?'DA':'Twitch').join(' · ')}</small></td>
       <td class="audience-stat" data-label="Эфиры">{e.attendanceCount??e.attendanceSessionIds?.length??0}/{data.summary?.streams??0}</td><td class="audience-stat" data-label={e.source==='youtube'?'Мин · оценка':'Мин в чате'}>{num(e.source==='youtube'?e.estimatedChatMinutes:e.observedMinutes)}</td><td class="audience-stat" data-label="Сообщения">{num(e.messages,0)}</td>
     </tr>{/each}</tbody></table></div>
@@ -197,7 +199,7 @@
 {/if}
 
 </div>
-<style>.audience-pagination{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px}.audience-pagination button{flex:0 0 auto}.audience-pagination span{font-size:12px;color:var(--muted)}.returning-audience>header>span{font-size:12px;color:var(--muted);white-space:nowrap}.regular-summary{font-size:12px;line-height:1.5}.regular-summary strong{font-size:inherit;font-weight:500}.timing-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}.timing-grid :global(.time-patterns){grid-column:1;grid-row:1}.timing-grid :global(.donation-patterns){grid-column:2;grid-row:1}.timing-grid :global(.discovery-grid){grid-column:1/-1}
+<style>.compact-audience{max-height:min(60dvh,480px);overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}.compact-audience thead{position:sticky;top:0;background:var(--bg);z-index:1}.audience-pagination{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px}.audience-pagination button{flex:0 0 auto}.audience-pagination span{font-size:12px;color:var(--muted)}.returning-audience>header>span{font-size:12px;color:var(--muted);white-space:nowrap}.regular-summary{font-size:12px;line-height:1.5}.regular-summary strong{font-size:inherit;font-weight:500}.timing-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}.timing-grid :global(.time-patterns){grid-column:1;grid-row:1}.timing-grid :global(.donation-patterns){grid-column:2;grid-row:1}.timing-grid :global(.discovery-grid){grid-column:1/-1}
 @media(min-width:1101px){
  .timing-grid{grid-template-rows:repeat(6,auto) auto;row-gap:0;align-items:stretch}
  .timing-grid :global(.time-patterns),.timing-grid :global(.donation-patterns){display:grid;grid-template-rows:subgrid;grid-row:1/span 6;row-gap:0}

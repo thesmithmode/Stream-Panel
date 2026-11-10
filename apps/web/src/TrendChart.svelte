@@ -24,6 +24,7 @@
   const detailFormatter=$derived(new Intl.DateTimeFormat('ru-RU',{timeZone:timezone,dateStyle:'short',timeStyle:'medium'}));
   const timeLabel=(at:number)=>timeFormatter.format(at);
   const split=$derived(showRegulars&&!['viewers','twitchViewers','youtubeViewers'].includes(metric));
+  const hasBots=$derived(buckets.some(p=>p.botValue>0));
   const hasUnknown=$derived(buckets.some(p=>(p.unknownValue??0)>0));
   const height=(value:number)=>value>0?Math.max(1,value/maximum*220):0;
   function title(point:typeof buckets[number]) {
@@ -32,8 +33,8 @@
     if(!point.known)return `${label} · нет данных`;
     const partial=point.partial?' · неполные замеры площадок':'';
     const regular=split&&point.value>0?` · ядро: ${num(point.regularValue)} (${num((point.regularValue/point.value*100))}%)`:'';
-    const groups=split?` · подписчики: ${num(point.followerValue)} · залётные: ${num(Math.max(0,point.value-point.regularValue-point.followerValue-(point.unknownValue??0)))}${hasUnknown?` · статус неизвестен: ${num((point.unknownValue??0))}`:''}`:'';
-    return `${label} · всего: ${num(point.value)}${regular}${groups}${partial}`;
+    const groups=split?` · подписчики: ${num(point.followerValue)} · залётные: ${num(Math.max(0,point.value-point.botValue-point.regularValue-point.followerValue-(point.unknownValue??0)))}${hasUnknown?` · статус неизвестен: ${num((point.unknownValue??0))}`:''}`:'';
+    return `${label} · всего: ${num(point.value)}${point.botValue?` · боты: ${num(point.botValue)}`:''}${regular}${groups}${partial}`;
   }
   const titles=$derived(new Map(buckets.map(point=>[point.at,title(point)])));
   const highlighted=$derived(buckets.find(point=>point.at===(focusedAt??selectedAt)));
@@ -42,6 +43,7 @@
   {#if !buckets.length}<p class="muted">Пока нет точек для графика</p>{:else}
     {#if split}<div class="legend chart-legend"><span><i class="regular-swatch"></i>Ядро аудитории</span><span><i class="follower-swatch"></i>Подписчики</span><span><i class="other-swatch"></i>{isMessageMetric(metric)?'Залётные':'Остальные участники'}</span>{#if hasUnknown}<span><i class="unknown-swatch"></i>Статус подписки неизвестен</span>{/if}</div>{/if}
 
+    {#if hasBots}<div class="legend chart-legend"><span><i class="bot-swatch"></i>Боты</span></div>{/if}
     <div class="trend-plot"><svg height="305" viewBox={`0 0 ${plotWidth} 305`} style="width:100%;display:block" role="group" aria-label="График активности по выбранному периоду">
       <defs><clipPath id={`${id}-plot`}><rect x={plotLeft} y="25" width={plotWidth-plotLeft-24} height="225"/></clipPath></defs>
       {#each axis.ticks as tick}
@@ -52,14 +54,16 @@
       <g clip-path={`url(#${id}-plot)`}>
       {#each buckets as p}
         {@const barHeight=height(p.value)}
+        {@const botHeight=p.value>0?barHeight*p.botValue/p.value:0}
         {@const regularHeight=p.value>0?barHeight*p.regularValue/p.value:0}
         {@const followerHeight=split&&p.value>0?barHeight*p.followerValue/p.value:0}
         {@const unknownHeight=split&&p.value>0?barHeight*(p.unknownValue??0)/p.value:0}
         <g class="chart-bar" role="button" tabindex="0" aria-label={titles.get(p.at)} aria-pressed={selectedAt===p.at} onfocus={()=>focusedAt=p.at} onblur={()=>focusedAt=null} onclick={()=>onselect?.(p)} onkeydown={(event)=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();onselect?.(p);}}}>
           <rect class="total-segment" x={plotLeft+(p.at-start)/(end-start)*(plotWidth-plotLeft-24)} y={p.known?250-barHeight:245} width={Math.max(.2,p.width/(end-start)*(plotWidth-plotLeft-24)*.9)} height={p.known?barHeight:5} class:unknown={!p.known} class:estimated={metric==='estimated'}><title>{titles.get(p.at)}</title></rect>
-          {#if split&&p.known&&regularHeight>0}<rect class="regular-segment" x={plotLeft+(p.at-start)/(end-start)*(plotWidth-plotLeft-24)} y={250-regularHeight} width={Math.max(.2,p.width/(end-start)*(plotWidth-plotLeft-24)*.9)} height={regularHeight}><title>{titles.get(p.at)}</title></rect>{/if}
-          {#if split&&p.known&&followerHeight>0}<rect class="follower-segment" x={plotLeft+(p.at-start)/(end-start)*(plotWidth-plotLeft-24)} y={250-regularHeight-followerHeight} width={Math.max(.2,p.width/(end-start)*(plotWidth-plotLeft-24)*.9)} height={followerHeight}><title>{titles.get(p.at)}</title></rect>{/if}
-          {#if split&&p.known&&unknownHeight>0}<rect class="unknown-segment" x={plotLeft+(p.at-start)/(end-start)*(plotWidth-plotLeft-24)} y={250-regularHeight-followerHeight-unknownHeight} width={Math.max(.2,p.width/(end-start)*(plotWidth-plotLeft-24)*.9)} height={unknownHeight}><title>{titles.get(p.at)}</title></rect>{/if}
+          {#if split&&p.known&&regularHeight>0}<rect class="regular-segment" x={plotLeft+(p.at-start)/(end-start)*(plotWidth-plotLeft-24)} y={250-botHeight-regularHeight} width={Math.max(.2,p.width/(end-start)*(plotWidth-plotLeft-24)*.9)} height={regularHeight}><title>{titles.get(p.at)}</title></rect>{/if}
+          {#if split&&p.known&&followerHeight>0}<rect class="follower-segment" x={plotLeft+(p.at-start)/(end-start)*(plotWidth-plotLeft-24)} y={250-botHeight-regularHeight-followerHeight} width={Math.max(.2,p.width/(end-start)*(plotWidth-plotLeft-24)*.9)} height={followerHeight}><title>{titles.get(p.at)}</title></rect>{/if}
+          {#if split&&p.known&&unknownHeight>0}<rect class="unknown-segment" x={plotLeft+(p.at-start)/(end-start)*(plotWidth-plotLeft-24)} y={250-botHeight-regularHeight-followerHeight-unknownHeight} width={Math.max(.2,p.width/(end-start)*(plotWidth-plotLeft-24)*.9)} height={unknownHeight}><title>{titles.get(p.at)}</title></rect>{/if}
+          {#if p.known&&botHeight>0}<rect class="bot-segment" x={plotLeft+(p.at-start)/(end-start)*(plotWidth-plotLeft-24)} y={250-botHeight} width={Math.max(.2,p.width/(end-start)*(plotWidth-plotLeft-24)*.9)} height={botHeight}><title>{titles.get(p.at)}</title></rect>{/if}
           <rect x={plotLeft+(p.at-start)/(end-start)*(plotWidth-plotLeft-24)} y="25" width={Math.max(1,p.width/(end-start)*(plotWidth-plotLeft-24))} height="225" fill="transparent" style="pointer-events:all;fill:transparent"><title>{titles.get(p.at)}</title></rect>
         </g>
       {/each}
@@ -81,6 +85,7 @@
 </div>
 
 <style>
+ .bot-segment{fill:#69bce9}.bot-swatch{background:#69bce9}
   .trend-chart{position:relative;width:100%;min-width:0;padding:16px 20px;}
   :global(.stream-page) .trend-chart{padding:4px 0 12px;}
   .trend-plot{width:100%;min-width:0;}

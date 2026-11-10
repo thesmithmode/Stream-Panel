@@ -4,9 +4,10 @@ import type { ConfigurationPort } from './config.js';
 import type { StorePort } from './store-contract.js';
 import { object, string } from './provider-values.js';
 import { analyticsSettings,analyticsBotLogins } from './analytics-settings.js';
-type Store = StorePort<'supplementaryParticipants' | 'currentChat' | 'matchingStream' | 'subscriberHistory' | 'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteSession' | 'events' | 'followingAnalytics' | 'grid' | 'sessions' | 'streamMetadata' | 'summary'>;
+type Store = StorePort<'supplementaryParticipants' | 'currentChat' | 'matchingStream' | 'subscriberHistory' | 'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteSession' | 'events' | 'followerChanges' | 'followingAnalytics' | 'grid' | 'sessions' | 'streamMetadata' | 'summary'>;
 export function registerStreamsRoutes(app: FastifyInstance, db: Store, configuration: ConfigurationPort) {
     const botsFor=(query:unknown)=>analyticsBotLogins(object(query),configuration.value);
+    app.get('/api/v1/followers/changes',request=>{const q=object(request.query);return db.call('followerChanges',Number(q.from??0),Number(q.to??Date.now()));});
     app.get('/api/v1/events/recent',request=>{const q=object(request.query);return db.call('recentEvents',Number(q.offset??0),Number(q.limit??100),{...(string(q.session)?{session:string(q.session)}:{}),...(string(q.person)?{person:string(q.person)}:{}),messagesOnly:string(q.messages)==='1'});});
     for(const path of ['/api/v1/analytics/subscribers','/api/v1/analytics/subscriber-streams'])app.get(path,request=>{
       const q=object(request.query),source=string(q.source);

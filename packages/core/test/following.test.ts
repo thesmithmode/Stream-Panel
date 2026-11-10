@@ -12,7 +12,7 @@ test('per-platform follow status distinguishes unknown, complete negative, subsc
  s.followingSnapshot('twitch','owner',[],true,at+m);assert.equal(s.personFollowing(person,id)[0]!.status,false);
  s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:at+2*m},{id:'unlinked',name:'Other',followedAtMs:at+2*m}],true,at+3*m,2);
  s.endSession(id,at+4*m);s.followingSnapshot('twitch','owner',[],true,at+5*m,0);
- const state=s.personFollowing(person,id)[0]!;assert.equal(state.status,false);assert.equal(state.followedAtMs,at+2*m);assert.equal(state.streamStatus,true);assert.equal(state.followedDuringStreamMs,at+2*m);assert.equal(state.history.length,4);
+ const state=s.personFollowing(person,id)[0]!;assert.equal(state.status,false);assert.equal(state.followedAtMs,at+2*m);assert.equal(state.streamStatus,true);assert.equal(state.followedDuringStreamMs,at+2*m);assert.equal(state.history.length,3);
  const analytics=s.followingAnalytics(id);assert.equal(analytics.newFollowers.length,2);assert.equal(analytics.newFollowers[0]!.personId,person);assert.equal(analytics.newFollowers[1]!.personId,null);assert.equal(analytics.polls.length,3);
  // YouTube hides private subscribers: absence never proves a negative.
  s.youtubeMessages('channel','chat',[{id:'yt',snippet:{type:'textMessageEvent',publishedAt:new Date(at).toISOString(),displayMessage:'Hello'},authorDetails:{channelId:'author',displayName:'YT'}}]);const yt=String(s.persons().find(p=>p.sources==='youtube')!.id);
@@ -50,7 +50,7 @@ test('live follow events without polls and public YouTube subscribers retain pla
  assert.equal(s.followingAnalytics(id).newFollowers.find(f=>f.source==='youtube')!.personId,yt);
  s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:at+m}],true,at+5*m);
  s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:at+6*m}],true,at+7*m);
- assert.deepEqual(s.personFollowing(person)[0]!.history.map(p=>p.followedAtMs),[at+m,at+6*m]);
+ assert.deepEqual(s.personFollowing(person)[0]!.history.map(p=>p.followedAtMs),[at+m]);
  }finally{s.close();}
 });
 test('long stream history retains an early subscription after recent snapshot limits',()=>{
@@ -87,5 +87,22 @@ test('stream follower linking uses a fixed number of queries as the signup list 
   s.followingSnapshot('twitch','owner',followers(2),true,at+2*m);followingAnalytics(tracked,id);const small=queries;
   s.followingSnapshot('twitch','owner',followers(200),true,at+3*m);queries=0;const bulk=followingAnalytics(tracked,id);
   assert.equal(queries,small);assert.equal(bulk.newFollowers.length,200);assert.equal(bulk.newFollowers.find(f=>f.externalId==='viewer')!.personId,person);assert.equal(bulk.newFollowers.find(f=>f.externalId==='unknown-199')!.personId,null);
+ }finally{s.close();}
+});
+
+test('known status transitions omit repeat checks and unknown checks; unsubscriptions are named once in the stream and period',()=>{
+ const s=new StreamStore(':memory:');try{
+  const person=event(s,'changes','chat.message',at),id=s.startSession('owner','changes',at,'platform',at);
+  s.followingSnapshot('twitch','owner',[],true,at-m,0);
+  s.followingSnapshot('twitch','owner',[],true,at,0);
+  s.followingSnapshot('twitch','owner',[],false,at+m,null);
+  s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:at+2*m}],true,at+2*m,1);
+  s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:at+2*m}],true,at+3*m,1);
+  s.followingSnapshot('twitch','owner',[],false,at+4*m,null);
+  s.followingSnapshot('twitch','owner',[],true,at+5*m,0);
+  s.followingSnapshot('twitch','owner',[],true,at+6*m,0);s.endSession(id,at+7*m);
+  assert.deepEqual(s.personFollowing(person)[0]!.history.map(p=>[p.at,p.status]),[[at-m,false],[at+2*m,true],[at+5*m,false]]);
+  const stream=s.followingAnalytics(id);assert.equal(stream.newFollowers.length,1);assert.equal(stream.unfollowers.length,1);assert.equal(stream.unfollowers[0]!.personId,person);assert.equal(stream.unfollowers[0]!.at,at+5*m);
+  assert.equal(s.followerChanges(at,at+7*m).unfollowers.length,1);assert.throws(()=>s.followerChanges(10,1),/INVALID_PERIOD/);
  }finally{s.close();}
 });
