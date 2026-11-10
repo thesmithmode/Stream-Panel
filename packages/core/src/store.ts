@@ -459,6 +459,29 @@ export class StreamStore {
       if(source==='twitch'&&total!==null)new SubscriberHistory(this.db).count(source,account,total,at);
     }).immediate();
   }
+  followerPerson(source:string,account:string,externalId:string):{personId:string} {
+    if(!['twitch','youtube'].includes(source)||!account||!externalId)throw Error('INVALID_FOLLOWER');
+    return this.db.transaction(()=>{
+      const table=source==='youtube'?'youtube_identities':'identities';
+      const existing=this.db.prepare(`SELECT person_id AS personId FROM ${table} WHERE account_id=? AND external_id=?${source==='twitch'?" AND source='twitch'":''}`).get(account,externalId) as {personId:string}|undefined;
+      if(existing)return existing;
+      // Resolve only identities evidenced in this profile's stored follower history.
+      const follower=this.db.prepare(`SELECT json_extract(f.value,'$.name') AS name,p.observed_at_ms AS at FROM provider_snapshots p,json_each(p.payload_json,'$.followers') f WHERE p.source=? AND p.account_id=? AND p.key='followers' AND json_extract(f.value,'$.id')=? ORDER BY p.observed_at_ms DESC LIMIT 1`).get(source,account,externalId) as {name:string;at:number}|undefined;
+      if(!follower)throw Error('FOLLOWER_NOT_FOUND');
+      if(source==='youtube'){
+        this.ensureYoutubeIdentity(account,{channelId:externalId,displayName:follower.name},follower.at);
+      }else{
+        const linked=this.resolveAutoLinkPerson('twitch',account,externalId,follower.name),personId=linked?.personId??randomUUID(),identityId=randomUUID();
+        if(!linked)this.db.prepare('INSERT INTO persons VALUES (?,?,1)').run(personId,follower.name);
+        else this.db.prepare('UPDATE persons SET revision=revision+1 WHERE id=?').run(personId);
+        this.db.prepare("INSERT INTO identities(id,source,account_id,external_id,display_name,candidate_key,person_id,match_key) VALUES (?,'twitch',?,?,?,?,?,?)").run(identityId,account,externalId,follower.name,candidateKey(follower.name),personId,matchKey(follower.name));
+        this.rememberAlias(identityId,follower.name,follower.at);
+      }
+      const result=this.db.prepare(`SELECT person_id AS personId FROM ${table} WHERE account_id=? AND external_id=?${source==='twitch'?" AND source='twitch'":''}`).get(account,externalId) as {personId:string}|undefined;
+      if(!result)throw Error('INVALID_FOLLOWER');
+      return result;
+    }).immediate();
+  }
   subscriberHistory(query:SubscriberQuery){return new SubscriberHistory(this.db).query(query);}
   youtubePublications(account:string,items:Publication[],at:number){new SubscriberHistory(this.db).publications(account,items,at);}
   personFollowing(personId:string,sessionId=''){sessionId=sessionId?this.groups.root(sessionId):'';if(!this.db.prepare('SELECT 1 FROM persons WHERE id=?').get(personId))throw new Error('PERSON_NOT_FOUND');if(sessionId)this.sessionRow(sessionId);return personFollowing(this.reads,personId,sessionId);}
