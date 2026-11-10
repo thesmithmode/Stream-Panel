@@ -45,3 +45,27 @@ test('stream subscriptions show platform totals, exact follow dates and independ
   assert.ok(new URL(page.url()).searchParams.get('person')!==none.id);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await app.close();}
 });
+
+test('follow history shows dates, newest events first, colors and reversible compact pagination',{timeout:90000},async()=>{
+ const app=await application();let browser;
+ try{
+  const at=Date.UTC(2026,10,8,20,30),day=86400000;
+  const id=await app.db.call('observePlatformStream','twitch','owner','history',at,at,null,'History');
+  await app.db.call('endSession',id,at+day);
+  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const events=Array.from({length:45},(_,i)=>({source:'twitch',account:'owner',externalId:`viewer-${i}`,personId:null,name:`Viewer ${i}`,at:at+i*3600000}));
+  // Interleave both directions and shuffle input so sorting must use full timestamps.
+  await page.route(`**/api/v1/sessions/${id}/followers`,route=>route.fulfill({json:{newFollowers:events.filter((_,i)=>i%2===0).reverse(),unfollowers:events.filter((_,i)=>i%2===1),platforms:[]}}));
+  await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator(`[data-session-id="${id}"] .stream-open`).click();
+  const panel=page.getByRole('region',{name:'Подписчики за стрим'}),rows=panel.locator('.follower-row');await panel.getByText('Viewer 44',{exact:true}).waitFor();
+  assert.equal(await rows.count(),20);assert.match(await rows.first().textContent(),/Viewer 44.*10\.11\.2026 · 19:30/);assert.match(await rows.nth(1).textContent(),/Viewer 43.*Отписался/);
+  assert.deepEqual(await rows.locator('time').evaluateAll(nodes=>nodes.map(n=>Date.parse(n.dateTime))),events.slice(25).reverse().map(e=>e.at));
+  assert.equal(await rows.first().locator('.follow-change').evaluate(n=>getComputedStyle(n).color),'rgb(120, 219, 169)');
+  assert.equal(await rows.nth(1).locator('.follow-change').evaluate(n=>getComputedStyle(n).color),'rgb(237, 137, 144)');
+  await panel.getByRole('button',{name:'Показать ещё 20',exact:true}).click();assert.equal(await rows.count(),40);
+  await panel.getByRole('button',{name:'Показать ещё 5',exact:true}).click();assert.equal(await rows.count(),45);
+  await panel.getByRole('button',{name:'Свернуть',exact:true}).click();assert.equal(await rows.count(),20);
+  for(const width of [390,1280]){await page.setViewportSize({width,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await panel.screenshot({path:`/tmp/sp-following-history-${width}.png`});}
+  assert.deepEqual(errors,[]);await saveCoverage(page);
+ }finally{await browser?.close();await app.close();}
+});
