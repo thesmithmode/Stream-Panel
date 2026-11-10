@@ -106,7 +106,7 @@
 </section>
 
 <Insights sessionId={sessionFilter} refreshToken={summary} {onPerson} {onStream} />
-{#if sessionFilter}<StreamDonations sessionId={sessionFilter} {onPerson} {changed}/><Following sessionId={sessionFilter} {onPerson}/>{/if}
+{#if sessionFilter}<StreamDonations sessionId={sessionFilter} {onPerson} {changed}/><Following hideEmpty sessionId={sessionFilter} {onPerson}/>{/if}
 {:else if activeTab==='current'}
 <CurrentChatParticipants sessionId={sessionFilter} {onPerson}/>
 {:else if activeTab==='people'}
