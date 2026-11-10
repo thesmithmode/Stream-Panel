@@ -106,3 +106,16 @@ test('known status transitions omit repeat checks and unknown checks; unsubscrip
   assert.equal(s.followerChanges(at,at+7*m).unfollowers.length,1);assert.throws(()=>s.followerChanges(10,1),/INVALID_PERIOD/);
  }finally{s.close();}
 });
+
+test('subscriber profile resolution is idempotent, scoped by platform/account and adds no viewing facts',()=>{
+ const s=new StreamStore(':memory:');try{
+  const stream=s.observePlatformStream('twitch','owner','profile',at,at,null,'Stream')!;
+  for(const source of ['twitch','youtube'] as const)s.followingSnapshot(source,'owner',[{id:'subscriber',name:`${source} subscriber`,followedAtMs:at+m}],true,at+2*m);
+  const twitch=s.followerPerson('twitch','owner','subscriber'),youtube=s.followerPerson('youtube','owner','subscriber');
+  assert.notEqual(twitch.personId,youtube.personId);assert.deepEqual(s.followerPerson('twitch','owner','subscriber'),twitch);assert.deepEqual(s.followerPerson('youtube','owner','subscriber'),youtube);
+  assert.equal(s.person(twitch.personId).display_name,'twitch subscriber');assert.equal(s.personFollowing(twitch.personId)[0]!.status,true);assert.equal(s.personFollowing(youtube.personId)[0]!.status,true);
+  assert.equal(s.followingAnalytics(stream).newFollowers.every(f=>f.personId!==null),true);
+  assert.equal(s.events(undefined,twitch.personId).length,0);assert.equal(s.events(undefined,youtube.personId).length,0);
+  assert.throws(()=>s.followerPerson('twitch','other','subscriber'),/FOLLOWER_NOT_FOUND/);assert.throws(()=>s.followerPerson('twitch','owner','missing'),/FOLLOWER_NOT_FOUND/);assert.throws(()=>s.followerPerson('other','owner','subscriber'),/INVALID_FOLLOWER/);
+ }finally{s.close();}
+});
