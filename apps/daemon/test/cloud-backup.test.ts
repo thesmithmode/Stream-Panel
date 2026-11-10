@@ -47,13 +47,38 @@ test('chunk manifests reject traversal, invalid lengths and checksums without le
  const zero=Buffer.alloc(CLOUD_PART_SIZE),tail=Buffer.alloc(17),hash=createHash('sha256');for(let n=0;n<3;n++)hash.update(zero);hash.update(tail);
  const baseline={format:'stream-panel-chunks-v1',filename,size:3*CLOUD_PART_SIZE+17,sha256:hash.digest('hex'),parts:Array.from({length:4},(_,n)=>({name:`${filename}.parts/${String(n).padStart(4,'0')}.part`,size:n===3?17:CLOUD_PART_SIZE,sha256:sha(n===3?tail:zero)}))};
  try{
-  for(const mode of ['format','filename','size','large','integer','hash','parts','count','path','part-size','part-hash','short','checksum','total-checksum','valid','existing']){
+  for(const mode of ['format','filename','size','large','integer','hash','parts','count','path','part-size','part-hash','short','checksum','total-checksum','valid','legacy-missing','existing']){
    const data=structuredClone(baseline);if(mode==='format')data.format='other';if(mode==='filename')data.filename='../key';if(mode==='size')data.size=1;if(mode==='large')data.size=3*1024*1024*1024;if(mode==='integer')data.size=NaN;if(mode==='hash')data.sha256='wrong';if(mode==='parts')(data as any).parts={};if(mode==='count')data.parts.pop();if(mode==='path')data.parts[0]!.name='../key';if(mode==='part-size')data.parts[0]!.size--;if(mode==='part-hash')data.parts[0]!.sha256='wrong';if(mode==='total-checksum')data.sha256='f'.repeat(64);
-   const request:typeof fetch=async input=>{const p=new URL(String(input)).pathname;if(p.includes('/bucket/'))return Response.json({public:false});if(p.endsWith(filename))return Response.json({},{status:404});if(p.endsWith('.manifest.json'))return Response.json(data);if(mode==='short')return new Response(new Uint8Array(0));if(mode==='checksum')return new Response(new Uint8Array(Buffer.alloc(CLOUD_PART_SIZE,1)));return new Response(new Uint8Array(p.endsWith('0003.part')?tail:zero));};
+   const request:typeof fetch=async input=>{const p=new URL(String(input)).pathname;if(p.includes('/bucket/'))return Response.json({public:false});if(p.endsWith(filename))return mode==='legacy-missing'?Response.json({statusCode:'404',error:'not_found',message:'Object not found'},{status:400}):Response.json({},{status:404});if(p.endsWith('.manifest.json'))return Response.json(data);if(mode==='short')return new Response(new Uint8Array(0));if(mode==='checksum')return new Response(new Uint8Array(Buffer.alloc(CLOUD_PART_SIZE,1)));return new Response(new Uint8Array(p.endsWith('0003.part')?tail:zero));};
    const cloud=new CloudBackup({url:'https://fixture.supabase.co',serviceKeyFile:service},request),destination=join(dir,mode);
-   if(mode==='valid'){await cloud.downloadFile(filename,destination);assert.equal((await stat(destination)).size,baseline.size);}
+   if(mode==='valid'||mode==='legacy-missing'){await cloud.downloadFile(filename,destination);assert.equal((await stat(destination)).size,baseline.size);}
    else if(mode==='existing'){await writeFile(destination,'keep');await assert.rejects(cloud.downloadFile(filename,destination),{code:'EEXIST'});assert.equal(await readFile(destination,'utf8'),'keep');}
    else {await assert.rejects(cloud.downloadFile(filename,destination));await assert.rejects(stat(destination),/ENOENT/);}
+  }
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+test('only explicit missing-object errors allow a manifest fallback',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'sp-cloud-missing-')),service=join(dir,'key');await writeFile(service,'fixture');
+ try{
+  for(const [status,body,missing] of [
+   [400,JSON.stringify({code:'NoSuchKey'}),true],
+   [400,JSON.stringify({code:'not_found'}),true],
+   [400,JSON.stringify({error:'not_found'}),true],
+   [400,JSON.stringify({error:'AccessDenied',message:'not_found'}),false],
+   [403,JSON.stringify({error:'not_found'}),false],
+   [400,'invalid json',false],
+   [400,' '.repeat(16*1024)+JSON.stringify({error:'not_found'}),false],
+  ] as const){
+   let manifestRequested=false;
+   const request:typeof fetch=async input=>{
+    const path=new URL(String(input)).pathname;
+    if(path.includes('/bucket/'))return Response.json({public:false});
+    if(path.endsWith('.manifest.json')){manifestRequested=true;return Response.json({});}
+    return new Response(body,{status});
+   };
+   const destination=join(dir,'download');
+   await assert.rejects(new CloudBackup({url:'https://fixture.supabase.co',serviceKeyFile:service},request).downloadFile(filename,destination));
+   assert.equal(manifestRequested,missing);await assert.rejects(stat(destination),/ENOENT/);
   }
  }finally{await rm(dir,{recursive:true,force:true});}
 });
