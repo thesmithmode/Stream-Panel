@@ -852,7 +852,7 @@ test("summary uses SQL aggregates and excludes well-known bots from message coun
     assert.ok(Number(raw.excludedBots) >= WELL_KNOWN_TWITCH_BOTS.length);
     const people = store.persons();
     const bot = people.find((p) => p.display_name === "Nightbot");
-    assert.equal(bot?.is_bot, 1);
+    assert.equal(bot, undefined);
     assert.ok(botExclusionSet(["CustomBot"]).has("custombot"));
     assert.equal(normalizeBotLogin("  @NightBot "), "nightbot");
     assert.equal(isExcludedBot("Nightbot", botExclusionSet()), true);

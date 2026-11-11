@@ -107,3 +107,37 @@ band projection instead of reloading both subscriber periods; background period
 preloading is preserved. Hosted stream profile matching uses one authorized request,
 checks access to both profiles and returns an explicit JSON string/null. Local
 collectors retain the legacy matching fallback.
+
+## Service accounts and attendance roster
+
+Schema 35 keeps broadcaster identities and the existing Twitch service-chatbot
+list out of audience rows in both bot modes, including current chat, recent events,
+people pagination and merged identities. YouTube's existing StreamElements aliases
+are treated the same way; ordinary YouTube nicknames do not establish bot status.
+Human/neutral overrides apply to optional audience bots, not service accounts.
+Facts, aliases, provider samples and manual classifications remain stored.
+
+Only optional audience bots participate in the existing viewer correction. Chat
+service connections are not evidence of video viewership and are never subtracted
+from provider samples as audience bots. The existing single broadcaster baseline
+correction is preserved. The stream list skips all membership joins when no optional
+bot needs correction; otherwise it materializes only their poll memberships.
+Schema 35 repairs affected stream projections once; unchanged per-stream facts
+and reductions remain reusable. Small period replies are invalidated.
+Older binaries require the existing matching database rollback checkpoint.
+
+Rolling-core membership has its own bounded cache and a compact attendance-only
+reduction path. It skips clock membership expansion, insight generation, participant
+paging and presentation finalization. The warmer prepares this roster before its
+landing report. Core rules, manual overrides and minute-stable bounds are retained.
+Membership lookups use sets; report tags load in one recursive batch; workspace
+statements are reused and sorting indexes are built only when requested. Stream
+insights run in the analytics worker, alongside the reusable stream facts.
+Participant classification batches depend on the visible identity set and relevant
+versions; a new report object or reordered rows no longer starts another request.
+
+`node scripts/benchmark-audience-read.mjs` creates and removes an isolated fixture
+of 12 two-hour streams, 80 chat participants (three service accounts), and 115,200
+poll memberships. It measures uncached core reads, not browser or network latency.
+`STREAM_PANEL_BENCHMARK_ROOT` can select a separately built baseline checkout.
+Do not interpret fixture ratios as a guarantee for production or every screen.

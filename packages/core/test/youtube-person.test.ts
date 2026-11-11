@@ -60,7 +60,7 @@ test('YouTube chat outside a confirmed YouTube broadcast stays raw and never inh
  }finally{s.close();}
 });
 
-test('YouTube owners stay out of statistics while all other YouTube accounts are humans regardless of nickname',()=>{
+test('YouTube owners and known service aliases stay hidden after renaming without removing raw messages',()=>{
  const s=new StreamStore(':memory:');try{
   s.observePlatformStream('youtube','channel','video',at,at,null,'YouTube');
   s.youtubeMessages('channel','chat',[
@@ -72,10 +72,10 @@ test('YouTube owners stay out of statistics while all other YouTube accounts are
    assert.equal(s.personStats(`youtube:${id}`).messageCount,0);
    assert.equal(s.personStats(`youtube:${id}`).estimatedChatMinutes,0);
   }
-  for(const id of ['channel','different-owner','bot'])assert.equal(s.persons().find(p=>p.id===`youtube:${id}`)!.is_bot,0);
-  assert.equal(s.personStats('youtube:bot').messageCount,2);
-  assert.ok(Number(s.personStats('youtube:bot').estimatedChatMinutes)>0);
-  assert.equal(s.analytics({fromMs:at,toMs:at+3*minute,youtubeAccount:'channel'}).summary.entities,1);
+  for(const id of ['channel','different-owner','bot'])assert.equal(s.persons().some(p=>p.id===`youtube:${id}`),false);
+  assert.equal(s.personStats('youtube:bot').messageCount,0);
+  assert.equal(s.personStats('youtube:bot').estimatedChatMinutes,0);
+  assert.equal(s.analytics({fromMs:at,toMs:at+3*minute,youtubeAccount:'channel'}).summary.entities,0);
   assert.equal(s.youtubeData('channel').messages.length,4);
  }finally{s.close();}
 });
@@ -129,7 +129,7 @@ test('a linked excluded YouTube owner suppresses every personal aggregate while 
   const stats=s.personStats(tw);assert.equal(stats.messageCount,0);assert.equal(stats.donationCount,0);
   assert.equal(stats.totalObservedMinutes,0);assert.equal(stats.sessionsWithAttendance,0);assert.equal(stats.watchingSinceMs,null);
   assert.equal(s.personsTop('messages').length,0);assert.equal(s.personsTop('observed_minutes').length,0);
-  assert.equal(s.events(undefined,tw).length,2);assert.equal(s.eventCount(),1);
+  assert.equal(s.events(undefined,tw).length,0);assert.equal(s.eventCount(),1);assert.equal(s.youtubeData('channel').messages.length,1);
  }finally{s.close();}
 });
 

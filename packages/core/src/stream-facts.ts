@@ -102,8 +102,9 @@ export class StreamFacts {
    for(const r of this.db.prepare(`SELECT DISTINCT person_id FROM ${table} WHERE account_id=? AND external_id IN(SELECT value FROM json_each(?))`).all(snapshot.account_id,followers) as {person_id:string}[]){following.add(r.person_id);platformFollowers[snapshot.source]?.add(r.person_id);}
    if(snapshot.source==='twitch'&&info.complete)for(const r of this.db.prepare("SELECT DISTINCT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id NOT IN(SELECT value FROM json_each(?))").all(snapshot.account_id,followers) as {person_id:string}[]){negative.add(r.person_id);platformNegative.twitch!.add(r.person_id);}
   }
+  const coreMembership=options?.corePeople?new Set(options.corePeople):undefined;
   const audience=value.audience.map(p=>{const override=preferences.get(p.id),f=value.filters;
-   const core=classifyCore(p.coreSessionIds.length,value.summary.streams,f.regularThresholdPercent,override==null?null:override===1,options?.corePeople?.includes(p.id));
+   const core=classifyCore(p.coreSessionIds.length,value.summary.streams,f.regularThresholdPercent,override==null?null:override===1,coreMembership?.has(p.id));
    return {...p,name:names.get(p.id)??p.name,tags:tags.filter(t=>t.person_id===p.id).map(t=>t.label),manualCore:override==null?null:override===1,core,regular:core,follower:following.has(p.id)?true:negative.has(p.id)&&!p.sources.includes('youtube')?false:null};});
   const attendees=audience.filter(p=>p.attendanceSessionIds.length),core=audience.filter(p=>p.core).length;
   const botIds=new Set(new PersonBots(this.db).decorate(audience,p=>p.id,options?.excludedLogins||[]).filter(p=>p.is_bot).map(p=>p.id));

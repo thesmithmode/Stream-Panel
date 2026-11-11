@@ -23,7 +23,7 @@ test('current chat includes silent Twitch members, excludes renamed owner/bots a
   const silent=result.people.find(p=>p.name==='Silent')!;assert.equal(silent.messages,0);assert.equal(silent.lastMessageAt,null);assert.equal(silent.minutes,3,'overlapping inclusive minute buckets count once');
   const talker=result.people.find(p=>p.name==='talker'||p.name==='Talker')!;assert.equal(talker.messages,2);assert.equal(talker.lastMessageAt,at+2*minute);
   const yt=result.people.find(p=>p.source==='youtube')!;assert.equal(yt.minutes,null);assert.equal(yt.messages,2);
-  assert.ok(s.currentChat(sid,[],true,at+2*minute+1000).people.some(p=>p.name==='rlod'));
+  assert.equal(s.currentChat(sid,[],true,at+2*minute+1000).people.some(p=>p.name==='rlod'),false);
   s.recordPoll(sid,'owner',{startedAtMs:at+2*minute,completedAtMs:at+3*minute,status:'partial',userIds:['talker']});
   const partial=s.currentChat(sid,[],false,at+3*minute+1000);assert.equal(partial.twitchState,'stale');assert.ok(partial.people.some(p=>p.name==='Silent'),'partial snapshots do not evict silent members');
   assert.equal(s.currentChat(sid,[],false,at+12*minute).people.some(p=>p.source==='youtube'),false,'YouTube expires at exactly ten minutes without evidence of leaving');

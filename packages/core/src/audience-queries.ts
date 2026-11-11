@@ -18,7 +18,7 @@ export class AudienceQueries {
     const query=`WITH options AS (SELECT p.id,p.display_name,
       (SELECT group_concat(DISTINCT source) FROM (SELECT source FROM identities WHERE person_id=p.id UNION SELECT 'youtube' source FROM youtube_identities WHERE person_id=p.id)) sources,
       CASE WHEN EXISTS(SELECT 1 FROM human_people h WHERE h.person_id=p.id) OR EXISTS(SELECT 1 FROM manual_neutral_people n WHERE n.person_id=p.id) THEN 0 WHEN EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||i.person_id OR ((value=i.match_key OR value='person:'||i.person_id) AND i.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))) OR EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||y.person_id OR ((value=y.match_key OR value='person:'||y.person_id) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) OR (a.match_key IN(SELECT value FROM json_each(?)) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people)))) THEN 1 ELSE 0 END is_bot
-      FROM persons p WHERE NOT EXISTS(SELECT 1 FROM person_merges m WHERE m.source_person_id=p.id AND m.undone_at_ms IS NULL)) SELECT * FROM options WHERE (?=1 OR is_bot=0) AND id<>?`;
+      FROM persons p WHERE p.id NOT IN(SELECT person_id FROM service_people) AND NOT EXISTS(SELECT 1 FROM person_merges m WHERE m.source_person_id=p.id AND m.undone_at_ms IS NULL)) SELECT * FROM options WHERE (?=1 OR is_bot=0) AND id<>?`;
     const filter=` AND (?='' OR instr(sp_options_lower(display_name),sp_options_lower(?))>0 OR EXISTS(SELECT 1 FROM identities i LEFT JOIN identity_aliases a ON a.identity_id=i.id WHERE i.person_id=options.id AND (instr(i.match_key,?)>0 OR instr(a.candidate_key,?)>0)) OR EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=options.id AND (instr(y.match_key,?)>0 OR instr(a.match_key,?)>0)))`;
     const args=[bots,bots,bots,Number(includeBots),exclude,search,search,term,term,term,term];
     const items=this.db.prepare(query+filter+' ORDER BY display_name,id LIMIT ? OFFSET ?').all(...args,limit,offset) as {id:string;display_name:string;sources:string|null;is_bot:number}[];
@@ -63,7 +63,7 @@ export class AudienceQueries {
            UNION ALL SELECT identity_id,count(*) AS n FROM effective_events WHERE type='donation' AND coalesce(occurred_at_ms,received_at_ms)>=${fromMs} GROUP BY identity_id
           ) counts ON counts.identity_id=i.id GROUP BY i.person_id
         ) ec ON ec.person_id = p.id
-        WHERE (EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id) OR EXISTS(SELECT 1 FROM youtube_identities y WHERE y.person_id=p.id) OR (NOT EXISTS(SELECT 1 FROM person_merges m WHERE m.source_person_id=p.id AND m.undone_at_ms IS NULL) AND (EXISTS(SELECT 1 FROM person_notes n WHERE n.person_id=p.id) OR EXISTS(SELECT 1 FROM person_tags t WHERE t.person_id=p.id) OR EXISTS(SELECT 1 FROM person_preferences pref WHERE pref.person_id=p.id))))
+        WHERE p.id NOT IN(SELECT person_id FROM service_people) AND (EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id) OR EXISTS(SELECT 1 FROM youtube_identities y WHERE y.person_id=p.id) OR (NOT EXISTS(SELECT 1 FROM person_merges m WHERE m.source_person_id=p.id AND m.undone_at_ms IS NULL) AND (EXISTS(SELECT 1 FROM person_notes n WHERE n.person_id=p.id) OR EXISTS(SELECT 1 FROM person_tags t WHERE t.person_id=p.id) OR EXISTS(SELECT 1 FROM person_preferences pref WHERE pref.person_id=p.id))))
           AND (
             ? = '' OR instr(lower(p.display_name), lower(?)) > 0
             OR EXISTS(
@@ -539,7 +539,7 @@ export class AudienceQueries {
     for(const poll of polls){
       let w=windows.get(poll.session_id);
       if(!w){const rangeStart=Math.max(fromMs,Math.floor(poll.stream_start/60000)*60000),toMs=Math.min(Math.ceil((poll.stream_end??now)/60000)*60000,beforeMs??Infinity);w={fromMs:rangeStart,toMs,spans:windowsFromLinks(bySession.get(poll.session_id)??[],rangeStart,toMs)};windows.set(poll.session_id,w);}
-      if(w.toMs<=w.fromMs||w.toMs-w.fromMs>31*86400000)continue;
+      if(w.toMs<=w.fromMs)continue;
       const person=result.get(poll.person_id)??new Map();result.set(poll.person_id,person);
       const observation=person.get(poll.session_id)??{minutes:new Set<number>(),first:null,last:null,startedAt:poll.stream_start};person.set(poll.session_id,observation);
       for(const minute of pollCoveredMinutes(poll.started_at_ms,poll.completed_at_ms,w.fromMs,w.toMs))if(w.spans.some(span=>minute<span.to&&minute+60000>span.from)){
@@ -562,7 +562,7 @@ export class AudienceQueries {
     ) SELECT DISTINCT match_key FROM identities WHERE person_id IN(SELECT person_id FROM excluded_people)
       UNION SELECT DISTINCT match_key FROM youtube_identities WHERE person_id IN(SELECT person_id FROM excluded_people)
       UNION SELECT 'person:'||person_id FROM manual_bot_people WHERE ?=0
-      UNION SELECT 'owner:'||person_id FROM identities WHERE source='twitch' AND external_id=account_id
+      UNION SELECT 'owner:'||person_id FROM service_people
       UNION SELECT 'owner:'||person_id FROM youtube_identities WHERE is_owner=1 OR external_id=account_id
     `).all(json,json,json,json,Number(excludedBotLogins===false)) as {match_key:string}[];
     for(const row of rows)keys.add(row.match_key);

@@ -2,7 +2,8 @@
  import Help from './Help.svelte';
  import PersonBot from './PersonBot.svelte';
  import {loadClassifications,type ClassificationState} from './classification';
- import {getProfile} from './api';
+ import {getProfile,getDataRevision,getServerRevision} from './api';
+ import {classificationScope} from './classification-scope';
  import Icon from './Icon.svelte';
  import {platformClass} from './period';
  import {type RankPerson,presenceMinutes,rankTable,intervalRows,durationLabel,platformNicknames,intervalSource} from './audience-ranking';
@@ -13,7 +14,8 @@
  let classificationProfile='';
  let classificationStates=$state<Record<string,ClassificationState>>({}),classificationError=$state(''),classificationRefresh=$state(0);
  $effect(()=>{
-  const ids=ranked.slice(0,limit).map(p=>p.id),profile=getProfile();void classificationRefresh;void people;
+  const [profile,,,rows]=JSON.parse(classificationRequest) as [string,number,string,[string,boolean,boolean,boolean][]];
+  const ids=rows.map(row=>row[0]);void classificationRefresh;
   if(!onClassificationChange)return;
   if(classificationProfile!==profile){classificationStates={};classificationProfile=profile;}
   const controller=new AbortController();classificationError='';
@@ -24,6 +26,7 @@
  let metric=$state('presence'),descending=$state(true),limit=$state(50),expanded=$state(new Set<string>()),viewport=$state(1024);
  const currencies=$derived([...new Set(people.flatMap(p=>Object.keys(p.donations??{})))].sort());
  const ranked=$derived(rankTable(people,metric,descending));
+ const classificationRequest=$derived(classificationScope(getProfile(),getDataRevision(getProfile()),getServerRevision(getProfile(),'classifications'),ranked.slice(0,limit)));
  const currencyColumns=$derived(viewport<=720?[]:currencies);
  $effect(()=>{void metric;limit=50;});
  $effect(()=>{void streamStart;limit=50;expanded=new Set();});

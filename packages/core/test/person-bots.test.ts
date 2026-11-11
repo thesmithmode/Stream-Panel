@@ -96,7 +96,7 @@ test('identity-anchored marks survive merge, split, undo and restart while shari
  }finally{a.close();b.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test('manual human marks replace bot marks, override known bot nicknames and can be reset or switched back',()=>{
+test('manual human marks replace audience bot marks but never unhide service accounts',()=>{
  const s=new StreamStore(':memory:');try{
   const sid=broadcast(s,'a',at,['suspect','nightbot']);const id=s.candidatePersons('suspect')[0]!,known=s.candidatePersons('nightbot')[0]!;
   const q={fromMs:at,toMs:at+2*minute,sessionId:sid};mark(s,id);assert.equal(s.analytics(q).summary.attendees,0);
@@ -106,7 +106,7 @@ test('manual human marks replace bot marks, override known bot nicknames and can
   assert.throws(()=>s.setPersonHuman(id,false,stale),/REVISION_CONFLICT/);
   assert.throws(()=>s.setPersonHuman(id,'true' as unknown as boolean,s.personRevision(id)),/INVALID_HUMAN_MARK/);
   assert.throws(()=>s.setPersonHuman(id,true,-1),/INVALID_HUMAN_MARK/);
-  s.setPersonHuman(known,true,s.personRevision(known));assert.equal(s.analytics(q).summary.attendees,2);assert.equal(s.summary(sid).messages,2);
+  s.setPersonHuman(known,true,s.personRevision(known));assert.equal(s.analytics(q).summary.attendees,1);assert.equal(s.summary(sid).messages,1);
   assert.equal(s.personsPage('',[],0,0,50,'bots').total,0);
   s.setPersonHuman(known,false,s.personRevision(known));assert.equal(s.analytics(q).summary.attendees,1);
   mark(s,id);assert.equal(s.personBot(id).manualHuman,false);assert.equal(s.personBot(id).manualBot,true);
@@ -167,9 +167,9 @@ test('neutral explicitly clears detected bot coloring and cached exclusions, inc
   assert.equal(s.personBot(known).knownBot,true);assert.equal(s.personBot(custom,['custombot']).knownBot,true);
   assert.equal(s.analytics(q).summary.attendees,0);
   s.setPersonClassification(known,'unknown',s.personRevision(known));assert.equal(s.personBot(known).knownBot,false);assert.equal(s.person(known).is_bot,0);
-  assert.equal(s.analytics(q).summary.attendees,1);assert.equal(s.summary(sid,['custombot']).messages,1);
+  assert.equal(s.analytics(q).summary.attendees,0);assert.equal(s.summary(sid,['custombot']).messages,0);
   s.setPersonClassification(custom,'unknown',s.personRevision(custom));assert.equal(s.personBot(custom,['custombot']).knownBot,false);
-  assert.equal(s.analytics(q).summary.attendees,2);assert.equal(s.personsPage('', ['custombot'],0,0,50,'bots').total,0);
+  assert.equal(s.analytics(q).summary.attendees,1);assert.equal(s.personsPage('', ['custombot'],0,0,50,'bots').total,0);
   s.setPersonClassification(known,'bot',s.personRevision(known));assert.equal(s.person(known).is_bot,1);assert.equal(s.analytics(q).summary.attendees,1);
  }finally{s.close();}
 });

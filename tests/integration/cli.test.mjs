@@ -159,8 +159,8 @@ test('startup warms both profiles without changing recorded facts',{timeout:2000
  const accounts=new AccountStore(path);try{for(const profile of ['ruslan','gulnaz'])await accounts.createUser(profile,profile,profile,'fixture-startup-password');}finally{accounts.close();}
  for(const profile of ['ruslan','gulnaz']){const s=new StreamStore(path,profile),id=s.startSession('owner','closed',at,'platform',at);s.endSession(id,at+60000);s.close();}
  c=start(dir,port);await c.ready();const db=new Database(path,{readonly:true});
- try{const deadline=Date.now()+7000;while(['ruslan','gulnaz'].some(p=>db.prepare(`SELECT count(*) n FROM p_${p}_analytics_stream_cache`).get().n===0)){assert.ok(Date.now()<deadline,'both profiles must warm without a viewer lease');await new Promise(r=>setTimeout(r,20));}
- for(const p of ['ruslan','gulnaz'])assert.equal(db.prepare(`SELECT count(*) n FROM p_${p}_analytics_stream_cache`).get().n,1);
+ try{const deadline=Date.now()+7000;while(['ruslan','gulnaz'].some(p=>db.prepare(`SELECT count(*) n FROM p_${p}_analytics_stream_cache`).get().n<2)){assert.ok(Date.now()<deadline,'both profiles must warm without a viewer lease');await new Promise(r=>setTimeout(r,20));}
+ for(const p of ['ruslan','gulnaz'])assert.equal(db.prepare(`SELECT count(*) n FROM p_${p}_analytics_stream_cache`).get().n,2);
  for(const p of ['ruslan','gulnaz'])assert.equal(db.prepare(`SELECT count(*) n FROM p_${p}_sessions`).get().n,1);
  }finally{db.close();}
  assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status,200);c.child.kill('SIGTERM');assert.equal((await c.exit).code,0);

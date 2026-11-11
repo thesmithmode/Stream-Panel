@@ -36,7 +36,7 @@ export class RecentEvents {
  list(offset=0,limit=100,now=Date.now(),filter:RecentFilter={}) {
   if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>200)throw new Error('INVALID_RECENT_EVENTS_PAGE');
   for(const id of [filter.session,filter.person])if(id!==undefined&&(typeof id!=='string'||!id||id.length>256))throw new Error('INVALID_RECENT_EVENTS_FILTER');
-  const where=['r.at_ms>?','r.at_ms<=?'],args:unknown[]=[now-EVENT_RETENTION_MS,now];
+  const where=['r.at_ms>?','r.at_ms<=?',"coalesce(i.person_id,y.person_id,'') NOT IN(SELECT person_id FROM service_people)"],args:unknown[]=[now-EVENT_RETENTION_MS,now];
   if(filter.messagesOnly)where.push("r.type IN('chat.message','textMessageEvent','superChatEvent','superStickerEvent')");
   if(filter.person){
    where.push(`EXISTS(SELECT 1 FROM (SELECT source,account_id,external_id,person_id FROM identities UNION ALL SELECT 'youtube',account_id,external_id,person_id FROM youtube_identities) i WHERE i.source=r.source AND i.account_id=r.account_id AND i.external_id=r.actor_id AND i.person_id=?)`);args.push(filter.person);
