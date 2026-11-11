@@ -16,6 +16,7 @@
    <label>Окно активности YouTube, мин<input type="number" min="1" max="30" required bind:value={rules.chatWindowMinutes}/></label>
    <label>Часовой пояс аналитики<select bind:value={rules.timezone}><option value="Europe/Moscow">Москва</option><option value="UTC">UTC</option><option value="Asia/Yekaterinburg">Екатеринбург</option></select></label>
    <label class="check"><input type="checkbox" bind:checked={rules.includeBots}/>Отображать ботов</label>
+   <p class="small muted">Переключатель учитывает участников, помеченных как боты. Служебные чат-боты и владелец канала скрыты всегда; их присутствие в чате не вычитается из числа зрителей.</p>
    <label class="check"><input type="checkbox" bind:checked={rules.highlightBots}/>Выделять ботов голубым</label>
    <label class="check"><input type="checkbox" bind:checked={rules.highlightHumans}/>Выделять людей красным</label>
   </div><button class="primary" disabled={busy}>{busy?'Сохраняем…':'Сохранить настройки'}</button>

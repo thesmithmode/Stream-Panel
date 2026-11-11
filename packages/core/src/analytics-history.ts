@@ -33,6 +33,7 @@ type Session = {
     members?:string;
 };
 type Report = ReturnType<typeof audienceAnalytics> & {
+    coreRoster?:string[];
     streamRange?:{first:number;last:number;total:number};
     insights?:InsightCard[];
     clockBuckets?: ClockBucket[];
@@ -119,7 +120,7 @@ export class AnalyticsHistory {
         if(db.pragma('temp_store',{simple:true})!==1)db.pragma('temp_store=FILE');
         db.pragma('temp.cache_size=-2048');
     }
-    close(){this.addresses.clear();this.projections.clear();this.projectionBytes=0;this.liveStreams.clear();for(const job of this.jobs.values())job.workspace.dispose();this.jobs.clear();for(const entry of this.completed.values())entry.workspace?.dispose();this.completed.clear();this.completedBytes=0;}
+    close(){this.memberships.clear();this.membershipBytes=0;this.addresses.clear();this.projections.clear();this.projectionBytes=0;this.liveStreams.clear();for(const job of this.jobs.values())job.workspace.dispose();this.jobs.clear();for(const entry of this.completed.values())entry.workspace?.dispose();this.completed.clear();this.completedBytes=0;}
     private page(value:Report,workspace:AnalyticsWorkspace<Person>|undefined,options:AnalyticsOptions):Report{
         // Project before cloning or crossing the worker boundary. The complete cached
         // report stays available for every day/resolution and legacy API clients.
@@ -164,7 +165,7 @@ export class AnalyticsHistory {
    WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND s.started_at_ms<? AND coalesce(s.ended_at_ms,?)>? ${options.sessionId?'AND s.id=?':''} ORDER BY s.started_at_ms,s.id`).all(options.toMs, options.toMs, options.fromMs,...(options.sessionId?[options.sessionId]:[])) as Session[];
     }
     private key(options: AnalyticsOptions, session: Session): string {
-        const fields = { ...(session.ended_at_ms===null?{liveScope:options.toMs%60000===0?'minute-boundary':'partial-minute'}:{}),format: 12,members:session.members??null, from: Math.max(options.fromMs, session.started_at_ms), to: session.ended_at_ms===null&&options.toMs>=Date.now()-120000?'live':Math.min(options.toMs, session.ended_at_ms??options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: options.excludedLogins===false?false:[...(options.excludedLogins??[])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
+        const fields = { ...(session.ended_at_ms===null?{liveScope:options.toMs%60000===0?'minute-boundary':'partial-minute'}:{}),format: 12,...(options.membershipOnly?{membershipOnly:true}:{}),members:session.members??null, from: Math.max(options.fromMs, session.started_at_ms), to: session.ended_at_ms===null&&options.toMs>=Date.now()-120000?'live':Math.min(options.toMs, session.ended_at_ms??options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: options.excludedLogins===false?false:[...(options.excludedLogins??[])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
         return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
     }
     private followerRevision(){
@@ -174,6 +175,7 @@ export class AnalyticsHistory {
     }
     private build(options: AnalyticsOptions, session: Session): Report {
         const report = this.facts.read(options,session.id,session.started_at_ms,session.ended_at_ms);
+        if(options.membershipOnly)return report;
         const clockBuckets=this.facts.details(options,session.id,session.started_at_ms,session.ended_at_ms,()=>this.clockBuckets(report,options),report);
         return {...report,clockBuckets,insights:streamInsights(report,options.timezone)};
     }
@@ -324,6 +326,7 @@ export class AnalyticsHistory {
     private background=false;
     private warmReport(options:AnalyticsOptions){this.background=true;try{return this.report(options);}finally{this.background=false;}}
     warm(options:AnalyticsOptions,bakeCategories=false){
+        if(options.rollingCore){const core=this.rollingMembership(options);if(core.preparing)return core;options=core.options;}
         // Bake the landing report, not a Cartesian product of moving windows.
         // Freeze an unfinished snapshot so moving time and live polls cannot restart it.
         const current:AnalyticsOptions={...options,source:'all',category:'',fromMs:0,toMs:options.toMs,summaryOnly:true,includeInsights:true};
@@ -366,25 +369,37 @@ export class AnalyticsHistory {
         options=core.options;
         return options.sessionId?this.projection(this.sessionReport(options),options):this.resolve(options,options.summaryOnly??false);
     }
+    private memberships=new Map<string,{people:string[];bytes:number}>();
+    private membershipBytes=0;
     private rollingMembership(options:AnalyticsOptions):{preparing:false;options:AnalyticsOptions}|(Report&{preparing:true}){
         if(!options.rollingCore)return {preparing:false,options};
         validateAnalyticsOptions(options);
         // A minute-stable clock shares the existing incremental report cache across
         // panels and periods. The roster always uses both platforms and all categories.
         const toMs=Math.floor(Date.now()/60000)*60000;
-        const basis:AnalyticsOptions={fromMs:toMs-(options.coreWindowDays??90)*86400000,toMs,source:'all',category:'',summaryOnly:true,panel:'audience',audienceCoreOnly:true,
+        const basis:AnalyticsOptions={fromMs:toMs-(options.coreWindowDays??90)*86400000,toMs,source:'all',category:'',summaryOnly:true,membershipOnly:true,panel:'audience',audienceCoreOnly:true,
             regularThresholdPercent:options.regularThresholdPercent??80,chatWindowMinutes:options.chatWindowMinutes??5,
             timezone:options.timezone??'Europe/Moscow',excludedLogins:options.excludedLogins??[],ownerId:options.ownerId??'',youtubeAccount:options.youtubeAccount??''};
+        const membershipKey=JSON.stringify([basis,this.statement("SELECT domain,revision FROM ui_revisions WHERE domain IN('analyticsActivity','people','donations','follows','analyticsPresentation') ORDER BY domain").all(),this.statement('SELECT revision FROM analytics_global_revision').get()]);
+        const retained=this.memberships.get(membershipKey);
+        if(retained)return {preparing:false,options:{...options,rollingCore:undefined,corePeople:retained.people}};
         const corePeople:string[]=[];
         for(let offset=0;;offset+=100){
             const report=this.resolve({...basis,audienceOffset:offset},true);
             if(report.preparing)return {...report,preparing:true};
+            if(report.coreRoster){corePeople.push(...report.coreRoster);break;}
             for(const person of report.audience){
                 if(person.manualCore??(person.core&&report.summary.streams>=12))corePeople.push(person.id);
             }
             if(!report.audiencePage||offset+100>=report.audiencePage.total)break;
         }
-        return {preparing:false,options:{...options,rollingCore:undefined,corePeople:corePeople.sort()}};
+        corePeople.sort();
+        const bytes=serialize(corePeople).byteLength;
+        if(bytes<=4*1024*1024){
+            while(this.memberships.size>=8||this.membershipBytes+bytes>4*1024*1024){const key=this.memberships.keys().next().value!;this.membershipBytes-=this.memberships.get(key)!.bytes;this.memberships.delete(key);}
+            this.memberships.set(membershipKey,{people:corePeople,bytes});this.membershipBytes+=bytes;
+        }
+        return {preparing:false,options:{...options,rollingCore:undefined,corePeople}};
     }
     private sessionReport(options:AnalyticsOptions):Report{
         validateAnalyticsOptions(options);options=normalizeCoreOptions(options);
@@ -534,6 +549,14 @@ export class AnalyticsHistory {
         let next=reduction.next();
         while(!next.done){yield {preparing:true,ready:processed,total:sessions.length};next=reduction.next();}
         const fold=next.value,people=workspace.people,selectedStreams=fold.selectedStreams,sample=fold.sample;
+        if(options.membershipOnly){
+            const preferences=new Map((this.statement('SELECT person_id,manual_core FROM person_preferences').all() as {person_id:string;manual_core:number|null}[]).map(p=>[p.person_id,p.manual_core]));
+            const coreRoster=fold.people.filter(p=>{
+                const override=preferences.get(p.id);
+                return override==null?fold.selectedStreams>=12&&classifyCore(p.coreAttendanceCount,fold.selectedStreams,options.regularThresholdPercent??80,null):override===1;
+            }).map(p=>p.id).sort();
+            return {...validation,coreRoster,summary:{...validation.summary,streams:fold.selectedStreams}};
+        }
         for(const person of fold.people)people.set(person.id,person);
         for(const [id,people] of fold.categoryPeople)for(const person of people)workspace.categoryPerson(id,person);
         const categoryRows=new Map(fold.categories.map(c=>[c.id,c])),categories=new Map(fold.availableCategories.map(c=>[c.id,c]));
@@ -571,6 +594,7 @@ export class AnalyticsHistory {
     }
     private *finalizePeople(options:AnalyticsOptions,selectedStreams:number,people:AnalyticsWorkspace<Person>['people'],total:number){
         let sliceStart=performance.now();const processed=total;
+        const coreMembership=options.corePeople?new Set(options.corePeople):undefined;
         const preferences = new Map((this.statement('SELECT person_id,manual_core FROM person_preferences').all() as {
             person_id: string;
             manual_core: number | null;
@@ -580,7 +604,7 @@ export class AnalyticsHistory {
             const attendance = person.attendanceCount, ratio = selectedStreams ? attendance / selectedStreams : 0;
             const override = preferences.get(person.id);
             person.manualCore = override == null ? null : override === 1;
-            person.core = classifyCore(person.coreAttendanceCount,selectedStreams,options.regularThresholdPercent??80,person.manualCore,options.corePeople?.includes(person.id));
+            person.core = classifyCore(person.coreAttendanceCount,selectedStreams,options.regularThresholdPercent??80,person.manualCore,coreMembership?.has(person.id));
             person.regular = person.core;
             person.attendanceRatio = ratio;
             person.sessionRatio = selectedStreams ? person.sessionCount / selectedStreams : 0;
@@ -609,13 +633,16 @@ export class AnalyticsHistory {
                 }[])
                     negative.add(row.person_id);
         }
+        // Resolve inherited tags once for the whole roster, rather than one recursive
+        // query per participant. The workspace already holds the exact selected IDs.
+        const tags=new Map<string,string[]>();
+        const tagRows=this.db.prepare(`WITH RECURSIVE owners(person_id,origin_id) AS(SELECT id,id FROM ${people.table} UNION SELECT o.person_id,m.source_person_id FROM owners o JOIN person_merges m ON m.target_person_id=o.origin_id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT o.person_id,t.label FROM owners o JOIN person_tags t ON t.person_id=o.origin_id ORDER BY t.label`).all() as {person_id:string;label:string}[];
+        for(const row of tagRows){const list=tags.get(row.person_id)??[];list.push(row.label);tags.set(row.person_id,list);}
         const summary={entities:people.size,attendees:0,regulars:0,regularShare:null as number|null,core:0,streams:selectedStreams,chatters:0,messages:0};
         const composition:{bots?:number;core:number;followers:number;nonFollowers:number;unknown:number;twitch:number;youtube:number;both:number}={core:0,followers:0,nonFollowers:0,unknown:0,twitch:0,youtube:0,both:0};
         for (const person of people.values()) {
             person.follower = followers.has(person.id) ? true : negative.has(person.id) && !person.sources.includes('youtube') ? false : null;
-            person.tags = (this.statement(`WITH RECURSIVE owners(id) AS(SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON m.target_person_id=o.id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT t.label FROM person_tags t JOIN owners o ON o.id=t.person_id ORDER BY t.label`).all(person.id) as {
-                label: string;
-            }[]).map(t => t.label);
+            person.tags = tags.get(person.id)??[];
             people.set(person.id,person);summary.core+=Number(person.core);summary.chatters+=Number(person.messages>0);summary.messages+=person.messages;
             if(person.attendanceSessionIds.length){summary.attendees++;if(person.is_bot)composition.bots=(composition.bots??0)+1;composition.core+=Number(!person.is_bot&&person.core);composition.followers+=Number(!person.is_bot&&!person.core&&person.follower===true);composition.nonFollowers+=Number(!person.is_bot&&!person.core&&person.follower===false);composition.unknown+=Number(!person.is_bot&&!person.core&&person.follower===null);composition.twitch+=Number(person.sources.includes('twitch'));composition.youtube+=Number(person.sources.includes('youtube'));composition.both+=Number(person.sources.length>1);}
             if(performance.now()-sliceStart>250){yield {preparing:true as const,ready:processed,total:total*2};sliceStart=performance.now();}

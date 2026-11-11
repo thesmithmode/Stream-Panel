@@ -20,7 +20,7 @@ test('renamed Twitch and YouTube owners stay excluded in their profile and remai
       const ruslan=twitch(s,owner,'before','ruslan-id','Fullrandomname_twitch');
       const gulnaz=twitch(s,owner,'gulnaz','gulnaz-id','AmaliaMelina');
       s.youtubeMessages(ytOwner,'chat',[message('yt-before','ruslan-yt','Fullrandomname'),message('yt-gulnaz','gulnaz-yt','GulnazYouTube')]);
-      const ytRuslan=String(s.persons().find(p=>(s.person(String(p.id)).identities as any[]).some(i=>i.source==='youtube'&&i.external_id==='ruslan-yt'))!.id);
+      const ytRuslan=String(((s as any).db.prepare("SELECT person_id FROM youtube_identities WHERE account_id=? AND external_id='ruslan-yt'").get(ytOwner) as {person_id:string}).person_id);
       s.merge(ytRuslan,ruslan,s.personRevision(ytRuslan),s.personRevision(ruslan),at);
       s.ensureOwnerIdentity(owner,owner,profile==='ruslan'?'rlod':'AmaliaMelina',at+minute);
       assert.equal(twitch(s,owner,'after','ruslan-id','rlod',at+minute),ruslan);
@@ -69,7 +69,7 @@ test('provider renames update automatic card names while preserving explicit gro
     s.youtubeMessages('channel','chat',[message('3','yt-author','NextName',at+2*minute)]);
     assert.equal(s.person(yt).display_name,'YouTube group');
     assert.deepEqual(s.candidatePersons('Fullrandomname'),[yt]);
-    assert.equal(s.persons().length,2);
+    assert.equal(s.persons().length,1);
   }finally{s.close();}
 });
 

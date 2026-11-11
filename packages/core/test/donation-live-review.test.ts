@@ -31,9 +31,9 @@ test('read query count remains bounded as streams and donation pages grow',()=>{
  const db=(s as unknown as {db:{prepare:(...args:unknown[])=>unknown}}).db,prepare=db.prepare.bind(db);let queries=0;db.prepare=(...args)=>{queries++;return prepare(...args);};
  s.personStats(person);const small=queries;
  for(let i=1;i<101;i++)make(i);queries=0;s.personStats(person);assert.equal(queries,small,'opening a person must not add SQL round trips for each historical stream');
- queries=0;s.sessions();assert.ok(queries<=6,'stream cards use batch reads');
+ queries=0;s.sessions();assert.ok(queries<=7,'stream cards use batch reads');
  for(let i=0;i<20;i++)s.ingest(tip('page'+i));queries=0;s.donations();assert.equal(queries,2,'donations require a page and a count, not a query per row');
- queries=0;s.personsTop('observed_minutes');assert.ok(queries<=6,'ranking must not query each viewer/stream combination');
+ queries=0;s.personsTop('observed_minutes');assert.ok(queries<=7,'ranking must not query each viewer/stream combination');
  }finally{s.close();}
 });
 test('reimport preserves an explicitly cleared correction time; reassignment of a deleted timed donation restores its stream',()=>{

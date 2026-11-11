@@ -12,6 +12,8 @@ import {streamMetrics} from './stream-metrics.js';
 import {windowsFromLinks,sessionBreaks} from './session-windows.js';
 import {PersonBots,databaseBotExclusions} from "./person-bots.js";
 export interface AnalyticsOptions {
+    /** Internal attendance roster; never accepted from an HTTP query. */
+    membershipOnly?:boolean;
     /** Internal, server-selected rolling membership; never accepted from query input. */
     rollingCore?: boolean | undefined;
     coreWindowDays?: number;
@@ -122,6 +124,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     if(options.sessionId&&!recording)throw new Error('SESSION_NOT_FOUND');
     const from=recording?Math.max(options.fromMs,recording.started_at_ms):options.fromMs,to=recording?Math.min(options.toMs,recording.ended_at_ms??options.toMs):options.toMs;
     const {source,category,timezone,regularThresholdPercent,minSessions,minMinutes,minMessages,window,rule,clock}=validateAnalyticsOptions(options,from,to);
+    const coreMembership=options.corePeople?new Set(options.corePeople):undefined;
     const botPeople=new Set(new PersonBots(db).decorate(db.prepare("SELECT DISTINCT person_id id FROM identities WHERE source='twitch' AND match_key IN(SELECT value FROM json_each(?)) UNION SELECT person_id FROM manual_bot_people UNION SELECT person_id FROM youtube_identities WHERE match_key IN('streamelements','streemelements')").all(JSON.stringify([...botExclusionSet(options.excludedLogins||[])])) as {id:string}[],p=>p.id,options.excludedLogins||[]).filter(p=>p.is_bot).map(p=>p.id));
     const excluded = databaseBotExclusions(db,options.excludedLogins ?? []), botJson = JSON.stringify([...excluded]);
     const sessions = db.prepare('SELECT * FROM sessions WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id) AND started_at_ms<? AND coalesce(ended_at_ms,?)>? AND (? IS NULL OR id=?) ORDER BY started_at_ms LIMIT 1001').all(to, to, from, options.sessionId??null,options.sessionId??null) as any[];
@@ -389,7 +392,7 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
         e.coreSessionIds = [...e.attendanceSessionIds].filter(id => (coreDurations.get(id) ?? 0)>0 && (coreTime.get(id) ?? 0)*5 >= coreDurations.get(id)!);
         const override=preferences.get(e.id);
         e.manualCore=override==null?null:override===1;
-        e.core=classifyCore(e.coreSessionIds.length,selectedStreamCount,regularThresholdPercent,e.manualCore,options.corePeople?.includes(e.id));
+        e.core=classifyCore(e.coreSessionIds.length,selectedStreamCount,regularThresholdPercent,e.manualCore,coreMembership?.has(e.id));
         e.follower=followerPeople.has(e.id)?true:negativeFollowers.has(e.id)&&!e.sources.includes('youtube')?false:null;
         e.regular=e.core; // Compatibility fields refer to the same audience core.
         const signalMinutes=new Set<string>();

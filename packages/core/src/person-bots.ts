@@ -66,6 +66,7 @@ PRAGMA user_version=32;
 /** Names use the existing list; manual decisions use person IDs, never names. */
 export function databaseBotExclusions(db:Database.Database,extra:readonly string[]|false=[]):ReadonlySet<string>{
  const keys=new Set(botExclusionSet(extra));
+ for(const row of db.prepare('SELECT person_id FROM service_people').all() as {person_id:string}[])keys.add('owner:'+row.person_id);
  if(extra!==false)for(const row of db.prepare('SELECT person_id FROM manual_bot_people').all() as {person_id:string}[])keys.add('person:'+row.person_id);
  return keys;
 }
@@ -131,12 +132,13 @@ export class PersonBots {
   }).immediate();
  }
  private clearHumanCards(id:string){this.db.prepare(`WITH RECURSIVE owners(id) AS(SELECT ? UNION SELECT m.source_person_id FROM person_merges m JOIN owners o ON o.id=m.target_person_id WHERE m.undone_at_ms IS NULL) DELETE FROM person_human_cards WHERE person_id IN(SELECT id FROM owners)`).run(id);}
- decorate<T>(rows:T[],id:(row:T)=>string|null|undefined,extra:readonly string[]=[]):(T&{is_bot:number;is_donor:boolean;is_human:boolean})[]{
+ decorate<T>(rows:T[],id:(row:T)=>string|null|undefined,extra:readonly string[]=[],hideServices=true):(T&{is_bot:number;is_donor:boolean;is_human:boolean})[]{
   const ids=JSON.stringify([...new Set(rows.map(id).filter(Boolean))]),keys=JSON.stringify([...botExclusionSet(extra)]);
   const states=this.db.prepare(`SELECT p.id,EXISTS(SELECT 1 FROM manual_neutral_people n WHERE n.person_id=p.id) neutral,EXISTS(SELECT 1 FROM human_people h WHERE h.person_id=p.id) human,EXISTS(SELECT 1 FROM donor_people d WHERE d.person_id=p.id) donor,
    (EXISTS(SELECT 1 FROM manual_bot_people b WHERE b.person_id=p.id) OR EXISTS(SELECT 1 FROM identities i WHERE i.person_id=p.id AND i.source='twitch' AND i.match_key IN(SELECT value FROM json_each(?))) OR EXISTS(SELECT 1 FROM youtube_identities y WHERE y.person_id=p.id AND y.match_key IN('streamelements','streemelements'))) bot
    FROM persons p WHERE p.id IN(SELECT value FROM json_each(?))`).all(keys,ids) as {id:string;donor:number;bot:number;human:number;neutral:number}[];
   const map=new Map(states.map(s=>[s.id,s]));
-  return rows.map(row=>{const s=map.get(id(row)??'');return {...row,is_bot:Number(!!s?.bot&&!s?.human&&!s?.neutral),is_donor:!!s?.donor,is_human:!!s?.human};});
+  const service=new Set((hideServices?this.db.prepare('SELECT person_id FROM service_people WHERE person_id IN(SELECT value FROM json_each(?))').all(ids) as {person_id:string}[]:[]).map(p=>p.person_id));
+  return rows.filter(row=>!service.has(id(row)??'')).map(row=>{const s=map.get(id(row)??'');return {...row,is_bot:Number(!!s?.bot&&!s?.human&&!s?.neutral),is_donor:!!s?.donor,is_human:!!s?.human};});
  }
 }

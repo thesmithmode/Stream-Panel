@@ -9,28 +9,34 @@ import {matchesActivityDay,type TimeAudienceSummary} from './time-audience.js';
 
 /** File-backed scratch data, private to this connection and excluded from backups. */
 export class DiskMap<T> {
- constructor(private db:Database.Database,readonly table:string,existing=false){
+ private statements=new Map<string,Database.Statement>();
+ private statement(sql:string){let value=this.statements.get(sql);if(!value){value=this.db.prepare(sql);this.statements.set(sql,value);}return value;}
+ private indexed=new Set<string>();
+ constructor(private db:Database.Database,readonly table:string,private existing=false){
   db.function('sp_analytics_lower',{deterministic:true},value=>String(value).toLowerCase());
   if(!existing)db.exec(`CREATE TEMP TABLE ${table}(id TEXT PRIMARY KEY,value TEXT NOT NULL,seen INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID`);
  }
- get(id:string):T|undefined{const row=this.db.prepare(`SELECT value FROM ${this.table} WHERE id=?`).get(id) as {value:string}|undefined;return row?JSON.parse(row.value) as T:undefined;}
- set(id:string,value:T){this.db.prepare(`INSERT INTO ${this.table}(id,value) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value`).run(id,JSON.stringify(value));}
- get size(){return (this.db.prepare(`SELECT count(*) n FROM ${this.table}`).get() as {n:number}).n;}
+ get(id:string):T|undefined{const row=this.statement(`SELECT value FROM ${this.table} WHERE id=?`).get(id) as {value:string}|undefined;return row?JSON.parse(row.value) as T:undefined;}
+ set(id:string,value:T){this.statement(`INSERT INTO ${this.table}(id,value) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value`).run(id,JSON.stringify(value));}
+ get size(){return (this.statement(`SELECT count(*) n FROM ${this.table}`).get() as {n:number}).n;}
  *values():Generator<T>{
   let after='';
   for(;;){
-   const rows=this.db.prepare(`SELECT id,value FROM ${this.table} WHERE id>? ORDER BY id LIMIT 32`).all(after) as {id:string;value:string}[];
+   const rows=this.statement(`SELECT id,value FROM ${this.table} WHERE id>? ORDER BY id LIMIT 32`).all(after) as {id:string;value:string}[];
    if(!rows.length)return;
    for(const row of rows){after=row.id;yield JSON.parse(row.value) as T;}
   }
  }
- firstVisit(id:string){return this.db.prepare(`UPDATE ${this.table} SET seen=1 WHERE id=? AND seen=0`).run(id).changes===1;}
+ firstVisit(id:string){return this.statement(`UPDATE ${this.table} SET seen=1 WHERE id=? AND seen=0`).run(id).changes===1;}
  page(offset=0,search='',sort='core',coreOnly=false,limit=100,attendanceOnly=false){
   const fields:Record<string,string>={sessions:'sessionCount',observedMinutes:'observedMinutes',estimatedChatMinutes:'estimatedChatMinutes',messages:'messages',attendanceRatio:'attendanceRatio'};
   const metric=fields[sort],baseOrder="json_extract(value,'$.core') DESC,json_extract(value,'$.observedMinutes') DESC,json_extract(value,'$.messages') DESC",order=metric?`json_extract(value,'$.${metric}') DESC,${baseOrder}`:baseOrder;
+  if(!this.existing&&!this.indexed.has(order)){
+   this.db.exec(`CREATE INDEX ${this.table}_page_${metric??'core'} ON ${this.table}(${order},id)`);this.indexed.add(order);
+  }
   const where="(?=0 OR json_extract(value,'$.core')=1) AND (?='' OR instr(sp_analytics_lower(json_extract(value,'$.name')),sp_analytics_lower(?))>0) AND (?=0 OR json_array_length(value,'$.attendanceSessionIds')>0)";
-  const total=(this.db.prepare(`SELECT count(*) n FROM ${this.table} WHERE ${where}`).get(Number(coreOnly),search,search,Number(attendanceOnly)) as {n:number}).n;
-  const rows=this.db.prepare(`SELECT value FROM ${this.table} WHERE ${where} ORDER BY ${order},id LIMIT ? OFFSET ?`).all(Number(coreOnly),search,search,Number(attendanceOnly),limit,offset) as {value:string}[];
+  const total=(this.statement(`SELECT count(*) n FROM ${this.table} WHERE ${where}`).get(Number(coreOnly),search,search,Number(attendanceOnly)) as {n:number}).n;
+  const rows=this.statement(`SELECT value FROM ${this.table} WHERE ${where} ORDER BY ${order},id LIMIT ? OFFSET ?`).all(Number(coreOnly),search,search,Number(attendanceOnly),limit,offset) as {value:string}[];
   return {items:rows.map(row=>JSON.parse(row.value) as T),total,offset,limit};
  }
 }

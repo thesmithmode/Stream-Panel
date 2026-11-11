@@ -8,7 +8,7 @@ type Store = StorePort<'supplementaryParticipants' | 'currentChat' | 'matchingSt
 export function registerStreamsRoutes(app: FastifyInstance, db: Store, configuration: ConfigurationPort) {
     const botsFor=(query:unknown)=>analyticsBotLogins(object(query),configuration.value);
     app.post('/api/v1/followers/person',request=>{const b=object(request.body);return db.call('followerPerson',string(b.source),string(b.account),string(b.externalId));});
-    app.get('/api/v1/followers/changes',request=>{const q=object(request.query);return db.call('followerChanges',Number(q.from??0),Number(q.to??Date.now()));});
+    app.get('/api/v1/followers/changes',request=>{const q=object(request.query);return db.call('followerChanges',Number(q.from??0),Number(q.to??Date.now()),botsFor(q));});
     app.get('/api/v1/events/recent',request=>{const q=object(request.query);return db.call('recentEvents',Number(q.offset??0),Number(q.limit??100),{...(string(q.session)?{session:string(q.session)}:{}),...(string(q.person)?{person:string(q.person)}:{}),messagesOnly:string(q.messages)==='1'});});
     for(const path of ['/api/v1/analytics/subscribers','/api/v1/analytics/subscriber-streams'])app.get(path,request=>{
       const q=object(request.query),source=string(q.source);
@@ -50,7 +50,7 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
       return conditionalResponse(request,reply,await db.call('currentChat',string(object(request.params).id),botsFor(request.query),string(q.includeExcluded)==='1'));
     });
     app.get('/api/v1/sessions/:id/supplementary-chat',request=>db.call('supplementaryParticipants',string(object(request.params).id),botsFor(request.query)));
-    app.get("/api/v1/sessions/:id/followers", async (request) => db.call("followingAnalytics", string(object(request.params).id)));
+    app.get("/api/v1/sessions/:id/followers", async (request) => db.call("followingAnalytics", string(object(request.params).id),botsFor(request.query)));
     app.get("/api/v1/sessions/:id/metadata", async (request) => db.call('streamMetadata', string(object(request.params).id)));
     app.post('/api/v1/sessions/merge',async request=>({id:await db.call('mergeSessions',object(request.body).sessionIds as string[])}));
     app.post('/api/v1/sessions/:id/unmerge',async request=>{await db.call('unmergeSessions',string(object(request.params).id));return {ok:true};});

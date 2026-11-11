@@ -1,3 +1,5 @@
+import {botExclusionSet,isExcludedBot} from './bots.js';
+import {databaseBotExclusions} from './person-bots.js';
 import {streamFollowerObservationsSql} from './follower-queries.js';
 import {sessionWindows} from './session-windows.js';
 import type Database from 'better-sqlite3';
@@ -72,7 +74,7 @@ function streamUnfollowers(db:Database.Database,start:number,end:number,windows:
  }
  return changes;
 }
-export function followingAnalytics(db:Database.Database,id:string,range?:{fromMs:number;toMs:number}){
+export function followingAnalytics(db:Database.Database,id:string,range?:{fromMs:number;toMs:number},excluded:readonly string[]|false=[]){
  const stream=range?{start:range.fromMs,end:range.toMs}:db.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=?').get(id) as {start:number;end:number|null};const end=stream.end??Date.now(),windows=range?[{from:stream.start,to:end}]:sessionWindows(db,id,stream.start,end);
  const compact=streamFollowerObservationsSql.replace('AS at,payload_json','AS at,(SELECT snapshot_id FROM follower_checks WHERE id=p.id) AS snapshotId');
  const checks=db.prepare(compact).all(stream.start,end) as {at:number;source:string;account:string;snapshotId:string}[];
@@ -95,7 +97,14 @@ export function followingAnalytics(db:Database.Database,id:string,range?:{fromMs
  UNION ALL SELECT r.source,r.account,r.external_id AS externalId,i.person_id AS personId,(SELECT display_name FROM persons WHERE id=i.person_id) AS personName FROM requested r JOIN youtube_identities i ON i.account_id=r.account AND i.external_id=r.external_id WHERE r.source='youtube'`).all(requested) as {source:string;account:string;externalId:string;personId:string;personName:string}[];
  const people=new Map(linked.map(i=>[JSON.stringify([i.source,i.account,i.externalId]),i]));
  for(const f of [...signups.values(),...unfollowers]){const person=people.get(JSON.stringify([f.source,f.account,f.externalId]));f.personId=person?.personId??null;if(person?.personName)f.name=person.personName;}
- const newFollowers=[...signups.values()].sort((a,b)=>b.at-a.at||Number(b.personId!==null)-Number(a.personId!==null)||a.externalId.localeCompare(b.externalId));
+ const exclusions=databaseBotExclusions(db,excluded),services=botExclusionSet(),optional=botExclusionSet(excluded);
+ const humans=new Set((db.prepare('SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people').all() as {person_id:string}[]).map(p=>p.person_id));
+ const visible=(f:{source:string;account:string;externalId:string;name:string;personId:string|null})=>{
+  if(f.externalId===f.account||f.personId&&exclusions.has('owner:'+f.personId))return false;
+  if(f.source==='twitch'?isExcludedBot(f.name,services):['streamelements','streemelements'].includes(f.name.toLowerCase()))return false;
+  return !(f.personId&&exclusions.has('person:'+f.personId))&&((f.personId&&humans.has(f.personId))||!isExcludedBot(f.name,optional));
+ };
+ const newFollowers=[...signups.values()].filter(visible).sort((a,b)=>b.at-a.at||Number(b.personId!==null)-Number(a.personId!==null)||a.externalId.localeCompare(b.externalId));
  const observations=polls.filter(p=>p.at>=stream.start&&p.at<=end).map(p=>{const data=snapshot(p.payload_json);return {at:p.at,source:p.source,account:p.account,total:p.source==='youtube'?data.total:data.total??(data.complete?data.followers.length:null),visibleCount:data.followers.length,complete:data.complete};});
  const accounts=new Map<string,{source:string;account:string}>();
  for(const p of polls)accounts.set(`${p.source}:${p.account}`,p);
@@ -107,5 +116,5 @@ export function followingAnalytics(db:Database.Database,id:string,range?:{fromMs
   const comparable=source==='twitch'&&first!==undefined&&last!==undefined&&first.at<last.at;
   return {source,account,knownNew:newFollowers.filter(f=>f.source===source&&f.account===account).length,change:comparable?last.total!-first.total!:null,fromAt:comparable?first.at:null,toAt:comparable?last.at:null,startTotal:comparable?first.total:null,endTotal:comparable?last.total:null};
  });
- return {newFollowers,unfollowers:unfollowers.sort((a,b)=>b.at-a.at),platforms,polls:observations};
+ return {newFollowers,unfollowers:unfollowers.filter(visible).sort((a,b)=>b.at-a.at),platforms,polls:observations};
 }

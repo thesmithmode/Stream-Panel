@@ -15,17 +15,16 @@ test('OAuth validation applies a Twitch rename to the existing owner and complet
     const sid=(await db.call('observePlatformStream','twitch','owner','broadcast',at,at,'https://www.twitch.tv/Fullrandomname_twitch','Past stream'))!;
     await db.call('endSession',sid,at+60000);
     await (connection as any).validate();
-    const before=await db.call('persons');
+    const before=await db.call('candidatePersons','Fullrandomname_twitch');assert.equal(before.length,1);
     login='rlod';await (connection as any).validate();
     assert.equal(connection.status.account,'rlod');
     assert.equal(config.value.twitch?.userId,'owner');
     assert.equal(config.value.twitch?.refresh,'refresh');
     const after=await db.call('persons');
-    assert.equal(after.length,1);assert.equal(after[0]!.id,before[0]!.id);
-    assert.equal(after[0]!.display_name,'rlod');
-    assert.equal(after[0]!.is_bot,1,'owner remains excluded');
+    assert.equal(after.length,0,'owner is never an audience row');
+    assert.equal((await db.call('person',before[0]!)).display_name,'rlod');
     assert.deepEqual((await db.call('sessions',sid))[0]!.confirmedUrls,[{platform:'twitch',url:'https://www.twitch.tv/rlod'}]);
-    assert.deepEqual(await db.call('candidatePersons','Fullrandomname_twitch'),[before[0]!.id]);
+    assert.deepEqual(await db.call('candidatePersons','Fullrandomname_twitch'),[before[0]!]);
   }finally{await connection.stop();await db.stop();}
 });
 

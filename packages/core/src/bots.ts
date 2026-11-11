@@ -1,8 +1,10 @@
 import { matchKey } from "./domain.js";
 
-/** Well-known Twitch chat bots (logins). Events stay stored; analytics can exclude them. */
+/** Known Twitch service chatbots (logins). Audience views always hide them; events stay stored. */
 export const WELL_KNOWN_TWITCH_BOTS: readonly string[] = [
   "jeetbot",
+  "streamerbot",
+  "streamer_bot",
   "streemelements",
   "nightbot",
   "streamelements",

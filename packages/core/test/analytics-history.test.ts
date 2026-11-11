@@ -6,6 +6,28 @@ import {AnalyticsHistory,type ClockBucket} from '../src/analytics-history.js';
 import {AnalyticsWorkspace} from '../src/analytics-workspace.js';
 import {audienceAnalytics} from '../src/analytics.js';
 const base=Date.UTC(2026,9,1),minute=60000;
+test('rolling roster retains more than a page of people and manual overrides without repeating report preparation',t=>{
+ const now=Date.now();t.mock.method(Date,'now',()=>now);
+ const s=new StreamStore(':memory:');
+ try{
+  const users=Array.from({length:120},(_,i)=>'member'+i);let selected='';
+  for(let i=0;i<12;i++){
+   const at=now-(14-i)*86400000,id=s.startSession('owner','roster'+i,at,'platform',at);selected=id;
+   s.recordPoll(id,'owner',{startedAtMs:at,completedAtMs:at+minute,status:'complete',userIds:i===11?[...users,'rare']:users});s.endSession(id,at+2*minute);
+  }
+  const first=s.candidatePersons('member0')[0]!,rare=s.candidatePersons('rare')[0]!;
+  s.setPersonMetadata(first,[],false,s.personRevision(first));s.setPersonMetadata(rare,[],true,s.personRevision(rare));
+  const q={sessionId:selected,fromMs:0,toMs:now,rollingCore:true,timezone:'UTC'};
+  const read=()=>{for(let i=0;i<100;i++){const report=s.analytics(q);if(!report.preparing)return report;}throw Error('roster never completed');};
+  const raw=audienceAnalytics((s as any).reads,{fromMs:Math.floor(now/minute)*minute-90*86400000,toMs:Math.floor(now/minute)*minute,timezone:'UTC'});
+  const expected=raw.audience.filter(p=>p.manualCore??(p.core&&raw.summary.streams>=12)).map(p=>p.id).sort();
+  assert.equal(expected.length,120);assert.deepEqual(read().audience.filter(p=>p.core).map(p=>p.id).sort(),expected);
+  const history=(s as any).history,resolve=history.resolve.bind(history);let rosterReads=0;
+  history.resolve=(options:any,...args:any[])=>{if(options.membershipOnly)rosterReads++;return resolve(options,...args);};
+  assert.deepEqual(read().audience.filter(p=>p.core).map(p=>p.id).sort(),expected);assert.equal(rosterReads,0);
+  s.setPersonMetadata(first,[],true,s.personRevision(first));assert.equal(read().audience.filter(p=>p.core).length,121);assert.ok(rosterReads>0);
+ }finally{s.close();}
+});
 function fixture(s:StreamStore,n=4,youtube=false){for(let i=0;i<n;i++){
  const at=base+i*86400000,sid=s.startSession('owner',String(i),at,'platform',at);
  s.streamSample(sid,at,'game','Game','',11);

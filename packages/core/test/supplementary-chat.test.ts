@@ -38,7 +38,7 @@ test('supplementary lists exclude owners and bots, respect manual intervals and 
   s.youtubeSnapshot('second','collectionRole','secondary',now);
   s.youtubeMessages('second','chat',[msg('bot','bot',now-1000),{...msg('owner','second',now-1000),authorDetails:{channelId:'second',displayName:'Owner',isChatOwner:true}},msg('viewer','normal',now-1000)]);
   assert.equal(s.supplementaryParticipants(id,['owner:youtube:bot'],now).length,1);
-  assert.equal(new SupplementaryChat((s as any).db).participants(id,'["bot"]',now,false,true).length,3);
+  assert.equal(new SupplementaryChat((s as any).db).participants(id,'["bot"]',now,false,true).length,2);
   s.youtubeSnapshot('second','collectionRole','primary',now);assert.equal(s.supplementaryParticipants(id,[],now).length,0);assert.equal(s.person('youtube:normal').youtubeSecondary,false);
   s.deleteSession(id,now);assert.equal(s.supplementaryParticipants(id,[],now).length,0);
  }finally{s.close();}
