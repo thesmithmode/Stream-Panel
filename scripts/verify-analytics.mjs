@@ -48,6 +48,18 @@ try{
     periods.push({days,firstReadyMs:cold.ms,firstRequests:cold.requests,hotReadyMs:hot.ms,shiftedReadyMs:shifted.ms,shiftedRequests:shifted.requests});
    }
    console.log(JSON.stringify({analyticsProbe:true,profile,active,firstReadyMs:first.ms,firstRequests:first.requests,warmMs,hotReadyMs:repeat.ms,hotRequests:repeat.requests,streams:repeat.report.summary.streams,responseBytes:Buffer.byteLength(JSON.stringify(repeat.report)),compactResponseBytes:Buffer.byteLength(JSON.stringify(compact.report)),compactHotReadyMs:compact.ms,gzipBytes:gzipSync(JSON.stringify(repeat.report),{level:1}).length,periods}));
+   // Validate existing completed streams in both modes, on the private copy only.
+   const services=new Set(store.db.prepare('SELECT person_id FROM service_people').all().map(p=>p.person_id));
+   const recent=store.sessions(undefined,0,4,false).filter(s=>s.ended_at_ms!==null).slice(0,3);
+   for(const session of recent)for(const includeBots of [false,true]){
+    const excluded=includeBots?false:cfg.excludedBotLogins??[];
+    const report=read({...options,sessionId:session.id,fromMs:0,toMs:session.ended_at_ms,includeInsights:false,excludedLogins:excluded}).report;
+    const row=store.sessions(session.id,0,1,excluded)[0],mean=report.streamComparison[0]?.viewers.known.mean??null;
+    if(!row||report.audience.some(p=>services.has(p.id)))throw Error('HISTORICAL_SERVICE_ACCOUNT_VISIBLE');
+    if(row.viewerKnownMean!==mean&&!(Number.isFinite(row.viewerKnownMean)&&Number.isFinite(mean)&&Math.abs(row.viewerKnownMean-mean)<=1e-8))throw Error('HISTORICAL_VIEWER_COUNT_MISMATCH');
+    if(report.summary.messages!==store.summary(session.id,excluded,false).messages)throw Error('HISTORICAL_MESSAGE_COUNT_MISMATCH');
+    console.log(JSON.stringify({historicalViewerProbe:true,profile,startedAt:session.started_at_ms,includeBots,viewers:mean,messages:report.summary.messages,serviceAccountsVisible:0}));
+   }
   }finally{store.close();}
  }
 }finally{source.close();await rm(staging,{recursive:true,force:true});}

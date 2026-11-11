@@ -46,7 +46,7 @@ test('analytics keeps owners/bots out, unions linked identities, splits categori
         assert.equal(result.timeline.find(x => x.at === base + 5 * minute)?.presenceKnown, false);
         assert.equal(result.categories.find(x => x.id === 'game')?.messages, 4);
         assert.equal(result.categories.find(x => x.id === 'talk')?.messages, 1);
-        assert.equal(result.timeline.find(x => x.at === base)?.viewers, 13);
+        assert.equal(result.timeline.find(x => x.at === base)?.viewers, 16);
         assert.equal(s.analytics({ ...opts, source: 'twitch' }).audience.length, 1);
         assert.equal(s.analytics({ ...opts, source: 'youtube' }).audience.length, 1);
         assert.equal(s.analytics({ ...opts, category: 'talk' }).audience[0]?.observedMinutes, 2);

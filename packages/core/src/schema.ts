@@ -1,3 +1,4 @@
+import {serviceAccountsSchema} from './service-accounts.js';
 import {botExclusionSet} from './bots.js';
 import {personBotSchema} from './person-bots.js';
 import {viewerAdjustmentSchema} from './viewer-adjustment.js';
@@ -616,7 +617,7 @@ UPDATE analytics_global_revision SET revision=revision+1;
 UPDATE ui_revisions SET revision=revision+1;
 PRAGMA user_version=34;
 `;
-export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24,schemaV25,changeRevisionSchema,analyticsRevisionSchema,overviewRevisionSchema,sharedIdentitySchema,schemaV30,donationFxSchema,personBotSchema,viewerAdjustmentSchema,botAnalyticsSchema] as const;
+export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24,schemaV25,changeRevisionSchema,analyticsRevisionSchema,overviewRevisionSchema,sharedIdentitySchema,schemaV30,donationFxSchema,personBotSchema,viewerAdjustmentSchema,botAnalyticsSchema,serviceAccountsSchema] as const;
 export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;
 
 

@@ -225,7 +225,7 @@ export class StreamStore {
   personsPage(search = "", excludedBotLogins: readonly string[] | false = [], fromMs=0, offset=0, limit=50, botFilter="humans") {
     const page=this.queries.personsPage(search,excludedBotLogins,fromMs,offset,limit,botFilter);return {...page,items:new SupplementaryChat(this.db).decorate(this.bots.decorate(page.items,p=>String(p.id),excludedBotLogins===false?[]:excludedBotLogins),p=>String(p.id))};
   }
-  person(id: string,includeEvents=true) {const person=this.queries.person(id,includeEvents);return {...person,...new SupplementaryChat(this.db).decorate(this.bots.decorate([person],p=>String(p.id)),p=>String(p.id))[0]};}
+  person(id: string,includeEvents=true) {const person=this.queries.person(id,includeEvents);return {...person,...new SupplementaryChat(this.db).decorate(this.bots.decorate([person],p=>String(p.id),[],false),p=>String(p.id))[0]};}
   events(
     sessionId?: string,
     personId?: string,
@@ -485,8 +485,8 @@ export class StreamStore {
   subscriberHistory(query:SubscriberQuery){return new SubscriberHistory(this.db).query(query);}
   youtubePublications(account:string,items:Publication[],at:number){new SubscriberHistory(this.db).publications(account,items,at);}
   personFollowing(personId:string,sessionId=''){sessionId=sessionId?this.groups.root(sessionId):'';if(!this.db.prepare('SELECT 1 FROM persons WHERE id=?').get(personId))throw new Error('PERSON_NOT_FOUND');if(sessionId)this.sessionRow(sessionId);return personFollowing(this.reads,personId,sessionId);}
-  followerChanges(fromMs:number,toMs:number){if(!Number.isSafeInteger(fromMs)||!Number.isSafeInteger(toMs)||fromMs<0||toMs<=fromMs||toMs>8640000000000000)throw Error('INVALID_PERIOD');return followingAnalytics(this.reads,'',{fromMs,toMs});}
-  followingAnalytics(sessionId:string){sessionId=this.groups.root(sessionId);this.sessionRow(sessionId);return followingAnalytics(this.reads,sessionId);}
+  followerChanges(fromMs:number,toMs:number,excluded:readonly string[]|false=[]){if(!Number.isSafeInteger(fromMs)||!Number.isSafeInteger(toMs)||fromMs<0||toMs<=fromMs||toMs>8640000000000000)throw Error('INVALID_PERIOD');return followingAnalytics(this.reads,'',{fromMs,toMs},excluded);}
+  followingAnalytics(sessionId:string,excluded:readonly string[]|false=[]){sessionId=this.groups.root(sessionId);this.sessionRow(sessionId);return followingAnalytics(this.reads,sessionId,undefined,excluded);}
   streamMetadata(sessionId:string){
     sessionId=this.groups.root(sessionId);this.sessionRow(sessionId);
     return this.reads.prepare(`SELECT observed_at_ms AS at,category_id AS categoryId,category_name AS categoryName,title
