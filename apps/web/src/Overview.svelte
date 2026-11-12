@@ -40,7 +40,7 @@
     changed:()=>Promise<void>;
     onStream:(id:string)=>void;
   } = $props();
-  let audienceData=$state<any>(null),audienceError=$state(''),audienceBusy=$state(false);
+  let audienceData=$state.raw<any>(null),audienceError=$state(''),audienceBusy=$state(false);
   let audienceMetric=$state<ChartMetric>('viewers');
   const viewerMetrics=$derived(audienceData?.streamComparison?.[0]?.viewers);
   const viewers=$derived(viewerMetrics?(viewerMetrics.known?.partialMinutes?viewerMetrics.known:viewerMetrics.all):session?{mean:session.viewerKnownMean??session.viewerMean,peak:session.viewerKnownPeak??session.viewerPeak}:undefined);
@@ -53,8 +53,10 @@
   function setResolution(value:number){resolution=value;try{localStorage.setItem(`sp-stream-resolution-${getProfile()}`,String(value));}catch{/* Preferences are optional. */}}
   let supplemental=$state<any[]>([]);
   const participants=$derived(withSupplementaryChat(audienceData?.audience??[],supplemental));
+  const live=$derived(session?.ended_at_ms===null);
+  const tabs=$derived([['summary','Итоги'],['people','Участники'],...(live?[['current','Текущие зрители']]:[]),['events','События']] as [string,string][]);
   let activeTab=$state('summary');
-  $effect(()=>{activeTab=['summary','people','current','events'].includes(section)?section:'summary';});
+  $effect(()=>{activeTab=tabs.some(([id])=>id===section)?section:'summary';});
   const decimal=(n:number)=>n.toLocaleString('ru-RU',{maximumFractionDigits:1});
   let metadata=$state<Array<{at:number;title:string;categoryName:string}>>([]);
   let audienceRequest=0,lastAudienceSession='';
@@ -91,7 +93,7 @@
  {#if summary.donations>0}<div><span>Донаты</span><strong>{Object.keys(summary.totals).length?Object.entries(summary.totals).map(([c,a])=>money(a,c)).join(' · '):'—'}</strong></div>{/if}
  <div><span>Сообщения</span><strong>{summary.messages.toLocaleString('ru-RU')}</strong></div>
 </section>
-<SectionTabs items={[["summary","Итоги"],["people","Участники"],["current","Текущие зрители"],["events","События"]]} bind:value={activeTab} onchange={()=>onSection(activeTab)} label="Разделы эфира" panelId="stream-tabpanel"/>
+<SectionTabs items={tabs} bind:value={activeTab} onchange={()=>onSection(activeTab)} label="Разделы эфира" panelId="stream-tabpanel"/>
 <div id="stream-tabpanel" role="tabpanel" aria-label={activeTab==='summary'?'Итоги':activeTab==='people'?'Участники':activeTab==='current'?'Текущие зрители':'События'}>
 {#if activeTab==='summary'}
 <section class="panel series-panel">
@@ -107,7 +109,7 @@
 
 <Insights sessionId={sessionFilter} refreshToken={summary} {onPerson} {onStream} />
 {#if sessionFilter}<StreamDonations sessionId={sessionFilter} {onPerson} {changed}/><Following hideEmpty sessionId={sessionFilter} {onPerson}/>{/if}
-{:else if activeTab==='current'}
+{:else if activeTab==='current'&&live}
 <CurrentChatParticipants sessionId={sessionFilter} {onPerson}/>
 {:else if activeTab==='people'}
 {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceBusy}<p role="status">Загружаем участников…</p>{:else}

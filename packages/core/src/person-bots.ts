@@ -63,11 +63,16 @@ UPDATE analytics_fact_versions SET activity=activity+1 WHERE session_id IN(
 PRAGMA user_version=32;
 `;
 
+/** Anchor the eligibility view on actual operator marks. Otherwise SQLite can
+ * start from every person in the profile even when there are no marked bots. */
+export const manualBotPeopleSql=`SELECT person_id FROM manual_bot_people WHERE person_id IN(
+ SELECT i.person_id FROM person_bot_marks m JOIN identities i ON i.id=m.identity_id)`;
+
 /** Names use the existing list; manual decisions use person IDs, never names. */
 export function databaseBotExclusions(db:Database.Database,extra:readonly string[]|false=[]):ReadonlySet<string>{
  const keys=new Set(botExclusionSet(extra));
  for(const row of db.prepare('SELECT person_id FROM service_people').all() as {person_id:string}[])keys.add('owner:'+row.person_id);
- if(extra!==false)for(const row of db.prepare('SELECT person_id FROM manual_bot_people').all() as {person_id:string}[])keys.add('person:'+row.person_id);
+ if(extra!==false)for(const row of db.prepare(manualBotPeopleSql).all() as {person_id:string}[])keys.add('person:'+row.person_id);
  return keys;
 }
 

@@ -10,7 +10,7 @@ import type Database from 'better-sqlite3';
 import {currencyRates} from './rates.js';
 import {streamMetrics} from './stream-metrics.js';
 import {windowsFromLinks,sessionBreaks} from './session-windows.js';
-import {PersonBots,databaseBotExclusions} from "./person-bots.js";
+import {PersonBots,databaseBotExclusions,manualBotPeopleSql} from "./person-bots.js";
 export interface AnalyticsOptions {
     /** Internal attendance roster; never accepted from an HTTP query. */
     membershipOnly?:boolean;
@@ -125,14 +125,21 @@ export function audienceAnalytics(db: Database.Database, options: AnalyticsOptio
     const from=recording?Math.max(options.fromMs,recording.started_at_ms):options.fromMs,to=recording?Math.min(options.toMs,recording.ended_at_ms??options.toMs):options.toMs;
     const {source,category,timezone,regularThresholdPercent,minSessions,minMinutes,minMessages,window,rule,clock}=validateAnalyticsOptions(options,from,to);
     const coreMembership=options.corePeople?new Set(options.corePeople):undefined;
-    const botPeople=new Set(new PersonBots(db).decorate(db.prepare("SELECT DISTINCT person_id id FROM identities WHERE source='twitch' AND match_key IN(SELECT value FROM json_each(?)) UNION SELECT person_id FROM manual_bot_people UNION SELECT person_id FROM youtube_identities WHERE match_key IN('streamelements','streemelements')").all(JSON.stringify([...botExclusionSet(options.excludedLogins||[])])) as {id:string}[],p=>p.id,options.excludedLogins||[]).filter(p=>p.is_bot).map(p=>p.id));
+    const botPeople=new Set(new PersonBots(db).decorate(db.prepare(`SELECT DISTINCT person_id id FROM identities WHERE source='twitch' AND match_key IN(SELECT value FROM json_each(?)) UNION ${manualBotPeopleSql} UNION SELECT person_id FROM youtube_identities WHERE match_key IN('streamelements','streemelements')`).all(JSON.stringify([...botExclusionSet(options.excludedLogins||[])])) as {id:string}[],p=>p.id,options.excludedLogins||[]).filter(p=>p.is_bot).map(p=>p.id));
     const excluded = databaseBotExclusions(db,options.excludedLogins ?? []), botJson = JSON.stringify([...excluded]);
     const sessions = db.prepare('SELECT * FROM sessions WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id) AND started_at_ms<? AND coalesce(ended_at_ms,?)>? AND (? IS NULL OR id=?) ORDER BY started_at_ms LIMIT 1001').all(to, to, from, options.sessionId??null,options.sessionId??null) as any[];
     if (sessions.length > 1000)
         throw new Error('ANALYTICS_RANGE_TOO_LARGE');
     const sessionIds = JSON.stringify(sessions.map(s => s.id));
-    const visible = `SELECT p.id,p.display_name FROM persons p WHERE NOT EXISTS(SELECT 1 FROM identities ib WHERE ib.person_id=p.id AND (EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||ib.person_id OR ((value=ib.match_key OR value='person:'||ib.person_id) AND ib.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) OR (ib.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people) AND EXISTS(SELECT 1 FROM identity_aliases a WHERE a.identity_id=ib.id AND ltrim(a.candidate_key,'@#') IN(SELECT value FROM json_each(?)))) OR (ib.source='twitch' AND (ib.external_id=? OR ib.external_id=ib.account_id)))) AND NOT EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||y.person_id OR ((value=y.match_key OR value='person:'||y.person_id) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) OR (y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people) AND a.match_key IN(SELECT value FROM json_each(?)))))`;
-    const people = db.prepare(visible).all(botJson, botJson, options.ownerId ?? '', botJson,botJson) as {
+    // Classify only people whose facts can contribute to this report. Scanning the
+    // whole profile here repeats the same work for every historical stream leaf.
+    const candidates=db.prepare(`SELECT i.person_id FROM event_sessions es INDEXED BY event_sessions_session CROSS JOIN events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE es.session_id IN(SELECT value FROM json_each(?))
+      UNION SELECT i.person_id FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id WHERE ? AND p.session_id IN(SELECT value FROM json_each(?))
+      UNION SELECT y.person_id FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE m.account_id=? AND m.published_at_ms>=? AND m.published_at_ms<?
+      UNION SELECT value FROM json_each(?)`).all(sessionIds,Number(!options.donationsOnly&&options.activityInput===undefined),sessionIds,options.youtubeAccount??'',Math.max(0,from-window*60000),to,JSON.stringify((options.activityInput??[]).map(row=>row.person))) as {person_id:string}[];
+    const candidateIds=JSON.stringify(candidates.map(row=>row.person_id));
+    const visible = `SELECT p.id,p.display_name FROM persons p WHERE p.id IN(SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM identities ib WHERE ib.person_id=p.id AND (EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||ib.person_id OR ((value=ib.match_key OR value='person:'||ib.person_id) AND ib.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) OR (ib.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people) AND EXISTS(SELECT 1 FROM identity_aliases a WHERE a.identity_id=ib.id AND ltrim(a.candidate_key,'@#') IN(SELECT value FROM json_each(?)))) OR (ib.source='twitch' AND (ib.external_id=? OR ib.external_id=ib.account_id)))) AND NOT EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||y.person_id OR ((value=y.match_key OR value='person:'||y.person_id) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) OR (y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people) AND a.match_key IN(SELECT value FROM json_each(?)))))`;
+    const people = db.prepare(visible).all(candidateIds,botJson, botJson, options.ownerId ?? '', botJson,botJson) as {
         id: string;
         display_name: string;
     }[];

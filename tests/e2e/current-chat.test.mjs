@@ -78,3 +78,24 @@ test('live chat combines silent Twitch members and recent YouTube authors, sorts
   assert.equal(cache,304);assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{if(browser)await browser.close();await a.close();}
 });
+
+test('finished streams hide current viewers and old current links fall back to results without polling live chat',{timeout:60000},async()=>{
+ const a=await application();let browser;
+ try{
+  const at=Date.now()-86400000,id=await a.db.call('startSession','owner','finished',at,'platform',at);
+  await a.db.call('streamSample',id,at,'game','Game','Finished stream',4);
+  await a.db.call('endSession',id,at+60000);
+  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:900}});let currentReads=0;
+  page.on('request',request=>{if(new URL(request.url()).pathname.endsWith('/current-chat'))currentReads++;});
+  await goto(page,a.bootstrap());
+  await page.getByRole('button',{name:'Стримы',exact:true}).click();
+  await page.locator(`[data-session-id="${id}"] .stream-open`).click();
+  await page.getByRole('tab',{name:'Итоги',exact:true}).waitFor();
+  assert.equal(await page.getByRole('tab',{name:'Текущие зрители',exact:true}).count(),0);
+  const url=new URL(page.url());url.searchParams.set('section','current');await page.goto(url.toString());
+  await page.getByRole('tab',{name:'Итоги',exact:true,selected:true}).waitFor();
+  assert.equal(await page.getByRole('region',{name:'Текущие зрители',exact:true}).count(),0);
+  await assertUiLayout(page);await page.setViewportSize({width:390,height:844});await assertUiLayout(page);
+  assert.equal(currentReads,0,'a finished recording never starts current-chat requests');await saveCoverage(page);
+ }finally{await browser?.close();await a.close();}
+});
