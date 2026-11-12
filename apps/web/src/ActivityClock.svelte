@@ -6,13 +6,13 @@
  import type {ActivityMetric} from './analytics-view';
  import {chartMetrics} from './chart-series';
  import Help from './Help.svelte';
- let {scope,visitorRevision,rows,metric=$bindable('viewers'),resolution=$bindable(15),timezone,windows=[],people=[],summary=[],summarySelection,loadSummary,onPerson,loadVisitors}:{visitorRevision?:string|undefined;scope?:string;rows:ClockActivity[];metric?:ActivityMetric;resolution?:number;timezone:string;windows?:Window[];people?:TimePerson[];summary?:TimeAudienceSummary[];summarySelection?:{day:string;resolution:number};loadSummary?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>;onPerson:(id:string)=>void;loadVisitors?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>}=$props();
+ let {scope,visitorRevision,rows,currencyOptions,metric=$bindable('viewers'),resolution=$bindable(15),timezone,windows=[],people=[],summary=[],summarySelection,loadSummary,onPerson,loadVisitors}:{visitorRevision?:string|undefined;scope?:string;rows:ClockActivity[];currencyOptions?:string[]|undefined;metric?:ActivityMetric;resolution?:number;timezone:string;windows?:Window[];people?:TimePerson[];summary?:TimeAudienceSummary[];summarySelection?:{day:string;resolution:number};loadSummary?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>;onPerson:(id:string)=>void;loadVisitors?:(params:Record<string,string|number>,signal:AbortSignal)=>Promise<any>}=$props();
  let day=$state('all'),currency=$state('RUB'),selected=$state<number|null>(null),availableWidth=$state(800);
  const plotWidth=$derived(Math.max(300,availableWidth));
  const step=$derived([1,5,15,30,60].includes(resolution)?resolution:15);
- let loadedSummaries=$state<Record<string,TimeAudienceSummary[]>>({}),summaryBusy=$state(false),summaryError=$state(''),summaryRetry=$state(0);
+ let loadedSummaries=$state<Record<string,TimeAudienceSummary[]>>({}),loadedActivities=$state<Record<string,ClockActivity[]>>({}),summaryBusy=$state(false),summaryError=$state(''),summaryRetry=$state(0);
  const summaryKey=$derived(JSON.stringify([scope,visitorRevision,day,step]));
- const initialSummary=$derived(!summarySelection||(summarySelection.day===day&&summarySelection.resolution===step)||(step===60&&['пн','вт','ср','чт','пт','сб','вс'].includes(day)));
+ const initialSummary=$derived(!summarySelection||(summarySelection.day===day&&summarySelection.resolution===step));
  const displayedSummary=$derived(initialSummary?summary:loadedSummaries[summaryKey]??[]);
  $effect(()=>{
   const key=summaryKey,loader=loadSummary,initial=initialSummary,currentDay=day,resolution=step;void summaryRetry;
@@ -20,15 +20,16 @@
   if(initial||!loader||untrack(()=>loadedSummaries[key]!==undefined))return;
   const controller=new AbortController();summaryBusy=true;
   void untrack(()=>loader({clockDay:currentDay,clockResolution:resolution},controller.signal)).then(result=>{
-   if(!controller.signal.aborted){const retained=Object.entries(untrack(()=>loadedSummaries)).slice(-49);loadedSummaries={...Object.fromEntries(retained),[key]:result.clockBuckets??[]};}
+   if(!controller.signal.aborted){const retained=Object.entries(untrack(()=>loadedSummaries)).slice(-11);loadedSummaries={...Object.fromEntries(retained),[key]:result.clockBuckets??[]};const activities=Object.entries(untrack(()=>loadedActivities)).slice(-11);loadedActivities={...Object.fromEntries(activities),[key]:result.activityClock??rows};}
   }).catch(e=>{if(!controller.signal.aborted)summaryError=e.message;}).finally(()=>{if(!controller.signal.aborted)summaryBusy=false;});
   return ()=>controller.abort();
  });
  const attendance=$derived(summarySelection||displayedSummary.length?displayedSummary.filter(b=>b.day===day&&b.resolution===step):timeAudience(windows,people,timezone,step,day).map(b=>({...b,streams:b.streams.size,people:[]})));
- const currencies=$derived([...new Set(rows.flatMap(row=>Object.keys(row.donationAmounts??{})))].sort());
+ const displayedRows=$derived(initialSummary?rows:loadedActivities[summaryKey]??[]);
+ const currencies=$derived(currencyOptions??[...new Set(rows.flatMap(row=>Object.keys(row.donationAmounts??{})))].sort());
  const activeCurrency=$derived(currencies.includes(currency)?currency:currencies[0]??'RUB');
  const attendanceByMinute=$derived(new Map(attendance.map(b=>[b.minute,b])));
- const buckets=$derived((metric==='activeAudience'?Array.from({length:1440/step},(_,i)=>{const minute=i*step,b=attendanceByMinute.get(minute);return {minute,value:b?.averageAudience??null,duration:b?.airtimeMs??0,total:b?.personTimeMs??0};}):metric==='donations'?clockDonationSeries(rows,activeCurrency,step,day):clockActivitySeries(rows,metric,step,day,true)));
+ const buckets=$derived((metric==='activeAudience'?Array.from({length:1440/step},(_,i)=>{const minute=i*step,b=attendanceByMinute.get(minute);return {minute,value:b?.averageAudience??null,duration:b?.airtimeMs??0,total:b?.personTimeMs??0};}):metric==='donations'?clockDonationSeries(displayedRows,activeCurrency,step,day):clockActivitySeries(displayedRows,metric,step,day,true)));
  const start=0,span=1440,ticks=[0,360,720,1080,1440],timeGrid=[180,360,540,720,900,1080,1260];
  const levels=$derived(clockAxis(Math.max(0,...buckets.map(b=>b.value??0))));
  const maximum=$derived(levels.at(-1)!);

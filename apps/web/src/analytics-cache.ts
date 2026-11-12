@@ -52,5 +52,5 @@ export function loadAnalytics(profile:string,q:URLSearchParams,force=false,signa
  return useReport(entry,signal);
 }
 export function summaryQuery(from:number,to:number,source:string,category:string,timezone:string,resolution:number,sort:string){
- return new URLSearchParams({from:String(from),to:String(to),source,category,timezone,mode:'summary',insights:'1',clockCompact:'1',clockDay:'all',clockResolution:String(resolution),audienceOffset:'0',audienceSearch:'',audienceSort:sort,audienceCoreOnly:'0'});
+ return new URLSearchParams({from:String(from),to:String(to),source,category,timezone,mode:'summary',insights:'1',clockCompact:'1',clockActivityCompact:'1',clockDay:'all',clockResolution:String(resolution),audienceOffset:'0',audienceSearch:'',audienceSort:sort,audienceCoreOnly:'0'});
 }

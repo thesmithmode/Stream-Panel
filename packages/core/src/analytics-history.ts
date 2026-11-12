@@ -516,7 +516,7 @@ export class AnalyticsHistory {
         if (!next.done)
             return clockOnly?{filters:validation.filters,...next.value,stage:'aggregate'}:{ ...validation, ...next.value, stage: 'aggregate' };
         this.jobs.delete(fingerprint);
-        next.value.clockRevision=fingerprint;
+        next.value.clockRevision=live?createHash('sha256').update(JSON.stringify([fingerprint,job.liveRevision])).digest('hex'):fingerprint;
         try{
             const value=clockOnly?this.clockResult(next.value,job.workspace,options):this.page(next.value,job.workspace,options);
             if(!live&&historical&&(this.cachePolicy.availableBytes?.()??Infinity)>=1024*1024*1024){

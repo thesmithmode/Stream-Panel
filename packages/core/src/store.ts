@@ -1,3 +1,4 @@
+import {compactClockActivity} from './clock-activity.js';
 import {SupplementaryChat} from './supplementary-chat.js';
 import {DonationFx,type CbrRate} from './donation-fx.js';
 import {CurrentChatQueries} from './current-chat.js';
@@ -407,8 +408,11 @@ export class StreamStore {
   }
   personOptions(search='',offset=0,limit=50,includeBots=false,selected='',excluded:readonly string[]|false=[],exclude=''){return this.queries.personOptions(search,offset,limit,includeBots,selected,excluded,exclude);}
 
-  analytics(options: AnalyticsOptions) {
-    const report=this.history.query(options.sessionId?{...options,sessionId:this.groups.root(options.sessionId)}:options);return {...report,audience:this.bots.decorate(report.audience,p=>p.id)};
+  analytics(options: AnalyticsOptions,compactActivity=false) {
+    const report=this.history.query(options.sessionId?{...options,sessionId:this.groups.root(options.sessionId)}:options);return {...report,audience:this.bots.decorate(report.audience,p=>p.id),...(compactActivity&&!report.preparing?{
+      activityClock:compactClockActivity(report.activityClock,options.clockResolution??15,options.clockDay??'all'),
+      clockCurrencies:[...new Set(report.activityClock.flatMap(row=>Object.keys(row.donationAmounts??{})))].sort()
+    }: {})};
   }
 
   streamAnalytics(options:AnalyticsOptions){
@@ -416,9 +420,12 @@ export class StreamStore {
     return {filters:report.filters,summary:report.summary,timeline:report.timeline,audience:report.audience,streamComparison:report.streamComparison,
       ...(report.preparing?{preparing:true,ready:report.ready,total:report.total,stage:report.stage}:{})};
   }
-  preloadAnalytics(options:AnalyticsOptions){
+  preloadAnalytics(options:AnalyticsOptions,compactActivity=false){
     const report=this.history.backgroundQuery(options.sessionId?{...options,sessionId:this.groups.root(options.sessionId)}:options);
-    return {...report,audience:this.bots.decorate(report.audience,p=>p.id)};
+    return {...report,audience:this.bots.decorate(report.audience,p=>p.id),...(compactActivity&&!report.preparing?{
+      activityClock:compactClockActivity(report.activityClock,options.clockResolution??15,options.clockDay??'all'),
+      clockCurrencies:[...new Set(report.activityClock.flatMap(row=>Object.keys(row.donationAmounts??{})))].sort()
+    }: {})};
   }
   clockAudience(options:AnalyticsOptions){return this.history.clockAudience(options);}
   advanceAnalytics(options:AnalyticsOptions){return this.history.advance(options);}

@@ -28,6 +28,7 @@ try{
   const auth=await app.app.inject({method:'POST',url:'/api/v1/bootstrap',headers:{host,origin},payload:{key:app.bootstrap().split('#key=')[1]}});
   const headers={host,cookie:auth.cookies.map(c=>`${c.name}=${c.value}`).join('; '),'accept-encoding':'gzip'};
   const q=new URLSearchParams({from:String(period==='all'||period==='stream'?0:now-period*86400000),to:String(now),source:'all',category:'',timezone:'Europe/Moscow',mode:'summary',insights:'1',clockCompact:'1',clockDay:'all',clockResolution:'15',attendanceOnly:'1'});
+  if(process.env.STREAM_PANEL_BENCHMARK_ROOT===undefined&&panel==='time')q.set('clockActivityCompact','1');
   if(period==='stream'){q.set('session',session);if(process.env.STREAM_PANEL_BENCHMARK_ROOT===undefined)q.set('view','stream');}else q.set('panel',panel);
   const url='/api/v1/analytics?'+q;
   const measure=async validators=>{

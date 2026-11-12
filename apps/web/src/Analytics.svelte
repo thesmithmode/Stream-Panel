@@ -53,7 +53,7 @@
   const visible=$derived(data?.audiencePage?(pagedAudience?.audience??data.audience):(data?.audience??[]).filter((e:any)=>(!view.coreOnly||e.core)&&e.name.toLowerCase().includes(search.toLowerCase())).sort((a:any,b:any)=>view.sort==="sessions"?(b.sessionCount??b.sessionIds.length)-(a.sessionCount??a.sessionIds.length):(b[view.sort]??0)-(a[view.sort]??0)));
   async function reportPage(extra:Record<string,string|number>,signal?:AbortSignal,endpoint='analytics',filters=data?.filters){
     if(!filters)throw new Error('Отчёт ещё не загружен');
-    const q=new URLSearchParams(Object.entries({...filters,from:filters.fromMs,to:filters.toMs,mode:'summary',insights:'1',attendanceOnly:'1',...(endpoint==='analytics/audience'?{panel:'audience'}:{}),...extra}).map(([key,value])=>[key,String(value)]));
+    const q=new URLSearchParams(Object.entries({...filters,from:filters.fromMs,to:filters.toMs,mode:'summary',insights:'1',clockActivityCompact:'1',attendanceOnly:'1',...(endpoint==='analytics/audience'?{panel:'audience'}:{}),...extra}).map(([key,value])=>[key,String(value)]));
     return analyticsReport(signal=>api(`${endpoint}?${q}`,undefined,signal),signal??new AbortController().signal);
   }
   const streamsLoader=$derived.by(()=>{const filters=data?.filters;return (params:Record<string,string|number>,signal:AbortSignal)=>reportPage({panel:'dynamics',...params},signal,'analytics',filters);});
@@ -181,7 +181,7 @@
       {#each weekdays as weekday}<div class="heatmap-row"><strong>{weekday}</strong>{#each Array.from({length:24},(_,i)=>i) as hour}<button aria-label={hourTitle(weekday,hour)} title={hourTitle(weekday,hour)} onclick={()=>selectedHour={day:weekday,hour}} style:background={heatValue(hourCells.get(`${weekday}:${hour}`))!==null?`rgba(95,196,170,${.15+.85*(heatValue(hourCells.get(`${weekday}:${hour}`))??0)/hourMax})`:"#3b4350"}></button>{/each}</div>{/each}
     </div>{#if selectedHour}<p class="analytics-help small" role="status">{hourTitle(selectedHour.day,selectedHour.hour)}</p>{/if}</section>{/if}
 
-  {#if view.trend}<ActivityClock scope={reportScope} visitorRevision={data.clockRevision} rows={data.activityClock??[]} windows={data.activityWindows??[]} people={data.audience??[]} summary={data.clockBuckets??[]} summarySelection={data.clockSelection} loadSummary={clockLoader} loadVisitors={visitorLoader} {onPerson} bind:metric={view.metric} bind:resolution={view.resolution} {timezone}/>{/if}
+  {#if view.trend}<ActivityClock scope={reportScope} visitorRevision={data.clockRevision} rows={data.activityClock??[]} currencyOptions={data.clockCurrencies} windows={data.activityWindows??[]} people={data.audience??[]} summary={data.clockBuckets??[]} summarySelection={data.clockSelection} loadSummary={clockLoader} loadVisitors={visitorLoader} {onPerson} bind:metric={view.metric} bind:resolution={view.resolution} {timezone}/>{/if}
 
   <div class="timing-grid">
   {#if data.patterns&&data.composition}<TimePatterns {data} section="time" />{/if}

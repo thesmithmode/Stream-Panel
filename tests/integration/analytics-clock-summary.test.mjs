@@ -1,3 +1,4 @@
+import {clockActivitySeries,clockDonationSeries} from '../../dist/packages/core/src/clock-activity.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {application} from '../helpers/application.mjs';
@@ -13,10 +14,14 @@ test('compact analytics and lazy clock endpoint preserve full API, filters, vali
   const full=await read('analytics');query.set('clockCompact','1');
   const compact=await read('analytics');assert.deepEqual(compact.summary,full.summary);assert.ok(compact.clockBuckets.length<full.clockBuckets.length/3);
   assert.deepEqual(compact.clockSelection,{day:'all',resolution:15});
+  query.set('clockActivityCompact','1');
   for(const day of ['all','weekdays','weekends','пн','вт','ср','чт','пт','сб','вс'])for(const resolution of [1,5,15,30,60]){
    query.set('clockDay',day);query.set('clockResolution',String(resolution));const detail=await read('analytics/clock-summary');
    assert.deepEqual(detail.clockBuckets.filter(b=>b.day===day&&b.resolution===resolution),full.clockBuckets.filter(b=>b.day===day&&b.resolution===resolution));
-   assert.deepEqual(detail.filters,full.filters);assert.equal(detail.clockRevision,full.clockRevision);assert.equal(detail.audience,undefined);assert.equal(detail.activityClock,undefined);assert.equal(detail.timeline,undefined);
+   assert.ok(detail.activityClock.length<=1440/resolution);
+   for(const metric of ['viewers','messages','watchHours'])assert.deepEqual(clockActivitySeries(detail.activityClock,metric,resolution,day,true),clockActivitySeries(full.activityClock,metric,resolution,day,true));
+   assert.deepEqual(clockDonationSeries(detail.activityClock,'RUB',resolution,day),clockDonationSeries(full.activityClock,'RUB',resolution,day));
+   assert.deepEqual(detail.filters,full.filters);assert.equal(detail.clockRevision,full.clockRevision);assert.equal(detail.audience,undefined);assert.ok(Array.isArray(detail.activityClock));assert.ok(Array.isArray(detail.clockCurrencies));assert.equal(detail.timeline,undefined);
   }
   query.set('clockResolution','2');const invalid=await a.app.inject({headers,url:`/api/v1/analytics/clock-summary?${query}`});assert.equal(invalid.statusCode,400);
  }finally{await a.close();}

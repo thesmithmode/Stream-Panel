@@ -1,3 +1,4 @@
+import type {AnalyticsOptions} from '../../../packages/core/src/analytics.js';
 import {conditionalResponse,PreparedResponses} from './conditional-response.js';
 import type { FastifyInstance,FastifyRequest } from 'fastify';
 import type { ConfigurationPort } from './config.js';
@@ -41,7 +42,7 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
             throw new Error('INVALID_ANALYTICS_FILTER');
         for(const field of ['streamFrom','streamTo','streamOffset','streamLimit'])if(q[field]!==undefined&&(!Number.isSafeInteger(Number(q[field]))||Number(q[field])<0||(field==='streamLimit'&&Number(q[field])>100)))throw Error('INVALID_ANALYTICS_FILTER');
         return wire.respond(request,reply,await wireKey(request,sessionId),async()=>{
-        const result=await db.call(request.routeOptions.url==='/api/v1/analytics/clock'?"clockAudience":streamView?"streamAnalytics":string(q._background)==='1'?"preloadAnalytics":"analytics", {
+        const options:AnalyticsOptions={
             rollingCore:true,coreWindowDays:defaults.coreWindowDays,...(q.streamFrom===undefined?{}:{streamFrom:Number(q.streamFrom)}),...(q.streamTo===undefined?{}:{streamTo:Number(q.streamTo)}),...(q.streamOffset===undefined?{}:{streamOffset:Number(q.streamOffset)}),...(q.streamLimit===undefined?{}:{streamLimit:Number(q.streamLimit)}),
             ...(sessionId ? { sessionId } : {}),...(panel?{panel:panel as 'dynamics'|'time'|'audience'}:{}),...(string(q.attendanceOnly)==='1'?{attendanceOnly:true}:{}), ...(string(q.mode)==='summary'?{summaryOnly:true}:{}),...(string(q.insights)==='1'?{includeInsights:true}:{}), fromMs: sessionId ? 0 : Number(q.from), toMs: sessionId ? Date.now() : Math.min(Number(q.to), Date.now()), source, category: string(q.category),
             ...(q.audienceOffset===undefined?{}:{audienceOffset:Number(q.audienceOffset)}),...(q.audienceSearch===undefined?{}:{audienceSearch:string(q.audienceSearch)}),...(q.audienceSort===undefined?{}:{audienceSort:string(q.audienceSort)}),...(q.audienceCoreOnly===undefined?{}:{audienceCoreOnly:string(q.audienceCoreOnly)==='1'}),
@@ -50,9 +51,11 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
             regularThresholdPercent: q.regularThresholdPercent === undefined ? defaults.regularThresholdPercent : Number(q.regularThresholdPercent), minSessions: q.minSessions === undefined ? defaults.minSessions : Number(q.minSessions), minMinutes: q.minMinutes === undefined ? defaults.minMinutes : Number(q.minMinutes), minMessages: q.minMessages === undefined ? defaults.minMessages : Number(q.minMessages),
             chatWindowMinutes: q.chatWindowMinutes === undefined ? defaults.chatWindowMinutes : Number(q.chatWindowMinutes), coreRule, timezone: string(q.timezone) || defaults.timezone,
             excludedLogins: botsFor(request.query), ownerId: configuration.value.twitch?.userId ?? "", youtubeAccount: configuration.value.youtube?.userId ?? configuration.value.youtubeAccountId ?? "",
-        });
+        };
+        const compactActivity=string(q.clockActivityCompact)==='1'&&(panel==='time'||request.routeOptions.url==='/api/v1/analytics/clock-summary');
+        const result=request.routeOptions.url==='/api/v1/analytics/clock'?await db.call('clockAudience',options):streamView?await db.call('streamAnalytics',options):string(q._background)==='1'?await db.call('preloadAnalytics',options,compactActivity):await db.call('analytics',options,compactActivity);
         if(request.routeOptions.url==='/api/v1/analytics/clock-summary'&&'clockBuckets' in result&&!result.preparing)
-            return {filters:result.filters,clockBuckets:result.clockBuckets,clockSelection:result.clockSelection,clockRevision:result.clockRevision};
+            return {filters:result.filters,clockBuckets:result.clockBuckets,clockSelection:'clockSelection' in result?result.clockSelection:undefined,clockRevision:'clockRevision' in result?result.clockRevision:undefined,...(compactActivity&&'clockCurrencies' in result&&'activityClock' in result?{activityClock:result.activityClock,clockCurrencies:result.clockCurrencies}:{})};
         if(request.routeOptions.url==='/api/v1/analytics/audience'&&'audience' in result&&!result.preparing)
             return {filters:result.filters,audience:result.audience,audiencePage:'audiencePage' in result?result.audiencePage:undefined};
         return result;

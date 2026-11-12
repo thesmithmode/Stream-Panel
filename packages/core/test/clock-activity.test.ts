@@ -89,3 +89,20 @@ test('partial display pools only known minutes with a lower-bound marker and pre
  assert.equal(clockActivitySeries(merged,'viewers',60,'вт',true)[10]!.value,null);
  assert.equal(JSON.stringify([partial,full]),before);
 });
+
+test('compact activity grids preserve every metric, missing values, partial exposure and exact money at all day/step selections',async()=>{
+ const {compactClockActivity,clockDonationSeries}=await import('../src/clock-activity.js');
+ const rows=[
+  {day:'пн',minute:0,totals:[60000,60000,0,1,1,0,1],botTotals:[0,0,0,1,1,0,0],durations:[60000,60000,0,60000,60000,0,60000],knownViewerTotal:90000,knownViewerDuration:60000,partialViewerDuration:30000,donationAmounts:{RUB:'9007199254740993',USD:'17'}},
+  {day:'пн',minute:1,totals:[120000,120000,0,2,2,0,1],durations:[30000,30000,0,30000,30000,0,30000],donationAmounts:{RUB:'3'}},
+  {day:'сб',minute:14,totals:[0,0,0,0,0,0,0],durations:[60000,60000,0,60000,60000,0,60000],donationAmounts:{USD:'23'}}
+ ];
+ const before=structuredClone(rows);
+ for(const day of ['all','weekdays','weekends','пн','сб','вс'])for(const step of [1,5,15,30,60]){
+  const compact=compactClockActivity(rows,step,day);assert.ok(compact.length<=1440/step);
+  for(const metric of ['viewers','twitchViewers','youtubeViewers','messages','twitchMessages','youtubeMessages','donations','watchHours','twitchWatchHours','youtubeWatchHours'] as const)for(const partial of [true,false])
+   assert.deepEqual(clockActivitySeries(compact,metric,step,day,partial),clockActivitySeries(rows,metric,step,day,partial));
+  for(const currency of ['RUB','USD'])assert.deepEqual(clockDonationSeries(compact,currency,step,day),clockDonationSeries(rows,currency,step,day));
+ }
+ assert.deepEqual(rows,before);assert.equal(compactClockActivity(rows,2).length,compactClockActivity(rows,15).length);
+});

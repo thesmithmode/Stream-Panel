@@ -328,7 +328,7 @@ test('live writes do not restart historical preparation, but invalidate the comp
   let cpu=0;t.mock.method(performance,'now',()=>cpu+=10);
   const first=h.report(opts);assert.equal(first.preparing,true);
   s.streamSample(live,at,'game','Game','',11);const second=h.report(opts);assert.ok(second.ready!>first.ready!);
-  assert.equal(ready(h,opts).summary.streams,61);s.streamSample(live,at+1000,'game','Game','',13);const changed=h.report(opts);assert.ok(changed.preparing||changed.summary.streams===61);assert.equal(ready(h,opts).summary.messages,60);h.close();
+  const completed=ready(h,opts);assert.equal(completed.summary.streams,61);s.streamSample(live,at+1000,'game','Game','',13);const changed=h.report(opts);assert.ok(changed.preparing||changed.summary.streams===61);const refreshed=ready(h,opts);assert.equal(refreshed.summary.messages,60);assert.notEqual(refreshed.clockRevision,completed.clockRevision,'lazy clock selections invalidate after live facts change');h.close();
  }finally{s.close();}
 });
 

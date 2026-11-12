@@ -21,8 +21,11 @@ separate worker. Corrections replace only affected leaves and their ancestors.
    changed chat/polls invalidate the live contribution. No additional stale TTL is
    introduced. Completed memory/workspaces and SQLite report storage are bounded.
 3. Panel projections include the panel, selected clock day/resolution, audience
-   search/sort/page/core filter and stream range. Time returns aggregated clock
-   buckets; other day/resolution and participant pages load on demand. The full API
+   search/sort/page/core filter and stream range. Time requests `clockActivityCompact=1`: the worker merges minute numerators,
+   exposure, bot totals, known/partial viewer durations and exact currency minor
+   units into the selected day/resolution before RPC. The UI receives only this
+   activity grid plus aggregated attendance buckets and the complete currency list; other day/resolution and participant pages load on demand. The default unprojected
+   API retains the minute grid for existing clients. The full API
    is retained. UI follower endpoints omit unused `polls`; stored history and core
    diagnostic methods retain it. Poll summaries are suppressed before worker RPC
    for these UI reads. The stream view requests an explicit projection containing

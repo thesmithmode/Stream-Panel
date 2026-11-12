@@ -243,7 +243,7 @@
         await refresh(false,profile===authProfile?auth:undefined);
         if (!alive) return;
         authorized=true;saveRoute(true);
-      } catch(e){reportFailure(e);
+      } catch(e){authorized=false;scopeReady=false;reportFailure(e);
       } finally {
         loading=false;initializing=false;if(pendingInitialization&&alive)void initialize();
       }

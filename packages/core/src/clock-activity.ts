@@ -47,3 +47,9 @@ export function clockAxis(maximum:number){
  const step=[1,2,2.5,5,10].map(n=>n*power).find(n=>n>=rough)!,maximumTick=Math.ceil(peak/step)*step;
  return Array.from({length:Math.round(maximumTick/step)+1},(_,i)=>Number((i*step).toPrecision(12)));
 }
+/** Selected wire grid keeps exact numerators/exposure; other selections load lazily. */
+export function compactClockActivity(rows:ClockActivity[],resolution:number,day='all'):ClockActivity[]{
+ const step=[1,5,15,30,60].includes(resolution)?resolution:15;
+ const representative=day==='weekends'?'сб':day==='all'||day==='weekdays'?'пн':day;
+ return mergeClockActivity(rows.filter(row=>matchesActivityDay(day,row.day)).map(row=>({...row,day:representative,minute:Math.floor(row.minute/step)*step})));
+}
