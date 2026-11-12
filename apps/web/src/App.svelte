@@ -143,11 +143,11 @@
       const connectionsChanged=!previous||previous.connectionRevision!==next.connectionRevision;
       const subscribersChanged=!previous||previous.versions.subscribers!==next.versions.subscribers||previous.versions.follows!==next.versions.follows;
       setServerVersions(profile,next);
+      if(fresh&&scopeReady)bumpReadRevision(profile);
       if(tab==='stream'&&sessionFilter&&(!routeSection||['summary','people'].includes(routeSection))&&(changed||fresh||!scopeReady)){
         const query=new URLSearchParams({view:'stream',session:sessionFilter,source:'all',category:'',timezone:'Europe/Moscow'});
         void loadAnalytics(profile,query,fresh,controller.signal).catch(()=>{});
       }
-      if(fresh&&scopeReady)bumpReadRevision(profile);
       const requests=viewRequests(tab as View,sessionFilter).filter(([key])=>key==='status'?connectionsChanged||fresh||!scopeReady:changed||fresh||!scopeReady);
       const values=Object.fromEntries(await Promise.all(requests.map(async([key,path])=>[key,key==='status'&&initialStatus?initialStatus:await api(key==='sessions'&&tab==='sessions'&&sessionPage>0?`sessions?offset=${sessionPage*100}`:path,undefined,controller.signal)])));
       if(current!==epoch)return;
