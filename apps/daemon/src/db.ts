@@ -69,15 +69,24 @@ export class StoreClient {
     if(!isStoreMethod(method))throw new Error("UNKNOWN_OPERATION");
     await this.ready;
     if(this.dead||(this.stopping&&method!=="close"))throw new Error("DB_WORKER_STOPPED");
-    if(this.lane==='facts'&&this.path!==':memory:'&&['analytics','insights','clockAudience','warmAnalytics','advanceAnalytics','channelOverview'].includes(method)){
+    if(this.lane==='facts'&&this.path!==':memory:'&&['analytics','streamAnalytics','insights','clockAudience','warmAnalytics','preloadAnalytics','advanceAnalytics','channelOverview'].includes(method)){
       const analytics=await this.analyticalClient();
       return analytics.call(...request);
     }
-    if(cachedReads.has(method))return this.cache.read(readCacheKey(method,args),()=>this.execute<T>(method,...args),method==='analytics'?{ttlMs:86400000,compressed:true}:undefined);
+    if(cachedReads.has(method))return this.cache.read(readCacheKey(method,args),()=>this.executeRead<T>(method,args),method==='analytics'?{ttlMs:86400000,compressed:true}:undefined);
     if(uncachedReads.has(method))return this.execute<T>(method,...args);
     if(method!=="close")await this.storage.check();
     // The worker invalidates every same-profile client only after facts actually change.
     return this.execute<T>(method,...args);
+  }
+  private async executeRead<T>(method:string,args:unknown[]):Promise<T>{
+    // Coalesce bounded worker slices into one HTTP read. Yield to the worker queue
+    // between slices so visible reads/writes can still pass background maintenance.
+    const deadline=performance.now()+2000;
+    let result:T;
+    do{result=await this.execute<T>(method,...args);}
+    while(['analytics','streamAnalytics','clockAudience'].includes(method)&&result&&typeof result==='object'&&'preparing' in result&&result.preparing&&performance.now()<deadline);
+    return result;
   }
   private async analyticalClient():Promise<StoreClient>{
     const current=this.analyticsClient;

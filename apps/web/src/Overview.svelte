@@ -66,7 +66,7 @@
     if(current!==lastAudienceSession){audienceData=null;metadata=[];supplemental=[];lastAudienceSession=current;}
     if(!current){audienceData=null;audienceBusy=false;return;}
     if(!needsAudience){audienceBusy=false;return;}
-    const query=new URLSearchParams({session:current,source:'all',category:'',timezone:'Europe/Moscow'});
+    const query=new URLSearchParams({view:'stream',session:current,source:'all',category:'',timezone:'Europe/Moscow'});
     audienceData=cachedAnalytics(getProfile(),query)??audienceData;
     audienceBusy=audienceData===null;
     const controller=new AbortController();

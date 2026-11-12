@@ -76,3 +76,12 @@ test('classification sync invalidates peer profile caches immediately and preser
   const calls=a.queueStatus().operations.personBot!.calls;await a.call('personBot',String(x.id));assert.equal(a.queueStatus().operations.personBot!.calls,calls,'stable shared state retains cache hits');
  }finally{await Promise.all([a.stop(),b.stop()]);await rm(dir,{recursive:true,force:true});}
 });
+test('foreground analytical reads coalesce slices while background reads remain bounded',async()=>{
+ const client=new StoreClient(':memory:');try{
+  await client.ready;const internal=client as any;let count=0;
+  const execute=internal.execute.bind(internal);
+  internal.execute=async(method:string,...args:unknown[])=>method==='analytics'?{preparing:++count<3,value:count}:execute(method,...args);
+  const result=await client.call('analytics',{fromMs:0,toMs:Date.now()});assert.equal((result as any).value,3);assert.equal(count,3);
+  await client.call('analytics',{fromMs:0,toMs:Date.now()});assert.equal(count,3,'completed read remains cached');
+ }finally{await client.stop();}
+});

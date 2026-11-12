@@ -116,3 +116,5 @@ Client ID/secret и тот же Redirect URI, который показан в �
 
 Проверки OAuth используют тестовый HTTP-транспорт. Вход в настоящий второй канал
 владелец завершает через Google в панели.
+
+Performance and cache changes: read [the cache contract and feature checklist](docs/performance-and-cache.md).

@@ -328,7 +328,7 @@ test('live writes do not restart historical preparation, but invalidate the comp
   let cpu=0;t.mock.method(performance,'now',()=>cpu+=10);
   const first=h.report(opts);assert.equal(first.preparing,true);
   s.streamSample(live,at,'game','Game','',11);const second=h.report(opts);assert.ok(second.ready!>first.ready!);
-  assert.equal(ready(h,opts).summary.streams,61);s.streamSample(live,at+1000,'game','Game','',13);const changed=h.report(opts);assert.ok(changed.preparing||changed.summary.streams===61);assert.equal(ready(h,opts).summary.messages,60);h.close();
+  const completed=ready(h,opts);assert.equal(completed.summary.streams,61);s.streamSample(live,at+1000,'game','Game','',13);const changed=h.report(opts);assert.ok(changed.preparing||changed.summary.streams===61);const refreshed=ready(h,opts);assert.equal(refreshed.summary.messages,60);assert.notEqual(refreshed.clockRevision,completed.clockRevision,'lazy clock selections invalidate after live facts change');h.close();
  }finally{s.close();}
 });
 
@@ -626,5 +626,21 @@ test('cached reports count only streams with sufficient observed time for core',
    assert.equal(report.audience.find((p:any)=>p.name==='Exact')!.core,true);
    assert.equal(report.audience.find((p:any)=>p.name==='Short')!.attendanceRatio,1);
   }
+ }finally{s.close();}
+});
+test('runtime warming prepares 7/30/all panels and refreshes moving windows without changing legacy baking',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,4);const history=(s as any).history as AnalyticsHistory;
+  const end=base+10*86400000,queries:any[]=[],report=history.report.bind(history);
+  history.report=(q)=>{queries.push(q);return report(q);};
+  let result;do{result=s.warmAnalytics({...options,toMs:end},false,true);}while(result.preparing);
+  for(const days of [0,7,30])for(const panel of ['dynamics','time','audience']){
+   const fromMs=days?Math.max(0,end-days*86400000):0;
+   assert.ok(queries.some(q=>q.fromMs===fromMs&&q.panel===panel&&q.clockCompact&&q.attendanceOnly));
+   assert.equal(s.analytics({...options,fromMs,toMs:end,source:'all',category:'',panel:panel as 'dynamics',summaryOnly:true,includeInsights:true,clockCompact:true,clockDay:'all',clockResolution:15,attendanceOnly:true}).preparing,undefined);
+  }
+  const count=queries.length;assert.equal(s.warmAnalytics({...options,toMs:end},false,true).preparing,false);assert.equal(queries.length,count);
+  do{result=s.warmAnalytics({...options,toMs:end+minute},false,true);}while(result.preparing);
+  assert.ok(queries.length>count);
  }finally{s.close();}
 });

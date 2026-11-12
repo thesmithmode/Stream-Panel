@@ -36,13 +36,13 @@ function snapshotKey(profile:string,q:URLSearchParams){
 function key(profile:string,q:URLSearchParams){return JSON.stringify([snapshotKey(profile,q),(['7','30'].includes(q.get('_period')??'')?[q.get('from'),q.get('to')]:null),getDataRevision(profile),getServerRevision(profile,q.get('session')?'stream:'+q.get('session'):'report')]);}
 export function cachedAnalytics(profile:string,q:URLSearchParams){return reports.get(key(profile,q))?.value??snapshots.get(snapshotKey(profile,q));}
 export function clearAnalyticsCache(){clearScreenData();for(const entry of reports.values())entry.controller.abort();reports.clear();snapshots.clear();overviews.clear();overviewSnapshots.clear();clearSubscriberCache();}
-export function loadAnalytics(profile:string,q:URLSearchParams,force=false,signal?:AbortSignal){
+export function loadAnalytics(profile:string,q:URLSearchParams,force=false,signal?:AbortSignal,background=false){
  if(signal?.aborted)return Promise.reject(signal.reason);
  const id=key(profile,q),prior=reports.get(id);
  if(prior&&!prior.controller.signal.aborted&&(prior.pending||(!force&&prior.until>Date.now())))return useReport(prior,signal);
  const entry:SharedReport<any>&{value?:any;until:number}={value:prior?.value,until:0,pending:true,users:0,controller:new AbortController(),task:undefined as unknown as Promise<any>};
  entry.task=(async()=>{
-  const request=new URLSearchParams(q);request.delete('_period');
+  const request=new URLSearchParams(q);request.delete('_period');if(background)request.set('_background','1');
   const result=await analyticsReport(signal=>api(`analytics?${request}`,undefined,signal,profile),entry.controller.signal);
   if(result.filters&&['category','source','timezone'].some(field=>result.filters[field]!==q.get(field)))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');
   entry.pending=false;entry.value=result;const snapshot=snapshotKey(profile,q);snapshots.delete(snapshot);snapshots.set(snapshot,result);while(snapshots.size>8)snapshots.delete(snapshots.keys().next().value!);entry.until=getServerRevision(profile,q.get('session')?'stream:'+q.get('session'):'report')?Infinity:Date.now()+60000;return result;
@@ -52,5 +52,5 @@ export function loadAnalytics(profile:string,q:URLSearchParams,force=false,signa
  return useReport(entry,signal);
 }
 export function summaryQuery(from:number,to:number,source:string,category:string,timezone:string,resolution:number,sort:string){
- return new URLSearchParams({from:String(from),to:String(to),source,category,timezone,mode:'summary',insights:'1',clockCompact:'1',clockDay:'all',clockResolution:String(resolution),audienceOffset:'0',audienceSearch:'',audienceSort:sort,audienceCoreOnly:'0'});
+ return new URLSearchParams({from:String(from),to:String(to),source,category,timezone,mode:'summary',insights:'1',clockCompact:'1',clockActivityCompact:'1',clockDay:'all',clockResolution:String(resolution),audienceOffset:'0',audienceSearch:'',audienceSort:sort,audienceCoreOnly:'0'});
 }

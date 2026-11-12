@@ -37,3 +37,16 @@ test('compression skips small, unrelated, pre-encoded, failed, and incompressibl
   const r=await app.inject({url:'/api/v1/analytics/clock',headers:{'accept-encoding':'gzip'}});assert.equal(r.headers['content-encoding'],'br');assert.equal(r.body,'already encoded');
  }finally{await app.close();}
 });
+test('clock-summary uses identical cached gzip bytes and still honors a later identity request',async()=>{
+ const {PreparedResponses}=await import('../src/conditional-response.js');
+ const app=Fastify();registerAnalyticsCompression(app);const cache=new PreparedResponses();let loads=0,revision=1;
+ app.get('/api/v1/analytics/clock-summary',(request,reply)=>cache.respond(request,reply,String(revision),async()=>{loads++;return {clockBuckets:Array.from({length:300},(_,minute)=>({minute,people:revision,messages:0}))};}));
+ try{
+  const first=await app.inject({url:'/api/v1/analytics/clock-summary',headers:{'accept-encoding':'gzip'}});
+  const repeat=await app.inject({url:'/api/v1/analytics/clock-summary',headers:{'accept-encoding':'gzip'}});
+  assert.equal(first.headers['content-encoding'],'gzip');assert.deepEqual(repeat.rawPayload,first.rawPayload);assert.equal(loads,1);
+  const plain=await app.inject({url:'/api/v1/analytics/clock-summary',headers:{'accept-encoding':'gzip;q=0'}});assert.equal(plain.headers['content-encoding'],undefined);assert.deepEqual(plain.json(),JSON.parse(gunzipSync(first.rawPayload).toString()));
+  const unchanged=await app.inject({url:'/api/v1/analytics/clock-summary',headers:{'if-none-match':first.headers.etag!,'accept-encoding':'gzip'}});assert.equal(unchanged.statusCode,304);assert.equal(unchanged.rawPayload.length,0);assert.equal(loads,1);
+  revision++;const changed=await app.inject({url:'/api/v1/analytics/clock-summary',headers:{'accept-encoding':'gzip','if-none-match':first.headers.etag!}});assert.equal(changed.statusCode,200);assert.notEqual(changed.headers.etag,first.headers.etag);
+ }finally{await app.close();}
+});
