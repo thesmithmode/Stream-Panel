@@ -28,7 +28,7 @@ try{
     const report=store.subscriberHistory({source,account,from,to});
     console.log(JSON.stringify({subscriberProbe:true,profile,source,days,points:report.counts.length,total:report.total,firstAt:report.firstAt,lastAt:report.lastAt}));
    }
-   const options={...analyticsSettings(cfg.analyticsSettings),fromMs:0,toMs:Math.floor(Date.now()/60000)*60000,source:'all',category:'',summaryOnly:true,includeInsights:true,excludedLogins:cfg.excludedBotLogins??[],ownerId:cfg.twitch?.userId??'',youtubeAccount:cfg.youtube?.userId??cfg.youtubeAccountId??''};
+   const options={...analyticsSettings(cfg.analyticsSettings),rollingCore:true,fromMs:0,toMs:Math.floor(Date.now()/60000)*60000,source:'all',category:'',summaryOnly:true,includeInsights:true,excludedLogins:cfg.excludedBotLogins??[],ownerId:cfg.twitch?.userId??'',youtubeAccount:cfg.youtube?.userId??cfg.youtubeAccountId??''};
    const read=(query=options)=>{let report,requests=0;const start=performance.now();do{report=store.analytics(query);if(++requests>10000)throw Error('ANALYTICS_DID_NOT_FINISH');}while(report.preparing);return {report,requests,ms:Math.round(performance.now()-start)};};
    const first=read(),active=store.sessions().some(s=>s.ended_at_ms===null),start=performance.now();
    if(!active){let rounds=0;while(store.warmAnalytics(options,true).preparing)if(++rounds>10000)throw Error('WARM_DID_NOT_FINISH');}
@@ -51,14 +51,18 @@ try{
    // Validate existing completed streams in both modes, on the private copy only.
    const services=new Set(store.db.prepare('SELECT person_id FROM service_people').all().map(p=>p.person_id));
    const recent=store.sessions(undefined,0,4,false).filter(s=>s.ended_at_ms!==null).slice(0,3);
+   const oldest=store.reads.prepare('SELECT id FROM sessions s WHERE ended_at_ms IS NOT NULL AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) ORDER BY started_at_ms,id LIMIT 1').get();
+   if(oldest&&!recent.some(s=>s.id===oldest.id)){const row=store.sessions(oldest.id,0,1,false)[0];if(row)recent.push(row);}
    for(const session of recent)for(const includeBots of [false,true]){
     const excluded=includeBots?false:cfg.excludedBotLogins??[];
-    const report=read({...options,sessionId:session.id,fromMs:0,toMs:session.ended_at_ms,includeInsights:false,excludedLogins:excluded}).report;
+    const query={...options,sessionId:session.id,fromMs:0,toMs:session.ended_at_ms,includeInsights:false,excludedLogins:excluded};
+    const cold=read(query),hot=read(query),report=hot.report;
+    if(JSON.stringify(cold.report.summary)!==JSON.stringify(report.summary))throw Error('HISTORICAL_REPEAT_CHANGED_SUMMARY');
     const row=store.sessions(session.id,0,1,excluded)[0],mean=report.streamComparison[0]?.viewers.known.mean??null;
     if(!row||report.audience.some(p=>services.has(p.id)))throw Error('HISTORICAL_SERVICE_ACCOUNT_VISIBLE');
     if(row.viewerKnownMean!==mean&&!(Number.isFinite(row.viewerKnownMean)&&Number.isFinite(mean)&&Math.abs(row.viewerKnownMean-mean)<=1e-8))throw Error('HISTORICAL_VIEWER_COUNT_MISMATCH');
     if(report.summary.messages!==store.summary(session.id,excluded,false).messages)throw Error('HISTORICAL_MESSAGE_COUNT_MISMATCH');
-    console.log(JSON.stringify({historicalViewerProbe:true,profile,startedAt:session.started_at_ms,includeBots,viewers:mean,messages:report.summary.messages,serviceAccountsVisible:0}));
+    console.log(JSON.stringify({historicalViewerProbe:true,profile,startedAt:session.started_at_ms,includeBots,viewers:mean,messages:report.summary.messages,serviceAccountsVisible:0,firstReadyMs:cold.ms,hotReadyMs:hot.ms,firstRequests:cold.requests}));
    }
   }finally{store.close();}
  }
