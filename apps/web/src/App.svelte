@@ -237,9 +237,9 @@
         try {const identity=await api<any>("auth/me?status=1");user=identity.user;restoreRoute();if(identity.status?.profile===profile)initialStatus=identity.status;} catch(e) {if((e as Error).message!=="NOT_FOUND"&&(e as Error).message!=="HTTP_404")throw e;}
         const authProfile=profile,auth=initialStatus??await api<any>("status");
         setCsrf(auth.csrf);user=auth.user??user;restoreRoute();
-        // Status already established permissions and configuration. Screens without
-        // shell reads can request their data alongside revision validation.
-        if(profile===authProfile&&viewRequests(tab as View,sessionFilter).length===1){status=auth;scopeReady=true;authorized=true;loading=false;}
+        // Status already established permissions and configuration. Analytics can
+        // request its report alongside revision validation; editors still wait.
+        if(tab==='analytics'&&profile===authProfile&&viewRequests(tab as View,sessionFilter).length===1){status=auth;scopeReady=true;authorized=true;loading=false;}
         await refresh(false,profile===authProfile?auth:undefined);
         if (!alive) return;
         authorized=true;saveRoute(true);

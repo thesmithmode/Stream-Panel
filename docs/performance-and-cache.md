@@ -48,8 +48,8 @@ separate worker. Corrections replace only affected leaves and their ancestors.
    empty 304 before loading the report or serializing/compressing its body.
 7. Browser snapshots include profile, filters, server and mutation versions; they
    clear on logout. Stale snapshots can stay visible during revalidation, never
-   substitute another profile. Authenticated status permits shell-free pages to
-   start alongside revision checks. Followers/subscribers start alongside the
+   substitute another profile. Authenticated status permits Analytics to start alongside revision checks;
+   editor/classification screens still wait for authoritative versions. Followers/subscribers start alongside the
    visible report. Other panels preload serially after it completes.
 
 Background fact advancement, warming and panel preloads yield to foreground FIFO

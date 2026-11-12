@@ -106,3 +106,10 @@ test('compact activity grids preserve every metric, missing values, partial expo
  }
  assert.deepEqual(rows,before);assert.equal(compactClockActivity(rows,2).length,compactClockActivity(rows,15).length);
 });
+test('a dense week transfers at most 96 activity rows at the default step',async()=>{
+ const {compactClockActivity}=await import('../src/clock-activity.js');
+ const dense=['пн','вт','ср','чт','пт','сб','вс'].flatMap(day=>Array.from({length:1440},(_,minute)=>({day,minute,totals:[60000,60000,0,1,1,0,0],durations:[60000,60000,0,60000,60000,0,60000]})));
+ const compact=compactClockActivity(dense,15,'all');assert.equal(compact.length,96);
+ assert.ok(Buffer.byteLength(JSON.stringify(compact))<48*1024,'default clock grid payload budget');
+ assert.ok(Buffer.byteLength(JSON.stringify(compact))<Buffer.byteLength(JSON.stringify(dense))/30);
+});
