@@ -22,3 +22,10 @@ test('historical endpoints, filters, searches and periods remain distinct',()=>{
  assert.notEqual(readCacheKey('persons',['',[],now-7*86400000],now),readCacheKey('persons',['',[],now-30*86400000],now));
  assert.equal(readCacheKey('summary',['stream'],now),readCacheKey('summary',['stream'],now+15000));
 });
+test('stream projections keep settings and profile arguments distinct from full reports',()=>{
+ const now=Date.UTC(2026,9,29,12),q={sessionId:'one',fromMs:0,toMs:now,source:'all',timezone:'UTC'};
+ assert.notEqual(readCacheKey('streamAnalytics',[q],now),readCacheKey('analytics',[q],now));
+ assert.notEqual(readCacheKey('streamAnalytics',[q],now),readCacheKey('streamAnalytics',[{...q,sessionId:'two'}],now));
+ assert.notEqual(readCacheKey('streamAnalytics',[q],now),readCacheKey('streamAnalytics',[{...q,timezone:'Europe/Moscow'}],now));
+ assert.equal(readCacheKey('streamAnalytics',[q],now),readCacheKey('streamAnalytics',[{...q,toMs:now+500}],now));
+});

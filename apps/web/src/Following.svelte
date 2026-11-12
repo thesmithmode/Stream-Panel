@@ -3,7 +3,7 @@
  import {api,date} from './api';
  import {ConnectionError} from './request';
  import Help from './Help.svelte';
- let {sessionId='',fromMs=0,toMs=0,embedded=false,hideEmpty=false,onPerson}:{sessionId?:string;fromMs?:number;toMs?:number;embedded?:boolean;hideEmpty?:boolean;onPerson:(id:string)=>void}=$props();
+ let {preloaded,sessionId='',fromMs=0,toMs=0,embedded=false,hideEmpty=false,onPerson}:{preloaded?:Promise<any>|undefined;sessionId?:string;fromMs?:number;toMs?:number;embedded?:boolean;hideEmpty?:boolean;onPerson:(id:string)=>void}=$props();
  let data=$state<any>(null),error=$state(''),limit=$state(10);
  const changes=$derived([...((data?.newFollowers??[]).map((row:any)=>({...row,following:true}))),...((data?.unfollowers??[]).map((row:any)=>({...row,following:false})))].sort((a,b)=>b.at-a.at));
  const hasFollowers=$derived(changes.length>0||(data?.platforms??[]).some((row:any)=>row.change!==null&&row.change!==0));
@@ -17,8 +17,9 @@
  const time=(at:number)=>new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',hour:'2-digit',minute:'2-digit'}).format(at);
  $effect(()=>{
   const session=sessionId,from=fromMs,to=toMs,request=latestRequest();data=null;error='';limit=10;
-  const load=()=>void request.run(signal=>api(session?`sessions/${session}/followers`:`followers/changes?${new URLSearchParams({from:String(from),to:String(to)})}`,undefined,signal),result=>{data=result;error='';},failure=>{if(!(failure instanceof ConnectionError))error=failure.message;});
-  load();window.addEventListener('sp:data-refresh',load);return()=>{request.cancel();window.removeEventListener('sp:data-refresh',load);};
+  const prepared=preloaded;let initial=true;
+  const load=()=>{const task=initial?prepared:undefined;initial=false;void request.run(signal=>task??api(session?`sessions/${session}/followers`:`followers/changes?${new URLSearchParams({from:String(from),to:String(to)})}`,undefined,signal),result=>{data=result;error='';},failure=>{if(!(failure instanceof ConnectionError))error=failure.message;});};
+  load();if(!prepared)window.addEventListener('sp:data-refresh',load);return()=>{request.cancel();window.removeEventListener('sp:data-refresh',load);};
  });
 </script>
 {#if !hideEmpty||hasFollowers||error}

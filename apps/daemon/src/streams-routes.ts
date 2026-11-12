@@ -1,14 +1,26 @@
-import {conditionalResponse} from './conditional-response.js';
-import type { FastifyInstance } from 'fastify';
+import {conditionalResponse,PreparedResponses} from './conditional-response.js';
+import type { FastifyInstance,FastifyRequest } from 'fastify';
 import type { ConfigurationPort } from './config.js';
 import type { StorePort } from './store-contract.js';
 import { object, string } from './provider-values.js';
 import { analyticsSettings,analyticsBotLogins } from './analytics-settings.js';
-type Store = StorePort<'supplementaryParticipants' | 'currentChat' | 'matchingStream' | 'subscriberHistory' | 'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteSession' | 'events' | 'followerPerson' | 'followerChanges' | 'followingAnalytics' | 'grid' | 'sessions' | 'streamMetadata' | 'summary'>;
+type Store = StorePort<'streamAnalytics' | 'preloadAnalytics' | 'changes' | 'supplementaryParticipants' | 'currentChat' | 'matchingStream' | 'subscriberHistory' | 'recentEvents' | 'mergeSessions' | 'unmergeSessions' | 'analytics' | 'clockAudience' | 'channelOverview' | 'deleteSession' | 'events' | 'followerPerson' | 'followerChanges' | 'followingAnalytics' | 'grid' | 'sessions' | 'streamMetadata' | 'summary'>;
 export function registerStreamsRoutes(app: FastifyInstance, db: Store, configuration: ConfigurationPort) {
+    const wire=new PreparedResponses();
+    const wireKey=async(request:FastifyRequest,session='')=>{
+      const change=await db.call('changes',session||undefined);
+      // Elapsed live time changes even without a fact write; leave live reads to the
+      // existing versioned incremental cache, rather than freeze their wire snapshot.
+      const q=object(request.query);
+      if(change.activeStream||(!session&&(q.to===undefined||Number(q.to)>Date.now())))return undefined;
+      const coreTick=request.routeOptions.url?.startsWith('/api/v1/analytics')?Math.floor(Date.now()/60000):null;
+      return JSON.stringify([request.routeOptions.url,session,coreTick,Object.fromEntries(Object.entries(object(request.query)).filter(([key])=>key!=='_background')),configuration.value.analyticsSettings,configuration.value.excludedBotLogins,configuration.value.twitch?.userId,configuration.value.youtube?.userId,configuration.value.youtubeAccountId,change]);
+    };
     const botsFor=(query:unknown)=>analyticsBotLogins(object(query),configuration.value);
     app.post('/api/v1/followers/person',request=>{const b=object(request.body);return db.call('followerPerson',string(b.source),string(b.account),string(b.externalId));});
-    app.get('/api/v1/followers/changes',request=>{const q=object(request.query);return db.call('followerChanges',Number(q.from??0),Number(q.to??Date.now()),botsFor(q));});
+    app.get('/api/v1/followers/changes',async(request,reply)=>{const q=object(request.query);
+      return wire.respond(request,reply,await wireKey(request),async()=>{const {polls,...visible}=await db.call('followerChanges',Number(q.from??0),Number(q.to??Date.now()),botsFor(q),false);void polls;return visible;});
+    });
     app.get('/api/v1/events/recent',request=>{const q=object(request.query);return db.call('recentEvents',Number(q.offset??0),Number(q.limit??100),{...(string(q.session)?{session:string(q.session)}:{}),...(string(q.person)?{person:string(q.person)}:{}),messagesOnly:string(q.messages)==='1'});});
     for(const path of ['/api/v1/analytics/subscribers','/api/v1/analytics/subscriber-streams'])app.get(path,request=>{
       const q=object(request.query),source=string(q.source);
@@ -20,6 +32,7 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
     for(const path of ["/api/v1/analytics","/api/v1/analytics/clock","/api/v1/analytics/audience","/api/v1/analytics/clock-summary"])app.get(path, async (request,reply) => {
         const q = object(request.query);
         const panel=string(q.panel);if(panel&&!['dynamics','time','audience'].includes(panel))throw new Error('INVALID_ANALYTICS_PANEL');
+        const streamView=string(q.view)==='stream';if(streamView&&!string(q.session))throw Error('INVALID_ANALYTICS_FILTER');
         const sessionId = string(q.session), defaults = analyticsSettings(configuration.value.analyticsSettings);
         const source = string(q.source) || 'all', coreRule = string(q.coreRule) || defaults.coreRule;
         if (source !== 'all' && source !== 'twitch' && source !== 'youtube')
@@ -27,7 +40,8 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
         if (coreRule !== 'either' && coreRule !== 'both' && coreRule !== 'frequency')
             throw new Error('INVALID_ANALYTICS_FILTER');
         for(const field of ['streamFrom','streamTo','streamOffset','streamLimit'])if(q[field]!==undefined&&(!Number.isSafeInteger(Number(q[field]))||Number(q[field])<0||(field==='streamLimit'&&Number(q[field])>100)))throw Error('INVALID_ANALYTICS_FILTER');
-        const result=await db.call(request.routeOptions.url==='/api/v1/analytics/clock'?"clockAudience":"analytics", {
+        return wire.respond(request,reply,await wireKey(request,sessionId),async()=>{
+        const result=await db.call(request.routeOptions.url==='/api/v1/analytics/clock'?"clockAudience":streamView?"streamAnalytics":string(q._background)==='1'?"preloadAnalytics":"analytics", {
             rollingCore:true,coreWindowDays:defaults.coreWindowDays,...(q.streamFrom===undefined?{}:{streamFrom:Number(q.streamFrom)}),...(q.streamTo===undefined?{}:{streamTo:Number(q.streamTo)}),...(q.streamOffset===undefined?{}:{streamOffset:Number(q.streamOffset)}),...(q.streamLimit===undefined?{}:{streamLimit:Number(q.streamLimit)}),
             ...(sessionId ? { sessionId } : {}),...(panel?{panel:panel as 'dynamics'|'time'|'audience'}:{}),...(string(q.attendanceOnly)==='1'?{attendanceOnly:true}:{}), ...(string(q.mode)==='summary'?{summaryOnly:true}:{}),...(string(q.insights)==='1'?{includeInsights:true}:{}), fromMs: sessionId ? 0 : Number(q.from), toMs: sessionId ? Date.now() : Math.min(Number(q.to), Date.now()), source, category: string(q.category),
             ...(q.audienceOffset===undefined?{}:{audienceOffset:Number(q.audienceOffset)}),...(q.audienceSearch===undefined?{}:{audienceSearch:string(q.audienceSearch)}),...(q.audienceSort===undefined?{}:{audienceSort:string(q.audienceSort)}),...(q.audienceCoreOnly===undefined?{}:{audienceCoreOnly:string(q.audienceCoreOnly)==='1'}),
@@ -38,10 +52,11 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
             excludedLogins: botsFor(request.query), ownerId: configuration.value.twitch?.userId ?? "", youtubeAccount: configuration.value.youtube?.userId ?? configuration.value.youtubeAccountId ?? "",
         });
         if(request.routeOptions.url==='/api/v1/analytics/clock-summary'&&'clockBuckets' in result&&!result.preparing)
-            return conditionalResponse(request,reply,{filters:result.filters,clockBuckets:result.clockBuckets,clockSelection:result.clockSelection,clockRevision:result.clockRevision});
+            return {filters:result.filters,clockBuckets:result.clockBuckets,clockSelection:result.clockSelection,clockRevision:result.clockRevision};
         if(request.routeOptions.url==='/api/v1/analytics/audience'&&'audience' in result&&!result.preparing)
-            return conditionalResponse(request,reply,{filters:result.filters,audience:result.audience,audiencePage:result.audiencePage});
-        return conditionalResponse(request,reply,result);
+            return {filters:result.filters,audience:result.audience,audiencePage:'audiencePage' in result?result.audiencePage:undefined};
+        return result;
+        });
     });
     app.get('/api/v1/sessions/match',async(request,reply)=>{const q=object(request.query);return reply.type('application/json').send(JSON.stringify(await db.call('matchingStream',Number(q.startedAt),string(q.latest)==='1')));});
     app.get("/api/v1/sessions", async (request) => db.call("sessions", string(object(request.query).session) || undefined, Number(object(request.query).offset ?? 0), Number(object(request.query).limit ?? 100), botsFor(request.query)));
@@ -50,7 +65,10 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
       return conditionalResponse(request,reply,await db.call('currentChat',string(object(request.params).id),botsFor(request.query),string(q.includeExcluded)==='1'));
     });
     app.get('/api/v1/sessions/:id/supplementary-chat',request=>db.call('supplementaryParticipants',string(object(request.params).id),botsFor(request.query)));
-    app.get("/api/v1/sessions/:id/followers", async (request) => db.call("followingAnalytics", string(object(request.params).id),botsFor(request.query)));
+    app.get("/api/v1/sessions/:id/followers", async (request,reply) => {
+      const id=string(object(request.params).id);
+      return wire.respond(request,reply,await wireKey(request,id),async()=>{const {polls,...visible}=await db.call('followingAnalytics',id,botsFor(request.query),false);void polls;return visible;});
+    });
     app.get("/api/v1/sessions/:id/metadata", async (request) => db.call('streamMetadata', string(object(request.params).id)));
     app.post('/api/v1/sessions/merge',async request=>({id:await db.call('mergeSessions',object(request.body).sessionIds as string[])}));
     app.post('/api/v1/sessions/:id/unmerge',async request=>{await db.call('unmergeSessions',string(object(request.params).id));return {ok:true};});

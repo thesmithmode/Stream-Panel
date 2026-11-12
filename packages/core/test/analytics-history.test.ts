@@ -628,3 +628,19 @@ test('cached reports count only streams with sufficient observed time for core',
   }
  }finally{s.close();}
 });
+test('runtime warming prepares 7/30/all panels and refreshes moving windows without changing legacy baking',()=>{
+ const s=new StreamStore(':memory:');try{
+  fixture(s,4);const history=(s as any).history as AnalyticsHistory;
+  const end=base+10*86400000,queries:any[]=[],report=history.report.bind(history);
+  history.report=(q)=>{queries.push(q);return report(q);};
+  let result;do{result=s.warmAnalytics({...options,toMs:end},false,true);}while(result.preparing);
+  for(const days of [0,7,30])for(const panel of ['dynamics','time','audience']){
+   const fromMs=days?Math.max(0,end-days*86400000):0;
+   assert.ok(queries.some(q=>q.fromMs===fromMs&&q.panel===panel&&q.clockCompact&&q.attendanceOnly));
+   assert.equal(s.analytics({...options,fromMs,toMs:end,source:'all',category:'',panel:panel as 'dynamics',summaryOnly:true,includeInsights:true,clockCompact:true,clockDay:'all',clockResolution:15,attendanceOnly:true}).preparing,undefined);
+  }
+  const count=queries.length;assert.equal(s.warmAnalytics({...options,toMs:end},false,true).preparing,false);assert.equal(queries.length,count);
+  do{result=s.warmAnalytics({...options,toMs:end+minute},false,true);}while(result.preparing);
+  assert.ok(queries.length>count);
+ }finally{s.close();}
+});

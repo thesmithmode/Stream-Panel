@@ -74,7 +74,7 @@ function streamUnfollowers(db:Database.Database,start:number,end:number,windows:
  }
  return changes;
 }
-export function followingAnalytics(db:Database.Database,id:string,range?:{fromMs:number;toMs:number},excluded:readonly string[]|false=[]){
+export function followingAnalytics(db:Database.Database,id:string,range?:{fromMs:number;toMs:number},excluded:readonly string[]|false=[],includePolls=true){
  const stream=range?{start:range.fromMs,end:range.toMs}:db.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=?').get(id) as {start:number;end:number|null};const end=stream.end??Date.now(),windows=range?[{from:stream.start,to:end}]:sessionWindows(db,id,stream.start,end);
  const compact=streamFollowerObservationsSql.replace('AS at,payload_json','AS at,(SELECT snapshot_id FROM follower_checks WHERE id=p.id) AS snapshotId');
  const checks=db.prepare(compact).all(stream.start,end) as {at:number;source:string;account:string;snapshotId:string}[];
@@ -116,5 +116,5 @@ export function followingAnalytics(db:Database.Database,id:string,range?:{fromMs
   const comparable=source==='twitch'&&first!==undefined&&last!==undefined&&first.at<last.at;
   return {source,account,knownNew:newFollowers.filter(f=>f.source===source&&f.account===account).length,change:comparable?last.total!-first.total!:null,fromAt:comparable?first.at:null,toAt:comparable?last.at:null,startTotal:comparable?first.total:null,endTotal:comparable?last.total:null};
  });
- return {newFollowers,unfollowers:unfollowers.filter(visible).sort((a,b)=>b.at-a.at),platforms,polls:observations};
+ return {newFollowers,unfollowers:unfollowers.filter(visible).sort((a,b)=>b.at-a.at),platforms,polls:includePolls?observations:[]};
 }

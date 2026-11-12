@@ -11,6 +11,7 @@
   import Help from "./Help.svelte";
   import Sheet from "./Sheet.svelte";
   import Icon from "./Icon.svelte";
+  import {subscriberPeriod,subscriberScope} from './subscriber-cache';
   import Following from "./Following.svelte";
   import SubscriberGrowth from "./SubscriberGrowth.svelte";
   import AudienceGrowth from "./AudienceGrowth.svelte";
@@ -32,6 +33,7 @@
   let period=$state<number|'all'|'custom'>('all');
   const reportScope=$derived(JSON.stringify([profile,section,period,period==='custom'?from:'',period==='custom'?to:'',source,category,timezone]));
   let loadedScope=$state(''),loadedPanel=$state('');
+  let followingTask=$state.raw<Promise<any>|undefined>();
   let refreshController:AbortController|undefined;
   let requestId=0, mounted=$state(false);
   $effect(()=>{
@@ -106,12 +108,23 @@
       const offset=0,term='',sort=view.sort,core=false;
       const audienceQuery=JSON.stringify([scope,offset,term,sort,core]);
       const panel=section;const q=summaryQuery(fromMs,toMs,source,category,timezone,view.resolution,sort);q.set('panel',panel);q.set('attendanceOnly','1');if(liveEnd&&period!=='custom')q.set('_period',String(period));
+      if(panel==='audience'){
+        followingTask=api(`followers/changes?${new URLSearchParams({from:String(fromMs),to:String(toMs)})}`,undefined,signal);
+        void followingTask.catch(()=>{});
+      }
+      if(panel==='dynamics')void subscriberPeriod(subscriberScope(profile,fromMs,toMs,timezone,liveEnd&&period!=='custom')).promise.catch(()=>{});
       const cached=cachedAnalytics(profile,q);
       if(cached&&id===requestId){data=cached;loadedPanel=panel;loadedScope=scope;loadedAudienceQuery=audienceQuery;}
       const result=await loadAnalytics(profile,q,force,signal);
       if(id===requestId){if(result.filters&&(result.filters.category!==category||result.filters.source!==source||result.filters.timezone!==timezone))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');loadedPanel=panel;loadedScope=scope;loadedAudienceQuery=audienceQuery;
         if(JSON.stringify([scope,audienceOffset,search,view.sort,view.coreOnly])===audienceQuery)pagedAudience=null;
         if(!sameResponse(data,result))data=mergeResponseBlocks(data,result);
+        // Complete the visible read first; reuse its period while preparing other tabs.
+        void (async()=>{for(const next of ['dynamics','time','audience']){
+          if(signal?.aborted)return;if(next===panel)continue;
+          const background=new URLSearchParams(q);background.set('panel',next);
+          try{await loadAnalytics(profile,background,false,signal,true);}catch{return;}
+        }})();
 }
     }catch(e){if(id===requestId&&!signal?.aborted){error=(e as Error).message;}}
     finally{if(id===requestId)busy=false;}
@@ -177,7 +190,7 @@
   </div>
   {/if}
   {#if section==='audience'}{#if data.composition}<TimePatterns {data} section="audience"/>{/if}
-  <Following fromMs={data.filters?.fromMs??0} toMs={data.filters?.toMs??Date.now()} {onPerson}/>
+  <Following preloaded={followingTask} fromMs={data.filters?.fromMs??0} toMs={data.filters?.toMs??Date.now()} {onPerson}/>
   {#if view.audience}<section class="panel returning-audience"><header><h2>Возвращаемость участников</h2><Help id="analytics-audience" label="О минутах в чате" text="Наблюдаемые минуты Twitch учитывают молчавших участников и исключают неизвестные промежутки. Оценка YouTube показана отдельно. Выберите сортировку по минутам или сообщениям; нажмите имя для подробностей."/><span>{data.audiencePage?(pagedAudience?.audiencePage?.total??data.audiencePage.total):visible.length} участников</span></header>
     <p class="small regular-summary">Ядро аудитории: <strong>{data.composition?.core??0} из {data.summary.attendees??data.summary.entities??0} ({data.summary.attendees?pct((data.composition?.core??0)/data.summary.attendees):"нет данных"})</strong></p>
     <div class="analytics-controls"><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label>Сортировка<select aria-label="Сортировка" bind:value={view.sort}><option value="observedMinutes">Минуты в чате</option><option value="estimatedChatMinutes">Оценка активности YouTube</option><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option><option value="attendanceRatio">Доля посещённых эфиров</option></select></label><label class="check"><input type="checkbox" bind:checked={view.coreOnly} /> Только ядро</label></div>

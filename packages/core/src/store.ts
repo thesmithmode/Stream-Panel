@@ -411,9 +411,18 @@ export class StreamStore {
     const report=this.history.query(options.sessionId?{...options,sessionId:this.groups.root(options.sessionId)}:options);return {...report,audience:this.bots.decorate(report.audience,p=>p.id)};
   }
 
+  streamAnalytics(options:AnalyticsOptions){
+    const report=this.analytics(options);
+    return {filters:report.filters,summary:report.summary,timeline:report.timeline,audience:report.audience,streamComparison:report.streamComparison,
+      ...(report.preparing?{preparing:true,ready:report.ready,total:report.total,stage:report.stage}:{})};
+  }
+  preloadAnalytics(options:AnalyticsOptions){
+    const report=this.history.backgroundQuery(options.sessionId?{...options,sessionId:this.groups.root(options.sessionId)}:options);
+    return {...report,audience:this.bots.decorate(report.audience,p=>p.id)};
+  }
   clockAudience(options:AnalyticsOptions){return this.history.clockAudience(options);}
   advanceAnalytics(options:AnalyticsOptions){return this.history.advance(options);}
-  warmAnalytics(options:AnalyticsOptions,bakeCategories=false){const result=this.history.warm(options,bakeCategories);if(!result.preparing)this.channelOverview(options.excludedLogins);return result;}
+  warmAnalytics(options:AnalyticsOptions,bakeCategories=false,bakePeriods=false){const result=this.history.warm(options,bakeCategories,bakePeriods);if(!result.preparing)this.channelOverview(options.excludedLogins);return result;}
 
   youtubeQuota(day: string, profile: string, cost = 1,budget=4000): boolean {
     if (!/^\d{2}\/\d{2}\/\d{4}$/.test(day) || !profile || !Number.isInteger(cost) || cost < 1 || cost > 4000||!Number.isInteger(budget)||budget<1||budget>4000) throw new Error("INVALID_QUOTA");
@@ -485,8 +494,8 @@ export class StreamStore {
   subscriberHistory(query:SubscriberQuery){return new SubscriberHistory(this.db).query(query);}
   youtubePublications(account:string,items:Publication[],at:number){new SubscriberHistory(this.db).publications(account,items,at);}
   personFollowing(personId:string,sessionId=''){sessionId=sessionId?this.groups.root(sessionId):'';if(!this.db.prepare('SELECT 1 FROM persons WHERE id=?').get(personId))throw new Error('PERSON_NOT_FOUND');if(sessionId)this.sessionRow(sessionId);return personFollowing(this.reads,personId,sessionId);}
-  followerChanges(fromMs:number,toMs:number,excluded:readonly string[]|false=[]){if(!Number.isSafeInteger(fromMs)||!Number.isSafeInteger(toMs)||fromMs<0||toMs<=fromMs||toMs>8640000000000000)throw Error('INVALID_PERIOD');return followingAnalytics(this.reads,'',{fromMs,toMs},excluded);}
-  followingAnalytics(sessionId:string,excluded:readonly string[]|false=[]){sessionId=this.groups.root(sessionId);this.sessionRow(sessionId);return followingAnalytics(this.reads,sessionId,undefined,excluded);}
+  followerChanges(fromMs:number,toMs:number,excluded:readonly string[]|false=[],includePolls=true){if(!Number.isSafeInteger(fromMs)||!Number.isSafeInteger(toMs)||fromMs<0||toMs<=fromMs||toMs>8640000000000000)throw Error('INVALID_PERIOD');return followingAnalytics(this.reads,'',{fromMs,toMs},excluded,includePolls);}
+  followingAnalytics(sessionId:string,excluded:readonly string[]|false=[],includePolls=true){sessionId=this.groups.root(sessionId);this.sessionRow(sessionId);return followingAnalytics(this.reads,sessionId,undefined,excluded,includePolls);}
   streamMetadata(sessionId:string){
     sessionId=this.groups.root(sessionId);this.sessionRow(sessionId);
     return this.reads.prepare(`SELECT observed_at_ms AS at,category_id AS categoryId,category_name AS categoryName,title

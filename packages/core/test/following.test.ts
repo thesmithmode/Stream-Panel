@@ -119,3 +119,14 @@ test('subscriber profile resolution is idempotent, scoped by platform/account an
   assert.throws(()=>s.followerPerson('twitch','other','subscriber'),/FOLLOWER_NOT_FOUND/);assert.throws(()=>s.followerPerson('twitch','owner','missing'),/FOLLOWER_NOT_FOUND/);assert.throws(()=>s.followerPerson('other','owner','subscriber'),/INVALID_FOLLOWER/);
  }finally{s.close();}
 });
+test('UI follower projection omits poll transfer while preserving changes and diagnostic history',()=>{
+ const s=new StreamStore(':memory:');try{
+  const id=s.startSession('owner','compact',at,'platform',at);
+  s.followingSnapshot('twitch','owner',[],true,at);
+  s.followingSnapshot('twitch','owner',[{id:'viewer',name:'Viewer',followedAtMs:at+m}],true,at+2*m,1);
+  s.endSession(id,at+3*m);
+  const full=s.followingAnalytics(id),compact=s.followingAnalytics(id,[],false);
+  assert.ok(full.polls.length>0);assert.deepEqual(compact,{...full,polls:[]});
+  assert.deepEqual(s.followerChanges(at,at+3*m,[],false),{...s.followerChanges(at,at+3*m),polls:[]});
+ }finally{s.close();}
+});

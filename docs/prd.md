@@ -94,3 +94,7 @@
 ## 8. Вне v1
 
 Виджеты OBS и интерактив Stream Tools, другие площадки, публичный SaaS, автоматический cross-platform матч по имени без согласия, canonical watch time, восстановление утраченного Twitch-чата, полноценный multi-writer sync, упаковка в один EXE и обязательная облачная инфраструктура.
+
+## Performance acceptance
+
+Preserve all analytical features, accuracy and freshness. Targets for every 7/30/all analytics panel and a stream page are ≤1 s cold and ≤300 ms warm to meaningful rendered content. Follow the [cache and performance contract](performance-and-cache.md), including exact filter keys, mutation invalidation, lazy detail access and regression tests. Synthetic API budgets are regression checks and do not establish production acceptance. Main/production require explicit owner approval.

@@ -322,29 +322,37 @@ export class AnalyticsHistory {
         }
         return {pending:(this.statement('SELECT count(*) n FROM analytics_jobs').get() as {n:number}).n};
     }
-    private warming:{revision:string;categories:string[];index:number;targetRevision:string}|undefined;
+    private warming:{revision:string;targets:AnalyticsOptions[];index:number;targetRevision:string}|undefined;
     private background=false;
-    private warmReport(options:AnalyticsOptions){this.background=true;try{return this.report(options);}finally{this.background=false;}}
-    warm(options:AnalyticsOptions,bakeCategories=false){
+    private warmReport(options:AnalyticsOptions){return this.report(options);}
+    warm(options:AnalyticsOptions,bakeCategories=false,bakePeriods=false){
+        this.background=true;
+        try{return this.warmTargets(options,bakeCategories,bakePeriods);}finally{this.background=false;}
+    }
+    private warmTargets(options:AnalyticsOptions,bakeCategories=false,bakePeriods=false){
         if(options.rollingCore){const core=this.rollingMembership(options);if(core.preparing)return core;options=core.options;}
-        // Bake the landing report, not a Cartesian product of moving windows.
+        // Runtime warming covers only the standard periods/panels; legacy category baking stays available.
         // Freeze an unfinished snapshot so moving time and live polls cannot restart it.
         const current:AnalyticsOptions={...options,source:'all',category:'',fromMs:0,toMs:options.toMs,summaryOnly:true,includeInsights:true};
         const sessions=this.sessions(current);
         const {fromMs,toMs,...settings}=current;void fromMs;void toMs;
-        const structure=JSON.stringify([settings,bakeCategories,sessions.map(s=>({...s,revision:s.ended_at_ms===null?0:s.revision})),this.annotationsRevision(),this.followerRevision()]);
+        const structure=JSON.stringify([bakePeriods?Math.floor(current.toMs/60000):0,settings,bakeCategories,bakePeriods,sessions.map(s=>({...s,revision:s.ended_at_ms===null?0:s.revision})),this.annotationsRevision(),this.followerRevision()]);
         const revision=JSON.stringify([structure,sessions.filter(s=>s.ended_at_ms===null).map(s=>[s.id,s.revision])]);
         if(revision===this.warmedRevision)return {preparing:false,ready:1,total:1};
         if(this.warming?.revision!==structure){
             const categories=bakeCategories?this.statement("SELECT category_id AS id FROM stream_samples WHERE category_id<>'' AND category_name<>'' GROUP BY category_id ORDER BY count(*) DESC,category_id LIMIT 6").all() as {id:string}[]:[];
-            this.warming={revision:structure,categories:['',...categories.map(c=>c.id)],index:0,targetRevision:revision};
+            const targets:AnalyticsOptions[]=[];
+            if(bakePeriods)for(const days of [0,7,30])for(const category of ['',...categories.map(c=>c.id)])for(const panel of ['dynamics','time','audience'] as const)
+                targets.push({...current,fromMs:days?Math.max(0,current.toMs-days*86400000):0,category,panel,clockCompact:true,clockDay:'all',clockResolution:15,attendanceOnly:true});
+            if(!bakePeriods)for(const category of ['',...categories.map(c=>c.id)])targets.push({...current,category});
+            this.warming={revision:structure,targets,index:0,targetRevision:revision};
         }
-        const job=this.warming,report=this.warmReport({...current,category:job.categories[job.index]!});
+        const job=this.warming,report=this.warmReport(job.targets[job.index]!);
         if(report.preparing)return {preparing:true,ready:report.ready??0,total:report.total??1};
         // Advance only the unfinished report; do not reread/clone all completed
         // categories on every background slice. Yield between ready reports too.
         job.index++;
-        if(job.index<job.categories.length)return {preparing:true,ready:job.index,total:job.categories.length};
+        if(job.index<job.targets.length)return {preparing:true,ready:job.index,total:job.targets.length};
         this.warmedRevision=job.targetRevision;
         this.warming=undefined;
         return {preparing:this.warmedRevision!==revision,ready:1,total:1};
@@ -362,6 +370,9 @@ export class AnalyticsHistory {
           insights:panel==='dynamics'?(report.insights??[]):[],activityClock:panel==='time'?report.activityClock:[],activityWindows:[],
           clockBuckets:panel==='time'?(report.clockBuckets??[]):[],hours:panel==='time'?report.hours:[],categories:panel==='dynamics'?report.categories:[],
         };
+    }
+    backgroundQuery(options:AnalyticsOptions):Report{
+        this.background=true;try{return this.query(options);}finally{this.background=false;}
     }
     query(options:AnalyticsOptions):Report{
         const core=this.rollingMembership(options);

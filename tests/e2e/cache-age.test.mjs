@@ -7,7 +7,7 @@ test('unchanged all-time cache survives time passage and activity does not reloa
 const app=await application();let browser;
 try {
  const id=await seed(app);await app.db.call('endSession',id,Date.now());browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:900}});page.setDefaultTimeout(10000);
- const calls=[];page.on('request',r=>{const u=new URL(r.url());if(u.pathname==='/api/v1/analytics')calls.push(u.search);});
+ const calls=[];page.on('request',r=>{const u=new URL(r.url());if(u.pathname==='/api/v1/analytics'&&!u.searchParams.has('_background'))calls.push(u.search);});
  await goto(page,app.bootstrap());await page.locator('.channel-metrics').waitFor();await navigate(page,'Аналитика');await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');
  const initial=calls.length;
  await navigate(page,'Обзор');await page.locator('.channel-metrics').waitFor();await navigate(page,'Аналитика');await page.waitForFunction(()=>document.querySelector('.analytics-results')?.getAttribute('aria-busy')==='false');const instant=calls.length;

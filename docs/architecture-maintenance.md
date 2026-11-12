@@ -45,3 +45,7 @@ Cached reads live for at most 30 seconds in local memory and Redis, and domain m
 Клиент проверяет `/api/v1/changes` для открытого профиля: по умолчанию раз в пять минут без эфира и раз в минуту в живом контексте. Скрытая вкладка не опрашивает сервер. Проверка версий не загружает отчёт; неизменившиеся исторические снимки сохраняются при навигации. Изменения донатов, людей и настроек учитываются и без эфира. Счётчики подписчиков обновляют свой график отдельно. Расписание сборщиков провайдеров сохранено.
 
 Аналитика запрашивается только при открытии аналитики или конкретного стрима. Параметр `panel` сокращает ответ до текущего подраздела без изменения расчётов. Предварительная обработка сохранена для просматриваемого профиля: короткая аренда интереса браузера ограничивает фоновую работу, а завершённая версия повторно не обрабатывается. Возвращаемость использует `attendanceOnly=1`; записи доноров без участия в эфире остаются в общих данных и донатах, но не увеличивают число участников.
+
+## Report delivery and scheduling
+
+See [performance-and-cache.md](performance-and-cache.md) for the authoritative read-path contract. Versioned route-local serialized bodies and bounded ETag-keyed gzip reuse avoid repeated serialization/compression. Live reads bypass the additional wire cache. Foreground operations precede queued analytical maintenance; open/close remain barriers. Warming covers 7/30/all and all panels. Browser panel preloads use bounded low-priority worker operations.

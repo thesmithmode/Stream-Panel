@@ -1,5 +1,7 @@
 # Stream Panel workflow
 
+- Before data/API/UI changes read [performance and cache contract](docs/performance-and-cache.md); preserve its keys, invalidation, freshness and regression budgets.
+
 - Preserve data, collection, profile isolation and rollback checkpoints during UI work.
 - Complete local review, appropriate tests and responsive checks before handing a PR to CI.
 - User preference: check CI and deployment manually in the active conversation. Do not

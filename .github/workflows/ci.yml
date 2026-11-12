@@ -74,6 +74,9 @@ jobs:
       - name: Verify incremental history on 10,000 streams
         if: matrix.segment == 'unit'
         run: node --max-old-space-size=128 scripts/benchmark-analytics-load.mjs
+      - name: Check screen API latency and payload budgets
+        if: matrix.segment == 'integration'
+        run: STREAM_PANEL_PERF_GATE=1 node scripts/benchmark-screen-api.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

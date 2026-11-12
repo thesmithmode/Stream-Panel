@@ -1,3 +1,4 @@
+import {nextStoreRequest} from './store-worker-queue.js';
 import {parentPort,workerData} from 'node:worker_threads';
 import {isStoreMethod,invalidatesCachedReads} from './store-contract.js';
 import {StreamStore} from '../../../packages/core/src/store.js';
@@ -21,7 +22,16 @@ function shareIdentities(entry:Entry){
   if(peer.stamp!==stamp){peer.stamp=stamp;parentPort!.postMessage({clientId:id,invalidate:true});}
  }
 }
-parentPort!.on('message',async({id,method,args,clientId=workerData.clientId?'':initial,open,profile}:{id:number;method:string;args:unknown[];clientId?:string;open?:boolean;profile?:string})=>{
+type Message={id:number;method:string;args:unknown[];clientId?:string;open?:boolean;profile?:string};
+const queue:Message[]=[];let scheduled=false;
+parentPort!.on('message',(message:Message)=>{queue.push(message);if(!scheduled){scheduled=true;setImmediate(drain);}});
+async function drain(){
+ await execute(nextStoreRequest(queue));
+ // Process newly arrived message events before choosing the next job. A chain of
+ // resolved promises would otherwise drain old warm jobs ahead of a new user read.
+ if(queue.length)setImmediate(drain);else scheduled=false;
+}
+async function execute({id,method,args,clientId=workerData.clientId?'':initial,open,profile}:Message){
  if(open){
   try{const entry=openStore(profile);stores.set(clientId,entry);shareIdentities(entry);parentPort!.postMessage({clientId,ready:true});}
   catch(error){parentPort!.postMessage({clientId,ready:true,error:error instanceof Error?error.message:'DB_ERROR'});}return;
@@ -44,5 +54,5 @@ parentPort!.on('message',async({id,method,args,clientId=workerData.clientId?'':i
   if(method==='close')stores.delete(clientId);
   parentPort!.postMessage({clientId,id,result,executionMs});
  }catch(error){parentPort!.postMessage({clientId,id,error:error instanceof Error?error.message:'DB_ERROR'});}
-});
+}
 parentPort!.postMessage({clientId:initial,ready:true});

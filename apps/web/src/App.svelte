@@ -1,7 +1,7 @@
 <script lang="ts">
   import {screenVersion,refreshInterval,type Changes} from './refresh-policy';
   import {setServerVersions,bumpReadRevision,getDataRevision} from './api';
-  import {clearAnalyticsCache} from "./analytics-cache";
+  import {clearAnalyticsCache,loadAnalytics} from "./analytics-cache";
   import Sheet from "./Sheet.svelte";
   import DonationTotal from "./DonationTotal.svelte";
   import StreamHistory from "./StreamHistory.svelte";
@@ -143,6 +143,10 @@
       const connectionsChanged=!previous||previous.connectionRevision!==next.connectionRevision;
       const subscribersChanged=!previous||previous.versions.subscribers!==next.versions.subscribers||previous.versions.follows!==next.versions.follows;
       setServerVersions(profile,next);
+      if(tab==='stream'&&sessionFilter&&(!routeSection||['summary','people'].includes(routeSection))&&(changed||fresh||!scopeReady)){
+        const query=new URLSearchParams({view:'stream',session:sessionFilter,source:'all',category:'',timezone:'Europe/Moscow'});
+        void loadAnalytics(profile,query,fresh,controller.signal).catch(()=>{});
+      }
       if(fresh&&scopeReady)bumpReadRevision(profile);
       const requests=viewRequests(tab as View,sessionFilter).filter(([key])=>key==='status'?connectionsChanged||fresh||!scopeReady:changed||fresh||!scopeReady);
       const values=Object.fromEntries(await Promise.all(requests.map(async([key,path])=>[key,key==='status'&&initialStatus?initialStatus:await api(key==='sessions'&&tab==='sessions'&&sessionPage>0?`sessions?offset=${sessionPage*100}`:path,undefined,controller.signal)])));
@@ -233,6 +237,9 @@
         try {const identity=await api<any>("auth/me?status=1");user=identity.user;restoreRoute();if(identity.status?.profile===profile)initialStatus=identity.status;} catch(e) {if((e as Error).message!=="NOT_FOUND"&&(e as Error).message!=="HTTP_404")throw e;}
         const authProfile=profile,auth=initialStatus??await api<any>("status");
         setCsrf(auth.csrf);user=auth.user??user;restoreRoute();
+        // Status already established permissions and configuration. Screens without
+        // shell reads can request their data alongside revision validation.
+        if(profile===authProfile&&viewRequests(tab as View,sessionFilter).length===1){status=auth;scopeReady=true;authorized=true;loading=false;}
         await refresh(false,profile===authProfile?auth:undefined);
         if (!alive) return;
         authorized=true;saveRoute(true);
