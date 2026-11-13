@@ -41,6 +41,7 @@ test('one toolbar controls subscriber windows, custom dates validate locally, an
   await card.locator('[data-source=twitch] strong').filter({hasText:'56'}).waitFor();
   assert.equal(await card.locator('.subscriber-controls,input[type=date],.period-switch').count(),0);
   assert.ok(Number(requests.at(-1).searchParams.get('to'))-Number(requests.at(-1).searchParams.get('from'))>60*day);
+  await page.getByRole('button',{name:'По месяцам',exact:true}).click();
   let releasePage,finishPage;const heldPage=new Promise(resolve=>releasePage=resolve),finishedPage=new Promise(resolve=>finishPage=resolve);
   await page.route('**/api/v1/analytics?*',async route=>{if(new URL(route.request().url()).searchParams.has('streamFrom')){await heldPage;try{await route.continue();}finally{finishPage();}}else await route.continue();});
   try{
