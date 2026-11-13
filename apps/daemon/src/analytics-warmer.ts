@@ -1,10 +1,11 @@
 import {analyticsSettings,analyticsCalculationSettings} from './analytics-settings.js';
 import type {ConfigurationPort} from './config.js';
 import type {StorePort} from './store-contract.js';
-type Runtime={configuration:ConfigurationPort;db:StorePort<'warmAnalytics'|'changes'|'advanceAnalytics'|'analytics'>&{queueStatus?:()=>{pending:number};onChange?:(listener:()=>void)=>()=>void}};
+type Runtime={configuration:ConfigurationPort;db:StorePort<'warmAnalytics'|'changes'|'advanceAnalytics'|'analytics'|'followerChanges'>&{queueStatus?:()=>{pending:number};onChange?:(listener:()=>void)=>()=>void}};
 /** Serial background catch-up: bounded SQLite chunks, then idle checks once a minute. */
 export function startAnalyticsWarmer(runtimes:()=>Iterable<Runtime>,enabled:()=>boolean,onError:()=>void){
  const versions=new WeakMap<object,string>();
+ const followingVersions=new WeakMap<object,string>();
  const windows=new WeakMap<object,{signature:string;toMs:number;index:number}>();
  let stopped=false,running=false,dirty=false,timer:ReturnType<typeof setTimeout>|undefined;
  const subscriptions=new Map<Runtime,()=>void>();
@@ -27,6 +28,19 @@ export function startAnalyticsWarmer(runtimes:()=>Iterable<Runtime>,enabled:()=>
     if(stopped)break;
     const rules=analyticsCalculationSettings(cfg.analyticsSettings),includeBots=analyticsSettings(cfg.analyticsSettings).includeBots;
     const signature=JSON.stringify([change.versions.activity,change.versions.people,change.versions.donations,change.versions.follows,rules,includeBots,cfg.excludedBotLogins,cfg.twitch?.userId,cfg.youtube?.userId]);
+    // Following is independent of the expensive audience catch-up. Prepare it
+    // first, once per data version and minute, with the exact UI period bounds.
+    const followEnd=Math.floor(Date.now()/60000)*60000;
+    const followSignature=JSON.stringify([signature,followEnd]);
+    if(followingVersions.get(runtime.db)!==followSignature){
+     for(const days of [0,7,30]){
+      if(stopped)break;
+      if((runtime.db.queueStatus?.().pending??0)>0){preparing=true;break;}
+      await runtime.db.call('followerChanges',days?followEnd-days*86400000:0,followEnd,includeBots?false:cfg.excludedBotLogins);
+      if(days===30)followingVersions.set(runtime.db,followSignature);
+     }
+     if(stopped)break;
+    }
     if(versions.get(runtime.db)===signature)continue;
     const options={...rules,rollingCore:true,fromMs:0,toMs:Date.now(),excludedLogins:includeBots?false as const:cfg.excludedBotLogins,ownerId:cfg.twitch?.userId??'',youtubeAccount:cfg.youtube?.userId??cfg.youtubeAccountId??''};
     const queued=await runtime.db.call('advanceAnalytics',options);
