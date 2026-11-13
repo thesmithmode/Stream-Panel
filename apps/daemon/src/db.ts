@@ -17,6 +17,8 @@ export class StoreClient {
   storageStatus(){return this.storage.status();}
   private readonly timings = new Map<string, {calls:number;maxQueueMs:number;maxExecutionMs:number}>();
   queueStatus():{pending:number;operations:Record<string,{calls:number;maxQueueMs:number;maxExecutionMs:number}>}{const analytics=this.analyticsClient?.queueStatus();return {pending:this.pending.size+(analytics?.pending??0),operations:{...Object.fromEntries(this.timings),...analytics?.operations}};}
+  private readonly changeListeners=new Set<()=>void>();
+  onChange(listener:()=>void){this.changeListeners.add(listener);return ()=>{this.changeListeners.delete(listener);};}
   private sequence = 0;
   private dead = false;
   private stopping=false;
@@ -34,7 +36,7 @@ export class StoreClient {
     this.ready = new Promise((resolve, reject) => {
       const onMessage=(message:{clientId?:string;ready?:boolean;error?:string;invalidate?:boolean;id:number;result?:unknown;executionMs?:number}) => {
         if(message.clientId!==this.lease.clientId)return;
-        if(message.invalidate){this.cache.invalidate();this.analyticsClient?.cache.invalidate();return;}
+        if(message.invalidate){this.cache.invalidate();this.analyticsClient?.cache.invalidate();for(const listener of this.changeListeners)listener();return;}
         if (message.ready) {
           if(message.error)reject(new Error(message.error));else resolve();
           return;
