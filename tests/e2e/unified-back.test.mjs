@@ -12,7 +12,7 @@ test('one Back follows tabs, directory, reload and Forward; direct person links 
   const context=await browser.newContext({viewport:{width:390,height:844}}),page=await context.newPage();page.setDefaultTimeout(10000);
   await goto(page,app.bootstrap());await navigate(page,'Люди');
   await page.getByLabel('Поиск человека').fill('Тестовый');
-  await page.locator('.person-row').first().click();const person=new URL(page.url()).searchParams.get('person');
+  await page.getByRole('region',{name:'Список людей',exact:true}).getByRole('button',{name:'Тестовый зритель',exact:true}).click();const person=new URL(page.url()).searchParams.get('person');
   await page.getByRole('tab',{name:'Заметки',exact:true}).click();await reload(page);
   await page.getByRole('button',{name:'Назад',exact:true}).click();
   await page.getByRole('tab',{name:'Обзор',exact:true}).waitFor();assert.equal(await page.getByRole('tab',{name:'Обзор',exact:true}).getAttribute('aria-selected'),'true');
@@ -21,6 +21,7 @@ test('one Back follows tabs, directory, reload and Forward; direct person links 
   await page.getByRole('button',{name:'Назад',exact:true}).click();await page.getByRole('heading',{name:'Тестовый зритель',exact:true}).waitFor();
   await page.getByRole('button',{name:'Назад',exact:true}).click();await page.getByRole('region',{name:'Список людей',exact:true}).waitFor();
   await page.goForward();await page.getByRole('heading',{name:'Тестовый зритель',exact:true}).waitFor();
+  await page.setViewportSize({width:1280,height:900});await page.getByRole('link',{name:'Stream Panel',exact:true}).click();await page.locator('.channel-metrics').waitFor();await page.getByRole('button',{name:'Назад',exact:true}).click();await page.getByRole('heading',{name:'Тестовый зритель',exact:true}).waitFor();
   const direct=await context.newPage();direct.setDefaultTimeout(10000);
   await goto(direct,`${app.origin}/?view=people&profile=ruslan&person=${encodeURIComponent(person)}`);
   await direct.getByRole('heading',{name:'Тестовый зритель',exact:true}).waitFor();

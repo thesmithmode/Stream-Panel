@@ -283,7 +283,7 @@
 
 <div class="app-shell" class:highlight-bots={status?.config?.analyticsSettings?.highlightBots??true} class:highlight-humans={status?.config?.analyticsSettings?.highlightHumans??true}>
   <aside class:analytics-context={tab==='analytics'&&scopeReady&&authorized&&!loading} class="sidebar" aria-label="Навигация">
-    <a class="brand" href="/">Stream <span>Panel</span></a>
+    <a class="brand" href="/" onclick={event=>{if(event.button===0&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey&&!event.altKey){event.preventDefault();navigate('overview');}}}>Stream <span>Panel</span></a>
     <nav aria-label="Разделы">
       {#each nav as [key,label]}<button disabled={loading||!authorized} class:active={tab===key||(key==='sessions'&&tab==='stream')} aria-current={tab===key?'page':undefined} onclick={()=>navigate(key)}><Icon name={key}/>{label}</button>{/each}
       <button disabled={loading||!authorized} class:active={moreOpen||['connections','settings'].includes(tab)} aria-expanded={moreOpen} onclick={()=>moreOpen=true}><Icon name="more"/>Ещё</button>
