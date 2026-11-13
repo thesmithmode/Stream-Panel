@@ -3,6 +3,7 @@
  import type {ViewerPlatform} from './daily-metrics';
  import {dailyMetrics,type StreamMetric} from './daily-metrics';
  import Help from './Help.svelte';
+ import Icon from './Icon.svelte';
  import {countAxis,countAxisInset} from './chart-layout';
  let {platform=$bindable<ViewerPlatform>('all'),metric=$bindable<'online'|'active'>('online'),streams,range,loadStreams,from=0,end=Date.now(),timezone='Europe/Moscow',onStream}:{platform?:ViewerPlatform;metric?:'online'|'active';streams:StreamMetric[];range?:{first:number;total:number};loadStreams?:(params:Record<string,number>,signal:AbortSignal)=>Promise<any>;from?:number;end?:number;timezone?:string;onStream:(id:string)=>void}=$props();
  let viewportWidth=$state(0);
@@ -70,7 +71,7 @@
  </div>
  {#if !(range?.total??streams.length)}<p class="growth-caption muted">Нужны собранные эфиры.</p>{:else}
  <div class="growth-navigation"><div class="growth-view" role="group" aria-label="Период графика"><button class="text-button" class:active={wholePeriod} aria-pressed={wholePeriod} onclick={()=>{mode='all';page=0;}}>Весь период</button><button class="text-button" class:active={mode==='month'} aria-pressed={mode==='month'} onclick={()=>{mode='month';page=0;}}>По месяцам</button><button class="text-button" class:active={mode==='week'} aria-pressed={mode==='week'} onclick={()=>{mode='week';page=0;}}>По неделям</button></div>
- <div class="growth-range">{#if !wholePeriod}<button class="text-button" aria-label="Предыдущие дни" disabled={!hasPrevious} onclick={()=>page++}>‹</button>{/if}<span>{fullDate(dates[0]!)}–{fullDate(dates.at(-1)!)}{metric==='active'?' · сообщений/ч':''}</span>{#if !wholePeriod}<button class="text-button" aria-label="Следующие дни" disabled={page===0} onclick={()=>page--}>›</button>{/if}</div></div>
+ <div class="growth-range">{#if !wholePeriod}<button class="text-button" aria-label="Предыдущие дни" disabled={!hasPrevious} onclick={()=>page++}><Icon name="back" size={18}/></button>{/if}<span>{fullDate(dates[0]!)}–{fullDate(dates.at(-1)!)}{metric==='active'?' · сообщений/ч':''}</span>{#if !wholePeriod}<button class="text-button" aria-label="Следующие дни" disabled={page===0} onclick={()=>page--}><Icon name="arrow" size={18}/></button>{/if}</div></div>
  <div class="growth-plot" bind:clientWidth={availableWidth} aria-busy={loading}>
  {#if loading}<p class="growth-status muted" role="status">Загрузка дней…</p>{:else if failure}<p class="growth-status" role="alert">{failure}</p>{/if}
  <svg viewBox={`0 0 ${width} ${plotHeight}`} height={plotHeight} role="group" aria-label={`${label} по дням`}>

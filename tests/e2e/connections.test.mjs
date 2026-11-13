@@ -278,7 +278,7 @@ test(
       await page.getByRole("tab", {name:"Аккаунты",exact:true}).click();await page.getByLabel("Имя человека").waitFor();
       await page.getByRole("button", { name: "Стримы", exact: true }).click();
       await page.locator('.stream-open').click();
-      assert.equal(await page.getByRole("button", {name:"К списку стримов",exact:true}).count(),1);
+      assert.equal(await page.getByRole("button", {name:"Назад",exact:true}).count(),1);
       assert.equal(await page.getByLabel("Период аналитики").count(), 0);
       assert.equal(await page.locator('.stream-feed').count(),0);
       await navigate(page,'Обзор');

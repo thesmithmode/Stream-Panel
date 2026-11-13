@@ -14,7 +14,7 @@ test('insights stay flat, exclude static attendance and omit accounting boilerpl
   const finding=(kind,title)=>({id:kind,kind,group:'people',title,detail:'Проверяемый вывод',basis:'Основание',action:'Проверить изменения',sampleSize:3,evidence:[]});
   await page.route('**/api/v1/analytics?*',async route=>{const response=await route.fetch({headers:{...route.request().headers(),'if-none-match':''}}),data=await response.json();if(!data.preparing)data.insights=[finding('chat_regular','Давно много писал'),finding('silent_regular','Давно смотрел'),finding('missing_regular','Перестал появляться'),{...finding('support_concentration','Основная поддержка'),basis:'Валюты считаются отдельно. Анонимные суммы включены в итог, но не приписаны одному человеку.'}];await route.fulfill({response,headers:{...response.headers(),etag:''},json:data});});
   await goto(page,a.bootstrap());await navigate(page,'Аналитика');await page.locator('.growth-plot').waitFor();
-  assert.equal(await page.getByRole('navigation',{name:'Разделы',exact:true}).isVisible(),false);
+  assert.equal(await page.getByRole('navigation',{name:'Разделы',exact:true}).isVisible(),true);
   const bottom=page.locator('.analytics-mobile-navigation');assert.equal(await bottom.getByRole('tab').count(),3);await assertUiLayout(page);
   await bottom.getByRole('tab',{name:'Время',exact:true}).click();await page.getByRole('tabpanel',{name:'Время',exact:true}).waitFor();
   await bottom.getByRole('tab',{name:'Аудитория',exact:true}).click();await page.getByRole('tabpanel',{name:'Аудитория',exact:true}).waitFor();
@@ -23,6 +23,6 @@ test('insights stay flat, exclude static attendance and omit accounting boilerpl
   assert.equal(await section.getByText('Давно много писал',{exact:true}).count(),0);assert.equal(await section.getByText('Давно смотрел',{exact:true}).count(),0);assert.equal(await section.locator('details').count(),1);assert.equal(await section.getByText(/Валюты считаются отдельно/).count(),0);
   const shots=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(shots){await mkdir(shots,{recursive:true});await page.screenshot({path:shots+'/analytics-navigation-mobile.png'});}
   await page.setViewportSize({width:1280,height:900});assert.equal(await bottom.isVisible(),false);assert.equal(await page.getByRole('tab',{name:'Динамика',exact:true}).count(),1);await assertUiLayout(page);
-  await page.setViewportSize({width:390,height:844});await bottom.getByRole('button',{name:'Назад',exact:true}).click();await page.getByRole('region',{name:'Статистика канала за всю историю',exact:true}).waitFor();assert.equal(await page.getByRole('navigation',{name:'Разделы',exact:true}).isVisible(),true);assert.deepEqual(errors,[]);await saveCoverage(page);
+  await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Назад',exact:true}).click();await page.getByRole('tab',{name:'Аудитория',exact:true}).waitFor();await page.getByRole('button',{name:'Обзор',exact:true}).click();await page.getByRole('region',{name:'Статистика канала за всю историю',exact:true}).waitFor();assert.equal(await page.getByRole('navigation',{name:'Разделы',exact:true}).isVisible(),true);assert.deepEqual(errors,[]);await saveCoverage(page);
  }finally{await browser?.close();await a.close();}
 });

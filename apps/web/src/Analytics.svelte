@@ -20,7 +20,7 @@
   import {platformClass} from './period';
   import TimePatterns from "./TimePatterns.svelte";
   import ComparisonCharts from "./ComparisonCharts.svelte";
-  let { profile = "local", defaultTimezone="Europe/Moscow", section=$bindable('dynamics'),onSection,onBack,onPerson, onStream }: {profile?:string;defaultTimezone?:string;section?:string;onSection?:(section:string)=>void;onBack:()=>void;onPerson:(id:string)=>void;onStream:(id:string)=>void} = $props();
+  let { profile = "local", defaultTimezone="Europe/Moscow", section=$bindable('dynamics'),onSection,onPerson, onStream }: {profile?:string;defaultTimezone?:string;section?:string;onSection?:(section:string)=>void;onPerson:(id:string)=>void;onStream:(id:string)=>void} = $props();
   let filtersOpen=$state(false),comparisonsOpen=$state(false);
   let view=$state(analyticsView(null));
   const localInput=(at:number)=>{const d=new Date(at);return new Date(at-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
@@ -135,7 +135,7 @@
   <div class="analytics-kpis"><div><strong>{data.summary?.streams??0}</strong><span>Эфиров</span></div>{#if data.donationTiming}<div><strong>{Object.entries(data.donationTiming.totals??{}).map(([c,a])=>money(String(a),c)).join(' · ')||'—'}</strong><span>Донаты</span></div>{/if}</div>
 {/if}
 <div class="analytics-navigation"><SectionTabs items={[["dynamics","Динамика"],["time","Время"],["audience","Аудитория"]]} bind:value={section} onchange={()=>onSection?.(section)} label="Разделы аналитики" panelId="analytics-tabpanel"/></div>
-<div class="analytics-mobile-navigation"><button class="analytics-back" onclick={onBack}><Icon name="back"/>Назад</button><SectionTabs onchange={()=>{onSection?.(section);window.scrollTo({top:0});}} icons={{dynamics:'analytics',time:'clock',audience:'people'}} items={[["dynamics","Динамика"],["time","Время"],["audience","Аудитория"]]} bind:value={section} label="Разделы аналитики" panelId="analytics-tabpanel"/></div>
+<div class="analytics-mobile-navigation"><SectionTabs onchange={()=>{onSection?.(section);window.scrollTo({top:0});}} icons={{dynamics:'analytics',time:'clock',audience:'people'}} items={[["dynamics","Динамика"],["time","Время"],["audience","Аудитория"]]} bind:value={section} label="Разделы аналитики" panelId="analytics-tabpanel"/></div>
 <Sheet bind:open={filtersOpen} title="Фильтры аналитики"><div class="filter-fields">
  {#if period==='custom'}<label>Начало периода<input type="datetime-local" value={from===localInput(0)&&data?.sessions?.length?localInput(data.sessions[0].started_at_ms):from} oninput={e=>{from=e.currentTarget.value;}} required/></label><label>Конец периода<input type="datetime-local" bind:value={to} onchange={()=>liveEnd=false} required/></label>{/if}
  <label>Площадка<select aria-label="Площадка" bind:value={source}><option value="all">Все площадки</option><option value="twitch">Twitch / DA</option><option value="youtube">YouTube</option></select></label>
@@ -158,7 +158,7 @@
   <SubscriberGrowth {profile} {timezone} liveEnd={liveEnd&&period!=='custom'} from={data.filters?.fromMs??0} to={data.filters?.toMs??Date.now()} {onStream}/>
   </div>
   <Insights report={data} loading={busy&&!data} {onPerson} {onStream}/>
-  <details class="section-disclosure" bind:open={comparisonsOpen}><summary>Возвращаемость по эфирам</summary>{#if comparisonsOpen}<ComparisonCharts scope={reportScope} {timezone} {onStream} showGrowth={false} streams={data.streamComparison??[]} totalCount={data.streamRange?.total} loadStreams={streamsLoader}/>{/if}</details>
+  <details class="section-disclosure retention-disclosure" bind:open={comparisonsOpen}><summary>Возвращаемость по эфирам</summary>{#if comparisonsOpen}<ComparisonCharts scope={reportScope} {timezone} {onStream} showGrowth={false} streams={data.streamComparison??[]} totalCount={data.streamRange?.total} loadStreams={streamsLoader}/>{/if}</details>
   {/if}
   {#if section==='time'}
   {#if view.hours}<section class="panel"><header><h2>Активность по дням и часам</h2><Help id="analytics-hours" label="О карте активности" text="Нажмите ячейку для точного значения. Яркость показывает активность, серый — нет данных. Часы без эфира не считаются нулями. Для зрителей показана сумма известных значений площадок; пропущенные замеры не считаются нулём."/></header><details class="chart-options"><summary>Настроить карту</summary><div class="filter-fields"><label>Метрика карты<select aria-label="Метрика карты" bind:value={view.heatMetric}><option value="viewers">Зрители (все)</option><option value="observed">Наблюдения Twitch</option><option value="estimated">Оценка активности YouTube</option><option value="messages">Сообщения</option><option value="donations">Число донатов</option><option value="amount">Сумма донатов</option></select></label>{#if view.heatMetric==='amount'}<label>Валюта карты<select aria-label="Валюта карты" bind:value={heatCurrency}>{#each [...new Set<string>((data.hours??[]).flatMap((h:any)=>Object.keys(h.donationTotals)))] as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select></label>{/if}<label>Расчёт карты<select aria-label="Расчёт карты" bind:value={heatCalculation}><option value="average">Среднее / на час эфира</option><option value="total">Накопленная сумма</option></select></label></div></details>
@@ -187,7 +187,7 @@
     </tr>{/each}</tbody></table></div>
     {#if !visible.length}<p class="muted analytics-empty">Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.</p>{/if}
     {#if visible.length>200}<p class="small muted">Показаны первые 200; используйте поиск или меньший период.</p>{/if}
-  {#if data.audiencePage}<div class="audience-pagination"><button class="outline" disabled={audienceBusy||audienceOffset===0} onclick={()=>audienceOffset=Math.max(0,audienceOffset-100)}>Назад</button><span>{audienceBusy?'Загрузка…':`Страница ${Math.floor(audienceOffset/100)+1}`}</span><button class="outline" disabled={audienceBusy||audienceOffset+100>=(pagedAudience?.audiencePage?.total??data.audiencePage.total)} onclick={()=>audienceOffset+=100}>Далее</button></div>{/if}
+  {#if data.audiencePage}<div class="audience-pagination"><button class="outline" disabled={audienceBusy||audienceOffset===0} onclick={()=>audienceOffset=Math.max(0,audienceOffset-100)}>Предыдущие</button><span>{audienceBusy?'Загрузка…':`Страница ${Math.floor(audienceOffset/100)+1}`}</span><button class="outline" disabled={audienceBusy||audienceOffset+100>=(pagedAudience?.audiencePage?.total??data.audiencePage.total)} onclick={()=>audienceOffset+=100}>Следующие</button></div>{/if}
   </section>
   {/if}
 {/if}

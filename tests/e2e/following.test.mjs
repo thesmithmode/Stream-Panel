@@ -32,7 +32,7 @@ test('stream subscriptions show platform totals, exact follow dates and independ
   await card.locator('.follow-history summary').first().click();assert.equal(await card.locator('.follow-history li').count(),3);
   await page.locator('.person-detail').screenshot({path:'/tmp/sp-follow-compact.png'});
   const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(evidence){await mkdir(evidence,{recursive:true});await page.screenshot({path:join(evidence,'following-mobile.png'),fullPage:true});}
-  const selectPerson=async name=>{await page.getByRole('button',{name:'К списку людей',exact:true}).click();await page.getByRole('button',{name,exact:true}).click();await page.getByRole('heading',{name,exact:true}).waitFor();};
+  const selectPerson=async name=>{await page.getByRole('button',{name:'Все люди',exact:true}).click();await page.getByRole('button',{name,exact:true}).click();await page.getByRole('heading',{name,exact:true}).waitFor();};
   await selectPerson('Silent');await card.getByText('Не подписан',{exact:true}).waitFor();await wideLast('.person-detail .kpi-strip > .kpi');
   await app.db.call('followingSnapshot','youtube','youtube',[{id:'author',name:'YT Viewer',followedAtMs:null}],true,at+6*m,null);
   await selectPerson('Follow Viewer');await card.getByText('Подписан',{exact:true}).waitFor();
