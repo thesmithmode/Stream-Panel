@@ -19,7 +19,7 @@
  ]);
 </script>
 {#if failure}<p role="alert">{failure}</p>{/if}
-{#if total>pageSize}<div class="analytics-controls"><button class="outline" disabled={page===0} onclick={()=>page--}>Назад</button><span>Сравнение: страница {page+1}</span><button class="outline" disabled={(page+1)*pageSize>=total} onclick={()=>page++}>Далее</button></div>{/if}
+{#if total>pageSize}<div class="analytics-controls"><button class="outline" disabled={page===0} onclick={()=>page--}>Предыдущие</button><span>Сравнение: страница {page+1}</span><button class="outline" disabled={(page+1)*pageSize>=total} onclick={()=>page++}>Следующие</button></div>{/if}
 <div class="comparison-charts">
  {#each comparisons as chart}<section class="panel"><div class="comparison-bars">
   {#each chart.rows as row}<div class="comparison-row"><div><span>{row.label} <small class="muted">· {row.detail}</small></span><strong>{row.value===null?'Нет данных':`${row.value.toLocaleString('ru-RU',{maximumFractionDigits:1})} ${chart.unit}`}</strong></div><div class="track"><i style:width={`${row.value===null?0:Math.min(100,Math.max(0,row.value))}%`}></i></div></div>{:else}<p class="muted">Нужны собранные эфиры.</p>{/each}

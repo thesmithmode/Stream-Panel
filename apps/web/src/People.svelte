@@ -11,6 +11,7 @@
   import DonorLinks from "./DonorLinks.svelte";
   import {
     api,
+    getProfile,
     date,
     money,
     type Person,
@@ -45,7 +46,8 @@
   function selectAccount(ids:string[],checked:boolean){selectedIdentities=checked?[...new Set([...selectedIdentities,...ids])]:selectedIdentities.filter(id=>!ids.includes(id));}
   let detailTab=$state("overview"),detailLoading=$state(false),showDonorLinks=$state(false);
   const botFilter=$derived(includeBots?"all":"humans");
-  let search = $state(""),
+  const savedDirectory=history.state?.peopleDirectory?.profile===getProfile()?history.state.peopleDirectory:undefined;
+  let search = $state<string>(savedDirectory?.search??""),
     selectedId = $state(""),
     detail = $state<any>(null),
     stats = $state<PersonStats | null>(null),
@@ -59,7 +61,7 @@
     candidates = $state<string[]>([]),
     busy = $state(false),
     sortBy = $state<"default" | "messages" | "donations" | "observed_minutes">(
-      "default",
+      savedDirectory?.sort??"default",
     ),
     tops = $state<PersonTop[]>([]);
   const accounts=$derived(personAccounts(detail?.identities??[],detail?.display_name??''));
@@ -87,7 +89,7 @@
   let donorCurrency=$state('RUB'),rankRefresh=$state(0);
   const donorCurrencies=$derived([...new Set(tops.flatMap(p=>Object.keys(p.donationTotals)))].sort());
   const rankLabels=$derived(new Map(tops.map(t=>[t.id,sortBy==='donations'?Object.entries(t.donationTotals).map(([currency,amount])=>money(amount,currency)).join(' · ')||`${t.donationCount} донатов`:sortBy==='observed_minutes'?formatDuration(t.observedMinutes):`${t.messageCount} сообщ.`])));
-  let pageRows = $state<Person[]>([]), peopleOffset = $state(0), peopleTotal = $state(0), peopleLoading = $state(false), peopleLoaded=$state(false);
+  let pageRows = $state<Person[]>([]), peopleOffset = $state<number>(savedDirectory?.offset??0), peopleTotal = $state(0), peopleLoading = $state(false), peopleLoaded=$state(false);
   const directory = latestRequest();
   let selectedSession = '';
   const rows = $derived(
@@ -113,13 +115,16 @@
   const visible=$derived(sortBy==='default'?rows:rows.filter(person=>(botFilter==='all'||!person.is_bot)).filter(person=>person.display_name.toLocaleLowerCase('ru-RU').includes(search.trim().toLocaleLowerCase('ru-RU'))));
   $effect(()=>{detailTab=['overview','activity','messages','donations','notes','accounts'].includes(section)?section:'overview';});
   const personTabs=[["overview","Обзор"],["activity","Активность"],["messages","Сообщения"],["donations","Донаты"],["notes","Заметки"],["accounts","Аккаунты"]] as const;
-  let directoryScroll=0,forceDirectory=false;
+  let directoryScroll=savedDirectory?.scroll??0,forceDirectory=false;
+  let directoryKey=untrack(()=>JSON.stringify([search,period,sortBy]));
   function clearSelection(){selectedId='';detail=null;stats=null;detailLoading=false;}
   async function backToDirectory(){clearSelection();onSelect('');await tick();window.scrollTo({top:directoryScroll});}
-  async function openPerson(id:string){directoryScroll=window.scrollY;await select(id);if(matchMedia('(max-width:900px)').matches)window.scrollTo({top:0});}
+  async function openPerson(id:string){directoryScroll=window.scrollY;rememberDirectory();await select(id);if(matchMedia('(max-width:900px)').matches)window.scrollTo({top:0});}
   function sourcesLabel(sources:string|null){return (sources?.split(',')??[]).map(source=>({twitch:'Twitch',youtube:'YouTube',donationalerts:'DonationAlerts'}[source.trim()]??source.trim())).join(' · ');}
   $effect(()=>{if(detailTab==='accounts'&&detail)untrack(()=>{void loadAudit().catch(e=>error=e.message);const id=detail.id;void api<string[]>(`persons/${id}/candidates`).then(value=>{if(selectedId===id)candidates=value;}).catch(e=>error=e.message);});});
-  $effect(()=>{search;period;sortBy;peopleOffset=0;});
+  $effect(()=>{const key=JSON.stringify([search,period,sortBy]);if(key!==directoryKey){directoryKey=key;peopleOffset=0;}});
+  function rememberDirectory(){const directory={profile:getProfile(),search,sort:sortBy,offset:peopleOffset,scroll:directoryScroll};history.replaceState({...history.state,peopleDirectory:directory},'');}
+  $effect(rememberDirectory);
   $effect(() => {
     const term=search.trim(), offset=peopleOffset, currentPeriod=period, bots=botFilter;void rankRefresh;
     const forced=forceDirectory;forceDirectory=false;
@@ -278,13 +283,13 @@
       >{/each}
     </div>
     {#if sortBy==='default'&&peopleTotal>50}<div class="people-pages" aria-label="Страницы людей">
-      <button class="outline small" disabled={peopleLoading||peopleOffset===0} aria-label="Предыдущие люди" onclick={()=>peopleOffset=Math.max(0,peopleOffset-50)}>Назад</button>
+      <button class="outline small" disabled={peopleLoading||peopleOffset===0} aria-label="Предыдущие люди" onclick={()=>peopleOffset=Math.max(0,peopleOffset-50)}>Предыдущие</button>
       <span class="small muted">{peopleOffset+1}–{Math.min(peopleOffset+50,peopleTotal)} из {peopleTotal} записей</span>
-      <button class="outline small" disabled={peopleLoading||peopleOffset+50>=peopleTotal} aria-label="Следующие люди" onclick={()=>peopleOffset+=50}>Далее</button>
+      <button class="outline small" disabled={peopleLoading||peopleOffset+50>=peopleTotal} aria-label="Следующие люди" onclick={()=>peopleOffset+=50}>Следующие</button>
     </div>{/if}
   </section>
   <section class="panel person-detail">
-    <button class="text-button people-back" onclick={backToDirectory}><Icon name="back" size={18}/>К списку людей</button>
+    <button class="text-button people-back" onclick={backToDirectory}>Все люди</button>
     {#if detailLoading}<div class="empty" role="status">Загружаем карточку…</div>{:else if !detail}<div class="empty">
         <Icon name="people" size={48} />
         <h3>Выберите человека</h3>

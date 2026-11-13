@@ -11,3 +11,8 @@ test('sections, person return context and people periods survive reload without 
  assert.deepEqual(readRoute(new URL(routeUrl(person),'https://panel.test').search),person);
  for(const bad of ['https://evil.test/','//evil.test/','/?view=unknown','/?view=people&returnTo=x','/?view=stream&x='+ 'a'.repeat(2048)])assert.equal(readRoute('?view=people&returnTo='+encodeURIComponent(bad)).returnTo,undefined);
 });
+test('history pages survive reload and reject invalid page numbers',()=>{
+ const route={view:'sessions',profile:'ruslan',session:'',person:'',page:2} as const;
+ assert.deepEqual(readRoute(new URL(routeUrl(route),'https://panel.test').search),route);
+ for(const page of ['-1','1.5','Infinity','100001','NaN'])assert.equal(readRoute('?view=sessions&page='+page).page,undefined);
+});
