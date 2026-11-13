@@ -41,6 +41,10 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
             return conditionalResponse(request,reply,{filters:result.filters,clockBuckets:result.clockBuckets,clockSelection:result.clockSelection,clockRevision:result.clockRevision});
         if(request.routeOptions.url==='/api/v1/analytics/audience'&&'audience' in result&&!result.preparing)
             return conditionalResponse(request,reply,{filters:result.filters,audience:result.audience,audiencePage:result.audiencePage});
+        if(request.routeOptions.url==='/api/v1/analytics'&&panel==='audience'&&!result.preparing){
+            const following=sessionId?await db.call('followingAnalytics',sessionId,botsFor(q)):await db.call('followerChanges',result.filters.fromMs,result.filters.toMs,botsFor(q));
+            return conditionalResponse(request,reply,{...result,following});
+        }
         return conditionalResponse(request,reply,result);
     });
     app.get('/api/v1/sessions/match',async(request,reply)=>{const q=object(request.query);return reply.type('application/json').send(JSON.stringify(await db.call('matchingStream',Number(q.startedAt),string(q.latest)==='1')));});

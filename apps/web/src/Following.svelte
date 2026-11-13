@@ -3,8 +3,9 @@
  import {api,date} from './api';
  import {ConnectionError} from './request';
  import Help from './Help.svelte';
- let {sessionId='',fromMs=0,toMs=0,embedded=false,hideEmpty=false,onPerson}:{sessionId?:string;fromMs?:number;toMs?:number;embedded?:boolean;hideEmpty?:boolean;onPerson:(id:string)=>void}=$props();
- let data=$state<any>(null),error=$state(''),limit=$state(10);
+ let {sessionId='',fromMs=0,toMs=0,embedded=false,hideEmpty=false,report,onPerson}:{sessionId?:string;fromMs?:number;toMs?:number;embedded?:boolean;hideEmpty?:boolean;report?:any;onPerson:(id:string)=>void}=$props();
+ let loaded=$state<any>(null),error=$state(''),limit=$state(10);
+ const data=$derived(report??loaded);
  const changes=$derived([...((data?.newFollowers??[]).map((row:any)=>({...row,following:true}))),...((data?.unfollowers??[]).map((row:any)=>({...row,following:false})))].sort((a,b)=>b.at-a.at));
  const hasFollowers=$derived(changes.length>0||(data?.platforms??[]).some((row:any)=>row.change!==null&&row.change!==0));
  const followingHelp='Follow Twitch и публичные подписки YouTube. Отписка Twitch обнаруживается полным опросом: указано время обнаружения. YouTube скрывает частные подписки, поэтому отсутствие в ответе не считается отпиской. История хранится с подключения панели.';
@@ -16,8 +17,9 @@
  const eventDate=(at:number)=>new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',day:'2-digit',month:'2-digit',year:'numeric'}).format(at);
  const time=(at:number)=>new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',hour:'2-digit',minute:'2-digit'}).format(at);
  $effect(()=>{
-  const session=sessionId,from=fromMs,to=toMs,request=latestRequest();data=null;error='';limit=10;
-  const load=()=>void request.run(signal=>api(session?`sessions/${session}/followers`:`followers/changes?${new URLSearchParams({from:String(from),to:String(to)})}`,undefined,signal),result=>{data=result;error='';},failure=>{if(!(failure instanceof ConnectionError))error=failure.message;});
+  if(report!==undefined){error='';limit=10;return;}
+  const session=sessionId,from=fromMs,to=toMs,request=latestRequest();loaded=null;error='';limit=10;
+  const load=()=>void request.run(signal=>api(session?`sessions/${session}/followers`:`followers/changes?${new URLSearchParams({from:String(from),to:String(to)})}`,undefined,signal),result=>{loaded=result;error='';},failure=>{if(!(failure instanceof ConnectionError))error=failure.message;});
   load();window.addEventListener('sp:data-refresh',load);return()=>{request.cancel();window.removeEventListener('sp:data-refresh',load);};
  });
 </script>
