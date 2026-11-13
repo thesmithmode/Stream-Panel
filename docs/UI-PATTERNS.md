@@ -54,3 +54,10 @@ card spacing, donation grouping, date alignment and navigation targets. The
 reference's illustrative account/data were not introduced into the application.
 Intentional extensions: universal Back per the follow-up request, existing profile
 placement preserved, 320px label wrapping and desktop horizontal record layout.
+
+Returning audience by stream uses one compact table: date, returning/total count
+and percentage. The short bar stays in the percentage column. Zero and unknown
+remain distinct. Paging stays at the bottom in equal chevron targets; its range
+shows which seven streams are visible. At desktop widths the section follows the
+width of one dynamics chart instead of stretching sparse values across the page.
+The retention regression covers 320/390/1280px, page switching and unknown values.
