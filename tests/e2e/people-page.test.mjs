@@ -39,7 +39,7 @@ test('people browse beyond 500 records, preserve a selected card and search acro
   await page.setViewportSize({width:390,height:844});
   await assertUiLayout(page,{label:'people pagination mobile'});
   assert.equal(await page.getByRole('region',{name:'Список людей'}).isVisible(),false);
-  await page.getByRole('button',{name:'К списку людей',exact:true}).click();
+  await page.getByRole('button',{name:'Все люди',exact:true}).click();
   await page.getByLabel('Viewer 001',{exact:true}).click();
   await page.getByRole('heading',{name:'Viewer 001',exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>window.scrollY),0,'phone cards open at the top');
@@ -51,7 +51,7 @@ test('people browse beyond 500 records, preserve a selected card and search acro
   await page.getByRole('tab',{name:'Аккаунты',exact:true}).click();
   await page.getByLabel('Имя человека').waitFor();
   await assertUiLayout(page);
-  await page.getByRole('button',{name:'К списку людей',exact:true}).click();
+  await page.getByRole('button',{name:'Все люди',exact:true}).click();
   await page.getByRole('button',{name:'Следующие люди'}).scrollIntoViewIfNeeded();
   await assertUiLayout(page);
   assert.deepEqual(errors,[]);await saveCoverage(page);

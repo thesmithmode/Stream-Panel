@@ -39,5 +39,5 @@
    {/snippet}</ActionMenu>
   </article>
  {:else}<div class="empty-small">Стримов пока нет</div>{/each}
- {#if page>0||sessions.length>=100}<div class="history-pages"><button class="outline" disabled={busy||page===0} onclick={()=>onpage(page-1)}>Назад</button><span>Страница {page+1}</span><button class="outline" disabled={busy||sessions.length<100} onclick={()=>onpage(page+1)}>Далее</button></div>{/if}
+ {#if page>0||sessions.length>=100}<div class="history-pages"><button class="outline" disabled={busy||page===0} onclick={()=>onpage(page-1)}>Предыдущие</button><span>Страница {page+1}</span><button class="outline" disabled={busy||sessions.length<100} onclick={()=>onpage(page+1)}>Следующие</button></div>{/if}
 </section>

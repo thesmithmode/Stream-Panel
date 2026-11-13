@@ -36,7 +36,7 @@
    </article>
   {:else}{#if loaded}<p class="muted">{messagesOnly?'Нет сохранённых сообщений за последние 7 дней.':'Нет сохранённых событий этого стрима за последние 7 дней.'}</p>{/if}{/each}
  {/if}
- <div class="actions"><button class="outline small" disabled={busy||offset===0} onclick={()=>offset=Math.max(0,offset-limit)}>Назад</button><span class="small">Страница {offset/limit+1}</span><button class="outline small" disabled={busy||rows.length<limit} onclick={()=>offset+=limit}>Далее</button><button class="outline small" disabled={busy} onclick={()=>refresh++}>Обновить</button></div>
+ <div class="actions"><button class="outline small" disabled={busy||offset===0} onclick={()=>offset=Math.max(0,offset-limit)}>Предыдущие</button><span class="small">Страница {offset/limit+1}</span><button class="outline small" disabled={busy||rows.length<limit} onclick={()=>offset+=limit}>Следующие</button><button class="outline small" disabled={busy} onclick={()=>refresh++}>Обновить</button></div>
 </div>
 <style>
  a.event-author{text-decoration:none}a.event-author:hover{text-decoration:underline}a.event-author:focus-visible{outline:2px solid var(--accent);outline-offset:2px}

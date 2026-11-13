@@ -22,10 +22,10 @@ test('stream participant messages retain their origin across reload, explicit re
    await ranking.getByRole('button',{name:'Second viewer',exact:true}).click();await page.getByRole('heading',{name:'Second viewer',exact:true}).waitFor();
    await page.getByRole('tab',{name:'Сообщения',exact:true}).click();await page.getByText('Message Second viewer',{exact:true}).waitFor();
    await reload(page);await page.getByText('Message Second viewer',{exact:true}).waitFor();assert.equal(await page.getByRole('tab',{name:'Сообщения',exact:true}).getAttribute('aria-selected'),'true');
-   await page.getByRole('button',{name:'Назад к стриму',exact:true}).click();await ranking.getByRole('button',{name:'Second viewer',exact:true}).waitFor();assert.equal(new URL(page.url()).searchParams.get('stream'),id);
+   await page.getByRole('button',{name:'Назад',exact:true}).click();await page.getByRole('tab',{name:'Обзор',exact:true}).waitFor();assert.equal(await page.getByRole('tab',{name:'Обзор',exact:true}).getAttribute('aria-selected'),'true');await page.getByRole('button',{name:'Назад',exact:true}).click();await ranking.getByRole('button',{name:'Second viewer',exact:true}).waitFor();assert.equal(new URL(page.url()).searchParams.get('stream'),id);
    assert.equal(await page.getByRole('tab',{name:'Участники',exact:true}).getAttribute('aria-selected'),'true');
    await ranking.getByRole('button',{name:'Primary viewer',exact:true}).click();await page.getByRole('heading',{name:'Primary viewer',exact:true}).waitFor();await page.getByRole('tab',{name:'Сообщения',exact:true}).click();
-   await page.goBack();await ranking.getByRole('button',{name:'Primary viewer',exact:true}).waitFor();assert.equal(new URL(page.url()).searchParams.get('stream'),id);
+   await page.goBack();await page.getByRole('tab',{name:'Обзор',exact:true}).waitFor();await page.goBack();await ranking.getByRole('button',{name:'Primary viewer',exact:true}).waitFor();assert.equal(new URL(page.url()).searchParams.get('stream'),id);
    await page.getByRole('tab',{name:'Текущие зрители',exact:true}).click();await page.getByRole('region',{name:'Текущие зрители',exact:true}).getByRole('button',{name:'@Second viewer',exact:true}).waitFor();
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
    await mkdir('/tmp/stream-panel-qa',{recursive:true});await page.screenshot({path:`/tmp/stream-panel-qa/participants-${viewport.width}.png`,fullPage:false});

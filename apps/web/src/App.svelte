@@ -6,7 +6,8 @@
   import DonationTotal from "./DonationTotal.svelte";
   import StreamHistory from "./StreamHistory.svelte";
   import PeriodSelect from './PeriodSelect.svelte';
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
+  import {initializeNavigation,saveNavigation,canGoBack,rememberScroll,navigationScroll} from "./navigation";
   import {readRoute,routeUrl,type View} from "./route";
   import {ConnectionError} from "./request";
   import {isOutdatedRelease} from './release';
@@ -78,10 +79,10 @@
     const key=screenKey();screens.delete(key);screens.set(key,{revision:getDataRevision(profile),status,changes,sessions,summary});
     while(screens.size>24)screens.delete(screens.keys().next().value!);
   }
-  function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile,section:routeSection,returnTo,period:tab==='people'?peoplePeriod:undefined});if(replace)history.replaceState(null,'',url);else if(location.pathname+location.search!==url)history.pushState(null,'',url);}
-  function clearScope(){
+  function saveRoute(replace=false){const url=routeUrl({view:tab as View,session:sessionFilter,person:personId,profile,section:routeSection,returnTo,period:tab==='people'?peoplePeriod:undefined,...(tab==='sessions'&&sessionPage?{page:sessionPage}:{})});saveNavigation(url,replace);}
+  function clearScope(resetPage=true){
     scopeMount++;
-    changes=null;selectedSessions=[];sessionPage=0;refreshTask?.controller.abort();busy=false;scopeReady=false;summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};
+    changes=null;selectedSessions=[];if(resetPage)sessionPage=0;refreshTask?.controller.abort();busy=false;scopeReady=false;summary={messages:0,donations:0,totals:{},chatters:null,lastPollAtMs:null,events:0};
     const saved=screens.get(screenKey());
     if(saved&&saved.revision===getDataRevision(profile)){
       ({status,changes,sessions,summary}=saved);scopeReady=true;
@@ -90,7 +91,7 @@
       scopeReady=true;
     }
   }
-  function restoreRoute(){const route=readRoute(location.search,getProfile()),selected=accessibleProfile(route.profile),denied=selected!==route.profile;epoch++;tab=denied&&route.view==='stream'?'sessions':route.view;sessionFilter=denied?'':route.session;personId=denied?'':route.person;routeSection=route.section??'';if(route.view==='analytics')analyticsSection=['dynamics','time','audience'].includes(routeSection)?routeSection:'dynamics';returnTo=denied?'':route.returnTo??'';peoplePeriod=route.period??'';setProfile(selected);profile=selected;clearScope();}
+  function restoreRoute(){const route=readRoute(location.search,getProfile()),selected=accessibleProfile(route.profile),denied=selected!==route.profile;epoch++;tab=denied&&route.view==='stream'?'sessions':route.view;sessionFilter=denied?'':route.session;personId=denied?'':route.person;routeSection=route.section??'';if(route.view==='analytics')analyticsSection=['dynamics','time','audience'].includes(routeSection)?routeSection:'dynamics';returnTo=denied?'':route.returnTo??'';peoplePeriod=route.period??'';sessionPage=route.page??0;setProfile(selected);profile=selected;clearScope(false);}
   function reportFailure(e:unknown){if(e instanceof ConnectionError){connectionLost=true;return;}connectionLost=!navigator.onLine;if(document.hidden||!navigator.onLine)return;error=authMessage((e as Error).message);}
 
   const authMessage = (code: string) => ({ INVALID_SESSION_GROUP: "Выберите эфиры в пределах 31 дня (до 100 частей). Активным может быть только последний.", SESSION_ACTIVE:"Сначала дождитесь завершения эфира.", SESSION_GROUP_NOT_FOUND:"Объединение уже отменено. Обновите список.", INVALID_LOGIN: "Неверный логин или пароль", LOGIN_RATE_LIMIT: "Слишком много попыток. Попробуйте позже.", LOGIN_REQUIRED: "Войдите в свой профиль", LOCAL_LOGIN_REQUIRED: "Войдите в свой профиль" }[code] ?? code);
@@ -124,7 +125,7 @@
     connections: "Интеграции",
     settings: "Настройки",
   };
-  let analyticsSection=$state('dynamics'),analyticsBack=$state('sessions');
+  let analyticsSection=$state('dynamics');
   const nav = [["overview","Обзор"],["sessions","Стримы"],["analytics","Аналитика"],["people","Люди"],["donations","Донаты"]] as const;
   async function refresh(fresh=false,initialStatus?:any) {
     const current=epoch;
@@ -172,17 +173,24 @@
       if (current === epoch&&fresh) busy = false;retryInitialization();
     }
   }
-  function navigate(next:string,person='') {
-    if(next==='analytics'){if(tab!=='analytics')analyticsBack=tab==='stream'?'sessions':tab;analyticsSection='dynamics';}
-    routeSection='';returnTo='';moreOpen=false;epoch++;if(next!=='stream')sessionFilter='';tab=next;personId=person;clearScope();saveRoute();
+  function navigate(next:string,person='',replace=false) {
+    if(next==='analytics')analyticsSection='dynamics';
+    routeSection='';returnTo='';moreOpen=false;epoch++;if(next!=='stream')sessionFilter='';tab=next;personId=person;clearScope();saveRoute(replace);
     window.scrollTo({top:0,behavior:'instant'});void action(async()=>{},false);
   }
   function openPerson(id:string){
     const origin=returnTo||routeUrl({view:tab as View,session:sessionFilter,person:personId,profile,section:routeSection,period:tab==='people'?peoplePeriod:undefined});
     navigate('people',id);returnTo=origin;saveRoute(true);
   }
-  function returnFromPerson(){if(!returnTo)return;history.pushState(null,'',returnTo);restoreRoute();void action(async()=>{},false);}
-  function sectionChanged(section:string){routeSection=section;saveRoute(true);}
+  function goBack(){
+    moreOpen=false;
+    if(canGoBack()){rememberScroll();history.back();return;}
+    // A direct link has no in-app predecessor. Return to its natural parent.
+    if(tab==='people'&&personId){personId='';routeSection='';returnTo='';saveRoute(true);return;}
+    if(tab==='people'&&returnTo){saveNavigation(returnTo,true);restoreRoute();void action(async()=>{},false);return;}
+    navigate(tab==='stream'?'sessions':'overview','',true);
+  }
+  function sectionChanged(section:string){routeSection=section;saveRoute();}
   async function mergeSelected(){
     const ids=[...selectedSessions],current=epoch;
     if(!await confirmAction('Объединить стримы?',`Выбрано: ${ids.length}. Статистика будет общей, перерывы сохранятся. Объединение можно отменить.`,'Объединить')||current!==epoch)return;
@@ -212,6 +220,7 @@
     if(outdated)location.reload();
   }
   onMount(() => {
+    initializeNavigation();
     let alive=true,initializing=false,pendingInitialization=false,lastRefresh=Date.now();
     const update=()=>{if(!alive||!autoRefresh||busy||initializing||document.hidden||!navigator.onLine)return;if(!authorized){if(connectionLost&&!username&&!password)void initialize();return;}const current=epoch;void refresh().catch(e=>{if(current!==epoch||!alive)return;if(['LOGIN_REQUIRED','LOCAL_LOGIN_REQUIRED'].includes(e.message)){epoch++;authorized=false;sessions=[];clearScope();}reportFailure(e);});};
     const timer=setInterval(()=>{if(Date.now()-lastRefresh>=refreshInterval(refreshSeconds,tab as View,sessionFilter,changes)*1000){lastRefresh=Date.now();update();}},1000);
@@ -225,7 +234,7 @@
         if (key) {
           try{const response=await api("bootstrap",{key});setCsrf(response.csrf);}
           catch(bootstrapError){try{await api("status");}catch{throw bootstrapError;}}
-          history.replaceState(null,"",location.pathname+location.search);
+          history.replaceState(history.state,"",location.pathname+location.search);
         }
         // Establish account permissions before using a persisted or URL-selected profile.
         // Older standalone collectors may lack this route; retain their status flow.
@@ -247,7 +256,7 @@
       if (new URLSearchParams(location.hash.slice(1)).has("key"))
         void initialize();
     };
-    const back=()=>{if(new URLSearchParams(location.hash.slice(1)).has('key')){void initialize();return;}restoreRoute();void action(async()=>{},false);};
+    const back=()=>{moreOpen=false;if(new URLSearchParams(location.hash.slice(1)).has('key')){void initialize();return;}restoreRoute();const scroll=navigationScroll(),current=epoch;void action(async()=>{},false).then(async()=>{await tick();if(current===epoch)window.scrollTo({top:scroll,behavior:'instant'});});};
     const visibility=()=>{if(!document.hidden)update();};
     document.addEventListener("visibilitychange",visibility);
     const offline=()=>connectionLost=true;window.addEventListener('offline',offline);window.addEventListener('popstate',back);window.addEventListener('online',update);window.addEventListener('focus',update);
@@ -274,7 +283,7 @@
 
 <div class="app-shell" class:highlight-bots={status?.config?.analyticsSettings?.highlightBots??true} class:highlight-humans={status?.config?.analyticsSettings?.highlightHumans??true}>
   <aside class:analytics-context={tab==='analytics'&&scopeReady&&authorized&&!loading} class="sidebar" aria-label="Навигация">
-    <a class="brand" href="/">Stream <span>Panel</span></a>
+    <a class="brand" href="/" onclick={event=>{if(event.button===0&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey&&!event.altKey){event.preventDefault();navigate('overview');}}}>Stream <span>Panel</span></a>
     <nav aria-label="Разделы">
       {#each nav as [key,label]}<button disabled={loading||!authorized} class:active={tab===key||(key==='sessions'&&tab==='stream')} aria-current={tab===key?'page':undefined} onclick={()=>navigate(key)}><Icon name={key}/>{label}</button>{/each}
       <button disabled={loading||!authorized} class:active={moreOpen||['connections','settings'].includes(tab)} aria-expanded={moreOpen} onclick={()=>moreOpen=true}><Icon name="more"/>Ещё</button>
@@ -283,7 +292,10 @@
   </aside>
   <main class:analytics-page={tab==='analytics'} class:sessions-page={tab==='sessions'} class:stream-page={tab==='stream'} class:people-page={tab==='people'}>
     <div class="page-heading">
-      {#if tab==='people'&&returnTo}<button class="back-link text-button" onclick={returnFromPerson}><Icon name="back"/>Назад к {readRoute(new URL(returnTo,location.origin).search).view==='stream'?'стриму':'предыдущему разделу'}</button>{:else if tab==='stream'}<button aria-label="К списку стримов" class="back-link text-button" onclick={()=>navigate('sessions')}><Icon name="back"/>Стримы</button>{:else}<h1>{titles[tab]}</h1>{/if}
+      <div class="heading-location">
+        {#if authorized}<button class="back-link text-button" aria-label="Назад" title="Вернуться на предыдущий экран" disabled={tab==='overview'&&!canGoBack()} onclick={goBack}><Icon name="back"/><span>Назад</span></button>{/if}
+        {#if tab!=='stream'&&!(tab==='people'&&personId)}<h1>{titles[tab]}</h1>{/if}
+      </div>
       {#if authorized}<label class="heading-profile">{#if tab==='analytics'}<button class="icon-button analytics-menu-trigger" aria-label="Ещё" aria-expanded={moreOpen} onclick={()=>moreOpen=true}><Icon name="more"/></button>{/if}<span class="dot" class:off={connectionLost||!autoRefresh} title={connectionLost?'Нет связи':autoRefresh?'Автообновление включено':'Автообновление выключено'}></span><select aria-label="Профиль" value={profile} disabled={busy} onchange={event=>void switchProfile(event.currentTarget.value as Profile)}>{#each allowedProfiles as allowed}<option value={allowed}>{allowed==='ruslan'?'Руслан':'Гульназ'}</option>{/each}</select></label>{/if}
     </div>
     {#if loading}<div class="panel empty">
@@ -318,7 +330,7 @@
           changed={()=>refresh(true)}
         />
       {:else if tab === "analytics"}
-        <Analytics onSection={sectionChanged} bind:section={analyticsSection} onBack={()=>navigate(analyticsBack)} profile={profile} defaultTimezone={status.config.analyticsSettings?.timezone??"Europe/Moscow"} onPerson={openPerson} onStream={id=>{sessionFilter=id;navigate("stream");}} />
+        <Analytics onSection={sectionChanged} bind:section={analyticsSection} profile={profile} defaultTimezone={status.config.analyticsSettings?.timezone??"Europe/Moscow"} onPerson={openPerson} onStream={id=>{sessionFilter=id;navigate("stream");}} />
       {:else if tab === "donations"}<StreamDonations onPerson={openPerson} changed={()=>refresh(true)} />
       {:else if tab === "settings"}<Settings {profile} {status} onChange={()=>action(async()=>{clearAnalyticsCache();})} />
       {:else if tab === "connections"}<Connections
@@ -334,7 +346,7 @@
         />
       {:else if tab === "sessions"}
         <DonationTotal open={()=>navigate('donations')}/>
-        <StreamHistory {sessions} bind:selected={selectedSessions} {busy} page={sessionPage} onpage={page=>{selectedSessions=[];sessionPage=page;void action(async()=>{});}} onopen={id=>{sessionFilter=id;navigate('stream');}} onmerge={()=>action(mergeSelected)} onunmerge={id=>void action(()=>unmergeSession(id))} ondelete={id=>void action(async()=>{if(!await confirmAction('Удалить стрим?','Стрим исчезнет из истории и аналитики. Сохранённые события останутся.','Удалить'))return;await api(`sessions/${id}/delete`,{});})} validUrl={isConfirmedPlatformUrl}/>
+        <StreamHistory {sessions} bind:selected={selectedSessions} {busy} page={sessionPage} onpage={page=>{selectedSessions=[];sessionPage=page;saveRoute();void action(async()=>{});}} onopen={id=>{sessionFilter=id;navigate('stream');}} onmerge={()=>action(mergeSelected)} onunmerge={id=>void action(()=>unmergeSession(id))} ondelete={id=>void action(async()=>{if(!await confirmAction('Удалить стрим?','Стрим исчезнет из истории и аналитики. Сохранённые события останутся.','Удалить'))return;await api(`sessions/${id}/delete`,{});})} validUrl={isConfirmedPlatformUrl}/>
         {#if !sessions.length}<button class="outline" onclick={()=>navigate('connections')}>Открыть интеграции</button>{/if}
       {/if}
       {/if}

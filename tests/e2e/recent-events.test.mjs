@@ -15,8 +15,8 @@ test('stream archive and person messages show only the selected scope, paginate,
   assert.equal(await page.locator('.recent-events').count(),0,'archive loads only on request');
   await page.getByRole('tab',{name:'События',exact:true}).click();const archive=page.locator('.recent-events');await archive.getByText('<script>window.archiveXss=true</script>',{exact:true}).waitFor();
   assert.equal(await archive.locator('article').count(),50);assert.equal(await archive.getByText('Other stream',{exact:true}).count(),0);assert.equal(await page.evaluate(()=>window.archiveXss),undefined);
-  await archive.getByRole('button',{name:'Далее',exact:true}).click();await archive.getByText('Страница 2',{exact:true}).waitFor();await page.waitForFunction(()=>document.querySelectorAll('.recent-events article').length===7);await archive.getByText('Сообщение удалено модерацией.',{exact:true}).waitFor();
-  await archive.getByRole('button',{name:'Назад',exact:true}).click();await archive.getByText('Support',{exact:true}).waitFor();await archive.getByText('100,00 RUB',{exact:true}).waitFor();
+  await archive.getByRole('button',{name:'Следующие',exact:true}).click();await archive.getByText('Страница 2',{exact:true}).waitFor();await page.waitForFunction(()=>document.querySelectorAll('.recent-events article').length===7);await archive.getByText('Сообщение удалено модерацией.',{exact:true}).waitFor();
+  await archive.getByRole('button',{name:'Предыдущие',exact:true}).click();await archive.getByText('Support',{exact:true}).waitFor();await archive.getByText('100,00 RUB',{exact:true}).waitFor();
   for(const width of [390,1280]){await page.setViewportSize({width,height:844});await assertUiLayout(page);}
   const midnight=Date.UTC(2026,9,21,21),long='Очень длинное сообщение без обрезки. '.repeat(12),token='x'.repeat(180);
   const compactRows=[
