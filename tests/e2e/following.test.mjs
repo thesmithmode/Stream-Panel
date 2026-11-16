@@ -29,7 +29,7 @@ test('stream subscriptions show platform totals, exact follow dates and independ
   assert.equal(await card.locator('.follow-status').count(),1,'unknown YouTube subscription stays invisible');
   assert.equal(await card.locator('.follow-status').first().textContent(),'Не подписан');
   assert.equal(await page.getByRole('region',{name:'Подписки на канал',exact:true}).count(),0,'no duplicate framed subscription panel');
-  await card.locator('.follow-history summary').first().click();assert.equal(await card.locator('.follow-history li').count(),3);
+  const history=page.locator('.account-follow-history');assert.equal(await card.locator('details').count(),0);await history.locator('summary').click();assert.equal(await history.locator('li').count(),3);assert.ok(await history.locator('li strong').first().textContent());const bounds=await history.boundingBox(),accountsBounds=await card.boundingBox();assert.ok(Math.abs(bounds.width-accountsBounds.width)<2,'shared history spans the account section');assert.ok(bounds.y>=accountsBounds.y+accountsBounds.height,'history follows all accounts');
   await page.locator('.person-detail').screenshot({path:'/tmp/sp-follow-compact.png'});
   const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;if(evidence){await mkdir(evidence,{recursive:true});await page.screenshot({path:join(evidence,'following-mobile.png'),fullPage:true});}
   const selectPerson=async name=>{await page.getByRole('button',{name:'Все люди',exact:true}).click();await page.getByRole('button',{name,exact:true}).click();await page.getByRole('heading',{name,exact:true}).waitFor();};

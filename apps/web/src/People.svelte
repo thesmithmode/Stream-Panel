@@ -86,6 +86,11 @@
   function accountFollowing(ids:string[]){const matches=following.filter(row=>row.status!==null&&detail?.identities.some((i:any)=>ids.includes(i.id)&&i.source===row.source&&i.external_id===row.externalId&&i.account_id===row.account));return matches.sort((a,b)=>(b.checkedAtMs??0)-(a.checkedAtMs??0))[0];}
 
 
+  const subscriptionHistory=$derived(accounts.flatMap(identity=>{
+    const row=accountFollowing(identity.ids);
+    return (row?.history??[]).filter(item=>item.status!==null).map(item=>({...item,name:identity.display_name,source:identity.source}));
+  }).sort((a,b)=>b.at-a.at));
+
   let donorCurrency=$state('RUB'),rankRefresh=$state(0);
   const donorCurrencies=$derived([...new Set(tops.flatMap(p=>Object.keys(p.donationTotals)))].sort());
   const rankLabels=$derived(new Map(tops.map(t=>[t.id,sortBy==='donations'?Object.entries(t.donationTotals).map(([currency,amount])=>money(amount,currency)).join(' · ')||`${t.donationCount} донатов`:sortBy==='observed_minutes'?formatDuration(t.observedMinutes):`${t.messageCount} сообщ.`])));
@@ -340,7 +345,8 @@
 
         </div>{/if}
         <h3>Связанные аккаунты</h3>
-        <div class="account-summary">{#each accounts as identity}<span><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong><AccountFollowStatus row={accountFollowing(identity.ids)}/><PlatformProfileLink link={accountLink(identity.ids)} name={identity.display_name}/></span>{/each}</div>
+        <div class="account-summary">{#each accounts as identity}<span><span class="account-name"><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong><PlatformProfileLink link={accountLink(identity.ids)} name={identity.display_name} iconOnly/></span><AccountFollowStatus row={accountFollowing(identity.ids)} showHistory={false}/></span>{/each}</div>
+        {#if subscriptionHistory.length}<details class="account-follow-history"><summary>История подписок ({subscriptionHistory.length})</summary><ul>{#each subscriptionHistory as item}<li><strong class:twitch={item.source==='twitch'} class:youtube={item.source==='youtube'}>{item.name}</strong><span><time>{date(item.at)}</time> · {item.status?'Подписан':'Не подписан'}</span></li>{/each}</ul></details>{/if}
         <div class="actions"><button class="outline small" onclick={()=>{detailTab='donations';onSection(detailTab);showDonorLinks=true;}}>Привязать донаты</button></div>
       {:else if detailTab==='messages'}
        <RecentEvents personId={detail.id} messagesOnly onPerson={onSelect} />
@@ -450,7 +456,7 @@
  .person-detail .kpi-strip{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:0;margin-bottom:16px;gap:12px;}
  .person-detail .kpi{background:none;border:0;padding:0;min-height:48px;}
  .person-detail .kpi span{font-size:12px;}.person-detail .kpi strong{font-size:20px;color:#fff;}
- .account-summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}.account-summary>span{display:grid;gap:4px;align-content:start;align-items:start;min-width:0;max-width:100%;}.account-summary>span>strong{min-width:0;max-width:100%;overflow-wrap:anywhere;}
+ .account-summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}.account-summary>span{display:grid;gap:4px;align-content:start;align-items:start;min-width:0;max-width:100%;}.account-name{display:flex;align-items:center;gap:2px;min-width:0;max-width:100%;}.account-name strong{min-width:0;overflow-wrap:anywhere;}.account-follow-history{width:100%;border-top:1px solid var(--border);margin:12px 0;}.account-follow-history summary{font-size:14px;font-weight:400;}.account-follow-history ul{list-style:none;margin:0;padding:0;max-height:240px;overflow-y:auto;}.account-follow-history li{display:grid;gap:4px;padding:8px 0;font-size:12px;overflow-wrap:anywhere;}.account-follow-history li>span{color:var(--muted);}
  .person-tab-wrap{padding:0 14px;}
  .person-tab-wrap :global(.section-tabs){display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 12px;margin:0;}
  .person-tab-wrap :global(.section-tabs button){white-space:normal;font-size:12px;line-height:1.3;padding:8px 0;min-height:44px;}
