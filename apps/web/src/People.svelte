@@ -450,7 +450,7 @@
  .person-detail .kpi-strip{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:0;margin-bottom:16px;gap:12px;}
  .person-detail .kpi{background:none;border:0;padding:0;min-height:48px;}
  .person-detail .kpi span{font-size:12px;}.person-detail .kpi strong{font-size:20px;color:#fff;}
- .account-summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}.account-summary>span{display:grid;gap:4px;}
+ .account-summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}.account-summary>span{display:grid;gap:4px;align-content:start;align-items:start;min-width:0;max-width:100%;}.account-summary>span>strong{min-width:0;max-width:100%;overflow-wrap:anywhere;}
  .person-tab-wrap{padding:0 14px;}
  .person-tab-wrap :global(.section-tabs){display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 12px;margin:0;}
  .person-tab-wrap :global(.section-tabs button){white-space:normal;font-size:12px;line-height:1.3;padding:8px 0;min-height:44px;}
