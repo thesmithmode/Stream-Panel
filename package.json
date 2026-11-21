@@ -20,7 +20,10 @@
     "test:unit": "pnpm build:core && node --test --test-concurrency=2 dist/packages/core/test/*.test.js",
     "test:integration": "pnpm build && node --test --test-concurrency=2 dist/apps/daemon/test/*.test.js tests/integration/*.test.mjs",
     "test:e2e": "pnpm build && node --test --test-concurrency=2 tests/e2e/*.test.mjs",
-    "test:coverage": "pnpm build && node scripts/test-with-coverage.mjs"
+    "test:coverage": "pnpm build && node scripts/test-with-coverage.mjs",
+    "lint": "eslint .",
+    "format": "prettier --write",
+    "format:check": "prettier --check"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.2",
@@ -32,16 +35,22 @@
     "ws": "8.22.0"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.5",
     "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "24.10.1",
     "@types/ws": "8.18.2",
     "c8": "12.0.0",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.14.0",
     "istanbul-lib-coverage": "3.2.2",
     "playwright": "1.63.0",
+    "prettier": "3.10.1",
     "svelte": "5.57.2",
     "svelte-check": "4.7.6",
     "typescript": "5.9.3",
+    "typescript-eslint": "8.73.0",
     "v8-to-istanbul": "9.3.0",
     "vite": "8.3.3"
   }

@@ -31,7 +31,7 @@ test('phone stream reads stay bounded and manual/timed refresh update counters, 
 test('manual refresh arriving during an old automatic response waits for a new read',{timeout:30000},async()=>{
  const app=await application();let browser,release;
  try{
-  const id=await seed(app);browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(6000);await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator('.stream-open').click();
+  await seed(app);browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(6000);await goto(page,app.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();await page.locator('.stream-open').click();
   const messages=page.locator('.stream-kpis > div').filter({hasText:'Сообщения'}).locator('strong');await messages.getByText('8',{exact:true}).waitFor();
   let delayed=false;const started=new Promise(resolve=>{release={start:resolve};}),held=new Promise(resolve=>{release.finish=resolve;});let reads=0;
   await page.route('**/api/v1/summary?*',async route=>{reads++;if(delayed){await route.continue();return;}delayed=true;const old=await route.fetch();release.start();await held;await route.fulfill({response:old});});

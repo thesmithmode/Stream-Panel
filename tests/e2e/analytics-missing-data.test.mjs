@@ -1,4 +1,4 @@
-import {navigate,setFilter,openFilters,closeFilters,refreshData} from '../helpers/navigation.mjs';
+import {navigate,setFilter,refreshData} from '../helpers/navigation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
