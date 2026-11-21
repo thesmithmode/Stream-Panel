@@ -54,7 +54,56 @@
   let supplemental=$state<any[]>([]);
   const participants=$derived(withSupplementaryChat(audienceData?.audience??[],supplemental));
   const live=$derived(session?.ended_at_ms===null);
-  const tabs=$derived([['summary','Итоги'],['people','Участники'],...(live?[['current','Текущие зрители']]:[]),['events','События']] as [string,string][]);
+  type Clip={id:string;positionSeconds:number;seconds:number;url:string|null};
+  type ClipState={activeStreamId:string|null;clips:Clip[]};
+  let clipState=$state<ClipState>({activeStreamId:null,clips:[]});
+  let clipBusy=$state(false),clipMessage=$state(''),clipError=$state(false);
+  let clipRequest:{id:string;streamId:string}|undefined;
+  let refreshClips:(()=>Promise<void>)|undefined;
+  const canClip=$derived(live&&clipState.activeStreamId!==null);
+  const hasClips=$derived(canClip||clipState.clips.length>0);
+  function clipTime(seconds:number){
+    return [Math.floor(seconds/3600),Math.floor(seconds%3600/60),seconds%60]
+      .map(part=>String(part).padStart(2,'0')).join(':');
+  }
+  $effect(()=>{
+    const id=sessionFilter,profile=getProfile(),isLive=live;
+    if(!id)return;
+    const controller=new AbortController();
+    let sequence=0;
+    const poll=async()=>{
+      const current=++sequence;
+      try{
+        const next=await api<ClipState>(`sessions/${encodeURIComponent(id)}/clips`,undefined,controller.signal,profile);
+        if(!controller.signal.aborted&&current===sequence)clipState=next;
+      }catch{/* Keep the last successful read during a temporary outage. */}
+    };
+    refreshClips=poll;
+    void poll();
+    const timer=setInterval(()=>{if(!document.hidden)void poll();},isLive?15_000:30_000);
+    return ()=>{controller.abort();clearInterval(timer);refreshClips=undefined;};
+  });
+  async function saveClip(){
+    const streamId=clipState.activeStreamId;
+    if(clipBusy||!canClip||!streamId)return;
+    clipBusy=true;clipMessage='';clipError=false;
+    const id=sessionFilter,profile=getProfile();
+    try{
+      const result=await api<{positionSeconds:number}>(`sessions/${encodeURIComponent(id)}/clips`,
+        clipRequest?.streamId===streamId?clipRequest:(clipRequest={id:crypto.randomUUID(),streamId}),undefined,profile);
+      clipRequest=undefined;
+      clipMessage=`Сохранено · ${clipTime(result.positionSeconds)}`;
+      void refreshClips?.();
+    }catch(error){
+      clipError=true;
+      if((error as Error).message==='TWITCH_STREAM_OFFLINE'){
+        clipState={...clipState,activeStreamId:null};
+        clipRequest=undefined;
+        clipMessage='Эфир Twitch завершён.';
+      }else clipMessage='Не удалось подтвердить сохранение. Нажмите «Клип» ещё раз, чтобы повторить.';
+    }finally{clipBusy=false;}
+  }
+  const tabs=$derived([['summary','Итоги'],['people','Участники'],...(live?[['current','Текущие зрители']]:[]),['events','События'],...(hasClips?[['clips','Клипы']]:[])] as [string,string][]);
   let activeTab=$state('summary');
   $effect(()=>{activeTab=tabs.some(([id])=>id===section)?section:'summary';});
   const decimal=(n:number)=>n.toLocaleString('ru-RU',{maximumFractionDigits:1});
@@ -92,9 +141,11 @@
  <div><span>Пик зрителей</span><strong>{viewers?.peak!=null?viewers.peak:(audienceBusy?'…':'—')}</strong></div>
  {#if summary.donations>0}<div><span>Донаты</span><strong>{Object.keys(summary.totals).length?Object.entries(summary.totals).map(([c,a])=>money(a,c)).join(' · '):'—'}</strong></div>{/if}
  <div><span>Сообщения</span><strong>{summary.messages.toLocaleString('ru-RU')}</strong></div>
+ {#if canClip}<button type="button" class="outline clip-button" disabled={clipBusy} onclick={saveClip}>{clipBusy?'Сохраняем…':'Клип'}</button>{/if}
 </section>
+{#if clipMessage}<p class="small clip-message" class:clip-error={clipError} role="status">{clipMessage}</p>{/if}
 <SectionTabs items={tabs} bind:value={activeTab} onchange={()=>onSection(activeTab)} label="Разделы эфира" panelId="stream-tabpanel"/>
-<div id="stream-tabpanel" role="tabpanel" aria-label={activeTab==='summary'?'Итоги':activeTab==='people'?'Участники':activeTab==='current'?'Текущие зрители':'События'}>
+<div id="stream-tabpanel" role="tabpanel" aria-label={activeTab==='summary'?'Итоги':activeTab==='people'?'Участники':activeTab==='current'?'Текущие зрители':activeTab==='clips'?'Клипы':'События'}>
 {#if activeTab==='summary'}
 <section class="panel series-panel">
   <header><h2>Зрители и чат <Help id="stream-presence" label="Об аудитории стрима" text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Нажмите столбец для детализации; пропуски замеров не заменяются нулём." /></h2></header>
@@ -116,9 +167,28 @@
 {#if missingPresence}<p class="notice" role="status">Сообщения Twitch сохранены, но данных о присутствии участников нет. Время в чате недоступно: прочерк не означает отсутствие человека.</p>{/if}
 <AudienceRanking people={participants} {onPerson} onClassificationChange={changed} showIntervals {missingPresence} streamStart={session?.started_at_ms??0} streamEnd={session?.ended_at_ms??Date.now()}/>
 {/if}
+{:else if activeTab==='clips'}
+<section aria-label="Клипы">
+  <ul class="clip-list">
+    {#each clipState.clips as clip (clip.id)}
+      <li><span>{clipTime(clip.positionSeconds)}</span>
+        {#if clip.url}<a href={clip.url} target="_blank" rel="noopener noreferrer" aria-label={`Открыть запись с ${clipTime(clip.seconds)}`}>С {clipTime(clip.seconds)} ↗</a>
+        {:else}<small class="muted">Запись пока недоступна</small>{/if}
+      </li>
+    {:else}<li class="muted">Клипов пока нет</li>{/each}
+  </ul>
+  <p class="small muted">Метки хранятся до 7 дней</p>
+</section>
 {:else if sessionFilter}<section class="panel"><header><h2>События стрима · 7 дней</h2></header><div class="settings-body"><RecentEvents sessionId={sessionFilter} {onPerson}/></div></section>{/if}
 </div>
 <style>
+ .clip-button{align-self:center;justify-self:start;min-height:44px;padding:0 18px;color:var(--accent);border-color:var(--accent)}
+ .clip-message{margin:0;color:var(--teal)}
+ .clip-error{color:var(--text)}
+ .clip-list{list-style:none;margin:0 0 12px;padding:0;font-variant-numeric:tabular-nums}
+ .clip-list li{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:44px;border-bottom:1px solid var(--border)}
+ .clip-list a{display:inline-flex;align-items:center;min-height:44px}
+
  .stream-title-row{display:flex;gap:16px;align-items:start}.stream-title-row h1{flex:1;min-width:0;font-size:26px;line-height:1.3;margin:0 0 12px;overflow-wrap:anywhere}.stream-meta{color:var(--muted);margin:0 0 6px;font-size:14px}.series-panel>header{display:flex;align-items:center;justify-content:space-between}
  @media(min-width:1000px){.stream-title-row h1{font-size:30px}}
 </style>

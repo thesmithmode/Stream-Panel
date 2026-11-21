@@ -617,7 +617,16 @@ UPDATE analytics_global_revision SET revision=revision+1;
 UPDATE ui_revisions SET revision=revision+1;
 PRAGMA user_version=34;
 `;
-export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24,schemaV25,changeRevisionSchema,analyticsRevisionSchema,overviewRevisionSchema,sharedIdentitySchema,schemaV30,donationFxSchema,personBotSchema,viewerAdjustmentSchema,botAnalyticsSchema,serviceAccountsSchema] as const;
+const streamClipsSchema=`
+CREATE TABLE IF NOT EXISTS stream_clips (
+ id TEXT PRIMARY KEY, account_id TEXT NOT NULL, stream_id TEXT NOT NULL,
+ created_at_ms INTEGER NOT NULL, position_seconds INTEGER NOT NULL CHECK(position_seconds>=0)
+) STRICT;
+CREATE INDEX IF NOT EXISTS stream_clips_stream ON stream_clips(account_id,stream_id,created_at_ms);
+CREATE INDEX IF NOT EXISTS stream_clips_age ON stream_clips(created_at_ms);
+PRAGMA user_version=36;
+`;
+export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24,schemaV25,changeRevisionSchema,analyticsRevisionSchema,overviewRevisionSchema,sharedIdentitySchema,schemaV30,donationFxSchema,personBotSchema,viewerAdjustmentSchema,botAnalyticsSchema,serviceAccountsSchema,streamClipsSchema] as const;
 export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;
 
 
