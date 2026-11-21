@@ -30,8 +30,8 @@
   }
 </script>
 
-<div class="section-tabs" role="tablist" aria-label={label}>
-  {#each items as [key, text], index}<button
+<div class="section-tabs" role="tablist" aria-label={label}
+  >{#each items as [key, text], index}<button
       type="button"
       role="tab"
       id={`${id}-${key}`}
@@ -44,7 +44,6 @@
         onchange?.();
       }}
       onkeydown={(event) => keydown(event, index)}
-    >
-      {#if icons?.[key]}<Icon name={icons[key]} />{/if}{text}
-    </button>{/each}
-</div>
+      >{#if icons?.[key]}<Icon name={icons[key]} />{/if}{text}</button
+    >{/each}</div
+>

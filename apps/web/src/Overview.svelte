@@ -160,26 +160,26 @@
 </script>
 
 {#if session}<section class="stream-facts">
-    <div class="stream-title-row">
-      <h1>{session.primaryTitle || 'Без названия'}</h1>
-      <ActionMenu variant="metadata-menu" label="История названий и категорий">
-        {#snippet children()}
-          {#if viewerPartial}<p class="small muted">
-              Показана сумма известных зрителей площадок. Пропущенные замеры не считаются нулём.
-            </p>{/if}
-          {#each session.breaks ?? [] as pause}<p class="small">
-              Перерыв: {streamRange(pause.from, pause.to)} МСК
-            </p>{/each}
-          {#each [...metadata].sort((a, b) => b.at - a.at) as row}<p class="small">
-              {dateTime(row.at)}{row.categoryName && row.categoryName !== 'Категория неизвестна'
+    <div class="stream-title-row"
+      ><h1>{session.primaryTitle || 'Без названия'}</h1><ActionMenu
+        variant="metadata-menu"
+        label="История названий и категорий"
+        >{#snippet children()}
+          {#if viewerPartial}<p class="small muted"
+              >Показана сумма известных зрителей площадок. Пропущенные замеры не считаются нулём.</p
+            >{/if}
+          {#each session.breaks ?? [] as pause}<p class="small">Перерыв: {streamRange(pause.from, pause.to)} МСК</p
+            >{/each}
+          {#each [...metadata].sort((a, b) => b.at - a.at) as row}<p class="small"
+              >{dateTime(row.at)}{row.categoryName && row.categoryName !== 'Категория неизвестна'
                 ? ` · ${row.categoryName}`
-                : ''} · {row.title || 'Без названия'}
-            </p>{:else}<p class="small muted">Нет сохранённых метаданных.</p>{/each}
-        {/snippet}
-      </ActionMenu>
-    </div>
-    <p class="stream-meta">
-      {[
+                : ''} · {row.title || 'Без названия'}</p
+            >{:else}<p class="small muted">Нет сохранённых метаданных.</p>{/each}
+        {/snippet}</ActionMenu
+      ></div
+    >
+    <p class="stream-meta"
+      >{[
         `${streamRange(session.started_at_ms, session.ended_at_ms)} МСК`,
         [
           ...new Set(metadata.map((row) => row.categoryName).filter((name) => name && name !== 'Категория неизвестна')),
@@ -187,25 +187,26 @@
         session.platforms?.map((p) => (p === 'twitch' ? 'Twitch' : 'YouTube')).join(' + '),
       ]
         .filter(Boolean)
-        .join(' · ')}
-    </p>
+        .join(' · ')}</p
+    >
   </section>{/if}
 <section class="stream-kpis" aria-label="Итоги эфира">
-  <div>
-    <span>Средние зрители</span><strong>
-      <span class="kpi-number">{viewers?.mean != null ? decimal(viewers.mean) : audienceBusy ? '…' : '—'}</span>
-    </strong>
-  </div>
+  <div
+    ><span>Средние зрители</span><strong
+      ><span class="kpi-number">{viewers?.mean != null ? decimal(viewers.mean) : audienceBusy ? '…' : '—'}</span
+      ></strong
+    ></div
+  >
   <div><span>Пик зрителей</span><strong>{viewers?.peak != null ? viewers.peak : audienceBusy ? '…' : '—'}</strong></div>
-  {#if summary.donations > 0}<div>
-      <span>Донаты</span><strong>
-        {Object.keys(summary.totals).length
+  {#if summary.donations > 0}<div
+      ><span>Донаты</span><strong
+        >{Object.keys(summary.totals).length
           ? Object.entries(summary.totals)
               .map(([c, a]) => money(a, c))
               .join(' · ')
-          : '—'}
-      </strong>
-    </div>{/if}
+          : '—'}</strong
+      ></div
+    >{/if}
   <div><span>Сообщения</span><strong>{summary.messages.toLocaleString('ru-RU')}</strong></div>
 </section>
 <SectionTabs
@@ -228,28 +229,26 @@
 >
   {#if activeTab === 'summary'}
     <section class="panel series-panel">
-      <header>
-        <h2>
-          Зрители и чат <Help
+      <header
+        ><h2
+          >Зрители и чат <Help
             id="stream-presence"
             label="Об аудитории стрима"
             text="Счётчик зрителей поступает от площадки и включает зрителей без сообщений. Ники в чате — не подтверждение просмотра видео. Список составляется по опросам Twitch и сообщениям YouTube. Нажмите столбец для детализации; пропуски замеров не заменяются нулём."
-          />
-        </h2>
-      </header>
+          /></h2
+        ></header
+      >
       <div class="stream-chart-toolbar">
-        <select aria-label="Показатель графика стрима" bind:value={audienceMetric}>
-          {#each chartMetrics as choice}<option value={choice.value}>{choice.label}</option>{/each}
-        </select>
-        <div class="period-chips" role="group" aria-label="Детализация графика">
-          {#each [1, 5, 15] as step}<button
+        <select aria-label="Показатель графика стрима" bind:value={audienceMetric}
+          >{#each chartMetrics as choice}<option value={choice.value}>{choice.label}</option>{/each}</select
+        >
+        <div class="period-chips" role="group" aria-label="Детализация графика"
+          >{#each [1, 5, 15] as step}<button
               class:active={resolution === step}
               aria-pressed={resolution === step}
-              onclick={() => setResolution(step)}
-            >
-              {step} мин
-            </button>{/each}
-        </div>
+              onclick={() => setResolution(step)}>{step} мин</button
+            >{/each}</div
+        >
       </div>
       {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceData}
         <AudienceChart
@@ -273,13 +272,13 @@
   {:else if activeTab === 'current' && live}
     <CurrentChatParticipants sessionId={sessionFilter} {onPerson} />
   {:else if activeTab === 'people'}
-    {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceBusy}<p role="status">
-        Загружаем участников…
-      </p>{:else}
-      {#if missingPresence}<p class="notice" role="status">
-          Сообщения Twitch сохранены, но данных о присутствии участников нет. Время в чате недоступно: прочерк не
-          означает отсутствие человека.
-        </p>{/if}
+    {#if audienceError}<p class="notice error" role="alert">{audienceError}</p>{:else if audienceBusy}<p role="status"
+        >Загружаем участников…</p
+      >{:else}
+      {#if missingPresence}<p class="notice" role="status"
+          >Сообщения Twitch сохранены, но данных о присутствии участников нет. Время в чате недоступно: прочерк не
+          означает отсутствие человека.</p
+        >{/if}
       <AudienceRanking
         people={participants}
         {onPerson}
@@ -290,10 +289,11 @@
         streamEnd={session?.ended_at_ms ?? Date.now()}
       />
     {/if}
-  {:else if sessionFilter}<section class="panel">
-      <header><h2>События стрима · 7 дней</h2></header>
-      <div class="settings-body"><RecentEvents sessionId={sessionFilter} {onPerson} /></div>
-    </section>{/if}
+  {:else if sessionFilter}<section class="panel"
+      ><header><h2>События стрима · 7 дней</h2></header><div class="settings-body"
+        ><RecentEvents sessionId={sessionFilter} {onPerson} /></div
+      ></section
+    >{/if}
 </div>
 
 <style>

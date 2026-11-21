@@ -381,61 +381,56 @@
 </script>
 
 <div class="analytics-toolbar">
-  <div class="period-chips" role="group" aria-label="Быстрый выбор периода">
-    {#each [[7, '7 дней'], [30, '30 дней'], ['all', 'Всё время']] as [value, label]}<button
+  <div class="period-chips" role="group" aria-label="Быстрый выбор периода"
+    >{#each [[7, '7 дней'], [30, '30 дней'], ['all', 'Всё время']] as [value, label]}<button
         class:active={period === value}
         aria-pressed={period === value}
         aria-label={String(label)}
         onclick={() => preset(value as number | 'all')}
-      >
-        <span class="period-full">{label}</span><span class="period-short" aria-hidden="true">
-          {value === 'all' ? 'Всё' : `${value} дн.`}
-        </span>
-      </button>{/each}<button
+        ><span class="period-full">{label}</span><span class="period-short" aria-hidden="true"
+          >{value === 'all' ? 'Всё' : `${value} дн.`}</span
+        ></button
+      >{/each}<button
       class:active={period === 'custom'}
       aria-pressed={period === 'custom'}
       aria-label="Свои даты"
       onclick={() => {
         period = 'custom';
         filtersOpen = true;
-      }}
-    >
-      <span class="period-full">Свои даты</span><span class="period-short" aria-hidden="true">Даты</span>
-    </button>
-  </div>
+      }}><span class="period-full">Свои даты</span><span class="period-short" aria-hidden="true">Даты</span></button
+    ></div
+  >
   <button
     class="outline filters-button"
     aria-label="Фильтры"
     aria-expanded={filtersOpen}
     onclick={() => (filtersOpen = true)}
-  >
-    <Icon name="filters" size={18} />Фильтры{#if category || source !== 'all' || period === 'custom'}<span
+    ><Icon name="filters" size={18} />Фильтры{#if category || source !== 'all' || period === 'custom'}<span
         class="filter-dot"
-      ></span>{/if}
-  </button>
+      ></span>{/if}</button
+  >
 </div>
-{#if category || source !== 'all' || period === 'custom'}<p class="applied-filters">
-    {categoryOptions.find((c: any) => c.id === category)?.name ?? 'Все категории'} · {source === 'all'
+{#if category || source !== 'all' || period === 'custom'}<p class="applied-filters"
+    >{categoryOptions.find((c: any) => c.id === category)?.name ?? 'Все категории'} · {source === 'all'
       ? 'Все площадки'
       : source === 'twitch'
         ? 'Twitch / DA'
         : 'YouTube'}{#if period === 'custom'}
-      · Свой период{/if}
-  </p>{/if}
+      · Свой период{/if}</p
+  >{/if}
 {#if data}
-  <div class="analytics-kpis">
-    <div><strong>{data.summary?.streams ?? 0}</strong><span>Эфиров</span></div>
-    {#if data.donationTiming}<div>
-        <strong>
-          {Object.entries(data.donationTiming.totals ?? {})
+  <div class="analytics-kpis"
+    ><div><strong>{data.summary?.streams ?? 0}</strong><span>Эфиров</span></div>{#if data.donationTiming}<div
+        ><strong
+          >{Object.entries(data.donationTiming.totals ?? {})
             .map(([c, a]) => money(String(a), c))
-            .join(' · ') || '—'}
-        </strong><span>Донаты</span>
-      </div>{/if}
-  </div>
+            .join(' · ') || '—'}</strong
+        ><span>Донаты</span></div
+      >{/if}</div
+  >
 {/if}
-<div class="analytics-navigation">
-  <SectionTabs
+<div class="analytics-navigation"
+  ><SectionTabs
     items={[
       ['dynamics', 'Динамика'],
       ['time', 'Время'],
@@ -445,10 +440,10 @@
     onchange={() => onSection?.(section)}
     label="Разделы аналитики"
     panelId="analytics-tabpanel"
-  />
-</div>
-<div class="analytics-mobile-navigation">
-  <SectionTabs
+  /></div
+>
+<div class="analytics-mobile-navigation"
+  ><SectionTabs
     onchange={() => {
       onSection?.(section);
       window.scrollTo({ top: 0 });
@@ -462,71 +457,63 @@
     bind:value={section}
     label="Разделы аналитики"
     panelId="analytics-tabpanel"
-  />
-</div>
-<Sheet bind:open={filtersOpen} title="Фильтры аналитики">
-  <div class="filter-fields">
-    {#if period === 'custom'}<label>
-        Начало периода<input
+  /></div
+>
+<Sheet bind:open={filtersOpen} title="Фильтры аналитики"
+  ><div class="filter-fields">
+    {#if period === 'custom'}<label
+        >Начало периода<input
           type="datetime-local"
           value={from === localInput(0) && data?.sessions?.length ? localInput(data.sessions[0].started_at_ms) : from}
           oninput={(e) => {
             from = e.currentTarget.value;
           }}
           required
-        />
-      </label><label>
-        Конец периода<input type="datetime-local" bind:value={to} onchange={() => (liveEnd = false)} required />
-      </label>{/if}
-    <label>
-      Площадка<select aria-label="Площадка" bind:value={source}>
-        <option value="all">Все площадки</option><option value="twitch">Twitch / DA</option><option value="youtube">
-          YouTube
-        </option>
-      </select>
-    </label>
-    <label>
-      Категория Twitch<select aria-label="Категория Twitch" bind:value={category}>
-        <option value="">Все категории</option>{#each categoryOptions as c}<option value={c.id}>{c.name}</option>{/each}
-      </select>
-    </label>
-    <details class="section-disclosure">
-      <summary>Отображение и часовой пояс</summary>
-      <div class="filter-fields">
-        <label>
-          Часовой пояс сравнения<select aria-label="Часовой пояс сравнения" bind:value={timezone}>
-            <option value="Europe/Moscow">Москва</option><option value="UTC">UTC</option><option
-              value="Asia/Yekaterinburg"
-            >
-              Екатеринбург
-            </option>
-          </select>
-        </label>
+        /></label
+      ><label
+        >Конец периода<input type="datetime-local" bind:value={to} onchange={() => (liveEnd = false)} required /></label
+      >{/if}
+    <label
+      >Площадка<select aria-label="Площадка" bind:value={source}
+        ><option value="all">Все площадки</option><option value="twitch">Twitch / DA</option><option value="youtube"
+          >YouTube</option
+        ></select
+      ></label
+    >
+    <label
+      >Категория Twitch<select aria-label="Категория Twitch" bind:value={category}
+        ><option value="">Все категории</option>{#each categoryOptions as c}<option value={c.id}>{c.name}</option
+          >{/each}</select
+      ></label
+    >
+    <details class="section-disclosure"
+      ><summary>Отображение и часовой пояс</summary><div class="filter-fields">
+        <label
+          >Часовой пояс сравнения<select aria-label="Часовой пояс сравнения" bind:value={timezone}
+            ><option value="Europe/Moscow">Москва</option><option value="UTC">UTC</option><option
+              value="Asia/Yekaterinburg">Екатеринбург</option
+            ></select
+          ></label
+        >
         <label class="check"><input type="checkbox" bind:checked={view.trend} />График активности</label><label
-          class="check"
-        >
-          <input type="checkbox" bind:checked={view.categories} />Сравнение категорий
-        </label><label class="check"><input type="checkbox" bind:checked={view.hours} />Дни и часы</label><label
-          class="check"
-        >
-          <input type="checkbox" bind:checked={view.audience} />Возвращаемость участников
-        </label><button class="outline" onclick={() => (view = analyticsView(null))}>Сбросить отображение</button>
-      </div>
-    </details>
-    <div class="filter-actions">
-      <button
+          class="check"><input type="checkbox" bind:checked={view.categories} />Сравнение категорий</label
+        ><label class="check"><input type="checkbox" bind:checked={view.hours} />Дни и часы</label><label class="check"
+          ><input type="checkbox" bind:checked={view.audience} />Возвращаемость участников</label
+        ><button class="outline" onclick={() => (view = analyticsView(null))}>Сбросить отображение</button>
+      </div></details
+    >
+    <div class="filter-actions"
+      ><button
         class="outline"
         onclick={() => {
           category = '';
           source = 'all';
           preset('all');
-        }}
-      >
-        Сбросить фильтры
-      </button><button class="primary" onclick={() => (filtersOpen = false)}>Готово</button>
-    </div>
-  </div>
-</Sheet>
+        }}>Сбросить фильтры</button
+      ><button class="primary" onclick={() => (filtersOpen = false)}>Готово</button></div
+    >
+  </div></Sheet
+>
 {#if busy && (!data || loadedPanel !== section)}<p class="small muted" role="status">Обновляем аналитику…</p>{/if}
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 <div
@@ -559,8 +546,8 @@
           />
         </div>
         <Insights report={data} loading={busy && !data} {onPerson} {onStream} />
-        <details class="section-disclosure retention-disclosure" bind:open={comparisonsOpen}>
-          <summary>Возвращаемость по эфирам</summary>{#if comparisonsOpen}<ComparisonCharts
+        <details class="section-disclosure retention-disclosure" bind:open={comparisonsOpen}
+          ><summary>Возвращаемость по эфирам</summary>{#if comparisonsOpen}<ComparisonCharts
               scope={reportScope}
               {timezone}
               {onStream}
@@ -568,69 +555,61 @@
               streams={data.streamComparison ?? []}
               totalCount={data.streamRange?.total}
               loadStreams={streamsLoader}
-            />{/if}
-        </details>
+            />{/if}</details
+        >
       {/if}
       {#if section === 'time'}
-        {#if view.hours}<section class="panel">
-            <header>
-              <h2>Активность по дням и часам</h2>
-              <Help
+        {#if view.hours}<section class="panel"
+            ><header
+              ><h2>Активность по дням и часам</h2><Help
                 id="analytics-hours"
                 label="О карте активности"
                 text="Нажмите ячейку для точного значения. Яркость показывает активность, серый — нет данных. Часы без эфира не считаются нулями. Для зрителей показана сумма известных значений площадок; пропущенные замеры не считаются нулём."
-              />
-            </header>
-            <details class="chart-options">
-              <summary>Настроить карту</summary>
-              <div class="filter-fields">
-                <label>
-                  Метрика карты<select aria-label="Метрика карты" bind:value={view.heatMetric}>
-                    <option value="viewers">Зрители (все)</option><option value="observed">
-                      Наблюдения Twitch
-                    </option><option value="estimated">Оценка активности YouTube</option><option value="messages">
-                      Сообщения
-                    </option><option value="donations">Число донатов</option><option value="amount">
-                      Сумма донатов
-                    </option>
-                  </select>
-                </label>{#if view.heatMetric === 'amount'}<label>
-                    Валюта карты<select aria-label="Валюта карты" bind:value={heatCurrency}>
-                      {#each [...new Set<string>((data.hours ?? []).flatMap( (h: any) => Object.keys(h.donationTotals) ))] as c}<option
-                          value={c}
-                        >
-                          {c}
-                        </option>{:else}<option value="RUB">RUB</option>{/each}
-                    </select>
-                  </label>{/if}<label>
-                  Расчёт карты<select aria-label="Расчёт карты" bind:value={heatCalculation}>
-                    <option value="average">Среднее / на час эфира</option><option value="total">
-                      Накопленная сумма
-                    </option>
-                  </select>
-                </label>
-              </div>
-            </details>
+              /></header
+            ><details class="chart-options"
+              ><summary>Настроить карту</summary><div class="filter-fields"
+                ><label
+                  >Метрика карты<select aria-label="Метрика карты" bind:value={view.heatMetric}
+                    ><option value="viewers">Зрители (все)</option><option value="observed">Наблюдения Twitch</option
+                    ><option value="estimated">Оценка активности YouTube</option><option value="messages"
+                      >Сообщения</option
+                    ><option value="donations">Число донатов</option><option value="amount">Сумма донатов</option
+                    ></select
+                  ></label
+                >{#if view.heatMetric === 'amount'}<label
+                    >Валюта карты<select aria-label="Валюта карты" bind:value={heatCurrency}
+                      >{#each [...new Set<string>((data.hours ?? []).flatMap( (h: any) => Object.keys(h.donationTotals) ))] as c}<option
+                          value={c}>{c}</option
+                        >{:else}<option value="RUB">RUB</option>{/each}</select
+                    ></label
+                  >{/if}<label
+                  >Расчёт карты<select aria-label="Расчёт карты" bind:value={heatCalculation}
+                    ><option value="average">Среднее / на час эфира</option><option value="total"
+                      >Накопленная сумма</option
+                    ></select
+                  ></label
+                ></div
+              ></details
+            >
 
             <div class="hour-heatmap" aria-label="Карта активности по дням и часам">
-              <div class="heatmap-labels">
-                <span></span>{#each Array.from({ length: 24 }, (_, i) => i) as hour}<span>{hour}</span>{/each}
-              </div>
-              {#each weekdays as weekday}<div class="heatmap-row">
-                  <strong>{weekday}</strong>{#each Array.from({ length: 24 }, (_, i) => i) as hour}<button
+              <div class="heatmap-labels"
+                ><span></span>{#each Array.from({ length: 24 }, (_, i) => i) as hour}<span>{hour}</span>{/each}</div
+              >
+              {#each weekdays as weekday}<div class="heatmap-row"
+                  ><strong>{weekday}</strong>{#each Array.from({ length: 24 }, (_, i) => i) as hour}<button
                       aria-label={hourTitle(weekday, hour)}
                       title={hourTitle(weekday, hour)}
                       onclick={() => (selectedHour = { day: weekday, hour })}
                       style:background={heatValue(hourCells.get(`${weekday}:${hour}`)) !== null
                         ? `rgba(95,196,170,${0.15 + (0.85 * (heatValue(hourCells.get(`${weekday}:${hour}`)) ?? 0)) / hourMax})`
                         : '#3b4350'}
-                    ></button>{/each}
-                </div>{/each}
-            </div>
-            {#if selectedHour}<p class="analytics-help small" role="status">
-                {hourTitle(selectedHour.day, selectedHour.hour)}
-              </p>{/if}
-          </section>{/if}
+                    ></button>{/each}</div
+                >{/each}
+            </div>{#if selectedHour}<p class="analytics-help small" role="status"
+                >{hourTitle(selectedHour.day, selectedHour.hour)}</p
+              >{/if}</section
+          >{/if}
 
         {#if view.trend}<ActivityClock
             scope={reportScope}
@@ -661,102 +640,87 @@
           toMs={data.filters?.toMs ?? Date.now()}
           {onPerson}
         />
-        {#if view.audience}<section class="panel returning-audience">
-            <header>
-              <h2>Возвращаемость участников</h2>
-              <Help
+        {#if view.audience}<section class="panel returning-audience"
+            ><header
+              ><h2>Возвращаемость участников</h2><Help
                 id="analytics-audience"
                 label="О минутах в чате"
                 text="Наблюдаемые минуты Twitch учитывают молчавших участников и исключают неизвестные промежутки. Оценка YouTube показана отдельно. Выберите сортировку по минутам или сообщениям; нажмите имя для подробностей."
-              /><span>
-                {data.audiencePage ? (pagedAudience?.audiencePage?.total ?? data.audiencePage.total) : visible.length} участников
-              </span>
-            </header>
-            <p class="small regular-summary">
-              Ядро аудитории: <strong>
-                {data.composition?.core ?? 0} из {data.summary.attendees ?? data.summary.entities ?? 0} ({data.summary
+              /><span
+                >{data.audiencePage ? (pagedAudience?.audiencePage?.total ?? data.audiencePage.total) : visible.length} участников</span
+              ></header
+            >
+            <p class="small regular-summary"
+              >Ядро аудитории: <strong
+                >{data.composition?.core ?? 0} из {data.summary.attendees ?? data.summary.entities ?? 0} ({data.summary
                   .attendees
                   ? pct((data.composition?.core ?? 0) / data.summary.attendees)
-                  : 'нет данных'})
-              </strong>
-            </p>
-            <div class="analytics-controls">
-              <label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label>
-                Сортировка<select aria-label="Сортировка" bind:value={view.sort}>
-                  <option value="observedMinutes">Минуты в чате</option><option value="estimatedChatMinutes">
-                    Оценка активности YouTube
-                  </option><option value="sessions">Частота посещений</option><option value="messages">
-                    Сообщения
-                  </option><option value="attendanceRatio">Доля посещённых эфиров</option>
-                </select>
-              </label><label class="check"><input type="checkbox" bind:checked={view.coreOnly} /> Только ядро</label>
-            </div>
-            <div class="table-wrap compact-audience" role="region" aria-label="Таблица возвращаемости">
-              <table class="compact-audience-table">
-                <thead><tr><th>Участник</th><th>Эфиры</th><th>Минуты в чате</th><th>Сообщения</th></tr></thead><tbody>
-                  {#each visible.slice(0, data.audiencePage ? 100 : 200) as e (e.id)}<tr
+                  : 'нет данных'})</strong
+              ></p
+            >
+            <div class="analytics-controls"
+              ><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label
+                >Сортировка<select aria-label="Сортировка" bind:value={view.sort}
+                  ><option value="observedMinutes">Минуты в чате</option><option value="estimatedChatMinutes"
+                    >Оценка активности YouTube</option
+                  ><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option><option
+                    value="attendanceRatio">Доля посещённых эфиров</option
+                  ></select
+                ></label
+              ><label class="check"><input type="checkbox" bind:checked={view.coreOnly} /> Только ядро</label></div
+            >
+            <div class="table-wrap compact-audience" role="region" aria-label="Таблица возвращаемости"
+              ><table class="compact-audience-table"
+                ><thead><tr><th>Участник</th><th>Эфиры</th><th>Минуты в чате</th><th>Сообщения</th></tr></thead><tbody
+                  >{#each visible.slice(0, data.audiencePage ? 100 : 200) as e (e.id)}<tr
                       class="audience-row"
                       class:bot-person={e.is_bot}
                       class:human-person={e.is_human}
                     >
-                      <td class="audience-name" data-label="Участник">
-                        <div>
-                          <button
+                      <td class="audience-name" data-label="Участник"
+                        ><div
+                          ><button
                             class={`text-button ${platformClass(e.sources ?? [e.source])}`}
                             disabled={busy}
-                            onclick={() => onPerson(e.id)}
-                          >
-                            {e.name}
-                          </button>{#if e.core}<span class="core-badge">Ядро</span>{:else if e.follower}<span
-                              class="follower-badge"
-                            >
-                              Подписчик
-                            </span>{/if}{#each e.tags ?? [] as tag}<span class="person-tag">{tag}</span>{/each}
-                        </div>
-                        <small>
-                          {(e.sources ?? [e.source])
+                            onclick={() => onPerson(e.id)}>{e.name}</button
+                          >{#if e.core}<span class="core-badge">Ядро</span>{:else if e.follower}<span
+                              class="follower-badge">Подписчик</span
+                            >{/if}{#each e.tags ?? [] as tag}<span class="person-tag">{tag}</span>{/each}</div
+                        ><small
+                          >{(e.sources ?? [e.source])
                             .map((source: string) =>
                               source === 'youtube' ? 'YouTube' : source === 'donationalerts' ? 'DA' : 'Twitch',
                             )
-                            .join(' · ')}
-                        </small>
-                      </td>
-                      <td class="audience-stat" data-label="Эфиры">
-                        {e.attendanceCount ?? e.attendanceSessionIds?.length ?? 0}/{data.summary?.streams ?? 0}
-                      </td><td
-                        class="audience-stat"
-                        data-label={e.source === 'youtube' ? 'Мин · оценка' : 'Мин в чате'}
+                            .join(' · ')}</small
+                        ></td
                       >
-                        {num(e.source === 'youtube' ? e.estimatedChatMinutes : e.observedMinutes)}
-                      </td><td class="audience-stat" data-label="Сообщения">{num(e.messages, 0)}</td>
-                    </tr>{/each}
-                </tbody>
-              </table>
-            </div>
-            {#if !visible.length}<p class="muted analytics-empty">
-                Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.
-              </p>{/if}
-            {#if visible.length > 200}<p class="small muted">
-                Показаны первые 200; используйте поиск или меньший период.
-              </p>{/if}
-            {#if data.audiencePage}<div class="audience-pagination">
-                <button
+                      <td class="audience-stat" data-label="Эфиры"
+                        >{e.attendanceCount ?? e.attendanceSessionIds?.length ?? 0}/{data.summary?.streams ?? 0}</td
+                      ><td class="audience-stat" data-label={e.source === 'youtube' ? 'Мин · оценка' : 'Мин в чате'}
+                        >{num(e.source === 'youtube' ? e.estimatedChatMinutes : e.observedMinutes)}</td
+                      ><td class="audience-stat" data-label="Сообщения">{num(e.messages, 0)}</td>
+                    </tr>{/each}</tbody
+                ></table
+              ></div
+            >
+            {#if !visible.length}<p class="muted analytics-empty"
+                >Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.</p
+              >{/if}
+            {#if visible.length > 200}<p class="small muted"
+                >Показаны первые 200; используйте поиск или меньший период.</p
+              >{/if}
+            {#if data.audiencePage}<div class="audience-pagination"
+                ><button
                   class="outline"
                   disabled={audienceBusy || audienceOffset === 0}
-                  onclick={() => (audienceOffset = Math.max(0, audienceOffset - 100))}
-                >
-                  Предыдущие
-                </button><span>
-                  {audienceBusy ? 'Загрузка…' : `Страница ${Math.floor(audienceOffset / 100) + 1}`}
-                </span><button
+                  onclick={() => (audienceOffset = Math.max(0, audienceOffset - 100))}>Предыдущие</button
+                ><span>{audienceBusy ? 'Загрузка…' : `Страница ${Math.floor(audienceOffset / 100) + 1}`}</span><button
                   class="outline"
                   disabled={audienceBusy ||
                     audienceOffset + 100 >= (pagedAudience?.audiencePage?.total ?? data.audiencePage.total)}
-                  onclick={() => (audienceOffset += 100)}
-                >
-                  Следующие
-                </button>
-              </div>{/if}
+                  onclick={() => (audienceOffset += 100)}>Следующие</button
+                ></div
+              >{/if}
           </section>
         {/if}
       {/if}

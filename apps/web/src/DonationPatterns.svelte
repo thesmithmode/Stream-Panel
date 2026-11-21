@@ -33,45 +33,40 @@
   const maximum = $derived(Math.max(1, ...rows.map((r) => (metric === 'count' ? r.count : Number(r.amount)))));
 </script>
 
-<section class="panel chart-panel donation-patterns">
-  <header>
-    <h2>Когда приходят донаты</h2>
-    <span class="small muted">{timing.count} донатов</span><Help
+<section class="panel chart-panel donation-patterns"
+  ><header
+    ><h2>Когда приходят донаты</h2><span class="small muted">{timing.count} донатов</span><Help
       id="donation-timing-help"
       label="О времени донатов"
       text={`${timing.basis ?? 'Все донаты выбранного периода, включая поступившие вне эфира.'} Это распределение фактов, а не рекомендация выбирать время стрима. У ${timing.unknownCount} донатов время неизвестно; они входят в итог, но не в график.`}
-    />
-  </header>
-  <details class="controls">
-    <summary>Настроить график</summary>
-    <div class="control-grid">
-      <label>
-        Группировать донаты<select aria-label="Группировать донаты" bind:value={dimension}>
-          <option value="weekday">Дни недели</option><option value="hour">Часы суток</option>
-        </select>
-      </label><label>
-        Показатель донатов<select aria-label="Показатель донатов" bind:value={metric}>
-          <option value="count">Количество</option><option value="amount">Общая сумма</option>
-        </select>
-      </label>{#if metric === 'amount'}<label>
-          Валюта донатов<select aria-label="Валюта донатов" bind:value={currency}>
-            {#each currencies as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}
-          </select>
-        </label>{/if}
-    </div>
-  </details>
-  <p class="small muted pattern-note">
-    {metric === 'count' ? 'Количество донатов' : `Общая сумма · ${activeCurrency}`}
-  </p>
-  <div class="bars">
-    {#each rows as r}<div class="bar-row">
-        <span>{r.label}</span>
-        <div class="track">
-          <i style:width={`${((metric === 'count' ? r.count : Number(r.amount)) / maximum) * 100}%`}></i>
-        </div>
-        <strong>{metric === 'count' ? r.count : money(String(r.amount), activeCurrency)}</strong>
-      </div>{/each}
-  </div>
+    /></header
+  >
+  <details class="controls"
+    ><summary>Настроить график</summary><div class="control-grid"
+      ><label
+        >Группировать донаты<select aria-label="Группировать донаты" bind:value={dimension}
+          ><option value="weekday">Дни недели</option><option value="hour">Часы суток</option></select
+        ></label
+      ><label
+        >Показатель донатов<select aria-label="Показатель донатов" bind:value={metric}
+          ><option value="count">Количество</option><option value="amount">Общая сумма</option></select
+        ></label
+      >{#if metric === 'amount'}<label
+          >Валюта донатов<select aria-label="Валюта донатов" bind:value={currency}
+            >{#each currencies as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select
+          ></label
+        >{/if}</div
+    ></details
+  >
+  <p class="small muted pattern-note">{metric === 'count' ? 'Количество донатов' : `Общая сумма · ${activeCurrency}`}</p
+  >
+  <div class="bars"
+    >{#each rows as r}<div class="bar-row"
+        ><span>{r.label}</span><div class="track"
+          ><i style:width={`${((metric === 'count' ? r.count : Number(r.amount)) / maximum) * 100}%`}></i></div
+        ><strong>{metric === 'count' ? r.count : money(String(r.amount), activeCurrency)}</strong></div
+      >{/each}</div
+  >
 </section>
 
 <style>

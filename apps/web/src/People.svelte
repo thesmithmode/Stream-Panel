@@ -421,31 +421,29 @@
           role="tab"
           class:active={sortBy === key}
           aria-selected={sortBy === key}
-          onclick={() => (sortBy = key)}
-        >
-          {label}
-        </button>{/each}
+          onclick={() => (sortBy = key)}>{label}</button
+        >{/each}
     </div>
-    {#if sortBy === 'donations'}<div class="donor-filters">
-        {#if donorCurrencies.length > 1}<label>
-            Сортировать по валюте<select aria-label="Валюта сортировки донатеров" bind:value={donorCurrency}>
-              {#each [...new Set(['RUB', ...donorCurrencies])] as c}<option value={c}>{c}</option>{/each}
-            </select>
-          </label>{/if}
-      </div>{/if}
+    {#if sortBy === 'donations'}<div class="donor-filters"
+        >{#if donorCurrencies.length > 1}<label
+            >Сортировать по валюте<select aria-label="Валюта сортировки донатеров" bind:value={donorCurrency}
+              >{#each [...new Set(['RUB', ...donorCurrencies])] as c}<option value={c}>{c}</option>{/each}</select
+            ></label
+          >{/if}</div
+      >{/if}
     <div class="search">
       <input aria-label="Поиск человека" placeholder="Найти по имени…" bind:value={search} />
     </div>
     <div class="people-list">
-      {#if peopleLoading && !peopleLoaded && sortBy === 'default'}<p class="small muted" role="status">
-          Загружаем людей…
-        </p>{/if}
+      {#if peopleLoading && !peopleLoaded && sortBy === 'default'}<p class="small muted" role="status"
+          >Загружаем людей…</p
+        >{/if}
       {#if !visible.length && (peopleLoaded || !peopleLoading)}<div class="empty-small">
           <Icon name="people" size={36} />
           <p>{search.trim() ? 'Никого не найдено' : 'Пока никого нет'}</p>
-          <span class="small muted">
-            {search.trim() ? 'Попробуйте другое имя.' : 'Аккаунты и донаты появятся после подключения.'}
-          </span>
+          <span class="small muted"
+            >{search.trim() ? 'Попробуйте другое имя.' : 'Аккаунты и донаты появятся после подключения.'}</span
+          >
         </div>{/if}{#each visible as person (person.id)}<button
           class:chosen={selectedId === person.id}
           class="person-row"
@@ -453,34 +451,29 @@
           class:human-person={person.is_human}
           aria-label={person.display_name}
           onclick={() => openPerson(person.id)}
-        >
-          <span class="avatar sr-only">{person.display_name.slice(0, 1).toUpperCase()}</span><span>
-            <strong class={platformClass(person.sources)} class:youtube-secondary={person.youtubeSecondary}>
-              {person.display_name}
-            </strong><small class:sr-only={!person.sources?.includes(',')}>{sourcesLabel(person.sources)}</small>
-          </span>{#if sortBy !== 'default'}<span class="count">{rankLabels.get(person.id)}</span>{/if}
-        </button>{/each}
+          ><span class="avatar sr-only">{person.display_name.slice(0, 1).toUpperCase()}</span><span
+            ><strong class={platformClass(person.sources)} class:youtube-secondary={person.youtubeSecondary}
+              >{person.display_name}</strong
+            ><small class:sr-only={!person.sources?.includes(',')}>{sourcesLabel(person.sources)}</small></span
+          >{#if sortBy !== 'default'}<span class="count">{rankLabels.get(person.id)}</span>{/if}</button
+        >{/each}
     </div>
     {#if sortBy === 'default' && peopleTotal > 50}<div class="people-pages" aria-label="Страницы людей">
         <button
           class="outline small"
           disabled={peopleLoading || peopleOffset === 0}
           aria-label="Предыдущие люди"
-          onclick={() => (peopleOffset = Math.max(0, peopleOffset - 50))}
+          onclick={() => (peopleOffset = Math.max(0, peopleOffset - 50))}>Предыдущие</button
         >
-          Предыдущие
-        </button>
-        <span class="small muted">
-          {peopleOffset + 1}–{Math.min(peopleOffset + 50, peopleTotal)} из {peopleTotal} записей
-        </span>
+        <span class="small muted"
+          >{peopleOffset + 1}–{Math.min(peopleOffset + 50, peopleTotal)} из {peopleTotal} записей</span
+        >
         <button
           class="outline small"
           disabled={peopleLoading || peopleOffset + 50 >= peopleTotal}
           aria-label="Следующие люди"
-          onclick={() => (peopleOffset += 50)}
+          onclick={() => (peopleOffset += 50)}>Следующие</button
         >
-          Следующие
-        </button>
       </div>{/if}
   </section>
   <section class="panel person-detail">
@@ -492,10 +485,8 @@
       </div>{:else}<header>
         <h2
           class={platformClass(detail.identities.map((i: any) => i.source))}
-          class:youtube-secondary={detail.youtubeSecondary}
+          class:youtube-secondary={detail.youtubeSecondary}>{detail.display_name}</h2
         >
-          {detail.display_name}
-        </h2>
 
         <PersonBot
           personId={detail.id}
@@ -510,15 +501,15 @@
         />
       </header>
 
-      <div class="person-tab-wrap">
-        <SectionTabs
+      <div class="person-tab-wrap"
+        ><SectionTabs
           items={personTabs}
           bind:value={detailTab}
           onchange={() => onSection(detailTab)}
           label="Разделы человека"
           panelId="person-tabpanel"
-        />
-      </div>
+        /></div
+      >
       <div
         class="settings-body person-scroll"
         id="person-tabpanel"
@@ -531,15 +522,15 @@
                 <span>Сообщения</span><strong>{stats.messageCount.toLocaleString('ru-RU')}</strong>
               </div>
               <div class="kpi">
-                <span>Донаты</span><strong>
-                  {Object.keys(stats.donationTotals).length
+                <span>Донаты</span><strong
+                  >{Object.keys(stats.donationTotals).length
                     ? Object.entries(stats.donationTotals)
                         .map(([c, a]) => money(a, c))
                         .join(' · ')
                     : stats.donationCount
                       ? String(stats.donationCount)
-                      : '—'}
-                </strong>
+                      : '—'}</strong
+                >
               </div>
               <div class="kpi">
                 <span>Наблюдаемое время</span><strong>{formatDuration(stats.totalObservedMinutes)}</strong>
@@ -548,57 +539,51 @@
                 <span>Среднее за посещённый стрим</span><strong>{formatDuration(stats.avgObservedMinutes)}</strong>
               </div>
               <div class="kpi">
-                <span>Посещаемость</span><strong>
-                  {stats.attendanceRatio == null ? '—' : `${Math.round(stats.attendanceRatio * 100)}%`}
-                </strong>
+                <span>Посещаемость</span><strong
+                  >{stats.attendanceRatio == null ? '—' : `${Math.round(stats.attendanceRatio * 100)}%`}</strong
+                >
               </div>
               {#if stats.estimatedChatMinutes != null && stats.estimatedChatMinutes > 0}
-                <div class="kpi">
-                  <span>Оценка активности YouTube</span><strong>{formatDuration(stats.estimatedChatMinutes)}</strong>
-                </div>
+                <div class="kpi"
+                  ><span>Оценка активности YouTube</span><strong>{formatDuration(stats.estimatedChatMinutes)}</strong
+                  ></div
+                >
               {/if}
             </div>{/if}
           <h3>Связанные аккаунты</h3>
-          <div class="account-summary">
-            {#each accounts as identity}<span>
-                <span class="account-name">
-                  <strong class:twitch={identity.source === 'twitch'} class:youtube={identity.source === 'youtube'}>
-                    {identity.display_name}
-                  </strong><PlatformProfileLink
-                    link={accountLink(identity.ids)}
-                    name={identity.display_name}
-                    iconOnly
-                  />
-                </span><AccountFollowStatus row={accountFollowing(identity.ids)} showHistory={false} />
-              </span>{/each}
-          </div>
-          {#if subscriptionHistory.length}<details class="account-follow-history">
-              <summary>История подписок ({subscriptionHistory.length})</summary>
-              <ul>
-                {#each subscriptionHistory as item}<li>
-                    <strong class:twitch={item.source === 'twitch'} class:youtube={item.source === 'youtube'}>
-                      {item.name}
-                    </strong><span><time>{date(item.at)}</time> · {item.status ? 'Подписан' : 'Не подписан'}</span>
-                  </li>{/each}
-              </ul>
-            </details>{/if}
-          <div class="actions">
-            <button
+          <div class="account-summary"
+            >{#each accounts as identity}<span
+                ><span class="account-name"
+                  ><strong class:twitch={identity.source === 'twitch'} class:youtube={identity.source === 'youtube'}
+                    >{identity.display_name}</strong
+                  ><PlatformProfileLink link={accountLink(identity.ids)} name={identity.display_name} iconOnly /></span
+                ><AccountFollowStatus row={accountFollowing(identity.ids)} showHistory={false} /></span
+              >{/each}</div
+          >
+          {#if subscriptionHistory.length}<details class="account-follow-history"
+              ><summary>История подписок ({subscriptionHistory.length})</summary><ul
+                >{#each subscriptionHistory as item}<li
+                    ><strong class:twitch={item.source === 'twitch'} class:youtube={item.source === 'youtube'}
+                      >{item.name}</strong
+                    ><span><time>{date(item.at)}</time> · {item.status ? 'Подписан' : 'Не подписан'}</span></li
+                  >{/each}</ul
+              ></details
+            >{/if}
+          <div class="actions"
+            ><button
               class="outline small"
               onclick={() => {
                 detailTab = 'donations';
                 onSection(detailTab);
                 showDonorLinks = true;
-              }}
-            >
-              Привязать донаты
-            </button>
-          </div>
+              }}>Привязать донаты</button
+            ></div
+          >
         {:else if detailTab === 'messages'}
           <RecentEvents personId={detail.id} messagesOnly onPerson={onSelect} />
         {:else if detailTab === 'accounts'}
-          <label>
-            Имя человека
+          <label
+            >Имя человека
             <div class="inline">
               <input bind:value={name} /><button
                 class="outline"
@@ -607,42 +592,39 @@
                   operation(async () => {
                     await api(`persons/${detail.id}/rename`, { name });
                     await select(detail.id);
-                  })}
+                  })}>Сохранить</button
               >
-                Сохранить
-              </button>
-            </div>
-          </label>
+            </div></label
+          >
 
-          <h3>
-            Связанные аккаунты <Help
+          <h3
+            >Связанные аккаунты <Help
               id="person-identities-help"
               label="О связях аккаунтов"
               text="Здесь собраны аккаунты одного человека. Совпадающие никнеймы связываются автоматически. При неоднозначном совпадении выберите человека вручную; выбранный аккаунт можно разъединить, сохранив события."
-            />
-          </h3>
-          {#each accounts as identity}<div class="identity-account">
-              <label class="identity-row">
-                <input
+            /></h3
+          >
+          {#each accounts as identity}<div class="identity-account"
+              ><label class="identity-row"
+                ><input
                   type="checkbox"
                   checked={identity.ids.every((id) => selectedIdentities.includes(id))}
                   onchange={(event) => selectAccount(identity.ids, event.currentTarget.checked)}
-                /><strong class:twitch={identity.source === 'twitch'} class:youtube={identity.source === 'youtube'}>
-                  {identity.display_name}
-                </strong><span class="small muted">
-                  {identity.source === 'donationalerts' ? 'Донатер' : 'Участник'} · {identity.source === 'twitch'
+                /><strong class:twitch={identity.source === 'twitch'} class:youtube={identity.source === 'youtube'}
+                  >{identity.display_name}</strong
+                ><span class="small muted"
+                  >{identity.source === 'donationalerts' ? 'Донатер' : 'Участник'} · {identity.source === 'twitch'
                     ? 'Twitch'
                     : identity.source === 'youtube'
                       ? 'YouTube'
-                      : 'DonationAlerts'}
-                </span>{#if identity.aliases.length}<small class="account-aliases">
-                    Имена: {identity.aliases.join(', ')}
-                  </small>{/if}
-              </label><AccountFollowStatus row={accountFollowing(identity.ids)} /><PlatformProfileLink
+                      : 'DonationAlerts'}</span
+                >{#if identity.aliases.length}<small class="account-aliases">Имена: {identity.aliases.join(', ')}</small
+                  >{/if}</label
+              ><AccountFollowStatus row={accountFollowing(identity.ids)} /><PlatformProfileLink
                 link={accountLink(identity.ids)}
                 name={identity.display_name}
-              />
-            </div>{/each}
+              /></div
+            >{/each}
           {#if selectedIdentities.length}<div class="inline">
               <input aria-label="Имя нового человека" placeholder="Имя нового человека" bind:value={splitName} /><button
                 class="outline"
@@ -662,10 +644,8 @@
                       revision: detail.revision,
                     });
                     await select(result.id);
-                  })}
+                  })}>Разъединить выбранные</button
               >
-                Разъединить выбранные
-              </button>
             </div>{/if}
           <h3>Объединить с человеком</h3>
           <div class="inline">
@@ -684,10 +664,8 @@
                 operation(async () => {
                   if (await confirmAction('Объединить людей?', 'Аккаунты и история обеих карточек будут объединены.'))
                     await merge();
-                })}
+                })}>Объединить</button
             >
-              Объединить
-            </button>
           </div>
           {#if target}<p class="small muted">
               Все события и наблюдения этих групп будут связаны. Содержимое событий сохранится; отмена доступна ниже.
@@ -695,13 +673,13 @@
           {#if merges.length}<section class="panel audit">
               <header><h2>История связей</h2></header>
               {#each merges as merge}<div class="capability">
-                  <span>
-                    {date(merge.created_at_ms)} · {merge.undone_at_ms
+                  <span
+                    >{date(merge.created_at_ms)} · {merge.undone_at_ms
                       ? 'Отменено'
                       : merge.kind === 'split'
                         ? 'Разъединение'
-                        : 'Объединение'}
-                  </span><button
+                        : 'Объединение'}</span
+                  ><button
                     class="outline small"
                     disabled={busy || merge.undone_at_ms !== null}
                     onclick={() =>
@@ -715,10 +693,8 @@
                           return;
                         await api(`${merge.kind === 'split' ? 'splits' : 'merges'}/${merge.id}/undo`, {});
                         await select(selectedId);
-                      })}
+                      })}>Отменить</button
                   >
-                    Отменить
-                  </button>
                 </div>{/each}
             </section>{/if}
         {:else if detailTab === 'donations'}
@@ -726,9 +702,8 @@
             class="outline small"
             aria-expanded={showDonorLinks}
             onclick={() => (showDonorLinks = !showDonorLinks)}
+            >{showDonorLinks ? 'Скрыть привязку' : 'Привязать донаты по нику'}</button
           >
-            {showDonorLinks ? 'Скрыть привязку' : 'Привязать донаты по нику'}
-          </button>
           {#if showDonorLinks}<DonorLinks personId={detail.id} onChange={() => refreshPerson(detail.id)} />{/if}
           {#key detail.id}<PersonDonations
               personId={detail.id}

@@ -35,20 +35,20 @@
 </script>
 
 <button class="donation-total" aria-label="Донаты за 30 дней и всё время" onclick={open}>
-  <span class="donation-period">
-    <span>За 30 дней</span><strong>
-      {#if recent}{Object.entries(
+  <span class="donation-period"
+    ><span>За 30 дней</span><strong
+      >{#if recent}{Object.entries(
           Object.keys(recent).length ? recent : Object.fromEntries(Object.keys(totals ?? {}).map((c) => [c, '0'])),
         )
           .map(([c, a]) => money(a, c))
-          .join(' · ') || '—'}{:else}{failed ? 'Недоступно' : '…'}{/if}
-    </strong>
-  </span>
-  <span class="donation-period">
-    <span>За всё время</span><strong>
-      {#if totals}{Object.entries(totals)
+          .join(' · ') || '—'}{:else}{failed ? 'Недоступно' : '…'}{/if}</strong
+    ></span
+  >
+  <span class="donation-period"
+    ><span>За всё время</span><strong
+      >{#if totals}{Object.entries(totals)
           .map(([c, a]) => money(a, c))
-          .join(' · ') || '—'}{:else}{failed ? 'Недоступно' : '…'}{/if}
-    </strong>
-  </span><Icon name="arrow" size={18} />
+          .join(' · ') || '—'}{:else}{failed ? 'Недоступно' : '…'}{/if}</strong
+    ></span
+  ><Icon name="arrow" size={18} />
 </button>

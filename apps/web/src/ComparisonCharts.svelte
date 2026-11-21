@@ -72,22 +72,21 @@
   {#each comparisons as chart}<section class="retention-section" aria-label={chart.title}>
       {#if chart.rows.length}<table class="retention-table">
           <thead><tr><th scope="col">Эфир</th><th scope="col">Вернулись</th><th scope="col">Доля</th></tr></thead>
-          <tbody>
-            {#each chart.rows as row}<tr class="comparison-row">
+          <tbody
+            >{#each chart.rows as row}<tr class="comparison-row">
                 <th scope="row">{row.label}</th>
                 <td>{row.detail}</td>
-                <td>
-                  <strong>
-                    {row.value === null
+                <td
+                  ><strong
+                    >{row.value === null
                       ? 'Нет данных'
-                      : `${row.value.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} ${chart.unit}`}
-                  </strong>
-                  <div class="track" aria-hidden="true">
-                    <i style:width={`${row.value === null ? 0 : Math.min(100, Math.max(0, row.value))}%`}></i>
-                  </div>
-                </td>
-              </tr>{/each}
-          </tbody>
+                      : `${row.value.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} ${chart.unit}`}</strong
+                  ><div class="track" aria-hidden="true"
+                    ><i style:width={`${row.value === null ? 0 : Math.min(100, Math.max(0, row.value))}%`}></i></div
+                  ></td
+                >
+              </tr>{/each}</tbody
+          >
         </table>{:else}<p class="retention-empty muted">Нужны собранные эфиры.</p>{/if}
     </section>{/each}
   {#if total > pageSize}<div class="retention-pages" aria-label="Страницы возвращаемости">
@@ -96,20 +95,16 @@
         aria-label="Предыдущие эфиры"
         title="Предыдущие эфиры"
         disabled={page === 0}
-        onclick={() => page--}
+        onclick={() => page--}><Icon name="back" size={18} /></button
       >
-        <Icon name="back" size={18} />
-      </button>
       <span>{page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} из {total}</span>
       <button
         class="outline"
         aria-label="Следующие эфиры"
         title="Следующие эфиры"
         disabled={(page + 1) * pageSize >= total}
-        onclick={() => page++}
+        onclick={() => page++}><Icon name="arrow" size={18} /></button
       >
-        <Icon name="arrow" size={18} />
-      </button>
     </div>{/if}
 </div>
 {#if showGrowth}<AudienceGrowth {streams} {timezone} {onStream} />{/if}

@@ -58,21 +58,19 @@
       change(async () => {
         await api(`persons/${personId}/notes`, { body: draft });
         draft = '';
-      })}
+      })}>Добавить заметку</button
   >
-    Добавить заметку
-  </button>
   {#if error}<p role="alert">{error}</p>{/if}
   {#each notes as note (note.id)}
     <article>
-      <div class="small muted">
-        {date(note.created_at_ms)}{#if note.revision > 0}
-          · Изменено {date(note.updated_at_ms)}{/if}
-      </div>
+      <div class="small muted"
+        >{date(note.created_at_ms)}{#if note.revision > 0}
+          · Изменено {date(note.updated_at_ms)}{/if}</div
+      >
       {#if editing?.id === note.id}
-        <label>
-          Текст заметки<textarea bind:value={editBody} disabled={busy} maxlength="10000" rows="3"></textarea>
-        </label>
+        <label
+          >Текст заметки<textarea bind:value={editBody} disabled={busy} maxlength="10000" rows="3"></textarea></label
+        >
         <button
           class="primary"
           disabled={busy || !editBody.trim()}
@@ -80,10 +78,8 @@
             change(async () => {
               await api(`persons/${personId}/notes/${note.id}/update`, { body: editBody, revision: editing!.revision });
               editing = null;
-            })}
+            })}>Сохранить заметку</button
         >
-          Сохранить заметку
-        </button>
         <button class="outline" disabled={busy} onclick={() => (editing = null)}>Отмена</button>
         <button
           class="icon-button danger-icon"
@@ -97,10 +93,8 @@
               await api(`persons/${personId}/notes/${note.id}/delete`, { revision });
               editing = null;
             });
-          }}
+          }}><Icon name="trash" size={18} /></button
         >
-          <Icon name="trash" size={18} />
-        </button>
       {:else}
         <p class="note-body">{note.body}</p>
         <button
@@ -111,10 +105,8 @@
           onclick={() => {
             editing = note;
             editBody = note.body;
-          }}
+          }}><Icon name="pencil" size={18} /></button
         >
-          <Icon name="pencil" size={18} />
-        </button>
       {/if}
     </article>
   {/each}

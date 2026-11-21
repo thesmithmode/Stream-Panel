@@ -74,11 +74,11 @@
   onDestroy(() => onselection?.(false));
 </script>
 
-{#if showResolution}<label class="interval-control">
-    Детализация графика<select bind:value={resolution}>
-      <option value={1}>1м</option><option value={5}>5м</option><option value={15}>15м</option>
-    </select>
-  </label>{/if}
+{#if showResolution}<label class="interval-control"
+    >Детализация графика<select bind:value={resolution}
+      ><option value={1}>1м</option><option value={5}>5м</option><option value={15}>15м</option></select
+    ></label
+  >{/if}
 <TrendChart
   {points}
   {metric}
@@ -93,75 +93,70 @@
 />
 {#if selected}
   <section class="bar-detail" aria-label="Детали выбранного столбца">
-    <header>
-      <h3>
-        {label(selected.at)}{selected.width > 60000 ? ` — ${label(selected.at + selected.width)}` : ''}
+    <header
+      ><h3
+        >{label(selected.at)}{selected.width > 60000 ? ` — ${label(selected.at + selected.width)}` : ''}
         <Help
           id={`${id}-help`}
           label="О детализации минуты"
           text="Список показывает персональные сигналы в выбранном интервале: наблюдения чата Twitch или оценку по сообщениям YouTube. Счётчик площадки не раскрывает личности всех зрителей. Для широкого столбца высота — среднее, а список — уникальные участники; выберите отдельную минуту. В режиме сообщений история под графиком показывает реальные сообщения выбранного интервала. Группы отражают ядро по правилам выбранного периода и подписку по последним полученным данным; неизвестный статус не считается отсутствием подписки."
-        />
-      </h3>
-      <button
+        /></h3
+      ><button
         class="outline small"
         onclick={() => {
           bucket = null;
           minute = null;
-        }}
-      >
-        Закрыть детализацию
-      </button>
-    </header>
-    {#if bucket && bucket.width > 60000}<label>
-        Минута столбца<select bind:value={minute}>
-          <option value={null}>Весь интервал</option>{#each minutePoints as p}<option value={p.at}>
-              {label(p.at)}
-            </option>{/each}
-        </select>
-      </label>{/if}
-    <div class="detail-values">
-      <span>
-        {chartMetrics.find((choice) => choice.value === metric)?.label ?? 'Активность чата'}:
-        <strong>
-          {selected.isBreak
+        }}>Закрыть детализацию</button
+      ></header
+    >
+    {#if bucket && bucket.width > 60000}<label
+        >Минута столбца<select bind:value={minute}
+          ><option value={null}>Весь интервал</option>{#each minutePoints as p}<option value={p.at}
+              >{label(p.at)}</option
+            >{/each}</select
+        ></label
+      >{/if}
+    <div class="detail-values"
+      ><span
+        >{chartMetrics.find((choice) => choice.value === metric)?.label ?? 'Активность чата'}:
+        <strong
+          >{selected.isBreak
             ? 'перерыв'
             : selected.known
               ? selected.value.toLocaleString('ru-RU', { maximumFractionDigits: 1 })
-              : 'нет данных'}
-        </strong>{#if selected.partial}
-          · неполные замеры площадок{/if}
-      </span>{#if selected.width > 60000 && ['observed', 'estimated'].includes(metric)}<span>
-          Уникальные люди за интервал: <strong>{people.length}</strong>
-        </span>{/if}
-    </div>
-    {#if isMessageMetric(metric) && selected.known}<div class="detail-values message-groups">
-        {#if selected.botValue}<span>Боты: <strong>{selected.botValue}</strong></span>{/if}<span>
-          Ядро: <strong>{selected.regularValue}</strong>
-        </span><span>Подписчики: <strong>{selected.followerValue}</strong></span><span>
-          Залётные: <strong>
-            {Math.max(
+              : 'нет данных'}</strong
+        >{#if selected.partial}
+          · неполные замеры площадок{/if}</span
+      >{#if selected.width > 60000 && ['observed', 'estimated'].includes(metric)}<span
+          >Уникальные люди за интервал: <strong>{people.length}</strong></span
+        >{/if}</div
+    >
+    {#if isMessageMetric(metric) && selected.known}<div class="detail-values message-groups"
+        >{#if selected.botValue}<span>Боты: <strong>{selected.botValue}</strong></span>{/if}<span
+          >Ядро: <strong>{selected.regularValue}</strong></span
+        ><span>Подписчики: <strong>{selected.followerValue}</strong></span><span
+          >Залётные: <strong
+            >{Math.max(
               0,
               selected.value -
                 selected.botValue -
                 selected.regularValue -
                 selected.followerValue -
                 (selected.unknownValue ?? 0),
-            )}
-          </strong>
-        </span>{#if selected.unknownValue}<span>
-            Статус подписки неизвестен: <strong>{selected.unknownValue}</strong>
-          </span>{/if}
-      </div>{/if}
-    {#if !isMessageMetric(metric)}<p class="small muted">Люди из чата в этом интервале</p>
-      <ul>
-        {#each people as person}<li>
-            <button class="text-button" onclick={() => onPerson(person.id)}>{person.name}</button><span>
-              {person.observed ? 'Twitch' : ''}{person.observed && person.estimated ? ' · ' : ''}{person.estimated
+            )}</strong
+          ></span
+        >{#if selected.unknownValue}<span>Статус подписки неизвестен: <strong>{selected.unknownValue}</strong></span
+          >{/if}</div
+      >{/if}
+    {#if !isMessageMetric(metric)}<p class="small muted">Люди из чата в этом интервале</p><ul
+        >{#each people as person}<li
+            ><button class="text-button" onclick={() => onPerson(person.id)}>{person.name}</button><span
+              >{person.observed ? 'Twitch' : ''}{person.observed && person.estimated ? ' · ' : ''}{person.estimated
                 ? 'YouTube · оценка'
-                : ''}
-            </span>
-          </li>{:else}<li class="muted">Нет сохранённых персональных сигналов в этом интервале.</li>{/each}
-      </ul>{/if}
+                : ''}</span
+            ></li
+          >{:else}<li class="muted">Нет сохранённых персональных сигналов в этом интервале.</li>{/each}</ul
+      >{/if}
   </section>
 {/if}
 

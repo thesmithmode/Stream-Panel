@@ -119,60 +119,48 @@
 
 {#if selected !== null}
   <section class="time-audience" aria-label="Участники выбранного интервала">
-    <div class="slot-heading">
-      <h3>Кто бывает в это время</h3>
-      <Help
+    <div class="slot-heading"
+      ><h3>Кто бывает в это время</h3><Help
         id="time-attendance-help"
         label="О явке по времени"
         text="Явка = число эфиров с сигналом человека в выбранном интервале / число эфиров, шедших в этом интервале. Повторные сигналы и связанные площадки одного человека учитываются один раз. Активные участники — известные люди по наблюдениям Twitch и сообщениям; это не все зрители. Для YouTube сигнал чата не подтверждает просмотр. Люди показаны за тот же день и интервал, что выбранный столбец."
-      />
-    </div>
-    {#if chosen}<p class="slot-caption">
-        <strong>
-          {clockLabel(chosen.minute)}–{clockLabel(chosen.minute + resolution)} · {chosen.streams} стримов · активных участников
-          в среднем {averageLabel(chosen.averageAudience)}
-        </strong>
-      </p>
-      <div class="table-wrap compact-data">
-        <table>
-          <thead><tr><th>Человек</th><th>Явка в это время</th><th>Посещено / шло эфиров</th></tr></thead><tbody>
-            {#each visitors as v (v.person!.id)}<tr>
-                <td>
-                  <button
+      /></div
+    >
+    {#if chosen}<p class="slot-caption"
+        ><strong
+          >{clockLabel(chosen.minute)}–{clockLabel(chosen.minute + resolution)} · {chosen.streams} стримов · активных участников
+          в среднем {averageLabel(chosen.averageAudience)}</strong
+        ></p
+      >
+      <div class="table-wrap compact-data"
+        ><table
+          ><thead><tr><th>Человек</th><th>Явка в это время</th><th>Посещено / шло эфиров</th></tr></thead><tbody
+            >{#each visitors as v (v.person!.id)}<tr
+                ><td
+                  ><button
                     class={`text-button ${platformClass(v.person!.sources ?? [v.person!.source ?? ''])}`}
-                    onclick={() => onPerson(v.person!.id)}
-                  >
-                    {v.person!.name}
-                  </button>
-                </td><td>{Math.round((v.visits / v.total) * 100)}%</td><td>{v.visits} / {v.total}</td>
-              </tr>{/each}
-          </tbody>
-        </table>
-      </div>
-      {#if visitorBusy && !visitors.length}<p class="empty-small" role="status">
-          Загрузка участников…
-        </p>{:else if visitorError}<p class="empty-small" role="alert">{visitorError}</p>{:else if !visitors.length}<p
-          class="empty-small"
-        >
-          Персональных сигналов в этом интервале нет.
-        </p>{/if}
-      {#if chosen.peopleDeferred && visitorPage}<div class="controls">
-          <button
+                    onclick={() => onPerson(v.person!.id)}>{v.person!.name}</button
+                  ></td
+                ><td>{Math.round((v.visits / v.total) * 100)}%</td><td>{v.visits} / {v.total}</td></tr
+              >{/each}</tbody
+          ></table
+        ></div
+      >
+      {#if visitorBusy && !visitors.length}<p class="empty-small" role="status">Загрузка участников…</p
+        >{:else if visitorError}<p class="empty-small" role="alert">{visitorError}</p>{:else if !visitors.length}<p
+          class="empty-small">Персональных сигналов в этом интервале нет.</p
+        >{/if}
+      {#if chosen.peopleDeferred && visitorPage}<div class="controls"
+          ><button
             class="outline"
             disabled={visitorBusy || visitorOffset === 0}
-            onclick={() => (visitorOffset = Math.max(0, visitorOffset - 100))}
-          >
-            Предыдущие в интервале
-          </button><span>
-            Страница {Math.floor(visitorPage.offset / 100) + 1} · {visitorPage.total} участников
-          </span><button
+            onclick={() => (visitorOffset = Math.max(0, visitorOffset - 100))}>Предыдущие в интервале</button
+          ><span>Страница {Math.floor(visitorPage.offset / 100) + 1} · {visitorPage.total} участников</span><button
             class="outline"
             disabled={visitorBusy || visitorOffset + 100 >= visitorPage.total}
-            onclick={() => (visitorOffset += 100)}
-          >
-            Следующие в интервале
-          </button>
-        </div>{/if}
+            onclick={() => (visitorOffset += 100)}>Следующие в интервале</button
+          ></div
+        >{/if}
     {:else}<p class="empty-small">В этом интервале нет записанных эфиров.</p>{/if}
   </section>
 {/if}

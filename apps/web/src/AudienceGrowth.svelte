@@ -150,86 +150,72 @@
 
 <svelte:window bind:innerWidth={viewportWidth} />
 <section class="panel chart-panel audience-growth">
-  <header>
-    <h2>Динамика по дням</h2>
-    <Help
+  <header
+    ><h2>Динамика по дням</h2><Help
       id="daily-growth"
       label="О средних по дням"
       text="Онлайн усредняется по минутам с замерами. Сообщения в час — число сообщений, делённое на часы эфира: показывает интенсивность чата, а не качество стрима или оптимальную длительность. Эфир относится к дате начала; несколько эфиров за день объединяются с учётом длительности. Пропущенные замеры не считаются нулём. Вместе — сумма известных значений площадок."
-    />
-  </header>
+    /></header
+  >
   <div class="stream-chart-toolbar daily-chart-toolbar">
-    <select aria-label="Показатель динамики" bind:value={metric}>
-      <option value="online">Средний онлайн</option><option value="active">Сообщения в час</option>
-    </select>
-    {#if metric === 'online'}<select aria-label="Источник динамики" bind:value={platform}>
-        <option value="all">Вместе</option><option value="twitch">Twitch</option><option value="youtube">
-          YouTube
-        </option>
-      </select>{/if}
+    <select aria-label="Показатель динамики" bind:value={metric}
+      ><option value="online">Средний онлайн</option><option value="active">Сообщения в час</option></select
+    >
+    {#if metric === 'online'}<select aria-label="Источник динамики" bind:value={platform}
+        ><option value="all">Вместе</option><option value="twitch">Twitch</option><option value="youtube"
+          >YouTube</option
+        ></select
+      >{/if}
   </div>
   {#if !(range?.total ?? streams.length)}<p class="growth-caption muted">Нужны собранные эфиры.</p>{:else}
-    <div class="growth-navigation">
-      <div class="growth-view" role="group" aria-label="Период графика">
-        <button
+    <div class="growth-navigation"
+      ><div class="growth-view" role="group" aria-label="Период графика"
+        ><button
           class="text-button"
           class:active={wholePeriod}
           aria-pressed={wholePeriod}
           onclick={() => {
             mode = 'all';
             page = 0;
-          }}
-        >
-          Весь период
-        </button><button
+          }}>Весь период</button
+        ><button
           class="text-button"
           class:active={mode === 'month'}
           aria-pressed={mode === 'month'}
           onclick={() => {
             mode = 'month';
             page = 0;
-          }}
-        >
-          По месяцам
-        </button><button
+          }}>По месяцам</button
+        ><button
           class="text-button"
           class:active={mode === 'week'}
           aria-pressed={mode === 'week'}
           onclick={() => {
             mode = 'week';
             page = 0;
-          }}
-        >
-          По неделям
-        </button>
-      </div>
-      <div class="growth-range">
-        {#if !wholePeriod}<button
+          }}>По неделям</button
+        ></div
+      >
+      <div class="growth-range"
+        >{#if !wholePeriod}<button
             class="text-button"
             aria-label="Предыдущие дни"
             disabled={!hasPrevious}
-            onclick={() => page++}
-          >
-            <Icon name="back" size={18} />
-          </button>{/if}<span>
-          {fullDate(dates[0]!)}–{fullDate(dates.at(-1)!)}{metric === 'active' ? ' · сообщений/ч' : ''}
-        </span>{#if !wholePeriod}<button
+            onclick={() => page++}><Icon name="back" size={18} /></button
+          >{/if}<span>{fullDate(dates[0]!)}–{fullDate(dates.at(-1)!)}{metric === 'active' ? ' · сообщений/ч' : ''}</span
+        >{#if !wholePeriod}<button
             class="text-button"
             aria-label="Следующие дни"
             disabled={page === 0}
-            onclick={() => page--}
-          >
-            <Icon name="arrow" size={18} />
-          </button>{/if}
-      </div>
-    </div>
+            onclick={() => page--}><Icon name="arrow" size={18} /></button
+          >{/if}</div
+      ></div
+    >
     <div class="growth-plot" bind:clientWidth={availableWidth} aria-busy={loading}>
       {#if loading}<p class="growth-status muted" role="status">Загрузка дней…</p>{:else if failure}<p
           class="growth-status"
-          role="alert"
-        >
-          {failure}
-        </p>{/if}
+          role="alert">{failure}</p
+        >{/if}
       <svg viewBox={`0 0 ${width} ${plotHeight}`} height={plotHeight} role="group" aria-label={`${label} по дням`}>
         {#each ticks as tick}<line
             x1={plotLeft}
@@ -276,24 +262,23 @@
                 y2={baseline}
                 stroke="var(--muted)"
               />{/if}
-            <rect x={plotLeft + i * barStep} y="16" width={barStep} height={baseline - 12} fill="transparent">
-              <title>{title(row)}</title>
-            </rect>
+            <rect x={plotLeft + i * barStep} y="16" width={barStep} height={baseline - 12} fill="transparent"
+              ><title>{title(row)}</title></rect
+            >
           </g>{#if dateTicks.includes(i)}<text
               x={x(i)}
               y={baseline + 28}
               text-anchor={i === 0 ? 'start' : i === displayed.length - 1 ? 'end' : 'middle'}
               fill="currentColor"
-              font-size="10"
-            >
-              {shortDate(row.date)}
-            </text>{/if}{/each}
-      </svg>
-    </div>
-    {#if current}<div class="growth-selection" role="status">
-        <div class="growth-selection-head">
-          <strong>{fullDate(current.date)}</strong><span style:color>{label}: <b>{format(value(current))}</b></span>
-        </div>
+              font-size="10">{shortDate(row.date)}</text
+            >{/if}{/each}
+      </svg></div
+    >
+    {#if current}<div class="growth-selection" role="status"
+        ><div class="growth-selection-head"
+          ><strong>{fullDate(current.date)}</strong><span style:color>{label}: <b>{format(value(current))}</b></span
+          ></div
+        >
         {#if current.point?.partial && metric === 'online'}<small>Неполные данные площадок</small>{/if}
         {#each current.point?.streams ?? [] as stream}<button
             class="growth-stream text-button"
@@ -301,15 +286,14 @@
             onclick={() => {
               if (stream.id) onStream(stream.id);
             }}
-          >
-            <span>
-              {new Date(stream.startedAt).toLocaleTimeString('ru-RU', {
+            ><span
+              >{new Date(stream.startedAt).toLocaleTimeString('ru-RU', {
                 timeZone: timezone,
                 hour: '2-digit',
                 minute: '2-digit',
-              })} · {stream.categories?.join(' · ') || 'Без категории'}
-            </span><span>Открыть эфир ›</span>
-          </button>{/each}
+              })} · {stream.categories?.join(' · ') || 'Без категории'}</span
+            ><span>Открыть эфир ›</span></button
+          >{/each}
       </div>{/if}
   {/if}
 </section>

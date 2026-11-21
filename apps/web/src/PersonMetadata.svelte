@@ -71,26 +71,23 @@
 </script>
 
 <section aria-label="Метки человека">
-  <h3>
-    Метки <Help
+  <h3
+    >Метки <Help
       id="person-core-help"
       label="Как определяется ядро"
       text="Ядро определяется за период из настроек профиля независимо от периода отчёта, при наличии минимум 12 эфиров. Для автоматического ядра эфир засчитывается при суммарной активности не менее 20% его длительности. Активность связанных площадок объединяется; применяется настроенный порог доли таких эфиров. Ручная отметка действует во всех отчётах профиля. Владельцы и боты исключаются независимо от отметки."
-    />
-  </h3>
-  <label>
-    Ядро аудитории<select aria-label="Ядро аудитории" bind:value={core} disabled={busy || !metadata}>
-      <option value="auto">Определять автоматически</option><option value="include">Включить в ядро</option><option
-        value="exclude"
-      >
-        Исключить из ядра
-      </option>
-    </select>
-  </label>
-  <label>
-    Новый тег
-    <div class="inline">
-      <input
+    /></h3
+  >
+  <label
+    >Ядро аудитории<select aria-label="Ядро аудитории" bind:value={core} disabled={busy || !metadata}
+      ><option value="auto">Определять автоматически</option><option value="include">Включить в ядро</option><option
+        value="exclude">Исключить из ядра</option
+      ></select
+    ></label
+  >
+  <label
+    >Новый тег<div class="inline"
+      ><input
         bind:value={tag}
         maxlength="64"
         disabled={busy || !metadata}
@@ -100,26 +97,25 @@
             addTag();
           }
         }}
-      /><button class="outline" disabled={busy || !metadata || !tag.trim() || tags.length >= 50} onclick={addTag}>
-        Добавить тег
-      </button>
-    </div>
-  </label>
-  <div class="tags">
-    {#each tags as label}<span>
-        {label}<button
+      /><button class="outline" disabled={busy || !metadata || !tag.trim() || tags.length >= 50} onclick={addTag}
+        >Добавить тег</button
+      ></div
+    ></label
+  >
+  <div class="tags"
+    >{#each tags as label}<span
+        >{label}<button
           class="text-button"
           aria-label={`Удалить тег ${label}`}
           disabled={busy}
-          onclick={() => (tags = tags.filter((t) => t !== label))}
-        >
-          <Icon name="trash" size={14} />
-        </button>
-      </span>{/each}
-  </div>
+          onclick={() => (tags = tags.filter((t) => t !== label))}><Icon name="trash" size={14} /></button
+        ></span
+      >{/each}</div
+  >
   <button class="primary" disabled={busy || !metadata} onclick={save}>Сохранить метки</button>
-  {#if error}<p role="alert">{error}</p>
-    <button class="outline" disabled={busy} onclick={reload}>Загрузить актуальные метки</button>{/if}
+  {#if error}<p role="alert">{error}</p><button class="outline" disabled={busy} onclick={reload}
+      >Загрузить актуальные метки</button
+    >{/if}
 </section>
 
 <style>

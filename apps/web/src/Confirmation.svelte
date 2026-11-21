@@ -19,14 +19,12 @@
   {#if confirmation.request}
     <h2 id="confirmation-title">{confirmation.request.title}</h2>
     <p id="confirmation-message">{confirmation.request.message}</p>
-    <div class="actions">
-      <button class="outline" onclick={() => answerConfirmation(false)}>Отмена</button><button
+    <div class="actions"
+      ><button class="outline" onclick={() => answerConfirmation(false)}>Отмена</button><button
         class="danger"
-        onclick={() => answerConfirmation(true)}
-      >
-        {confirmation.request.confirmLabel}
-      </button>
-    </div>
+        onclick={() => answerConfirmation(true)}>{confirmation.request.confirmLabel}</button
+      ></div
+    >
   {/if}
 </dialog>
 

@@ -42,36 +42,35 @@
 
 <div aria-label="Файлы резервных копий">
   <div class="channels">
-    <div>
-      <strong>Локальная копия</strong><span>{channelLabel(status.local)}</span>{#if status.local?.lastSuccessAt}<small>
-          {date(status.local.lastSuccessAt)}
-        </small>{/if}
-    </div>
-    <div>
-      <strong>Облачная копия</strong><span>{channelLabel(status.cloud)}</span>{#if status.cloud?.lastSuccessAt}<small>
-          {date(status.cloud.lastSuccessAt)}
-        </small>{/if}
-    </div>
+    <div
+      ><strong>Локальная копия</strong><span>{channelLabel(status.local)}</span>{#if status.local?.lastSuccessAt}<small
+          >{date(status.local.lastSuccessAt)}</small
+        >{/if}</div
+    >
+    <div
+      ><strong>Облачная копия</strong><span>{channelLabel(status.cloud)}</span>{#if status.cloud?.lastSuccessAt}<small
+          >{date(status.cloud.lastSuccessAt)}</small
+        >{/if}</div
+    >
   </div>
   <p class="small muted">Копия каждые 24 часа. Храним 7 дневных и 3 более старые недельные точки за 30 дней.</p>
-  {#if status.pendingUploads}<p class="small notice">
-      Ожидают загрузки: {status.pendingUploads}.{#if status.nextRetryAt}
-        Следующая попытка: {date(status.nextRetryAt)}.{/if} Эти копии защищены от удаления.
-    </p>{/if}
+  {#if status.pendingUploads}<p class="small notice"
+      >Ожидают загрузки: {status.pendingUploads}.{#if status.nextRetryAt}
+        Следующая попытка: {date(status.nextRetryAt)}.{/if} Эти копии защищены от удаления.</p
+    >{/if}
   {#if directory}<div>Каталог на сервере<code>{directory}</code></div>{/if}
   <button class="outline" disabled={busy} onclick={refresh}>Обновить список копий</button>
   {#if error}<p role="alert">{error}</p>{/if}
   {#each files as file}
-    <article>
-      <div>
-        <strong>{date(file.createdAt)}</strong><small>{file.filename}</small><small>
-          {(file.size / 1024).toFixed(1)} КБ
-        </small>
-      </div>
-      <a class="outline" href={`/api/v1/backups/${encodeURIComponent(file.filename)}`} download={file.filename}>
-        Скачать копию
-      </a>
-    </article>
+    <article
+      ><div
+        ><strong>{date(file.createdAt)}</strong><small>{file.filename}</small><small
+          >{(file.size / 1024).toFixed(1)} КБ</small
+        ></div
+      ><a class="outline" href={`/api/v1/backups/${encodeURIComponent(file.filename)}`} download={file.filename}
+        >Скачать копию</a
+      ></article
+    >
   {/each}
   {#if !busy && !error && !files.length}<p class="small muted">Сохранённых файлов пока нет</p>{/if}
   <BackupRestore available={status.restoreAvailable ?? false} />

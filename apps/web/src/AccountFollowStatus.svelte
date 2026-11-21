@@ -6,20 +6,16 @@
 </script>
 
 {#if row && row.status !== null}
-  <span
-    class="follow-status"
-    title={row.followedAtMs === null ? undefined : `Дата подписки: ${date(row.followedAtMs)}`}
+  <span class="follow-status" title={row.followedAtMs === null ? undefined : `Дата подписки: ${date(row.followedAtMs)}`}
+    >{row.status ? 'Подписан' : 'Не подписан'}</span
   >
-    {row.status ? 'Подписан' : 'Не подписан'}
-  </span>
-  {#if showHistory && history.length}<details class="follow-history">
-      <summary>История подписки ({history.length})</summary>
-      <ul>
-        {#each [...history].reverse() as item}<li>
-            <time>{date(item.at)}</time> · {item.status ? 'Подписан' : 'Не подписан'}
-          </li>{/each}
-      </ul>
-    </details>{/if}
+  {#if showHistory && history.length}<details class="follow-history"
+      ><summary>История подписки ({history.length})</summary><ul
+        >{#each [...history].reverse() as item}<li
+            ><time>{date(item.at)}</time> · {item.status ? 'Подписан' : 'Не подписан'}</li
+          >{/each}</ul
+      ></details
+    >{/if}
 {/if}
 
 <style>

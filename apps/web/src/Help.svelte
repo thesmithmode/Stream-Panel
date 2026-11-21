@@ -76,10 +76,8 @@
     aria-label={label}
     aria-expanded={open}
     aria-controls={id}
-    onclick={togglePopover}
+    onclick={togglePopover}>{trigger}</button
   >
-    {trigger}
-  </button>
   {#if open}<div
       class="help-popover"
       {id}

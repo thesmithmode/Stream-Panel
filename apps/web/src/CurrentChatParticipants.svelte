@@ -77,104 +77,100 @@
 </script>
 
 <section class="panel current-chat" aria-label="Текущие зрители">
-  <header>
-    <div>
-      <h2>
-        Сейчас в чате{#if data}
+  <header
+    ><div
+      ><h2
+        >Сейчас в чате{#if data}
           · {data.people.length}{/if}
         <Help
           id="current-chat-help"
           label="О текущих зрителях"
           text="Twitch показывает подключённых к чату, включая молчащих, с задержкой. Время в чате и сообщения считаются за текущий стрим; это не подтверждённое время просмотра видео. YouTube отмечен красным и @: отдельно появляются писавшие за последние 10 минут. Связанные аккаунты объединены под именем человека; сообщения учитываются за весь стрим. YouTube не сообщает присутствие и время просмотра. Список обновляется по выбранному интервалу автообновления. Сортировка и поиск сохраняются."
-        />
-      </h2>
-      <p class="small muted" role="status">
-        {#if data?.observedAt}Twitch · замер {messageAge(data.observedAt, now).replace(
+        /></h2
+      >
+      <p class="small muted" role="status"
+        >{#if data?.observedAt}Twitch · замер {messageAge(data.observedAt, now).replace(
             'Только что',
             'только что',
           )}{:else if data?.twitchState === 'waiting'}Twitch · ожидаем первый замер{:else if data?.twitchState === 'inactive'}Twitch-эфир
-          не идёт{:else if !data}Загружаем список…{/if}
-      </p>
-    </div>
+          не идёт{:else if !data}Загружаем список…{/if}</p
+      ></div
+    >
   </header>
-  <div class="chat-controls">
-    <input aria-label="Поиск по нику" type="search" placeholder="Поиск по нику" bind:value={search} />
-  </div>
-  {#if error}<p class="notice error" role="alert">
-      {error} <button class="text-button" onclick={() => load()}>Повторить</button>
-    </p>{/if}
-  {#if data?.twitchState === 'stale'}<p class="notice" role="status">
-      Список Twitch не обновлён. Последний успешный замер не подтверждает присутствие прямо сейчас.
-    </p>{/if}
-  {#if data && !data.live}<p class="empty-small">
-      Эфир завершён. История доступна во вкладке «Участники».
-    </p>{:else if data}
+  <div class="chat-controls"
+    ><input aria-label="Поиск по нику" type="search" placeholder="Поиск по нику" bind:value={search} /></div
+  >
+  {#if error}<p class="notice error" role="alert"
+      >{error} <button class="text-button" onclick={() => load()}>Повторить</button></p
+    >{/if}
+  {#if data?.twitchState === 'stale'}<p class="notice" role="status"
+      >Список Twitch не обновлён. Последний успешный замер не подтверждает присутствие прямо сейчас.</p
+    >{/if}
+  {#if data && !data.live}<p class="empty-small">Эфир завершён. История доступна во вкладке «Участники».</p
+    >{:else if data}
     {#if search}<p class="small muted search-count">Найдено: {rows.length} из {data.people.length}</p>{/if}
-    <div class="table-scroll">
-      <table>
-        <thead>
-          <tr>
+    <div class="table-scroll"
+      ><table
+        ><thead
+          ><tr>
             {#each [['name', 'Участник', 'Ник'], ['minutes', 'В чате', 'В чате'], ['messages', 'Сообщения', 'Сообщ.'], ['lastMessageAt', 'Последнее сообщение', 'Последнее сообщ.']] as [key, desktop, phone]}
-              <th scope="col" aria-sort={sort === key ? (descending ? 'descending' : 'ascending') : 'none'}>
-                <button onclick={() => order(key as ChatSort)} aria-label={`${desktop}${arrow(key as ChatSort)}`}>
-                  <span class="desktop-label">{desktop}</span><span class="phone-label">{phone}</span>{arrow(
+              <th scope="col" aria-sort={sort === key ? (descending ? 'descending' : 'ascending') : 'none'}
+                ><button onclick={() => order(key as ChatSort)} aria-label={`${desktop}${arrow(key as ChatSort)}`}
+                  ><span class="desktop-label">{desktop}</span><span class="phone-label">{phone}</span>{arrow(
                     key as ChatSort,
-                  )}
-                </button>
-              </th>
+                  )}</button
+                ></th
+              >
             {/each}
-          </tr>
-        </thead><tbody>
+          </tr></thead
+        ><tbody>
           {#each rows.slice(0, limit) as person (person.personId)}<tr
               data-chatter-key={person.key}
               class:bot-person={person.is_bot}
               class:human-person={person.is_human}
             >
-              <td>
-                <button
+              <td
+                ><button
                   class={`text-button person-name ${platformClass(person.accounts?.map((a) => a.source) ?? [person.source])}`}
                   class:youtube-secondary={person.youtubeSecondary}
                   title={person.name}
                   onclick={() => onPerson(person.personId)}
-                >
-                  {person.source === 'youtube' && person.name === person.accountName && !person.name.startsWith('@')
+                  >{person.source === 'youtube' && person.name === person.accountName && !person.name.startsWith('@')
                     ? '@'
-                    : ''}{person.name}
-                </button>{#each person.accounts ?? [] as account}{#if (person.accounts?.length ?? 0) > 1 || account.name !== person.name}<small
+                    : ''}{person.name}</button
+                >{#each person.accounts ?? [] as account}{#if (person.accounts?.length ?? 0) > 1 || account.name !== person.name}<small
                       class:twitch={account.source === 'twitch'}
                       class:youtube={account.source === 'youtube'}
                       class:youtube-secondary={account.secondary}
                       style="display:block"
-                    >
-                      {account.source === 'youtube' && !account.name.startsWith('@') ? '@' : ''}{account.name}
-                    </small>{/if}{/each}
-              </td>
-              <td>{person.minutes === null ? '—' : durationLabel(person.minutes)}</td><td>
-                {person.messages.toLocaleString('ru-RU')}
-              </td><td>
-                <time
+                      >{account.source === 'youtube' && !account.name.startsWith('@') ? '@' : ''}{account.name}</small
+                    >{/if}{/each}</td
+              >
+              <td>{person.minutes === null ? '—' : durationLabel(person.minutes)}</td><td
+                >{person.messages.toLocaleString('ru-RU')}</td
+              ><td
+                ><time
                   title={person.lastMessageAt === null
                     ? 'Не писал в текущем стриме'
                     : new Date(person.lastMessageAt).toLocaleString('ru-RU')}
-                >
-                  {messageAge(person.lastMessageAt, now)}
-                </time>
-              </td>
-            </tr>{:else}<tr>
-              <td colspan="4" class="empty-small">
-                {search
+                  >{messageAge(person.lastMessageAt, now)}</time
+                ></td
+              >
+            </tr>{:else}<tr
+              ><td colspan="4" class="empty-small"
+                >{search
                   ? 'Никто не найден'
                   : data.observedAt === null && data.twitchState !== 'inactive'
                     ? 'Данные списка Twitch пока недоступны.'
-                    : 'Нет участников в последнем списке Twitch и недавних сообщений YouTube.'}
-              </td>
-            </tr>{/each}
-        </tbody>
-      </table>
-    </div>
-    {#if rows.length > limit}<button class="outline small more" onclick={() => (limit += 50)}>
-        Показать ещё ({rows.length - limit})
-      </button>{/if}
+                    : 'Нет участников в последнем списке Twitch и недавних сообщений YouTube.'}</td
+              ></tr
+            >{/each}
+        </tbody></table
+      ></div
+    >
+    {#if rows.length > limit}<button class="outline small more" onclick={() => (limit += 50)}
+        >Показать ещё ({rows.length - limit})</button
+      >{/if}
   {/if}
 </section>
 

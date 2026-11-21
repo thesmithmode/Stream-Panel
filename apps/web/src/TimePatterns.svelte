@@ -85,89 +85,85 @@
   const total = $derived(groups.reduce((n, g) => n + g.count, 0));
 </script>
 
-{#if section !== 'audience'}<section class="panel chart-panel time-patterns">
-    <header>
-      <h2>Когда стримить</h2>
-      <Help
+{#if section !== 'audience'}<section class="panel chart-panel time-patterns"
+    ><header
+      ><h2>Когда стримить</h2><Help
         id="time-pattern-help"
         label="Как считаются средние"
         text="Средние взвешены по длительности с данными. Часы без эфиров не считаются нулями. Накопленная сумма складывает всю активность выбранного периода."
-      />
-    </header>
-    <details class="pattern-controls">
-      <summary>Настроить график</summary>
-      <div class="control-grid">
-        <label>
-          Сравнение времени<select aria-label="Сравнение времени" bind:value={dimension}>
-            <option value="weekday">Дни недели</option><option value="hour">Время суток</option>
-          </select>
-        </label>
-        <label>
-          Показатель времени<select aria-label="Показатель времени" bind:value={metric}>
-            <option value="viewers">Зрители</option><option value="messages">Сообщения</option><option value="observed">
-              Участники Twitch
-            </option><option value="estimated">Активность YouTube · оценка</option><option value="donations">
-              Число донатов
-            </option><option value="amount">Сумма донатов</option>
-          </select>
-        </label>
-        <label>
-          Расчёт времени<select aria-label="Расчёт времени" bind:value={calculation}>
-            <option value="average">Среднее / на час эфира</option><option value="total">Накопленная сумма</option>
-          </select>
-        </label>
-        {#if metric === 'amount'}<label>
-            Валюта времени<select aria-label="Валюта времени" bind:value={currency}>
-              {#each currencies as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}
-            </select>
-          </label>{/if}
-      </div>
-    </details>
-    <p class="small muted pattern-note">
-      {units}{metric === 'viewers' && rows.some((row) => row.cell?.viewerPartialMinutes)
+      /></header
+    >
+    <details class="pattern-controls"
+      ><summary>Настроить график</summary><div class="control-grid">
+        <label
+          >Сравнение времени<select aria-label="Сравнение времени" bind:value={dimension}
+            ><option value="weekday">Дни недели</option><option value="hour">Время суток</option></select
+          ></label
+        >
+        <label
+          >Показатель времени<select aria-label="Показатель времени" bind:value={metric}
+            ><option value="viewers">Зрители</option><option value="messages">Сообщения</option><option value="observed"
+              >Участники Twitch</option
+            ><option value="estimated">Активность YouTube · оценка</option><option value="donations"
+              >Число донатов</option
+            ><option value="amount">Сумма донатов</option></select
+          ></label
+        >
+        <label
+          >Расчёт времени<select aria-label="Расчёт времени" bind:value={calculation}
+            ><option value="average">Среднее / на час эфира</option><option value="total">Накопленная сумма</option
+            ></select
+          ></label
+        >
+        {#if metric === 'amount'}<label
+            >Валюта времени<select aria-label="Валюта времени" bind:value={currency}
+              >{#each currencies as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option
+                >{/each}</select
+            ></label
+          >{/if}
+      </div></details
+    >
+    <p class="small muted pattern-note"
+      >{units}{metric === 'viewers' && rows.some((row) => row.cell?.viewerPartialMinutes)
         ? ' · неполные данные площадок'
-        : ''}
-    </p>
-    <div class="pattern-bars" aria-label="Сравнение дней и часов">
-      {#each rows as row}<div class="pattern-row">
-          <span>{row.label}</span>
-          <div class="pattern-track" class:no-data={value(row.cell) === null}>
-            <i style:width={`${((value(row.cell) ?? 0) / maximum) * 100}%`}>
-              <b
+        : ''}</p
+    >
+    <div class="pattern-bars" aria-label="Сравнение дней и часов"
+      >{#each rows as row}<div class="pattern-row"
+          ><span>{row.label}</span><div class="pattern-track" class:no-data={value(row.cell) === null}
+            ><i style:width={`${((value(row.cell) ?? 0) / maximum) * 100}%`}
+              ><b
                 class="bot-segment"
                 style:width={`${value(row.cell) ? (botValue(row.cell) / value(row.cell)!) * 100 : 0}%`}
-              ></b>
-            </i>
-          </div>
-          <strong>{format(value(row.cell))}</strong><small>
-            {row.cell ? `${Math.round(row.cell.sampleMinutes)} мин эфира` : ''}
-          </small>
-        </div>{/each}
-    </div>
+              ></b></i
+            ></div
+          ><strong>{format(value(row.cell))}</strong><small
+            >{row.cell ? `${Math.round(row.cell.sampleMinutes)} мин эфира` : ''}</small
+          ></div
+        >{/each}</div
+    >
   </section>
 {/if}
 {#if section !== 'time'}<div class="discovery-grid">
-    <section class="panel chart-panel audience-composition">
-      <header>
-        <h2>Состав аудитории</h2>
-        <Help
+    <section class="panel chart-panel audience-composition"
+      ><header
+        ><h2>Состав аудитории</h2><Help
           id="composition-help"
           label="О составе аудитории"
           text={`Известные участники: Twitch ${data.composition.twitch}, YouTube ${data.composition.youtube}, связаны на обеих площадках ${data.composition.both}. Человек учитывается один раз. Статус подписки — на последнюю проверку. Анонимные зрители в счётчиках не раскрывают аккаунт. Неизвестный статус не означает отсутствие подписки.`}
-        />
-      </header>
-      <div class="settings-body">
-        <div class="composition-bar" aria-label="Доли состава аудитории">
-          {#each groups as g}<span style:width={`${total ? (g.count / total) * 100 : 0}%`} style:background={g.color}
-            ></span>{/each}
-        </div>
-        {#each groups as g}<p class="composition-row">
-            <span><i style:background={g.color}></i>{g.label}</span><strong>
-              {g.count}{total ? ` · ${Math.round((g.count / total) * 100)}%` : ''}
-            </strong>
-          </p>{/each}
-      </div>
-    </section>
+        /></header
+      ><div class="settings-body">
+        <div class="composition-bar" aria-label="Доли состава аудитории"
+          >{#each groups as g}<span style:width={`${total ? (g.count / total) * 100 : 0}%`} style:background={g.color}
+            ></span>{/each}</div
+        >
+        {#each groups as g}<p class="composition-row"
+            ><span><i style:background={g.color}></i>{g.label}</span><strong
+              >{g.count}{total ? ` · ${Math.round((g.count / total) * 100)}%` : ''}</strong
+            ></p
+          >{/each}
+      </div></section
+    >
   </div>
 {/if}
 

@@ -146,50 +146,51 @@
 
 {#if showAll || total > 0 || error}
   <section class="panel stream-donations" aria-label={sessionId ? 'Донаты стрима' : 'Все донаты'}>
-    <header>
-      <h2>{sessionId ? 'Донаты стрима' : 'Все донаты'} <span class="small muted">{statisticsCount}</span></h2>
-      <button class="icon-button" aria-label="Обновить донаты" disabled={busy || loading} onclick={rescan}>
-        <Icon name="refresh" size={18} />
-      </button>
-    </header>
+    <header
+      ><h2>{sessionId ? 'Донаты стрима' : 'Все донаты'} <span class="small muted">{statisticsCount}</span></h2><button
+        class="icon-button"
+        aria-label="Обновить донаты"
+        disabled={busy || loading}
+        onclick={rescan}><Icon name="refresh" size={18} /></button
+      ></header
+    >
     <div class="donation-list">
-      {#if total !== statisticsCount}<p class="small muted">
-          В статистике: {statisticsCount} · Всего записей: {total}. Донаты исключённых аккаунтов сохранены в журнале.
-        </p>{/if}
-      {#if connection === 'disconnected' || connection === 'error'}<p class="small muted">
-          DonationAlerts не подключён. Проверьте «Интеграции».
-        </p>{/if}
+      {#if total !== statisticsCount}<p class="small muted"
+          >В статистике: {statisticsCount} · Всего записей: {total}. Донаты исключённых аккаунтов сохранены в журнале.</p
+        >{/if}
+      {#if connection === 'disconnected' || connection === 'error'}<p class="small muted"
+          >DonationAlerts не подключён. Проверьте «Интеграции».</p
+        >{/if}
       {#if error}<p class="notice error" role="alert">{error}</p>{/if}
       {#each rows as row (row.id)}<article data-donation-id={row.id}>
-          <div class="donation-summary">
-            <div class="donation-owner">
-              {#if row.personId}<button
+          <div class="donation-summary"
+            ><div class="donation-owner"
+              >{#if row.personId}<button
                   class="text-button"
                   aria-label={`Связан: ${row.personName}`}
-                  onclick={() => onPerson(row.personId!)}
-                >
-                  {row.personName}
-                </button>{#if row.originalActorName && row.originalActorName !== row.personName}<small class="muted">
-                    {row.originalActorName}
-                  </small>{/if}{:else}<span>{row.originalActorName || 'Аноним'}</span>{/if}
-            </div>
-            <strong>{value(row)}</strong><button
+                  onclick={() => onPerson(row.personId!)}>{row.personName}</button
+                >{#if row.originalActorName && row.originalActorName !== row.personName}<small class="muted"
+                    >{row.originalActorName}</small
+                  >{/if}{:else}<span>{row.originalActorName || 'Аноним'}</span>{/if}</div
+            ><strong>{value(row)}</strong><button
               class="icon-button"
               aria-label="Привязать к человеку"
               title={row.personId ? 'Изменить привязку' : 'Привязать к человеку'}
               disabled={busy}
-              onclick={() => void edit(row)}
-            >
-              <Icon name={row.personId ? 'pencil' : 'connections'} size={18} />
-            </button>
-          </div>
-          <time class="small muted">
-            {row.occurredAtMs === null && row.sourceTime ? `${row.sourceTime} · время DA` : date(row.occurredAtMs)}
-          </time>
+              onclick={() => void edit(row)}><Icon name={row.personId ? 'pencil' : 'connections'} size={18} /></button
+            ></div
+          >
+          <time class="small muted"
+            >{row.occurredAtMs === null && row.sourceTime
+              ? `${row.sourceTime} · время DA`
+              : date(row.occurredAtMs)}</time
+          >
           {#if showAll && !row.sessionIds?.length}<span class="small muted">Без привязки к эфиру</span>{/if}
-          {#if row.message}<p class="donation-message">
-              {#if isAudioDonation({ text: row.message })}<AudioDonation text={row.message} />{:else}{row.message}{/if}
-            </p>{/if}
+          {#if row.message}<p class="donation-message"
+              >{#if isAudioDonation({ text: row.message })}<AudioDonation
+                  text={row.message}
+                />{:else}{row.message}{/if}</p
+            >{/if}
           {#if editing?.id === row.id}<form
               class="donation-editor"
               onsubmit={(e) => {
@@ -198,57 +199,46 @@
               }}
             >
               {#if finding}<p class="small muted" role="status">Ищем участников…</p>{:else if candidates.length}<p
-                  class="small muted"
-                >
-                  Писали в чат за 2 минуты до и после доната — выберите, если узнаёте человека.
-                </p>
-                <div class="candidate-list">
-                  {#each candidates as candidate}<button
+                  class="small muted">Писали в чат за 2 минуты до и после доната — выберите, если узнаёте человека.</p
+                ><div class="candidate-list"
+                  >{#each candidates as candidate}<button
                       type="button"
                       class="outline small"
                       class:active={recipient === candidate.id}
                       onclick={() => (recipient = candidate.id)}
-                    >
-                      {candidate.name}<span class="muted">{candidate.messages} сообщ.</span>
-                    </button>{/each}
-                </div>{:else}<p class="small muted">
-                  {row.occurredAtMs === null
+                      >{candidate.name}<span class="muted">{candidate.messages} сообщ.</span></button
+                    >{/each}</div
+                >{:else}<p class="small muted"
+                  >{row.occurredAtMs === null
                     ? 'Время доната неизвестно: подсказки по чату недоступны.'
-                    : 'В этом интервале сообщений нет. Найдите человека по имени.'}
-                </p>{/if}
+                    : 'В этом интервале сообщений нет. Найдите человека по имени.'}</p
+                >{/if}
               <PersonPicker label="Получатель привязки доната" bind:value={recipient} disabled={busy || finding} />
-              <div class="actions">
-                <button class="primary small" disabled={busy || finding || !recipient}>
-                  Сохранить привязку
-                </button><button
+              <div class="actions"
+                ><button class="primary small" disabled={busy || finding || !recipient}>Сохранить привязку</button
+                ><button
                   type="button"
                   class="outline small"
                   onclick={() => {
                     editing = null;
                     editorGeneration++;
-                  }}
-                >
-                  Отмена
-                </button>
-              </div>
+                  }}>Отмена</button
+                ></div
+              >
             </form>{/if}
         </article>{/each}
       {#if loading && !loaded}<p class="muted" role="status">Загружаем донаты…</p>{:else if !rows.length}<p
-          class="muted"
-        >
-          {showAll ? 'Сохранённых донатов пока нет.' : 'Донатов в этом стриме пока нет.'}
-        </p>{/if}
-      {#if total > 10}<div class="actions">
-          <button class="outline small" disabled={loading || offset === 0} onclick={() => (offset -= 10)}>
-            Предыдущие
-          </button><span class="small muted">{offset + 1}–{Math.min(offset + 10, total)} из {total}</span><button
+          class="muted">{showAll ? 'Сохранённых донатов пока нет.' : 'Донатов в этом стриме пока нет.'}</p
+        >{/if}
+      {#if total > 10}<div class="actions"
+          ><button class="outline small" disabled={loading || offset === 0} onclick={() => (offset -= 10)}
+            >Предыдущие</button
+          ><span class="small muted">{offset + 1}–{Math.min(offset + 10, total)} из {total}</span><button
             class="outline small"
             disabled={loading || offset + 10 >= total}
-            onclick={() => (offset += 10)}
-          >
-            Следующие
-          </button>
-        </div>{/if}
+            onclick={() => (offset += 10)}>Следующие</button
+          ></div
+        >{/if}
     </div>
   </section>
 {/if}

@@ -37,19 +37,20 @@
 </script>
 
 {#if error}<p role="alert">{error}</p>{:else if data}
-  <h3>Обычно в чате · МСК</h3>
-  {#if data.hasEstimatedActivity}<p class="small muted">Активность YouTube оценена по сообщениям.</p>{/if}
-  <div class="hours" aria-label="Активность человека по часам">
-    {#each data.hours as h}<div title={`${h.hour}:00 · ${formatDuration(h.minutes)}`}>
-        <i style:height={`${(h.minutes / maximum) * 90}px`}></i><small>{h.hour}</small>
-      </div>{/each}
-  </div>
+  <h3>Обычно в чате · МСК</h3>{#if data.hasEstimatedActivity}<p class="small muted"
+      >Активность YouTube оценена по сообщениям.</p
+    >{/if}
+  <div class="hours" aria-label="Активность человека по часам"
+    >{#each data.hours as h}<div title={`${h.hour}:00 · ${formatDuration(h.minutes)}`}
+        ><i style:height={`${(h.minutes / maximum) * 90}px`}></i><small>{h.hour}</small></div
+      >{/each}</div
+  >
   <h3>Посещения стримов</h3>
-  {#if data.visits.length}<div class="visits">
-      {#each data.visits.slice(-30).reverse() as visit}<div>
-          <span>{date(visit.at)}</span><strong>{formatDuration(visit.minutes)}</strong>
-        </div>{/each}
-    </div>{:else}<p class="muted">Активность в стримах пока не зафиксирована.</p>{/if}
+  {#if data.visits.length}<div class="visits"
+      >{#each data.visits.slice(-30).reverse() as visit}<div
+          ><span>{date(visit.at)}</span><strong>{formatDuration(visit.minutes)}</strong></div
+        >{/each}</div
+    >{:else}<p class="muted">Активность в стримах пока не зафиксирована.</p>{/if}
 {:else}<p role="status">Загружаем активность…</p>{/if}
 
 <style>

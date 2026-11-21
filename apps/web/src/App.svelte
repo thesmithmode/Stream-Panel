@@ -573,33 +573,31 @@
 <Confirmation />
 
 {#snippet refreshControls()}
-  <section class="refresh-settings" aria-label="Обновление данных">
-    <div class="refresh-controls">
+  <section class="refresh-settings" aria-label="Обновление данных"
+    ><div class="refresh-controls">
       <button
         class="refresh-toggle"
         aria-label={`Автообновление ${autoRefresh ? 'Вкл' : 'Выкл'}`}
         aria-pressed={autoRefresh}
         onclick={toggleRefresh}
-      >
-        <span class="refresh-label">Автообновление</span><span
+        ><span class="refresh-label">Автообновление</span><span
           class="toggle-track"
           class:enabled={autoRefresh}
-          aria-hidden="true"
-        >
-          <span></span>
-        </span>
-      </button>
-      {#if autoRefresh}<label>
-          Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}>
-            <option value={60}>1 мин</option><option value={300}>5 мин</option><option value={900}>15 мин</option>
-          </select>
-        </label>{/if}
-      <button class="outline manual-refresh" disabled={busy} onclick={() => void action(async () => {})}>
-        <Icon name="refresh" size={18} /><span>{busy ? 'Обновляем…' : 'Обновить данные'}</span>
-      </button>
+          aria-hidden="true"><span></span></span
+        ></button
+      >
+      {#if autoRefresh}<label
+          >Интервал<select aria-label="Интервал автообновления" bind:value={refreshSeconds}
+            ><option value={60}>1 мин</option><option value={300}>5 мин</option><option value={900}>15 мин</option
+            ></select
+          ></label
+        >{/if}
+      <button class="outline manual-refresh" disabled={busy} onclick={() => void action(async () => {})}
+        ><Icon name="refresh" size={18} /><span>{busy ? 'Обновляем…' : 'Обновить данные'}</span></button
+      >
       {#if connectionLost}<p role="status">Нет связи с сервером</p>{/if}
-    </div>
-  </section>
+    </div></section
+  >
 {/snippet}
 
 <div
@@ -620,27 +618,21 @@
           event.preventDefault();
           navigate('overview');
         }
-      }}
+      }}>Stream <span>Panel</span></a
     >
-      Stream <span>Panel</span>
-    </a>
     <nav aria-label="Разделы">
       {#each nav as [key, label]}<button
           disabled={loading || !authorized}
           class:active={tab === key || (key === 'sessions' && tab === 'stream')}
           aria-current={tab === key ? 'page' : undefined}
-          onclick={() => navigate(key)}
-        >
-          <Icon name={key} />{label}
-        </button>{/each}
+          onclick={() => navigate(key)}><Icon name={key} />{label}</button
+        >{/each}
       <button
         disabled={loading || !authorized}
         class:active={moreOpen || ['connections', 'settings'].includes(tab)}
         aria-expanded={moreOpen}
-        onclick={() => (moreOpen = true)}
+        onclick={() => (moreOpen = true)}><Icon name="more" />Ещё</button
       >
-        <Icon name="more" />Ещё
-      </button>
     </nav>
     {#if authorized && viewportWidth > 720}<div class="sidebar-refresh">{@render refreshControls()}</div>{/if}
   </aside>
@@ -657,21 +649,17 @@
             aria-label="Назад"
             title="Вернуться на предыдущий экран"
             disabled={tab === 'overview' && !canGoBack()}
-            onclick={goBack}
-          >
-            <Icon name="back" /><span>Назад</span>
-          </button>{/if}
+            onclick={goBack}><Icon name="back" /><span>Назад</span></button
+          >{/if}
         {#if tab !== 'stream' && !(tab === 'people' && personId)}<h1>{titles[tab]}</h1>{/if}
       </div>
-      {#if authorized}<label class="heading-profile">
-          {#if tab === 'analytics'}<button
+      {#if authorized}<label class="heading-profile"
+          >{#if tab === 'analytics'}<button
               class="icon-button analytics-menu-trigger"
               aria-label="Ещё"
               aria-expanded={moreOpen}
-              onclick={() => (moreOpen = true)}
-            >
-              <Icon name="more" />
-            </button>{/if}<span
+              onclick={() => (moreOpen = true)}><Icon name="more" /></button
+            >{/if}<span
             class="dot"
             class:off={connectionLost || !autoRefresh}
             title={connectionLost ? 'Нет связи' : autoRefresh ? 'Автообновление включено' : 'Автообновление выключено'}
@@ -680,19 +668,19 @@
             value={profile}
             disabled={busy}
             onchange={(event) => void switchProfile(event.currentTarget.value as Profile)}
-          >
-            {#each allowedProfiles as allowed}<option value={allowed}>
-                {allowed === 'ruslan' ? 'Руслан' : 'Гульназ'}
-              </option>{/each}
-          </select>
-        </label>{/if}
+            >{#each allowedProfiles as allowed}<option value={allowed}
+                >{allowed === 'ruslan' ? 'Руслан' : 'Гульназ'}</option
+              >{/each}</select
+          ></label
+        >{/if}
     </div>
     {#if loading}<div class="panel empty">
         <p>Загружаем профиль…</p>
-      </div>{:else if !authorized && connectionLost}<section class="panel empty">
-        <p role="status">Нет связи с сервером. Ожидаем подключения…</p>
-        <button onclick={() => location.reload()}>Попробовать снова</button>
-      </section>{:else if !authorized}<section class="panel empty">
+      </div>{:else if !authorized && connectionLost}<section class="panel empty"
+        ><p role="status">Нет связи с сервером. Ожидаем подключения…</p><button onclick={() => location.reload()}
+          >Попробовать снова</button
+        ></section
+      >{:else if !authorized}<section class="panel empty">
         <Icon name="connections" size={48} />
         <h2>Вход в Stream Panel</h2>
         <form
@@ -703,15 +691,15 @@
           }}
         >
           <label>Логин<input autocomplete="username" bind:value={username} required maxlength="32" /></label>
-          <label>
-            Пароль<input
+          <label
+            >Пароль<input
               type="password"
               autocomplete="current-password"
               bind:value={password}
               required
               maxlength="256"
-            />
-          </label>
+            /></label
+          >
           <button class="primary" disabled={busy}>{busy ? 'Входим…' : 'Войти'}</button>
         </form>
         {#if error}<p role="alert" class="small notice error">{error}</p>{/if}
@@ -719,29 +707,25 @@
       {#if status?.backup && (status.backup.cloud?.state !== 'success' || status.backup.pendingUploads > 0)}<p
           role="status"
           class="notice backup-warning"
-        >
-          Облачная резервная копия {status?.backup?.cloud?.state === 'disabled'
+          >Облачная резервная копия {status?.backup?.cloud?.state === 'disabled'
             ? 'не настроена'
             : status?.backup?.cloud?.state === 'error'
               ? 'не загружается'
-              : 'ожидает подтверждения'}. Проверьте раздел «Настройки».
-        </p>{/if}
+              : 'ожидает подтверждения'}. Проверьте раздел «Настройки».</p
+        >{/if}
       {#if status?.storage?.freeBytes !== null && status?.storage?.freeBytes < status?.storage?.reserveBytes}<p
           class="notice"
           role="status"
-        >
-          {status.storage.freeBytes < (status.storage.minFreeBytes ?? 16777216)
+          >{status.storage.freeBytes < (status.storage.minFreeBytes ?? 16777216)
             ? 'Критически мало места: запись временно остановлена, чтобы не повредить БД. Проверьте «Настройки».'
-            : 'На сервере мало свободного места. Панель очищает старые копии; сбор данных продолжается. Проверьте «Настройки». '}
-        </p>{/if}
-      {#if outdated}<div role="status" class="notice">
-          Доступна новая версия панели для обоих профилей. <button
+            : 'На сервере мало свободного места. Панель очищает старые копии; сбор данных продолжается. Проверьте «Настройки». '}</p
+        >{/if}
+      {#if outdated}<div role="status" class="notice"
+          >Доступна новая версия панели для обоих профилей. <button
             class="outline small"
-            onclick={() => location.reload()}
-          >
-            Обновить панель
-          </button>
-        </div>{/if}
+            onclick={() => location.reload()}>Обновить панель</button
+          ></div
+        >{/if}
       {#if error}<p role="alert" class="notice error">{error}</p>{/if}
       {#key `${profile}:${tab}:${sessionFilter}:${scopeMount}`}
         {#if !scopeReady}<div class="panel empty" role="status">Загружаем данные…</div>{:else}
@@ -844,9 +828,9 @@
                 })}
               validUrl={isConfirmedPlatformUrl}
             />
-            {#if !sessions.length}<button class="outline" onclick={() => navigate('connections')}>
-                Открыть интеграции
-              </button>{/if}
+            {#if !sessions.length}<button class="outline" onclick={() => navigate('connections')}
+                >Открыть интеграции</button
+              >{/if}
           {/if}
         {/if}
       {/key}
@@ -855,17 +839,12 @@
 </div>
 
 <Sheet bind:open={moreOpen} title="Ещё" compact>
-  <nav class="more-links" aria-label="Дополнительные разделы">
-    {#each [['connections', 'Интеграции'], ['settings', 'Настройки']] as const as [key, label]}<button
+  <nav class="more-links" aria-label="Дополнительные разделы"
+    >{#each [['connections', 'Интеграции'], ['settings', 'Настройки']] as const as [key, label]}<button
         class:active={tab === key}
         aria-current={tab === key ? 'page' : undefined}
-        onclick={() => navigate(key)}
-      >
-        <Icon name={key} />{label}<Icon name="arrow" size={18} />
-      </button>{/each}
-  </nav>
-  {#if viewportWidth <= 720}<div class="more-refresh">
-      <h3>Обновление данных</h3>
-      {@render refreshControls()}
-    </div>{/if}
+        onclick={() => navigate(key)}><Icon name={key} />{label}<Icon name="arrow" size={18} /></button
+      >{/each}</nav
+  >
+  {#if viewportWidth <= 720}<div class="more-refresh"><h3>Обновление данных</h3>{@render refreshControls()}</div>{/if}
 </Sheet>

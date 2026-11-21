@@ -97,68 +97,62 @@
 {#snippet finding(card: InsightCard)}
   <p>{card.detail}</p>
   {#if card.action}<p class="small">{card.action}</p>{/if}
-  {#if (card.basis && card.kind !== 'support_concentration') || card.evidence.length}<details class="evidence">
-      <summary>На чём основан вывод</summary>{#if card.basis && card.kind !== 'support_concentration'}<p
-          class="small muted"
-        >
-          {card.basis}
-        </p>{/if}
-      <ul>
-        {#each card.evidence.slice(0, 3) as item}<li>
-            {#if onStream}<button class="text-button small" onclick={() => onStream?.(item.sessionId)}>
-                {dateTime(item.at)} · {item.label}
-              </button>{:else}<span class="small">{dateTime(item.at)} · {item.label}</span>{/if}
-          </li>{/each}
-      </ul>
-    </details>{/if}
-  {#if card.personId}<button class="text-button small insight-person" onclick={() => onPerson(card.personId!)}>
-      Открыть человека
-    </button>{/if}
+  {#if (card.basis && card.kind !== 'support_concentration') || card.evidence.length}<details class="evidence"
+      ><summary>На чём основан вывод</summary>{#if card.basis && card.kind !== 'support_concentration'}<p
+          class="small muted">{card.basis}</p
+        >{/if}<ul
+        >{#each card.evidence.slice(0, 3) as item}<li
+            >{#if onStream}<button class="text-button small" onclick={() => onStream?.(item.sessionId)}
+                >{dateTime(item.at)} · {item.label}</button
+              >{:else}<span class="small">{dateTime(item.at)} · {item.label}</span>{/if}</li
+          >{/each}</ul
+      ></details
+    >{/if}
+  {#if card.personId}<button class="text-button small insight-person" onclick={() => onPerson(card.personId!)}
+      >Открыть человека</button
+    >{/if}
 {/snippet}
 {#if cards.length || error}
   <section class="panel insights-section" aria-label="Инсайты">
-    <header>
-      <h2>
-        <button
+    <header
+      ><h2
+        ><button
           class="disclosure-toggle"
           aria-expanded={opened}
           aria-controls={disclosureId}
-          onclick={() => (opened = !opened)}
-        >
-          Инсайты<Icon name="arrow" size={18} />
-        </button>
-      </h2>
-    </header>
+          onclick={() => (opened = !opened)}>Инсайты<Icon name="arrow" size={18} /></button
+        ></h2
+      ></header
+    >
     {#if opened}<div class="insight-body" id={disclosureId}>
-        {#if (busy || loading || data?.preparing) && !data?.insights}<p class="muted" role="status">
-            Ищем закономерности…
-          </p>
-        {:else if error}<p class="notice error" role="alert">{error}</p>
-          <button class="outline small" onclick={() => retry++}>Повторить</button>
-        {:else if !cards.length}<p class="muted">
-            {sessionId
+        {#if (busy || loading || data?.preparing) && !data?.insights}<p class="muted" role="status"
+            >Ищем закономерности…</p
+          >
+        {:else if error}<p class="notice error" role="alert">{error}</p><button
+            class="outline small"
+            onclick={() => retry++}>Повторить</button
+          >
+        {:else if !cards.length}<p class="muted"
+            >{sessionId
               ? 'Заметных особенностей этого эфира пока не найдено.'
-              : 'Для выбранного периода пока недостаточно данных для выводов.'}
-          </p>
+              : 'Для выбранного периода пока недостаточно данных для выводов.'}</p
+          >
         {:else}
-          {#if new Set(cards.map((c) => c.group)).size > 1}<div class="insight-filters" aria-label="Темы инсайтов">
-              {#each groups.filter((g) => g.id === 'all' || cards.some((c) => c.group === g.id)) as g}<button
+          {#if new Set(cards.map((c) => c.group)).size > 1}<div class="insight-filters" aria-label="Темы инсайтов"
+              >{#each groups.filter((g) => g.id === 'all' || cards.some((c) => c.group === g.id)) as g}<button
                   class:active={group === g.id}
                   aria-pressed={group === g.id}
-                  onclick={() => (group = g.id)}
-                >
-                  {g.label} <span>{countFindings(g.id)}</span>
-                </button>{/each}
-            </div>{/if}
-          <div class="insight-grid">
-            {#each filtered.slice(0, limit) as card (card.id)}<article class="insight-card">
-                <h3>{card.title}</h3>
-                {@render finding(card)}
-              </article>{/each}
-          </div>
-          {#if filtered.length > limit}<button class="outline more" onclick={() => (limit = filtered.length)}>
-              Показать все ({filtered.length})
-            </button>{/if}
+                  onclick={() => (group = g.id)}>{g.label} <span>{countFindings(g.id)}</span></button
+                >{/each}</div
+            >{/if}
+          <div class="insight-grid"
+            >{#each filtered.slice(0, limit) as card (card.id)}<article class="insight-card"
+                ><h3>{card.title}</h3>{@render finding(card)}</article
+              >{/each}</div
+          >
+          {#if filtered.length > limit}<button class="outline more" onclick={() => (limit = filtered.length)}
+              >Показать все ({filtered.length})</button
+            >{/if}
         {/if}
       </div>{/if}
   </section>

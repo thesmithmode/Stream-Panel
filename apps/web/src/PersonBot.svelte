@@ -150,8 +150,8 @@
     title={locked ? lockReason : labels[selected]}
     onkeydown={keyboard}
   >
-    <span class="thumb" style:transform={`translateX(${choices.indexOf(selected) * (compact ? 17 : 21)}px)`}>
-      {#if locked}<svg
+    <span class="thumb" style:transform={`translateX(${choices.indexOf(selected) * (compact ? 17 : 21)}px)`}
+      >{#if locked}<svg
           class="classification-lock"
           role="img"
           aria-label={lockReason}
@@ -161,10 +161,9 @@
           fill="none"
           stroke="currentColor"
           stroke-width="2.5"
-        >
-          <rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
-        </svg>{/if}
-    </span>
+          ><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg
+        >{/if}</span
+    >
     {#each choices as kind}<button
         type="button"
         role="radio"
@@ -173,10 +172,8 @@
         aria-checked={selected === kind}
         tabindex={selected === kind ? 0 : -1}
         disabled={disabled(kind)}
-        onclick={() => void select(kind)}
-      >
-        <span class="stop"></span>
-      </button>{/each}
+        onclick={() => void select(kind)}><span class="stop"></span></button
+      >{/each}
   </div>
   {#if error}<p class="classification-error" role="alert">{error}</p>{/if}
 </div>

@@ -103,26 +103,22 @@
         conflict = false;
         error = '';
         void refresh().catch(() => {});
-      }}
-    >
-      Обновить список донатов
-    </button>{/if}
+      }}>Обновить список донатов</button
+    >{/if}
   {#each rows as row (row.id)}<article data-donation-id={row.id}>
-      <div class="donation-heading">
-        <strong>{value(row)}</strong><span class="small muted">{date(row.occurredAtMs)}</span>
-      </div>
+      <div class="donation-heading"
+        ><strong>{value(row)}</strong><span class="small muted">{date(row.occurredAtMs)}</span></div
+      >
       <span class="small muted">{row.sourceName} · {row.originalActorName || 'Аноним'}</span>{#if row.message}<p
           class="donation-message"
-        >
-          {#if isAudioDonation({ text: row.message })}<AudioDonation text={row.message} />{:else}{row.message}{/if}
-        </p>{/if}
+          >{#if isAudioDonation({ text: row.message })}<AudioDonation text={row.message} />{:else}{row.message}{/if}</p
+        >{/if}
       {#if editing?.id === row.id}<form
           onsubmit={(e) => {
             e.preventDefault();
             void assign(row, recipient || null);
           }}
-        >
-          <PersonPicker
+          ><PersonPicker
             label="Привязать к человеку"
             bind:value={recipient}
             nullable={true}
@@ -130,11 +126,9 @@
           /><button class="primary" disabled={busy || loading}>Сохранить привязку</button><button
             type="button"
             class="outline"
-            onclick={() => (editing = null)}
-          >
-            Отмена
-          </button>
-        </form>
+            onclick={() => (editing = null)}>Отмена</button
+          ></form
+        >
       {:else}<button
           class="icon-button"
           aria-label="Изменить привязку"
@@ -143,28 +137,22 @@
           onclick={() => {
             editing = row;
             recipient = row.personId ?? personId;
-          }}
-        >
-          <Icon name="pencil" size={18} />
-        </button>{/if}
+          }}><Icon name="pencil" size={18} /></button
+        >{/if}
     </article>{/each}
   {#if loading && !loaded}<p role="status">Загружаем донаты…</p>{/if}
   {#if !rows.length && loaded}<p class="muted">Донатов пока нет</p>{/if}
-  {#if total > 10}<div class="pagination">
-      <button
+  {#if total > 10}<div class="pagination"
+      ><button
         class="outline"
         disabled={busy || loading || offset === 0}
-        onclick={() => (offset = Math.max(0, offset - 10))}
-      >
-        Предыдущие донаты
-      </button><span>{loadedOffset + 1}–{Math.min(loadedOffset + 10, total)} из {total}</span><button
+        onclick={() => (offset = Math.max(0, offset - 10))}>Предыдущие донаты</button
+      ><span>{loadedOffset + 1}–{Math.min(loadedOffset + 10, total)} из {total}</span><button
         class="outline"
         disabled={busy || loading || offset + 10 >= total}
-        onclick={() => (offset += 10)}
-      >
-        Следующие донаты
-      </button>
-    </div>{/if}
+        onclick={() => (offset += 10)}>Следующие донаты</button
+      ></div
+    >{/if}
 </section>
 
 <style>

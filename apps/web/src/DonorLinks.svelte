@@ -67,46 +67,42 @@
   }
 </script>
 
-<section class="donor-links" aria-label="Привязка ника донатера">
-  <h3>
-    Ники донатера <Help
+<section class="donor-links" aria-label="Привязка ника донатера"
+  ><h3
+    >Ники донатера <Help
       id="donor-scope-help"
       label="О привязке донатера"
       text="Привязка действует только в текущем профиле и использует его источник DonationAlerts. В другом профиле этот ник привязывается независимо."
-    />
-  </h3>
+    /></h3
+  >
   <form
     onsubmit={(e) => {
       e.preventDefault();
       void bind();
     }}
-  >
-    <label>
-      Ник в DonationAlerts<input
+    ><label
+      >Ник в DonationAlerts<input
         list={listId}
         bind:value={name}
         maxlength="200"
         required
         placeholder="Введите или выберите ник"
         autocomplete="off"
-      /><datalist id={listId}>
-        {#each nicknames as n}<option value={n.name}></option>{/each}
-      </datalist>
-    </label><button class="primary" disabled={busy || !name.trim()}>Привязать все донаты</button>
-  </form>
+      /><datalist id={listId}
+        >{#each nicknames as n}<option value={n.name}></option>{/each}</datalist
+      ></label
+    ><button class="primary" disabled={busy || !name.trim()}>Привязать все донаты</button></form
+  >
   {#each bindings as b}<p class="small">{b.name} · привязан к этому человеку</p>{/each}
-  {#if message}<p class="small" role="status">{message}</p>{/if}{#if error}<p role="alert" class="notice error">
-      {error}
-    </p>
-    <button
+  {#if message}<p class="small" role="status">{message}</p>{/if}{#if error}<p role="alert" class="notice error"
+      >{error}</p
+    ><button
       class="outline"
       onclick={() =>
         void load()
           .then(() => (error = ''))
-          .catch((e) => (error = e.message))}
-    >
-      Обновить привязки
-    </button>{/if}
+          .catch((e) => (error = e.message))}>Обновить привязки</button
+    >{/if}
 </section>
 
 <style>

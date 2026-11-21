@@ -151,45 +151,43 @@
 </script>
 
 <section class="panel chart-panel activity-clock">
-  <header>
-    <h2>Активность по часам</h2>
-    <Help
+  <header
+    ><h2>Активность по часам</h2><Help
       id="activity-clock-help"
       label="О суточном графике"
       text="Все дни выбранного периода совмещены на шкале 00:00–24:00 в часовом поясе аналитики. Зрители — среднее по времени с известными замерами; сообщения — число на час эфира. Время без эфиров и пропущенные замеры не считаются нулями. При неполных данных площадок показана сумма известных зрителей с пометкой о неполных данных; неизвестные значения не считаются нулями. Сумма зрителей площадок не означает уникальных людей. Активные участники — известные люди по наблюдениям Twitch и сигналам чата; это отдельная метрика. Нажмите столбец, чтобы увидеть людей и их явку за тот же интервал. Часы просмотра — накопленная сумма: онлайн × фактическое время известных замеров; она зависит от количества эфиров. Донаты — сумма в выбранной валюте на час эфира, только во время записанных эфиров. Нажмите столбец для точного значения."
-    />
-  </header>
-  <details class="clock-settings">
-    <summary>Настроить график</summary>
-    <div class="clock-controls">
-      <label>
-        Метрика графика<select bind:value={metric}>
-          {#each choices as choice}<option value={choice.value}>{choice.label}</option>{/each}
-        </select>
-      </label>
-      <label>
-        Шаг графика<select bind:value={resolution}>
-          <option value={1}>1м</option><option value={5}>5м</option><option value={15}>15м</option><option value={30}>
-            30м
-          </option><option value={60}>1ч</option>
-        </select>
-      </label>
-      <label>
-        Дни недели<select bind:value={day}>
-          <option value="all">Все дни</option><option value="weekdays">Будни</option><option value="weekends">
-            Выходные
-          </option>{#each ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'] as d}<option value={d}>{d}</option>{/each}
-        </select>
-      </label>
-      {#if metric === 'donations'}<label>
-          Валюта донатов графика<select bind:value={currency}>
-            {#each currencies as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}
-          </select>
-        </label>{/if}
-    </div>
-  </details>
-  <p class="small muted clock-caption">
-    {watchHours
+    /></header
+  >
+  <details class="clock-settings"
+    ><summary>Настроить график</summary><div class="clock-controls">
+      <label
+        >Метрика графика<select bind:value={metric}
+          >{#each choices as choice}<option value={choice.value}>{choice.label}</option>{/each}</select
+        ></label
+      >
+      <label
+        >Шаг графика<select bind:value={resolution}
+          ><option value={1}>1м</option><option value={5}>5м</option><option value={15}>15м</option><option value={30}
+            >30м</option
+          ><option value={60}>1ч</option></select
+        ></label
+      >
+      <label
+        >Дни недели<select bind:value={day}
+          ><option value="all">Все дни</option><option value="weekdays">Будни</option><option value="weekends"
+            >Выходные</option
+          >{#each ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'] as d}<option value={d}>{d}</option>{/each}</select
+        ></label
+      >
+      {#if metric === 'donations'}<label
+          >Валюта донатов графика<select bind:value={currency}
+            >{#each currencies as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select
+          ></label
+        >{/if}
+    </div></details
+  >
+  <p class="small muted clock-caption"
+    >{watchHours
       ? 'Часы просмотра · сумма'
       : metric === 'donations'
         ? `Донаты · ${activeCurrency}/ч`
@@ -197,11 +195,11 @@
           ? 'Сообщения/ч'
           : metric === 'activeAudience'
             ? 'Активная аудитория · среднее'
-            : 'Зрители · среднее'} · {timezone === 'Europe/Moscow' ? 'МСК' : timezone}
-  </p>
+            : 'Зрители · среднее'} · {timezone === 'Europe/Moscow' ? 'МСК' : timezone}</p
+  >
   {#if partialViewers}<p class="clock-caption small muted">Неполные данные площадок: сумма известных зрителей.</p>{/if}
-  <div class="clock-plot" bind:clientWidth={availableWidth}>
-    <svg
+  <div class="clock-plot" bind:clientWidth={availableWidth}
+    ><svg
       viewBox={`0 0 ${plotWidth} 250`}
       role="group"
       aria-label={`Активность с ${clockLabel(start)} до ${clockLabel(start + span)}`}
@@ -209,9 +207,9 @@
       {#each levels as value}
         {@const y = 200 - (value / maximum) * 170}
         <line class="value-grid" x1="45" x2={plotWidth - 25} y1={y} y2={y} stroke="currentColor" opacity=".15" />
-        <text class="value-tick" x="39" y={y + 4} text-anchor="end" fill="currentColor" font-size="11">
-          {value.toLocaleString('ru-RU', { notation: 'compact', maximumFractionDigits: 2 })}
-        </text>
+        <text class="value-tick" x="39" y={y + 4} text-anchor="end" fill="currentColor" font-size="11"
+          >{value.toLocaleString('ru-RU', { notation: 'compact', maximumFractionDigits: 2 })}</text
+        >
       {/each}
       {#each timeGrid as minute}<line
           class="time-grid"
@@ -244,10 +242,8 @@
             width={Math.max(0.3, (step / span) * (plotWidth - 70) * 0.9)}
             height={b.value === null ? 4 : height}
             fill={b.value === null ? '#737c8a' : 'var(--teal)'}
-            opacity={b.value === null ? 0.35 : 1}
+            opacity={b.value === null ? 0.35 : 1}><title>{description(b)}</title></rect
           >
-            <title>{description(b)}</title>
-          </rect>
           {#if 'botValue' in b && Number(b.botValue) > 0 && b.value !== null}<rect
               class="bot-segment"
               x={45 + ((b.minute - start) / span) * (plotWidth - 70)}
@@ -261,10 +257,8 @@
             y="25"
             width={(step / span) * (plotWidth - 70)}
             height="175"
-            fill="transparent"
+            fill="transparent"><title>{description(b)}</title></rect
           >
-            <title>{description(b)}</title>
-          </rect>
         </g>
       {/each}
       {#each ticks as minute}<text
@@ -272,17 +266,15 @@
           y="230"
           text-anchor={minute === start ? 'start' : minute === start + span ? 'end' : 'middle'}
           fill="currentColor"
-          font-size="12"
-        >
-          {clockLabel(minute)}
-        </text>{/each}
-    </svg>
-  </div>
+          font-size="12">{clockLabel(minute)}</text
+        >{/each}
+    </svg></div
+  >
   <p class="clock-caption small" role="status">{chosen ? description(chosen) : ''}</p>
   {#if summaryBusy}<p class="refresh-status" role="status">Загружаем детализацию графика…</p>{/if}
-  {#if summaryError}<p class="clock-caption small" role="alert">
-      {summaryError} <button onclick={() => summaryRetry++}>Повторить</button>
-    </p>{/if}
+  {#if summaryError}<p class="clock-caption small" role="alert"
+      >{summaryError} <button onclick={() => summaryRetry++}>Повторить</button></p
+    >{/if}
   <TimeAudience
     deferredSummary={!!summarySelection}
     {scope}

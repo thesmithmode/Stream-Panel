@@ -38,24 +38,24 @@
     <p class="small muted">Ключи выбранного профиля. Полная резервная копия сохраняет подключения обоих профилей.</p>
     {#if !data}<button class="outline" disabled={busy} onclick={load}>Загрузить ключи</button>
     {:else}
-      <div class="actions">
-        <button class="outline" onclick={() => (visible = !visible)}>
-          {visible ? 'Скрыть значения' : 'Показать значения'}
-        </button><button class="text-button" onclick={close}>Закрыть ключи</button>
-      </div>
-      <div class="credentials">
-        {#each Object.entries(data) as [provider, fields]}<div>
-            <h3>{names[provider]}</h3>
-            {#each Object.entries(fields) as [name, value]}{#if value !== undefined && value !== ''}<label>
-                  {labels[name]}<input
+      <div class="actions"
+        ><button class="outline" onclick={() => (visible = !visible)}
+          >{visible ? 'Скрыть значения' : 'Показать значения'}</button
+        ><button class="text-button" onclick={close}>Закрыть ключи</button></div
+      >
+      <div class="credentials"
+        >{#each Object.entries(data) as [provider, fields]}<div
+            ><h3>{names[provider]}</h3>
+            {#each Object.entries(fields) as [name, value]}{#if value !== undefined && value !== ''}<label
+                  >{labels[name]}<input
                     readonly
                     type={visible ? 'text' : 'password'}
                     value={Array.isArray(value) ? value.join(', ') : String(value)}
                     autocomplete="off"
-                  />
-                </label>{/if}{/each}
-          </div>{/each}
-      </div>
+                  /></label
+                >{/if}{/each}
+          </div>{/each}</div
+      >
     {/if}
     {#if error}<p role="alert">{error}</p>{/if}
   </div>

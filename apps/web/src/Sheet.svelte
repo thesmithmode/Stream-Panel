@@ -60,10 +60,10 @@
   }}
 >
   <div class="sheet-body">
-    <header>
-      <h2>{title}</h2>
-      <button class="icon-button" aria-label="Закрыть" onclick={() => (open = false)}>×</button>
-    </header>
+    <header
+      ><h2>{title}</h2><button class="icon-button" aria-label="Закрыть" onclick={() => (open = false)}>×</button
+      ></header
+    >
     {@render children()}
   </div>
 </dialog>

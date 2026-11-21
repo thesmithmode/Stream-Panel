@@ -35,7 +35,5 @@
   stroke-width="1.7"
   stroke-linecap="round"
   stroke-linejoin="round"
-  aria-hidden="true"
+  aria-hidden="true"><path d={paths[name] || paths.chat} /></svg
 >
-  <path d={paths[name] || paths.chat} />
-</svg>

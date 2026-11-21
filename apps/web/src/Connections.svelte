@@ -110,13 +110,13 @@
 </script>
 
 {#snippet syncInfo(provider: string)}
-  <div class="integration-sync">
-    <span>Синхронизация</span><time>
-      {status.sync?.[provider]?.lastSyncAt ? dateTime(status.sync[provider].lastSyncAt) : 'Пока не завершена'}
-    </time>{#if status.sync?.[provider]?.lastFollowersAt}<span>Подписчики</span><time>
-        {dateTime(status.sync[provider].lastFollowersAt)}
-      </time>{/if}
-  </div>
+  <div class="integration-sync"
+    ><span>Синхронизация</span><time
+      >{status.sync?.[provider]?.lastSyncAt ? dateTime(status.sync[provider].lastSyncAt) : 'Пока не завершена'}</time
+    >{#if status.sync?.[provider]?.lastFollowersAt}<span>Подписчики</span><time
+        >{dateTime(status.sync[provider].lastFollowersAt)}</time
+      >{/if}</div
+  >
 {/snippet}
 <div class="settings-grid">
   {#if status.user?.canViewCredentials ?? !status.serverMode}<Credentials />{/if}
@@ -128,7 +128,7 @@
     </header>
     <div class="settings-body">
       {@render syncInfo('twitch')}
-      {#if twitchError}<p role="alert" class="notice error">Войди снова в Twitch — авторизация сброшена.</p>{/if}
+      {#if twitchError}<p role="alert" class="notice error"> Войди снова в Twitch — авторизация сброшена. </p>{/if}
       {#if twitchConnected}
         <p class="small">
           {#if status.twitch.account}<strong>{status.twitch.account}</strong>{/if}
@@ -139,10 +139,8 @@
           {#if status.twitch.capabilities.followers === 'Для проверки подписок нужен повторный вход в Twitch с разрешением читать подписчиков'}<button
               class="primary"
               disabled={busy}
-              onclick={() => run(twitch)}
-            >
-              Разрешить чтение подписчиков
-            </button>{/if}
+              onclick={() => run(twitch)}>Разрешить чтение подписчиков</button
+            >{/if}
           <button
             class="outline"
             disabled={busy}
@@ -157,24 +155,22 @@
                 )
                   return;
                 await api('twitch/disconnect', {});
-              })}
+              })}>Отключить</button
           >
-            Отключить
-          </button>
         </div>
       {:else}
-        <label>
-          Client ID<input
+        <label
+          >Client ID<input
             bind:value={twitchClient}
             placeholder={status.config.twitchClientId || 'Client ID'}
             autocomplete="off"
-          />
-        </label>
+          /></label
+        >
         <details class="compact-details">
           <summary>Дополнительно</summary>
-          <label class="check">
-            <input type="checkbox" bind:checked={extended} /> Полный сбор событий: подписки, Bits, награды и активность канала
-          </label>
+          <label class="check"
+            ><input type="checkbox" bind:checked={extended} /> Полный сбор событий: подписки, Bits, награды и активность канала</label
+          >
           <p class="small muted">
             <a href="https://dev.twitch.tv/console/apps" target="_blank" rel="noreferrer">Twitch Developer Console</a> — public
             client, Device Code.
@@ -187,10 +183,8 @@
             <strong>Код: {status.device.userCode}</strong><a
               href={status.device.verificationUri}
               target="_blank"
-              rel="noreferrer"
+              rel="noreferrer">Открыть страницу входа</a
             >
-              Открыть страницу входа
-            </a>
             <button
               class="outline small"
               disabled={busy}
@@ -205,10 +199,8 @@
                   )
                     return;
                   await api('twitch/disconnect', {});
-                })}
+                })}>Отменить</button
             >
-              Отменить
-            </button>
           </div>{/if}
         {#if status.twitch.detail}<p class="small muted">
             {status.twitch.detail}
@@ -244,10 +236,8 @@
                 )
                   return;
                 await api('donationalerts/disconnect', {});
-              })}
+              })}>Отключить</button
           >
-            Отключить
-          </button>
           <button
             class="text-button"
             disabled={busy}
@@ -255,48 +245,46 @@
               run(async () => {
                 await api('donationalerts/rescan?recent=1', {}, AbortSignal.timeout(60000));
                 message = 'Данные о донатах обновлены.';
-              })}
+              })}>Обновить данные о донатах</button
           >
-            Обновить данные о донатах
-          </button>
         </div>
       {:else}
-        <label>
-          Client ID<input
+        <label
+          >Client ID<input
             bind:value={daClient}
             placeholder={status.config.daClientId || 'Client ID'}
             autocomplete="off"
-          />
-        </label>
+          /></label
+        >
         {#if ['DA_REAUTH_REQUIRED', 'DA_LOGIN_REQUIRED'].includes(status.donationalerts.detail)}
           <p class="small">Доступ DonationAlerts истёк или отозван. Подключите аккаунт снова.</p>
         {/if}
-        <label>
-          Client secret<input
+        <label
+          >Client secret<input
             type="password"
             bind:value={daSecret}
             placeholder={status.config.hasDaSecret ? 'Сохранён — можно не вводить' : 'Client secret'}
             autocomplete="new-password"
-          />
-        </label>
-        {#if status.config.hasDaSecret && !daSecret}<p class="small muted">Secret уже сохранён.</p>{/if}
+          /></label
+        >
+        {#if status.config.hasDaSecret && !daSecret}<p class="small muted"> Secret уже сохранён. </p>{/if}
         <p class="small muted">
           В настройках приложения DA укажите Redirect URI: <code>{status.config.daRedirectUri}</code>
         </p>
         <p class="small muted">
           Client Secret — секрет из карточки приложения DA, а не адрес Redirect URI.
-          <a href="https://www.donationalerts.com/application/clients" target="_blank" rel="noreferrer">
-            Открыть приложения DA
-          </a>
+          <a href="https://www.donationalerts.com/application/clients" target="_blank" rel="noreferrer"
+            >Открыть приложения DA</a
+          >
         </p>
         <details class="compact-details">
           <summary>Дополнительно</summary>
           <label>Access token<input type="password" bind:value={daToken} autocomplete="new-password" /></label>
           <label>Refresh token<input type="password" bind:value={daRefresh} autocomplete="new-password" /></label>
           <p class="small muted">
-            <a href="https://www.donationalerts.com/application/clients" target="_blank" rel="noreferrer">
-              Регистрация приложения DA
-            </a>
+            <a href="https://www.donationalerts.com/application/clients" target="_blank" rel="noreferrer"
+              >Регистрация приложения DA</a
+            >
           </p>
         </details>
         <div class="actions">
@@ -309,41 +297,37 @@
     </div>
   </section>
   <section class="panel settings">
-    <header>
-      <h2>YouTube</h2>
-      <IntegrationGuide provider="YouTube" redirect={status.config.youtubeRedirectUri ?? ''} /><span
+    <header
+      ><h2>YouTube</h2><IntegrationGuide provider="YouTube" redirect={status.config.youtubeRedirectUri ?? ''} /><span
         class="state"
         class:online={status.youtube?.state === 'connected'}
-      >
-        {statusLabel(status.youtube?.state ?? 'disconnected')}
-      </span>
-    </header>
+        >{statusLabel(status.youtube?.state ?? 'disconnected')}</span
+      ></header
+    >
     <div class="settings-body">
       {@render syncInfo('youtube')}
       {#if status.youtube?.state !== 'connected'}<p class="small muted">{youtubeDetail}</p>{/if}
       {#if status.youtube?.state === 'connected'}<YouTube />{/if}
       {#if ['connected', 'connecting', 'error'].includes(status.youtube?.state)}
         {#if status.youtube?.state === 'error'}
-          <details>
-            <summary>Настройки приложения Google</summary>
+          <details
+            ><summary>Настройки приложения Google</summary>
             <label>YouTube Client ID<input bind:value={youtubeClient} autocomplete="off" /></label>
-            <label>
-              Новый Client secret<input
+            <label
+              >Новый Client secret<input
                 type="password"
                 bind:value={youtubeSecret}
                 autocomplete="new-password"
                 placeholder={status.config.hasYoutubeSecret ? 'Сохранён; можно оставить пустым' : 'Client secret'}
-              />
-            </label>
+              /></label
+            >
           </details>{/if}
         <div class="actions">
           {#if status.youtube?.state === 'error'}<button
               class="primary"
               disabled={busy}
-              onclick={() => run(youtubeLogin)}
-            >
-              Повторить вход в Google
-            </button>{/if}
+              onclick={() => run(youtubeLogin)}>Повторить вход в Google</button
+            >{/if}
           <button
             class="outline"
             disabled={busy}
@@ -358,24 +342,30 @@
                 )
                   return;
                 await api('youtube/disconnect', {});
-              })}
+              })}>Отключить YouTube</button
           >
-            Отключить YouTube
-          </button>
         </div>
       {:else}
         <label>YouTube Client ID<input bind:value={youtubeClient} autocomplete="off" /></label>
-        {#if status.config.hasYoutubeSecret}<p class="small muted">
-            Client secret сохранён. Повторный ввод не требуется.
-          </p>
-          <details>
-            <summary>Изменить Client secret</summary><label>
-              YouTube Client secret<input type="password" bind:value={youtubeSecret} autocomplete="new-password" />
-            </label>
-          </details>
-        {:else}<label>
-            YouTube Client secret<input type="password" bind:value={youtubeSecret} autocomplete="new-password" />
-          </label>{/if}
+        {#if status.config.hasYoutubeSecret}<p class="small muted"
+            >Client secret сохранён. Повторный ввод не требуется.</p
+          >
+          <details
+            ><summary>Изменить Client secret</summary><label
+              >YouTube Client secret<input
+                type="password"
+                bind:value={youtubeSecret}
+                autocomplete="new-password"
+              /></label
+            ></details
+          >
+        {:else}<label
+            >YouTube Client secret<input
+              type="password"
+              bind:value={youtubeSecret}
+              autocomplete="new-password"
+            /></label
+          >{/if}
         <p class="small muted">Redirect: <code>{status.config.youtubeRedirectUri ?? ''}</code></p>
         <button class="primary" disabled={busy} onclick={() => run(youtubeLogin)}>Войти через YouTube</button>
       {/if}
@@ -383,30 +373,29 @@
   </section>
 
   <section class="panel settings" aria-label="Дополнительный YouTube">
-    <header>
-      <h2>YouTube · второй канал</h2>
-      <span class="state" class:online={status.youtubeSecondary?.state === 'connected'}>
-        {statusLabel(status.youtubeSecondary?.state ?? 'disconnected')}
-      </span>
-    </header>
+    <header
+      ><h2>YouTube · второй канал</h2><span class="state" class:online={status.youtubeSecondary?.state === 'connected'}
+        >{statusLabel(status.youtubeSecondary?.state ?? 'disconnected')}</span
+      ></header
+    >
     <div class="settings-body">
-      <p class="small muted">
-        Участники и события второго канала. Аналитика — по основному каналу; ники второго отмечены тёмно-красным.
-      </p>
+      <p class="small muted"
+        >Участники и события второго канала. Аналитика — по основному каналу; ники второго отмечены тёмно-красным.</p
+      >
       {#if status.youtubeSecondary?.account}<p class="small">{status.youtubeSecondary.account}</p>{/if}
-      {#if status.youtubeSecondary?.state === 'error'}<p class="notice error" role="alert">
-          {status.youtubeSecondary.detail}
-        </p>{/if}
+      {#if status.youtubeSecondary?.state === 'error'}<p class="notice error" role="alert"
+          >{status.youtubeSecondary.detail}</p
+        >{/if}
       {#if !['connected', 'connecting', 'authorizing'].includes(status.youtubeSecondary?.state)}
         <label>Второй YouTube Client ID<input bind:value={secondaryClient} autocomplete="off" /></label>
-        <label>
-          Второй YouTube Client secret<input
+        <label
+          >Второй YouTube Client secret<input
             type="password"
             bind:value={secondarySecret}
             autocomplete="new-password"
             placeholder={status.config.hasYoutubeSecondarySecret ? 'Сохранён; можно оставить пустым' : 'Client secret'}
-          />
-        </label>
+          /></label
+        >
         <p class="small muted">Redirect: <code>{status.config.youtubeRedirectUri ?? ''}</code></p>
         <button class="primary" disabled={busy} onclick={() => run(secondaryLogin)}>Подключить второй YouTube</button>
       {/if}
@@ -417,10 +406,8 @@
             run(async () => {
               if (await confirmAction('Отключить второй YouTube?', 'История сохранится.', 'Отключить'))
                 await api('youtube/disconnect', { account: 'secondary' });
-            })}
-        >
-          Отключить второй YouTube
-        </button>{/if}
+            })}>Отключить второй YouTube</button
+        >{/if}
     </div>
   </section>
 </div>

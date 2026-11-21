@@ -15,8 +15,8 @@
   } = $props();
 </script>
 
-<label class="period-select">
-  {label}<select
+<label class="period-select"
+  >{label}<select
     aria-label={label}
     {value}
     onchange={(e) =>
@@ -27,12 +27,11 @@
             ? 'custom'
             : Number(e.currentTarget.value),
       )}
-  >
-    {#each days as n}<option value={n}>Последние {n} {n === 1 ? 'сутки' : 'дней'}</option>{/each}<option value="all">
-      Вся история
-    </option>{#if custom}<option value="custom">Свои даты</option>{/if}
-  </select>
-</label>
+    >{#each days as n}<option value={n}>Последние {n} {n === 1 ? 'сутки' : 'дней'}</option>{/each}<option value="all"
+      >Вся история</option
+    >{#if custom}<option value="custom">Свои даты</option>{/if}</select
+  ></label
+>
 
 <style>
   label {

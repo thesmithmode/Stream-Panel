@@ -45,66 +45,65 @@
 {#if data}
   <section class="metrics channel-metrics" aria-label="Статистика канала за всю историю">
     <div class="metric total-streams"><div><span>Стримы</span><strong>{data.streams}</strong></div></div>
-    <div class="metric total-duration">
-      <div>
-        <span>Время эфиров</span><strong>
-          {#each formatDuration(data.durationMinutes).split(/ (?=\d)/) as part, i}{i ? ' ' : ''}<span
-              class="duration-part"
-            >
-              {part}
-            </span>{/each}
-        </strong><small>({formatHours(data.durationMinutes)})</small>
-      </div>
-    </div>
+    <div class="metric total-duration"
+      ><div
+        ><span>Время эфиров</span><strong
+          >{#each formatDuration(data.durationMinutes).split(/ (?=\d)/) as part, i}{i ? ' ' : ''}<span
+              class="duration-part">{part}</span
+            >{/each}</strong
+        ><small>({formatHours(data.durationMinutes)})</small></div
+      ></div
+    >
     <div class="metric total-attendees"><div><span>Участники чата</span><strong>{data.attendees}</strong></div></div>
-    <div class="metric total-messages">
-      <div><span>Сообщения</span><strong>{data.messages.toLocaleString('ru-RU')}</strong></div>
-    </div>
+    <div class="metric total-messages"
+      ><div><span>Сообщения</span><strong>{data.messages.toLocaleString('ru-RU')}</strong></div></div
+    >
     <div class="donation-summary">
       <div class="metric"><div><span>Донаты</span><strong>{data.donations}</strong></div></div>
-      <div class="metric">
-        <div>
-          <span>Сумма донатов · RUB</span>{#each Object.entries(data.totals) as [currency, amount]}<strong>
-              {money(amount, currency)}
-            </strong>{:else}<strong>—</strong>{/each}
-        </div>
-      </div>
+      <div class="metric"
+        ><div
+          ><span>Сумма донатов · RUB</span>{#each Object.entries(data.totals) as [currency, amount]}<strong
+              >{money(amount, currency)}</strong
+            >{:else}<strong>—</strong>{/each}</div
+        ></div
+      >
     </div>
   </section>
-  {#if data.pendingExchangeDonations}<p class="small muted" role="status">
-      Донаты без пересчёта: {data.pendingExchangeDonations}. Ожидается курс ЦБ или уточнение даты; пока они не включены
-      в рублёвую сумму.
-    </p>{/if}
+  {#if data.pendingExchangeDonations}<p class="small muted" role="status"
+      >Донаты без пересчёта: {data.pendingExchangeDonations}. Ожидается курс ЦБ или уточнение даты; пока они не включены
+      в рублёвую сумму.</p
+    >{/if}
   <h2 class="records-heading">Рекорды</h2>
   <section class="metrics channel-records" aria-label="Рекорды канала">
     {#each [['online', 'Средний онлайн'], ['messages', 'Сообщения'], ['peakOnline', 'Пик зрителей'], ['peakChat', 'Пик участников чата']] as [key, label]}{@const record =
         data.records?.[key as 'online' | 'messages' | 'peakOnline' | 'peakChat']}
-      <div class="metric">
-        <div>
-          <span>{label}</span><strong>{record ? num(record.value) : '—'}</strong><small>
-            {record ? recordDate(record.at) : 'Нет данных'}
-          </small>
-        </div>
-      </div>
+      <div class="metric"
+        ><div
+          ><span>{label}</span><strong>{record ? num(record.value) : '—'}</strong><small
+            >{record ? recordDate(record.at) : 'Нет данных'}</small
+          ></div
+        ></div
+      >
     {/each}
-    <div class="metric">
-      <div>
-        <span>Максимальный донат · RUB</span><strong>
-          {data.maximumDonation ? money(data.maximumDonation.amount, 'RUB') : '—'}
-        </strong><small>
-          {#if data.maximumDonation}{data.maximumDonation.name ?? 'Аноним'} · {data.maximumDonation.at === null
+    <div class="metric"
+      ><div
+        ><span>Максимальный донат · RUB</span><strong
+          >{data.maximumDonation ? money(data.maximumDonation.amount, 'RUB') : '—'}</strong
+        ><small
+          >{#if data.maximumDonation}{data.maximumDonation.name ?? 'Аноним'} · {data.maximumDonation.at === null
               ? 'Дата неизвестна'
-              : recordDate(data.maximumDonation.at)}{:else}Нет данных{/if}
-        </small>
-      </div>
-    </div>
+              : recordDate(data.maximumDonation.at)}{:else}Нет данных{/if}</small
+        ></div
+      ></div
+    >
   </section>
-  {#if !data.streams}<section class="panel">
-      <div class="empty-small">
-        <p>Стримы появятся автоматически после подключения площадок.</p>
-        <button class="primary" onclick={connect}>Открыть интеграции</button>
-      </div>
-    </section>{/if}
+  {#if !data.streams}<section class="panel"
+      ><div class="empty-small"
+        ><p>Стримы появятся автоматически после подключения площадок.</p><button class="primary" onclick={connect}
+          >Открыть интеграции</button
+        ></div
+      ></section
+    >{/if}
 {:else}<p class="muted" role="status">Загружаем итоги…</p>{/if}
 
 <style>

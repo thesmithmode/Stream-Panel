@@ -107,44 +107,38 @@
     class:embedded
     aria-label={sessionId ? 'Подписчики за стрим' : 'Подписки и отписки за период'}
   >
-    {#if embedded}<div class="following-info">
-        <Help trigger="О подписках" id="following-help" label="О подписках на канал" text={followingHelp} />
-      </div>{:else}<header>
-        <h2>Подписки и отписки <Help id="following-help" label="О подписках на канал" text={followingHelp} /></h2>
-      </header>{/if}
+    {#if embedded}<div class="following-info"
+        ><Help trigger="О подписках" id="following-help" label="О подписках на канал" text={followingHelp} /></div
+      >{:else}<header
+        ><h2>Подписки и отписки <Help id="following-help" label="О подписках на канал" text={followingHelp} /></h2
+        ></header
+      >{/if}
     {#if error}<p class="muted" role="status">{error}</p>{/if}
     {#if data === null}<p class="muted">Загружаем подписки…</p>{:else}<div class="follow-summary">
-        <p class="small muted history-caption">
-          Сначала новые · время МСК · показано {Math.min(limit, changes.length)} из {changes.length}
-        </p>
-        {#each changes.slice(0, limit) as follower}<div class="follower-row" class:unfollowed={!follower.following}>
-            <span class={follower.source === 'twitch' ? 'twitch' : 'youtube'}>{platform(follower.source)}</span><button
+        <p class="small muted history-caption"
+          >Сначала новые · время МСК · показано {Math.min(limit, changes.length)} из {changes.length}</p
+        >
+        {#each changes.slice(0, limit) as follower}<div class="follower-row" class:unfollowed={!follower.following}
+            ><span class={follower.source === 'twitch' ? 'twitch' : 'youtube'}>{platform(follower.source)}</span><button
               class="text-button follower-name"
-              onclick={() => openFollower(follower)}
-            >
-              {follower.name}
-            </button><span class="follow-change">{follower.following ? 'Подписался' : 'Отписался'}</span><time
+              onclick={() => openFollower(follower)}>{follower.name}</button
+            ><span class="follow-change">{follower.following ? 'Подписался' : 'Отписался'}</span><time
               datetime={new Date(follower.at).toISOString()}
-              title={date(follower.at)}
-            >
-              {eventDate(follower.at)} · {time(follower.at)}
-            </time>
-          </div>{/each}
-        <div class="history-actions">
-          {#if changes.length > limit}<button class="text-button" onclick={() => (limit += 10)}>
-              Показать ещё {Math.min(10, changes.length - limit)}
-            </button>{/if}{#if limit > 10}<button class="text-button" onclick={() => (limit = 10)}>
-              Свернуть
-            </button>{/if}
-        </div>
+              title={date(follower.at)}>{eventDate(follower.at)} · {time(follower.at)}</time
+            ></div
+          >{/each}
+        <div class="history-actions"
+          >{#if changes.length > limit}<button class="text-button" onclick={() => (limit += 10)}
+              >Показать ещё {Math.min(10, changes.length - limit)}</button
+            >{/if}{#if limit > 10}<button class="text-button" onclick={() => (limit = 10)}>Свернуть</button>{/if}</div
+        >
         {#each (data.platforms ?? []).filter((row: any) => row.change !== null && row.change !== row.knownNew && row.change !== 0) as row}<p
             class="small muted"
             title={`Замеры ${time(row.fromAt)}–${time(row.toAt)} МСК: ${row.startTotal} → ${row.endTotal}`}
-          >
-            {platform(row.source)}: общее число {row.change > 0 ? '+' : ''}{row.change}{row.knownNew
+            >{platform(row.source)}: общее число {row.change > 0 ? '+' : ''}{row.change}{row.knownNew
               ? ` · новых поимённо: ${row.knownNew}`
-              : ''}
-          </p>{/each}
+              : ''}</p
+          >{/each}
         {#if !hasFollowers}<p class="muted">Изменений подписок не зафиксировано.</p>{/if}
       </div>{/if}
   </section>

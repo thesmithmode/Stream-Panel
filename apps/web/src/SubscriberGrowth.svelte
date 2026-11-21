@@ -233,33 +233,30 @@
 </script>
 
 <section class="panel chart-panel subscriber-growth" aria-busy={loading} style:--subscriber-color="var(--accent)">
-  <header>
-    <div class="subscriber-heading">
-      <h2>Подписчики</h2>
-      <Help
+  <header
+    ><div class="subscriber-heading"
+      ><h2>Подписчики</h2><Help
         id="subscriber-growth"
         label="О графике подписчиков"
         text="Левая фиолетовая шкала — Twitch, правая красная — YouTube. Шкалы независимы; сравнивайте значения по цвету площадки. Серые полосы — одновременные эфиры, цветные — эфир только одной площадки. Круг — Shorts, ромб — видео; публикации до первого замера YouTube скрыты. Между замерами показано последнее известное число; до первого замера история неизвестна. YouTube не сообщает точное время каждой подписки; с 1000 подписчиков счётчик округляется."
-      />
-    </div>
-  </header>
-  {#if error && !data}<p class="subscriber-note" role="alert">
-      Не удалось загрузить подписчиков. <button class="text-button" onclick={() => void load()}>Повторить</button>
-    </p>{:else if !data}<p class="subscriber-note">
-      {loading ? 'Загружаем подписчиков…' : 'Нет замеров за этот период.'}
-    </p>{:else}
-    <div class="subscriber-totals">
-      {#each series as s}<div class="subscriber-total" data-source={s.source} style:--series-color={color(s.source)}>
-          <small>{name(s.source)}</small><strong>
-            {s.report?.total?.toLocaleString('ru-RU') ?? '—'}
-          </strong>{#if s.report?.change != null}<span class="subscriber-change">
-              {s.report.change > 0 ? '+' : ''}{s.report.change} за период
-            </span>{/if}
-        </div>{/each}
-    </div>
+      /></div
+    ></header
+  >
+  {#if error && !data}<p class="subscriber-note" role="alert"
+      >Не удалось загрузить подписчиков. <button class="text-button" onclick={() => void load()}>Повторить</button></p
+    >{:else if !data}<p class="subscriber-note">{loading ? 'Загружаем подписчиков…' : 'Нет замеров за этот период.'}</p
+    >{:else}
+    <div class="subscriber-totals"
+      >{#each series as s}<div class="subscriber-total" data-source={s.source} style:--series-color={color(s.source)}
+          ><small>{name(s.source)}</small><strong>{s.report?.total?.toLocaleString('ru-RU') ?? '—'}</strong
+          >{#if s.report?.change != null}<span class="subscriber-change"
+              >{s.report.change > 0 ? '+' : ''}{s.report.change} за период</span
+            >{/if}</div
+        >{/each}</div
+    >
     <div class="subscriber-range">{dateRange}</div>
-    <div class="subscriber-plot" bind:clientWidth={width}>
-      <svg height="270" viewBox={`0 0 ${plotWidth} 270`} role="group" aria-label="Число подписчиков Twitch и YouTube">
+    <div class="subscriber-plot" bind:clientWidth={width}
+      ><svg height="270" viewBox={`0 0 ${plotWidth} 270`} role="group" aria-label="Число подписчиков Twitch и YouTube">
         {#each [0, 0.25, 0.5, 0.75, 1] as fraction}<line
             x1={left}
             x2={plotWidth - right}
@@ -273,16 +270,13 @@
             data-axis={s.source}
             fill={color(s.source)}
             stroke={color(s.source)}
-          >
-            <line x1={side} x2={side} y1="30" y2="230" stroke-width="1.25" /><text
+            ><line x1={side} x2={side} y1="30" y2="230" stroke-width="1.25" /><text
               x={side}
               y="18"
               text-anchor={s.source === 'twitch' ? 'start' : 'end'}
               stroke="none"
-              font-size="10"
-            >
-              {name(s.source)}
-            </text>{#each s.scale.ticks as value}<line
+              font-size="10">{name(s.source)}</text
+            >{#each s.scale.ticks as value}<line
                 x1={side}
                 x2={side + (s.source === 'twitch' ? -4 : 4)}
                 y1={y(value, s.source)}
@@ -292,14 +286,12 @@
                 y={y(value, s.source) + 3}
                 text-anchor={s.source === 'twitch' ? 'end' : 'start'}
                 stroke="none"
-                font-size="10"
-              >
-                {axisNumber(value)}
-              </text>{/each}
-          </g>{/each}
-        {#if !totals.length}<text x={plotWidth / 2} y="130" text-anchor="middle" fill="currentColor" font-size="12">
-            Нет замеров за этот период.
-          </text>{/if}
+                font-size="10">{axisNumber(value)}</text
+              >{/each}</g
+          >{/each}
+        {#if !totals.length}<text x={plotWidth / 2} y="130" text-anchor="middle" fill="currentColor" font-size="12"
+            >Нет замеров за этот период.</text
+          >{/if}
         {#each streams as stream}<g
             class="stream-band"
             data-source={stream.source}
@@ -313,8 +305,7 @@
                 selectedStream = stream;
               }
             }}
-          >
-            <rect
+            ><rect
               class="stream-fill"
               x={x(stream.start)}
               width={Math.max(1, x(stream.end) - x(stream.start))}
@@ -329,8 +320,8 @@
               y2="230"
               stroke={color(stream.source)}
               opacity=".3"
-            />
-          </g>{/each}
+            /></g
+          >{/each}
         {#each series as s}<g data-series={s.source}>
             <path
               class="subscriber-line"
@@ -373,17 +364,15 @@
                 }}
               />{/each}
           </g>{/each}
-        {#each dateTicks as at}<g class="subscriber-date-tick">
-            <line x1={x(at)} x2={x(at)} y1="230" y2="234" stroke="currentColor" opacity=".5" /><text
+        {#each dateTicks as at}<g class="subscriber-date-tick"
+            ><line x1={x(at)} x2={x(at)} y1="230" y2="234" stroke="currentColor" opacity=".5" /><text
               x={x(at)}
               y="251"
               text-anchor="middle"
               fill="currentColor"
-              font-size={width < 450 ? 10 : 11}
-            >
-              {label(at, true)}
-            </text>
-          </g>{/each}
+              font-size={width < 450 ? 10 : 11}>{label(at, true)}</text
+            ></g
+          >{/each}
         {#each publications as item}{@const markerY = y(
             subscriberValueAt(youtubePoints, item.publishedAt)!,
             'youtube',
@@ -405,8 +394,7 @@
                 selectedPoint = null;
               }
             }}
-          >
-            <title>{kind(item)} · {label(item.publishedAt, true)} {label(item.publishedAt)}</title><rect
+            ><title>{kind(item)} · {label(item.publishedAt, true)} {label(item.publishedAt)}</title><rect
               x={x(item.publishedAt) - 10}
               y={markerY - 12}
               width="20"
@@ -426,46 +414,40 @@
                 fill={item.kind === 'unknown' ? 'var(--panel,var(--bg))' : color('youtube')}
                 stroke={color('youtube')}
                 stroke-width="1"
-              />{/if}
-          </g>{/each}
-      </svg>
-    </div>
+              />{/if}</g
+          >{/each}
+      </svg></div
+    >
     <div class="subscriber-details">
-      {#if selectedStream}<div class="subscriber-selection">
-          <span>
-            Эфир {label(selectedStream.start, true)} · {label(selectedStream.start)}–{label(selectedStream.end)}
-          </span><button
+      {#if selectedStream}<div class="subscriber-selection"
+          ><span
+            >Эфир {label(selectedStream.start, true)} · {label(selectedStream.start)}–{label(selectedStream.end)}</span
+          ><button
             class="text-button"
             onclick={() => {
               if (selectedStream) onStream(selectedStream.id);
-            }}
-          >
-            Открыть эфир
-          </button>
-        </div>{/if}
-      {#if selectedPoint}<div class="subscriber-selection">
-          <strong style:color={color(selectedPoint.source)}>
-            {name(selectedPoint.source)} · {selectedPoint.total} подписчиков
-          </strong><span>
-            {label(selectedPoint.at, true)} · {label(selectedPoint.at)}
-          </span>{#if selectedPoint.source === 'youtube'}<small>
-              Замер счётчика. Точное время подписки неизвестно.
-            </small>{/if}
-        </div>{/if}
-      {#if selection}<div class="subscriber-selection publication-selection">
-          <span>
-            {kind(selection)} · {label(selection.publishedAt, true)}
-            {label(selection.publishedAt)}
-          </span>{#if selection.kind === 'video'}<span>{selection.title}</span>{/if}
-        </div>{/if}
-      {#if error}<p class="subscriber-refresh-error" role="alert">
-          Не удалось обновить. <button class="text-button" onclick={() => load()}>Повторить</button>
-        </p>{/if}
-      <div class="subscriber-legend" style:--subscriber-color={color('youtube')}>
-        <span><i class="stream-key"></i>Оба</span><span><i class="circle-key"></i>Shorts</span><span>
-          <i class="diamond-key"></i>Видео
-        </span>
-      </div>
+            }}>Открыть эфир</button
+          ></div
+        >{/if}
+      {#if selectedPoint}<div class="subscriber-selection"
+          ><strong style:color={color(selectedPoint.source)}
+            >{name(selectedPoint.source)} · {selectedPoint.total} подписчиков</strong
+          ><span>{label(selectedPoint.at, true)} · {label(selectedPoint.at)}</span
+          >{#if selectedPoint.source === 'youtube'}<small>Замер счётчика. Точное время подписки неизвестно.</small
+            >{/if}</div
+        >{/if}
+      {#if selection}<div class="subscriber-selection publication-selection"
+          ><span>{kind(selection)} · {label(selection.publishedAt, true)} {label(selection.publishedAt)}</span
+          >{#if selection.kind === 'video'}<span>{selection.title}</span>{/if}</div
+        >{/if}
+      {#if error}<p class="subscriber-refresh-error" role="alert"
+          >Не удалось обновить. <button class="text-button" onclick={() => load()}>Повторить</button></p
+        >{/if}
+      <div class="subscriber-legend" style:--subscriber-color={color('youtube')}
+        ><span><i class="stream-key"></i>Оба</span><span><i class="circle-key"></i>Shorts</span><span
+          ><i class="diamond-key"></i>Видео</span
+        ></div
+      >
     </div>
   {/if}
 </section>

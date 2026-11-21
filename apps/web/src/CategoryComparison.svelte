@@ -53,37 +53,31 @@
 </script>
 
 <section class="panel chart-panel category-comparison">
-  <header>
-    <h2>Категории</h2>
-    <span class="muted">{from === 0 ? 'Всё время' : date(from)} — {date(to)}</span>
-  </header>
-  <div class="category-controls">
-    <label>
-      Метрика<select aria-label="Метрика категорий" bind:value={metric}>
-        <option value="meanOnline">Средний онлайн</option><option value="observedPerKnownMinute">
-          В среднем в чате
-        </option><option value="messagesPerHour">Сообщений/ч</option>
-      </select>
-    </label>
-  </div>
-  <div class="category-rows">
-    {#each rows as c}<article class="category-row">
-        <div class="category-title">
-          <h3>{c.name}</h3>
-          <strong>{c[metric] === null ? '—' : number(c[metric] ?? 0)}</strong>
-        </div>
-        <div class="category-bar">
-          <span style:width={`${((c[metric] ?? 0) / max) * 100}%`}>
-            <i style:width={`${c[metric] ? (botValue(c) / c[metric]!) * 100 : 0}%`}></i>
-          </span>
-        </div>
-        <p>
-          {c.sessions} эфиров · {number(c.minutes / 60)} ч{#if coverage(c) !== null && coverage(c) !== undefined && coverage(c)! < 0.999}
+  <header><h2>Категории</h2><span class="muted">{from === 0 ? 'Всё время' : date(from)} — {date(to)}</span></header>
+  <div class="category-controls"
+    ><label
+      >Метрика<select aria-label="Метрика категорий" bind:value={metric}
+        ><option value="meanOnline">Средний онлайн</option><option value="observedPerKnownMinute"
+          >В среднем в чате</option
+        ><option value="messagesPerHour">Сообщений/ч</option></select
+      ></label
+    ></div
+  >
+  <div class="category-rows"
+    >{#each rows as c}<article class="category-row"
+        ><div class="category-title"
+          ><h3>{c.name}</h3><strong>{c[metric] === null ? '—' : number(c[metric] ?? 0)}</strong></div
+        ><div class="category-bar"
+          ><span style:width={`${((c[metric] ?? 0) / max) * 100}%`}
+            ><i style:width={`${c[metric] ? (botValue(c) / c[metric]!) * 100 : 0}%`}></i></span
+          ></div
+        ><p
+          >{c.sessions} эфиров · {number(c.minutes / 60)} ч{#if coverage(c) !== null && coverage(c) !== undefined && coverage(c)! < 0.999}
             · данные за {Math.round(coverage(c)! * 100)}% времени{/if}{#if metric === 'meanOnline' && c.viewerPartialMinutes > 0}
-            · неполные данные площадок{/if}
-        </p>
-      </article>{:else}<p class="muted">Нет эфиров с известной категорией.</p>{/each}
-  </div>
+            · неполные данные площадок{/if}</p
+        ></article
+      >{:else}<p class="muted">Нет эфиров с известной категорией.</p>{/each}</div
+  >
 </section>
 
 <style>

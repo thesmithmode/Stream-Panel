@@ -109,13 +109,12 @@
   {#if error}<p role="alert">{error}</p>{/if}
   {#if busy && !loaded}<p role="status">Загружаем…</p>{:else}
     {#each rows as row, index (row.id)}
-      {#if index === 0 || calendar.format(row.at_ms) !== calendar.format(rows[index - 1]!.at_ms)}<h3 class="event-day">
-          {calendar.format(row.at_ms)}
-        </h3>{/if}
-      <article class:bot-person={row.is_bot} class:human-person={row.is_human}>
-        <time datetime={new Date(row.at_ms).toISOString()} title={date(row.at_ms)}>
-          {clock.format(row.at_ms)}
-        </time>{' '}{#if row.person_id}<a
+      {#if index === 0 || calendar.format(row.at_ms) !== calendar.format(rows[index - 1]!.at_ms)}<h3 class="event-day"
+          >{calendar.format(row.at_ms)}</h3
+        >{/if}
+      <article class:bot-person={row.is_bot} class:human-person={row.is_human}
+        ><time datetime={new Date(row.at_ms).toISOString()} title={date(row.at_ms)}>{clock.format(row.at_ms)}</time
+        >{' '}{#if row.person_id}<a
             class="event-author"
             class:twitch={row.source === 'twitch'}
             class:youtube={row.source === 'youtube'}
@@ -128,55 +127,47 @@
                 event.preventDefault();
                 onPerson(row.person_id!);
               }
-            }}
-          >
-            {row.person_name ?? row.actor_name ?? 'Без автора'}:
-          </a>{:else}<strong
+            }}>{row.person_name ?? row.actor_name ?? 'Без автора'}:</a
+          >{:else}<strong
             class="event-author"
             class:twitch={row.source === 'twitch'}
             class:youtube={row.source === 'youtube'}
             class:youtube-secondary={row.youtubeSecondary}
             title={`${row.actor_name ?? 'Без автора'} · ${sourceName(row.source)}`}
             aria-label={`${row.actor_name ?? 'Без автора'} · ${sourceName(row.source)}`}
-          >
-            {row.person_name ?? row.actor_name ?? 'Без автора'}:
-          </strong>{/if}{' '}<span class="event-text">
-          {#if row.payload.redacted}Сообщение удалено модерацией.{:else if typeof row.payload.text === 'string' && row.payload.text}{#if isAudioDonation(row.payload)}<AudioDonation
+            >{row.person_name ?? row.actor_name ?? 'Без автора'}:</strong
+          >{/if}{' '}<span class="event-text"
+          >{#if row.payload.redacted}Сообщение удалено модерацией.{:else if typeof row.payload.text === 'string' && row.payload.text}{#if isAudioDonation(row.payload)}<AudioDonation
                 text={row.payload.text}
-              />{:else}{row.payload.text}{/if}{:else}{labels[row.type] ?? 'Событие'}{/if}
-        </span>
+              />{:else}{row.payload.text}{/if}{:else}{labels[row.type] ?? 'Событие'}{/if}</span
+        >
         {#if typeof row.payload.amountMinor === 'string' && /^-?\d+$/.test(row.payload.amountMinor) && typeof row.payload.currency === 'string'}{' '}<strong
             class="event-amount"
-          >
-            {donationMoney({
+            >{donationMoney({
               amountMinor: row.payload.amountMinor,
               currency: row.payload.currency,
               rubAmountMinor: typeof row.payload.rubAmountMinor === 'string' ? row.payload.rubAmountMinor : null,
               exchangeRateDate: typeof row.payload.exchangeRateDate === 'string' ? row.payload.exchangeRateDate : null,
-            })}
-          </strong>{/if}
+            })}</strong
+          >{/if}
       </article>
-    {:else}{#if loaded}<p class="muted">
-          {messagesOnly
+    {:else}{#if loaded}<p class="muted"
+          >{messagesOnly
             ? 'Нет сохранённых сообщений за последние 7 дней.'
-            : 'Нет сохранённых событий этого стрима за последние 7 дней.'}
-        </p>{/if}{/each}
+            : 'Нет сохранённых событий этого стрима за последние 7 дней.'}</p
+        >{/if}{/each}
   {/if}
-  <div class="actions">
-    <button
+  <div class="actions"
+    ><button
       class="outline small"
       disabled={busy || offset === 0}
-      onclick={() => (offset = Math.max(0, offset - limit))}
-    >
-      Предыдущие
-    </button><span class="small">Страница {offset / limit + 1}</span><button
+      onclick={() => (offset = Math.max(0, offset - limit))}>Предыдущие</button
+    ><span class="small">Страница {offset / limit + 1}</span><button
       class="outline small"
       disabled={busy || rows.length < limit}
-      onclick={() => (offset += limit)}
-    >
-      Следующие
-    </button><button class="outline small" disabled={busy} onclick={() => refresh++}>Обновить</button>
-  </div>
+      onclick={() => (offset += limit)}>Следующие</button
+    ><button class="outline small" disabled={busy} onclick={() => refresh++}>Обновить</button></div
+  >
 </div>
 
 <style>

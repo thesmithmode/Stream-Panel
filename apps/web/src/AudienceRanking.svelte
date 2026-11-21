@@ -123,61 +123,60 @@
 
 <svelte:window bind:innerWidth={viewport} />
 <section class="panel audience-ranking" aria-label="Рейтинг участников">
-  <header>
-    <h2>Участники чата</h2>
-    <Help
+  <header
+    ><h2>Участники чата</h2><Help
       id={`${id}-help`}
       label="О времени участников"
       text="Время в эфире объединяет интервалы Twitch и YouTube без двойного подсчёта пересечений. Twitch — наблюдаемое присутствие в чате, YouTube — оценка по сообщениям. Площадки не раскрывают персональное время просмотра видео. Нажмите время или стрелку рядом, чтобы раскрыть интервалы. Пауза означает отсутствие сохранённых сигналов площадки, а не подтверждённый уход зрителя. Среднее число участников считается по всей длительности эфира; пропуски наблюдений могут его занижать."
-    />
-  </header>
-  {#if currencies.length}<div class="phone-donation-sort" aria-label="Сортировка по донатам">
-      {#each currencies as currency}<button
+    /></header
+  >
+  {#if currencies.length}<div class="phone-donation-sort" aria-label="Сортировка по донатам"
+      >{#each currencies as currency}<button
           class="text-button"
           aria-label={`Донаты, ${currency}${arrow(`donation:${currency}`)}`}
           aria-pressed={metric === `donation:${currency}`}
-          onclick={() => sort(`donation:${currency}`)}
-        >
-          Донаты · {currency}{arrow(`donation:${currency}`)}
-        </button>{/each}
-    </div>{/if}
-  {#if classificationError}<p class="notice error" role="alert">
-      {classificationError} <button class="text-button" onclick={() => classificationRefresh++}>Повторить</button>
-    </p>{/if}
-  <div class="table-scroll">
-    <table>
-      <thead>
-        <tr>
-          <th scope="col" aria-sort={metric === 'name' ? (descending ? 'descending' : 'ascending') : 'none'}>
-            <button onclick={() => sort('name')}>Участник{arrow('name')}</button>
-          </th>
+          onclick={() => sort(`donation:${currency}`)}>Донаты · {currency}{arrow(`donation:${currency}`)}</button
+        >{/each}</div
+    >{/if}
+  {#if classificationError}<p class="notice error" role="alert"
+      >{classificationError} <button class="text-button" onclick={() => classificationRefresh++}>Повторить</button></p
+    >{/if}
+  <div class="table-scroll"
+    ><table>
+      <thead
+        ><tr>
+          <th scope="col" aria-sort={metric === 'name' ? (descending ? 'descending' : 'ascending') : 'none'}
+            ><button onclick={() => sort('name')}>Участник{arrow('name')}</button></th
+          >
           <th
             scope="col"
             class:with-disclosure={showIntervals}
             aria-sort={metric === 'presence' ? (descending ? 'descending' : 'ascending') : 'none'}
+            ><button aria-label={`Время в чате${arrow('presence')}`} onclick={() => sort('presence')}
+              ><span class="desktop-label">Время в чате</span><span class="phone-label">В чате</span>{arrow(
+                'presence',
+              )}</button
+            ></th
           >
-            <button aria-label={`Время в чате${arrow('presence')}`} onclick={() => sort('presence')}>
-              <span class="desktop-label">Время в чате</span><span class="phone-label">В чате</span>{arrow('presence')}
-            </button>
-          </th>
-          <th scope="col" aria-sort={metric === 'messages' ? (descending ? 'descending' : 'ascending') : 'none'}>
-            <button aria-label={`Сообщения${arrow('messages')}`} onclick={() => sort('messages')}>
-              <span class="desktop-label">Сообщения</span><span class="phone-label">Сообщ.</span>{arrow('messages')}
-            </button>
-          </th>
+          <th scope="col" aria-sort={metric === 'messages' ? (descending ? 'descending' : 'ascending') : 'none'}
+            ><button aria-label={`Сообщения${arrow('messages')}`} onclick={() => sort('messages')}
+              ><span class="desktop-label">Сообщения</span><span class="phone-label">Сообщ.</span>{arrow(
+                'messages',
+              )}</button
+            ></th
+          >
           {#each currencyColumns as currency}<th
               scope="col"
               class="donation-column"
               aria-sort={metric === `donation:${currency}` ? (descending ? 'descending' : 'ascending') : 'none'}
-            >
-              <button onclick={() => sort(`donation:${currency}`)}>
-                Донаты, {currency}{arrow(`donation:${currency}`)}
-              </button>
-            </th>{/each}
-        </tr>
-      </thead>
-      <tbody>
-        {#each ranked.slice(0, limit) as person (person.id)}
+              ><button onclick={() => sort(`donation:${currency}`)}
+                >Донаты, {currency}{arrow(`donation:${currency}`)}</button
+              ></th
+            >{/each}
+        </tr></thead
+      >
+      <tbody
+        >{#each ranked.slice(0, limit) as person (person.id)}
           {@const regionId = `${id}-intervals-${person.id}`}
           {@const hasIntervals = showIntervals && !!person.intervals?.length}
           <tr
@@ -190,17 +189,15 @@
               ? classificationStates[person.id]!.manualHuman || classificationStates[person.id]!.automaticHuman
               : person.is_human}
           >
-            <td>
-              <div class="participant-name-line">
-                <button
+            <td
+              ><div class="participant-name-line"
+                ><button
                   class={`text-button person-name ${platformClass(person.accounts?.map((a) => a.source))}`}
                   class:youtube-secondary={person.youtubeSecondary}
                   class:with-nicks={platformNicknames(person).length > 0}
                   title={person.name}
-                  onclick={() => onPerson(person.id)}
+                  onclick={() => onPerson(person.id)}>{person.name}</button
                 >
-                  {person.name}
-                </button>
                 {#if onClassificationChange}<PersonBot
                     personId={person.id}
                     personName={person.name}
@@ -209,52 +206,50 @@
                     compact
                     onState={(state) => (classificationStates = { ...classificationStates, [person.id]: state })}
                     onChange={classificationChanged}
-                  />{/if}
-              </div>
-              {#if platformNicknames(person).length}<div class="platform-nicks">
-                  {#each platformNicknames(person) as account}<span
+                  />{/if}</div
+              >
+              {#if platformNicknames(person).length}<div class="platform-nicks"
+                  >{#each platformNicknames(person) as account}<span
                       class:twitch={account.source === 'twitch'}
                       class:youtube={account.source === 'youtube'}
                       class:youtube-secondary={account.secondary}
                       title={`${account.source === 'twitch' ? 'Twitch' : 'YouTube'} · ${account.name}`}
-                    >
-                      {account.name}
-                    </span>{/each}
-                </div>{/if}
-              {#if currencies.some((c) => BigInt(person.donations?.[c] ?? '0') !== 0n)}<div class="phone-donations">
-                  {#each currencies as c}{#if BigInt(person.donations?.[c] ?? '0') !== 0n}<span>
-                        {money(person.donations![c]!, c)}
-                      </span>{/if}{/each}
-                </div>{/if}
+                      >{account.name}</span
+                    >{/each}</div
+                >{/if}
+              {#if currencies.some((c) => BigInt(person.donations?.[c] ?? '0') !== 0n)}<div class="phone-donations"
+                  >{#each currencies as c}{#if BigInt(person.donations?.[c] ?? '0') !== 0n}<span
+                        >{money(person.donations![c]!, c)}</span
+                      >{/if}{/each}</div
+                >{/if}
             </td>
-            <td class:with-disclosure={showIntervals}>
-              {#if hasIntervals}<button
+            <td class:with-disclosure={showIntervals}
+              >{#if hasIntervals}<button
                   class="interval-toggle"
                   aria-label={`Интервалы ${person.name}`}
                   aria-expanded={expanded.has(person.id)}
                   aria-controls={expanded.has(person.id) ? regionId : undefined}
                   onclick={() => toggle(person.id)}
-                >
-                  <strong>{durationLabel(presenceMinutes(person))}</strong><Icon name="arrow" size={14} />
-                </button>{:else}<strong class="plain-duration">
-                  {person.youtubeSecondary
+                  ><strong>{durationLabel(presenceMinutes(person))}</strong><Icon name="arrow" size={14} /></button
+                >{:else}<strong class="plain-duration"
+                  >{person.youtubeSecondary
                     ? '—'
                     : missingPresence &&
                         person.accounts?.some((a) => a.source === 'twitch') &&
                         presenceMinutes(person) === 0
                       ? '—'
-                      : durationLabel(presenceMinutes(person))}
-                </strong>{/if}
-            </td>
+                      : durationLabel(presenceMinutes(person))}</strong
+                >{/if}</td
+            >
             <td class="message-count">{person.messages ?? 0}</td>
-            {#each currencyColumns as currency}<td class="donation-column">
-                {BigInt(person.donations?.[currency] ?? '0') === 0n
+            {#each currencyColumns as currency}<td class="donation-column"
+                >{BigInt(person.donations?.[currency] ?? '0') === 0n
                   ? '—'
-                  : money(person.donations![currency]!, currency)}
-              </td>{/each}
+                  : money(person.donations![currency]!, currency)}</td
+              >{/each}
           </tr>
-          {#if hasIntervals && expanded.has(person.id)}<tr class="interval-detail">
-              <td colspan={3 + currencyColumns.length}>
+          {#if hasIntervals && expanded.has(person.id)}<tr class="interval-detail"
+              ><td colspan={3 + currencyColumns.length}>
                 <div id={regionId} role="region" aria-label={`Интервалы ${person.name}`} class="interval-list">
                   {#each groups(person) as spans}
                     <ul class="platform-intervals">
@@ -267,52 +262,49 @@
                             class:youtube={span.kind !== 'observed'}
                             class:repeated={index > 0}
                             title={source(span.kind, person)}
-                          >
-                            <span class="desktop-label">{source(span.kind, person)}</span><span class="phone-label">
-                              {label.platform === 'Twitch' ? 'Twitch' : 'YT'}{label.estimate
+                            ><span class="desktop-label">{source(span.kind, person)}</span><span class="phone-label"
+                              >{label.platform === 'Twitch' ? 'Twitch' : 'YT'}{label.estimate
                                 ? ' · оценка'
-                                : ''}{#if label.nick}<span class="phone-nick">{label.nick}</span>{/if}
-                            </span>
-                          </small>
-                          <span class="interval-range">
-                            {intervalRange(span.from, span.to, streamStart, streamEnd)}
-                          </span>
-                          <strong>
-                            {durationLabel((span.to - span.from) / 60000)}{#if span.gap > 0}<span
+                                : ''}{#if label.nick}<span class="phone-nick">{label.nick}</span>{/if}</span
+                            ></small
+                          >
+                          <span class="interval-range">{intervalRange(span.from, span.to, streamStart, streamEnd)}</span
+                          >
+                          <strong
+                            >{durationLabel((span.to - span.from) / 60000)}{#if span.gap > 0}<span
                                 class="phone-gap"
                                 title={`Пауза ${source(span.kind, person)} · ${durationLabel(span.gap / 60000)}`}
                               >
                                 · пауза {durationLabel(span.gap / 60000)
                                   .replaceAll(' мин', 'м')
-                                  .replaceAll(' ч', 'ч')}
-                              </span>{/if}
-                          </strong>
+                                  .replaceAll(' ч', 'ч')}</span
+                              >{/if}</strong
+                          >
                           {#if span.gap > 0}<span
                               class="interval-gap"
                               title="Промежуток без сохранённых сигналов площадки"
-                            >
-                              Пауза {span.kind === 'observed' ? 'Twitch' : 'YouTube'} · {durationLabel(
+                              >Пауза {span.kind === 'observed' ? 'Twitch' : 'YouTube'} · {durationLabel(
                                 span.gap / 60000,
-                              )}
-                            </span>{/if}
+                              )}</span
+                            >{/if}
                         </li>
                       {/each}
                     </ul>
                   {/each}
                 </div>
-              </td>
-            </tr>{/if}
-        {:else}<tr>
-            <td colspan={3 + currencyColumns.length} class="muted empty-ranking">
-              Нет сохранённых данных об участниках
-            </td>
-          </tr>{/each}
-      </tbody>
-    </table>
-  </div>
-  {#if ranked.length > limit}<button class="outline small more" onclick={() => (limit += 50)}>
-      Показать ещё ({ranked.length - limit})
-    </button>{/if}
+              </td></tr
+            >{/if}
+        {:else}<tr
+            ><td colspan={3 + currencyColumns.length} class="muted empty-ranking"
+              >Нет сохранённых данных об участниках</td
+            ></tr
+          >{/each}</tbody
+      >
+    </table></div
+  >
+  {#if ranked.length > limit}<button class="outline small more" onclick={() => (limit += 50)}
+      >Показать ещё ({ranked.length - limit})</button
+    >{/if}
 </section>
 
 <style>

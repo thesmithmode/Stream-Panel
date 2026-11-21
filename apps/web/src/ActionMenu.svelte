@@ -29,13 +29,11 @@
     onclick={(event) => {
       event.preventDefault();
       open = !open;
-    }}
+    }}><Icon name="more" /></summary
   >
-    <Icon name="more" />
-  </summary>
-  {#if open}<Sheet bind:open {title} {trigger} compact>
-      <div class="action-menu-content">{@render children(() => (open = false))}</div>
-    </Sheet>{/if}
+  {#if open}<Sheet bind:open {title} {trigger} compact
+      ><div class="action-menu-content">{@render children(() => (open = false))}</div></Sheet
+    >{/if}
 </details>
 
 <style>

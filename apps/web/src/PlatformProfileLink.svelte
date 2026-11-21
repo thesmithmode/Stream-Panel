@@ -13,10 +13,9 @@
     target="_blank"
     rel="noopener noreferrer"
     aria-label={`Открыть ${name} на ${link.source === 'twitch' ? 'Twitch' : 'YouTube'} (новая вкладка)`}
-  >
-    {#if !iconOnly}{link.source === 'twitch' ? 'Twitch' : 'YouTube'}
-    {/if}<Icon name="external" size={iconOnly ? 16 : 12} />
-  </a>{/if}
+    >{#if !iconOnly}{link.source === 'twitch' ? 'Twitch' : 'YouTube'}
+    {/if}<Icon name="external" size={iconOnly ? 16 : 12} /></a
+  >{/if}
 
 <style>
   .platform-profile-link {
