@@ -1,6 +1,7 @@
+import type {ProfileName} from "../../../packages/core/src/profiles";
 export const views=['overview','stream','sessions','people','analytics','donations','connections','settings'] as const;
 export type View=typeof views[number];
-export interface Route {view:View;session:string;person:string;profile:'ruslan'|'gulnaz';section?:string;page?:number;returnTo?:string;period?:string|undefined}
+export interface Route {view:View;session:string;person:string;profile:ProfileName;section?:string;page?:number;returnTo?:string;period?:string|undefined}
 export function readRoute(search:string,profile:Route['profile']='ruslan'):Route{
  const q=new URLSearchParams(search),view=q.get('view'),session=q.get('stream')??'';
  const page=Number(q.get('page'));

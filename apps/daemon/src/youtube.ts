@@ -4,7 +4,7 @@ import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import type { ConfigurationPort, Tokens } from "./config.js";
 import type {StorePort} from './store-contract.js';
 type YoutubeStore = StorePort<'youtubePublications' | 'followingSnapshot' | 'gap' | 'observePlatformStream' | 'platformMissing' | 'youtubeData' | 'youtubeMessages' | 'youtubeQuota' | 'youtubeSnapshot' | 'youtubeViewers'>;
-import { object, string } from "./provider-values.js";
+import { object, string, type ProviderConnection } from "./provider-values.js";
 const scopes = ["https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/yt-analytics.readonly"];
 const videoParts='snippet,statistics,contentDetails,liveStreamingDetails,status,recordingDetails,topicDetails,localizations,paidProductPlacementDetails';
 /** Google quota units per Data API read (https://developers.google.com/youtube/v3/determine_quota_cost): every list used here costs 1, a live chat read costs 5. */
@@ -20,7 +20,7 @@ type ChatPace={at:number;credits:number;quiet:boolean;floor:number};
 // snippet.liveBroadcastContent leaves 'live' and actualEndTime appears when a stream ends,
 // and either signal alone triggers rediscovery (whichever YouTube updates first).
 const stillLive=(video:Record<string,any>|undefined)=>!!video&&!!video.liveStreamingDetails&&typeof video.liveStreamingDetails==='object'&&!video.liveStreamingDetails.actualEndTime&&video.snippet?.liveBroadcastContent==='live';
-export class YouTubeConnection {
+export class YouTubeConnection implements ProviderConnection {
   status:{state:string;account:string;detail:string;lastSyncAt?:number;lastFollowersAt?:number} = { state: "disconnected", account: "", detail: "" };
   private pending: { state: string; verifier: string; expires: number; clientId: string; secret: string } | undefined;
   private generation = 0;

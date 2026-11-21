@@ -1,4 +1,5 @@
-export type Profile = "ruslan" | "gulnaz";
+import {isProfileName,type ProfileName} from "../../../packages/core/src/profiles";
+export type Profile = ProfileName;
 type Storage = { getItem(key: string): string | null; setItem(key: string, value: string): void };
 
 // Read persisted preference once. Another tab may update storage, but cannot
@@ -9,7 +10,7 @@ export function createProfileSelection(storage: () => Storage) {
   return {
     get: () => profile,
     set(value: Profile) {
-      if (value !== "ruslan" && value !== "gulnaz") throw new Error("INVALID_PROFILE");
+      if (!isProfileName(value)) throw new Error("INVALID_PROFILE");
       profile = value;
       try { storage().setItem("sp-profile", value); } catch { /* private browser: in-memory selection */ }
     },

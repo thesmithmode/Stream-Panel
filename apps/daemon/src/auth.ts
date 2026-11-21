@@ -1,9 +1,10 @@
 import Database from "better-sqlite3";
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { PROFILES, type ProfileName } from "../../../packages/core/src/profiles.js";
 
-export const profiles = ["ruslan", "gulnaz"] as const;
+export const profiles = PROFILES;
 export const ACCOUNT_SESSION_SECONDS = 30 * 24 * 60 * 60;
-export type Profile = typeof profiles[number];
+export type Profile = ProfileName;
 export type UserSession = { profile: Profile; username: string; displayName: string; csrf: string; tokenHash: string };
 /** Ruslan owns the installation; Gulnaz can use only her own profile. */
 export function allowedProfiles(profile: Profile): readonly Profile[] { return profile === "ruslan" ? profiles : [profile]; }
@@ -32,7 +33,7 @@ export class AccountStore {
     this.db.pragma("foreign_keys = ON");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS sp_users (
-        profile TEXT PRIMARY KEY CHECK(profile IN ('ruslan','gulnaz')),
+        profile TEXT PRIMARY KEY CHECK(profile IN (${profiles.map(profile=>`'${profile}'`).join(',')})),
         username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
         salt TEXT NOT NULL, password_hash TEXT NOT NULL
       ) STRICT;

@@ -10,7 +10,7 @@ import {
 } from "../../../packages/core/src/chatters.js";
 import type { EventInput } from "../../../packages/core/src/domain.js";
 
-import {object, string, type ConnectionStatus, type SocketFactory} from './provider-values.js';
+import {object, string, type ConnectionStatus, type ProviderConnection, type SocketFactory} from './provider-values.js';
 export {object, string, type ConnectionStatus, type SocketFactory} from './provider-values.js';
 
 export function messageText(value: unknown): string {
@@ -122,7 +122,7 @@ export function isDefinitiveTwitchAuthFailure(
   );
 }
 
-export class TwitchConnection {
+export class TwitchConnection implements ProviderConnection {
   status: ConnectionStatus = {
     state: "disconnected",
     detail: "Не подключён",

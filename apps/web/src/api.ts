@@ -83,7 +83,7 @@ export interface Event {
     originChannelId?: string;
   };
 }
-export interface PlatformLink {identityId:string;source:'twitch'|'youtube';url:string}
+export type {PlatformLink} from '../../../packages/core/src/platform-links';
 export interface Person {
   youtubeSecondary?:boolean;
   is_bot?: number|boolean;

@@ -1,5 +1,6 @@
 export interface PlatformIdentity {id:string;source:string;external_id:string}
-export interface PlatformLink {identityId:string;source:'twitch'|'youtube';url:string}
+import type {PlatformLink} from '../../../packages/core/src/platform-links.js';
+export type {PlatformLink};
 type Login={id:string;login:string};
 
 /** Public profile addresses only; names and donor aliases are never URL identifiers. */
