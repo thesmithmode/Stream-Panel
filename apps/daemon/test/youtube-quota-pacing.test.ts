@@ -7,7 +7,7 @@ type Live={id:string;chat?:string};
 /** A YouTube channel fixture with an in-memory store, a manual clock and per-resource call logs. */
 const fixture=(options:{chatOnly?:boolean}={})=>{
  const base=Date.parse('2026-11-20T12:00:00Z');
- const state={at:base,live:[{id:'live',chat:'chat'}] as Live[],ended:new Set<string>(),messages:1,floor:60000,chatError:0,offlineAt:''};
+ const state={at:base,live:[{id:'live',chat:'chat'}] as Live[],ended:new Set<string>(),notLive:new Set<string>(),messages:1,floor:60000,chatError:0,offlineAt:''};
  const calls:{path:string;params:URLSearchParams;at:number}[]=[],quota:[string,string,number,number][]=[],messages:[string,unknown[]][]=[];
  const snapshots:Record<string,{data:unknown;updatedAt:number}>={channel:{data:{id:'owner',statistics:{subscriberCount:'10'}},updatedAt:base},report:{data:{},updatedAt:base},'cursor:followers':{data:true,updatedAt:base}};
  const db={call:async(method:string,...args:any[])=>{
@@ -23,7 +23,7 @@ const fixture=(options:{chatOnly?:boolean}={})=>{
  const request:typeof fetch=async input=>{
   const url=new URL(String(input)),path=url.pathname.split('/').at(-1)!;calls.push({path,params:url.searchParams,at:state.at});
   if(path==='liveBroadcasts')return Response.json({items:state.live.map(b=>({id:b.id,snippet:{channelId:'owner',...(b.chat?{liveChatId:b.chat}:{})}}))});
-  if(path==='videos')return Response.json({items:url.searchParams.get('id')!.split(',').map(id=>({id,liveStreamingDetails:{actualStartTime:new Date(base).toISOString(),concurrentViewers:'3',...(state.ended.has(id)?{actualEndTime:new Date(state.at).toISOString()}:{})}}))});
+  if(path==='videos')return Response.json({items:url.searchParams.get('id')!.split(',').map(id=>({id,snippet:{liveBroadcastContent:state.ended.has(id)||state.notLive.has(id)?'none':'live'},liveStreamingDetails:{actualStartTime:new Date(base).toISOString(),concurrentViewers:'3',...(state.ended.has(id)?{actualEndTime:new Date(state.at).toISOString()}:{})}}))});
   if(path==='messages'){
    if(state.chatError){state.chatError--;return Response.json({error:{errors:[{reason:'liveChatEnded'}]}},{status:403});}
    page++;return Response.json({nextPageToken:`page-${page}`,pollingIntervalMillis:state.floor,...(state.offlineAt?{offlineAt:state.offlineAt}:{}),items:Array.from({length:state.messages},(_,i)=>({id:`m${page}-${i}`,snippet:{type:'textMessageEvent',publishedAt:new Date(state.at).toISOString(),displayMessage:'hi'},authorDetails:{channelId:'viewer'}}))});
@@ -158,5 +158,21 @@ test('the supplementary chat reuses its broadcast list for 5 minutes and redisco
   const read=f.count('messages');while(f.count('messages')===read){await f.yt.collectOnce();f.state.at+=60000;}
   // The offline chat dropped the reused list, so the very next cycle rediscovers instead of waiting out the 5 minutes.
   f.state.live=[];const before=f.count('liveBroadcasts');assert.equal(await f.yt.collectOnce(),300000);assert.equal(f.count('liveBroadcasts'),before+1);
+ }finally{await f.yt.stop();}
+});
+
+test('a video that stops being live in snippet.liveBroadcastContent is rediscovered at once, before actualEndTime appears',async()=>{
+ const f=fixture();
+ try{
+  await f.yt.collectOnce();f.state.at+=60000;await f.yt.collectOnce();assert.equal(f.count('liveBroadcasts'),1,'live video keeps the reused list');
+  // YouTube already moved the stream out of live but has not published actualEndTime yet.
+  f.state.notLive.add('live');f.state.live=[];f.state.at+=60000;
+  const videos=f.count('videos');assert.equal(await f.yt.collectOnce(),300000);
+  assert.equal(f.count('liveBroadcasts'),2,'rediscovered in the same cycle');assert.deepEqual(f.snapshots.broadcasts!.data,[]);
+  assert.ok(f.count('videos')>=videos+1);
+  // Same signal while the listing still names the stream: one rediscovery, nothing else changes.
+  const g=fixture();try{
+   await g.yt.collectOnce();g.state.at+=60000;g.state.notLive.add('live');await g.yt.collectOnce();assert.equal(g.count('liveBroadcasts'),2,'listing still names it: one rediscovery');
+  }finally{await g.yt.stop();}
  }finally{await f.yt.stop();}
 });

@@ -52,12 +52,12 @@ test('a merge in one profile reaches cached reads of the other profile at once a
  try{
   await Promise.all([a.ready,b.ready]);const at=Date.UTC(2026,9,29,12);
   const chat=(user:string,name:string)=>({source:'twitch' as const,accountId:'owner',externalId:`${user}-chat`,type:'chat.message',actor:{externalId:user,displayName:name},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider' as const,transport:'eventsub' as const,payload:{text:'hi'}});
-  const video=[{id:'yt-chat',snippet:{type:'textMessageEvent',publishedAt:new Date(at).toISOString(),displayMessage:'hi'},authorDetails:{channelId:'UCegor',displayName:'@egorbarinov'}}];
-  for(const client of [a,b]){await client.call('ingest',chat('100','chikist007'));await client.call('youtubeMessages','yt','chat',video);}
+  const video=[{id:'yt-chat',snippet:{type:'textMessageEvent',publishedAt:new Date(at).toISOString(),displayMessage:'hi'},authorDetails:{channelId:'UCsample',displayName:'@samplechannel'}}];
+  for(const client of [a,b]){await client.call('ingest',chat('100','viewer4207'));await client.call('youtubeMessages','yt','chat',video);}
   assert.equal((await (b.call('persons') as Promise<any[]>)).length,2);
-  const people=await (a.call('persons') as Promise<any[]>),tw=people.find(p=>p.display_name==='chikist007'),yt=people.find(p=>p.display_name==='@egorbarinov');
+  const people=await (a.call('persons') as Promise<any[]>),tw=people.find(p=>p.display_name==='viewer4207'),yt=people.find(p=>p.display_name==='@samplechannel');
   await a.call('merge',yt.id,tw.id,yt.revision,tw.revision,at);
-  assert.deepEqual((await (b.call('persons') as Promise<any[]>)).map(p=>p.display_name),['chikist007'],'the other profile observes the shared merge before its next cache hit');
+  assert.deepEqual((await (b.call('persons') as Promise<any[]>)).map(p=>p.display_name),['viewer4207'],'the other profile observes the shared merge before its next cache hit');
   const calls=b.queueStatus().operations.persons!.calls;
   for(let i=0;i<3;i++){await b.call('persons');await a.call('changes');}
   assert.equal(b.queueStatus().operations.persons!.calls,calls,'nothing keeps invalidating after the change settled');
