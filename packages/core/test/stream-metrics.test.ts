@@ -27,3 +27,15 @@ test('several segments of one provider in a minute represent that provider only 
  const data=streamMetrics([{from:0,to:2*minute}],[{observed_at_ms:minute,twitch_viewers:5,youtube_viewers:null}],new Map(),[{platform:'twitch',from:0,to:minute+30000},{platform:'twitch',from:minute,to:2*minute}]);
  assert.equal(data.viewers.all.peak,5);assert.equal(data.viewers.all.mean,5);
 });
+
+test('combined mean adds independent counters and excludes incomplete minutes',()=>{
+ const data=streamMetrics([{from:0,to:3*minute}],[
+  {observed_at_ms:1000,twitch_viewers:3,youtube_viewers:null},
+  {observed_at_ms:2000,twitch_viewers:null,youtube_viewers:2},
+  {observed_at_ms:minute,twitch_viewers:1,youtube_viewers:0},
+  {observed_at_ms:2*minute,twitch_viewers:3,youtube_viewers:null},
+ ],new Map());
+ assert.equal(data.viewers.all.mean,3);
+ assert.equal(data.viewers.all.peak,5);
+ assert.equal(data.viewers.all.coverageRatio,2/3);
+});

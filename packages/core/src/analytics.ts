@@ -670,10 +670,13 @@ function compareStreams({scope:{sessions,source,to,botPeople},layout:{samplesByS
             seen.add(e.id);
         const durationMs=(selectedBySession.get(s.id)??[]).reduce((n,segment)=>n+segment.to-segment.from,0);
         const donations=streamDonations.get(s.id)??{},messages=sessionMessages.get(s.id)??0;
-        const metrics=streamMetrics((selectedBySession.get(s.id)??[]),(samplesBySession.get(s.id)??[]),streamAuthors.get(s.id)??new Map());
-        const aggregate=streamMetrics((selectedBySession.get(s.id)??[]),[...new Set((selectedBySession.get(s.id)??[]).flatMap(segment=>Array.from({length:Math.ceil(segment.to/60000)-Math.floor(segment.from/60000)},(_,i)=>(Math.floor(segment.from/60000)+i)*60000)))].map(at=>timeline.get(at)!).filter(Boolean).map(p=>({observed_at_ms:p.at,twitch_viewers:p.viewersPartial?null:p.viewers,youtube_viewers:0})),new Map());
-        metrics.viewers.all=aggregate.viewers.all;
-        metrics.viewers.known=streamMetrics(selectedBySession.get(s.id)??[],(samplesBySession.get(s.id)??[]).map(p=>({...p,twitch_viewers:source==='youtube'?null:p.twitch_viewers,youtube_viewers:source==='twitch'?null:p.youtube_viewers})),new Map(),(platformsBySession.get(s.id)??[]).filter(p=>source==='all'||p.platform===source).map(p=>({platform:p.platform,from:p.started_at_ms,to:p.ended_at_ms??to}))).viewers.known;
+        const spans=selectedBySession.get(s.id)??[];
+        const samples=samplesBySession.get(s.id)??[];
+        const links=platformsBySession.get(s.id)??[];
+        const activePlatforms=links.filter(p=>source==='all'||p.platform===source)
+            .map(p=>({platform:p.platform,from:p.started_at_ms,to:p.ended_at_ms??to}));
+        if(!links.length)activePlatforms.push({platform:source==='youtube'?'youtube':'twitch',from:s.started_at_ms,to:s.ended_at_ms??to});
+        const metrics=streamMetrics(spans,samples,streamAuthors.get(s.id)??new Map(),activePlatforms);
         const botSamples=(samplesBySession.get(s.id)??[]).map(p=>{const point=timeline.get(Math.floor(p.observed_at_ms/60000)*60000);return {...p,twitch_viewers:p.twitch_viewers===null?null:point?.botTwitchViewers??0,youtube_viewers:p.youtube_viewers===null?null:point?.botYoutubeViewers??0};});
         const botViewers=streamMetrics(selectedBySession.get(s.id)??[],botSamples,new Map(),(platformsBySession.get(s.id)??[]).filter(p=>source==='all'||p.platform===source).map(p=>({platform:p.platform,from:p.started_at_ms,to:p.ended_at_ms??to}))).viewers;
         const botMessages=audience.filter(p=>botPeople.has(p.id)).reduce((n,p)=>n+p.messageCounts.filter(m=>selection.contains(s.id,m.at)).reduce((n,m)=>n+m.count,0),0);
