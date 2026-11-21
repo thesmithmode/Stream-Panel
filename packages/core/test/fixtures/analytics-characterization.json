@@ -207,6 +207,7 @@
  "table sp_person_classifications": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
  "table sp_youtube_quota": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
  "table split_guards": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+ "table stream_clips": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
  "table stream_samples": "42c49ae1cab571d4589bd55a4984255c48bb9b587aa9825ff9ef2038c77ca205",
  "table subscriber_counts": "9382a79297ef44d50cfda73b273abf91bbd07141a4d02224ce06370de58ce44e",
  "table subscriber_follows": "a7b499605afce401a3cb3e66c2fd7ab495ad381d64a2398c05a4abb644cde32d",

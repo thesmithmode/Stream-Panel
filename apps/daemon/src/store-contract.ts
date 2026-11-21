@@ -80,6 +80,8 @@ export const storeOperations={
   donationCandidates:"cached",
   events:"cached",
   recentEvents:"read",
+  streamClips:"read",
+  saveStreamClip:"write",
   purgeRecentEvents:"maintenance",
   summary:"cached",
   grid:"read",

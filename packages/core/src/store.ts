@@ -9,6 +9,7 @@ import {AnalyticsHistory} from "./analytics-history.js";
 import {EventIngestion} from "./event-ingestion.js";
 import {RecentEvents,type RecentFilter} from './recent-events.js';
 export {priorModerationQuery} from "./event-ingestion.js";
+import {StreamClips} from './stream-clips.js';
 import {StreamSessions} from "./stream-sessions.js";
 import {IdentityLinks} from "./identity-links.js";
 import {SharedIdentities,type SyncHint} from "./shared-identities.js";
@@ -51,6 +52,7 @@ export class StreamStore {
   private readonly annotations:PersonAnnotations;
   private readonly eventIngestion:EventIngestion;
   private readonly streams:StreamSessions;
+  private readonly clips:StreamClips;
   private readonly links:IdentityLinks;
   private readonly queries:AudienceQueries;
   private readonly shared:SharedIdentities|null;
@@ -62,6 +64,7 @@ export class StreamStore {
     this.groups=new SessionGroups(this.db);
     this.annotations = new PersonAnnotations(this.db);
     this.bots=new PersonBots(this.reads);
+    this.clips=new StreamClips(this.db);
     this.streams=new StreamSessions(this.db,this.reads);
     this.links=new IdentityLinks(this.db,id=>this.annotations.personRevision(id));
     this.queries=new AudienceQueries(this.reads);
@@ -235,7 +238,15 @@ export class StreamStore {
     source?:string,
   ) {return this.bots.decorate(this.queries.events(sessionId?this.groups.root(sessionId):undefined,personId,fromMs,toMs,type,source),p=>p.person_id as string|null);}
   recentEvents(offset=0,limit=100,filter:RecentFilter={}) {return this.bots.decorate(new RecentEvents(this.db).list(offset,limit,Date.now(),{...filter,...(filter.session?{session:this.groups.root(filter.session)}:{})}),p=>p.person_id);}
-  purgeRecentEvents() {return new RecentEvents(this.db).purge();}
+  streamClips(session:string,account:string){return this.clips.list(session,account);}
+  saveStreamClip(session:string,account:string,stream:string,id:string,at:number,position:number){
+    return this.clips.save(session,account,stream,id,at,position);
+  }
+  purgeRecentEvents() {
+    const now=Date.now();
+    this.clips.purge(now);
+    return new RecentEvents(this.db).purge(now);
+  }
   summary(
     sessionId?: string,
     excludedBotLogins: readonly string[] | false = [],

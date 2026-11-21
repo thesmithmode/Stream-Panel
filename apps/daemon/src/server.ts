@@ -3,6 +3,7 @@ import {registerAnalyticsCompression} from './analytics-compression.js';
 import {registerRouteSchemas} from './route-schemas.js';
 import {registerPeopleRoutes} from './people-routes.js';
 import {registerDonationsRoutes} from './donations-routes.js';
+import {registerClipRoutes} from './clip-routes.js';
 import {registerStreamsRoutes} from './streams-routes.js';
 import {object, string} from './provider-values.js';
 import {prepareChatStorage} from "./chat-cleanup.js";
@@ -199,6 +200,7 @@ export async function createApplication(
   registerPeopleRoutes(app, db, configuration, ids=>twitch.profileLogins(ids));
   registerDonationsRoutes(app, db, configuration);
   registerStreamsRoutes(app, db, configuration);
+  registerClipRoutes(app, db, configuration, twitch);
   const dataEpoch=randomUUID();
   const connectionRevision=()=>createHash('sha256').update(JSON.stringify([configuration.publicView(),...[twitch.status,youtube.status,youtubeSecondary.status,da.status].map(({state,account,detail})=>({state,account,detail}))])).digest('hex');
   const sync=()=>({twitch:{lastSyncAt:twitch.status.lastSyncAt??null,lastFollowersAt:twitch.status.lastFollowersAt??null,lastEventAt:twitch.status.lastEventAt??null},youtube:{lastSyncAt:youtube.status.lastSyncAt??null,lastFollowersAt:youtube.status.lastFollowersAt??null},donationalerts:{lastSyncAt:da.status.lastSyncAt??null,lastEventAt:da.status.lastEventAt??null}});
