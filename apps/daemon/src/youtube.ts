@@ -4,7 +4,7 @@ import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import type { ConfigurationPort, Tokens } from "./config.js";
 import type {StorePort} from './store-contract.js';
 type YoutubeStore = StorePort<'youtubePublications' | 'followingSnapshot' | 'gap' | 'observePlatformStream' | 'platformMissing' | 'youtubeData' | 'youtubeMessages' | 'youtubeQuota' | 'youtubeSnapshot' | 'youtubeViewers'>;
-import { object, string } from "./provider-values.js";
+import { object, string, type ProviderConnection } from "./provider-values.js";
 const scopes = ["https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/yt-analytics.readonly"];
 const videoParts='snippet,statistics,contentDetails,liveStreamingDetails,status,recordingDetails,topicDetails,localizations,paidProductPlacementDetails';
 /** Google quota units per Data API read (https://developers.google.com/youtube/v3/determine_quota_cost): every list used here costs 1, a live chat read costs 5. */
@@ -16,11 +16,13 @@ export const YOUTUBE_LIVE_DISCOVERY_MS=5*60_000;
 /** Chat pacing: 60 s while messages arrive, 120 s while quiet, never faster than a 90 s long-run average (small burst allowance). */
 export const YOUTUBE_CHAT_PACE={activeMs:60_000,quietMs:120_000,averageMs:90_000,burst:4,toleranceMs:5_000} as const;
 type ChatPace={at:number;credits:number;quiet:boolean;floor:number};
+type Snapshots=Record<string,{data:unknown;updatedAt:number}>;
+type LiveState={broadcasts:Record<string,any>[];videoDetails:Map<string,Record<string,any>>;reused:boolean};
 // A reused broadcast list stays valid only while the per-minute video read still says live:
 // snippet.liveBroadcastContent leaves 'live' and actualEndTime appears when a stream ends,
 // and either signal alone triggers rediscovery (whichever YouTube updates first).
 const stillLive=(video:Record<string,any>|undefined)=>!!video&&!!video.liveStreamingDetails&&typeof video.liveStreamingDetails==='object'&&!video.liveStreamingDetails.actualEndTime&&video.snippet?.liveBroadcastContent==='live';
-export class YouTubeConnection {
+export class YouTubeConnection implements ProviderConnection {
   status:{state:string;account:string;detail:string;lastSyncAt?:number;lastFollowersAt?:number} = { state: "disconnected", account: "", detail: "" };
   private pending: { state: string; verifier: string; expires: number; clientId: string; secret: string } | undefined;
   private generation = 0;
@@ -256,49 +258,90 @@ export class YouTubeConnection {
     const previous = await this.db.call("youtubeData", tokens.userId);
     if (!valid()) return 300000;
     if(this.mode.chatOnly)return this.collectChatOnly(tokens,previous,generation);
-    let channelSnapshot: Record<string, unknown> | undefined;
-    let refreshedMetadata=false;
-    if (this.now() - (previous.snapshots['cursor:channelMetadata']?.updatedAt??previous.snapshots.channel?.updatedAt??0) >= 21600000) {
-      const channel = await this.api("channels", { part: "snippet,statistics,brandingSettings,contentDetails,topicDetails", mine: "true", maxResults: "50" }, tokens);
-      if (!valid()) return 300000;
-      const own = (Array.isArray(channel.items) ? channel.items : []).find((x: any) => x.id === tokens.userId);
-      if (!own) throw new Error("YOUTUBE_CHANNEL_CHANGED");
-      channelSnapshot = own;refreshedMetadata=true;
-    }
+    const {snapshots} = previous;
+    const metadata = await this.channelMetadata(tokens, snapshots, valid);
+    if (!metadata) return 300000;
+    let channelSnapshot = metadata.snapshot;
     // Finish and validate every discovery page before changing session or snapshot state.
     const live = await this.liveState(tokens, valid);
     if (!live || !valid()) return 300000;
-    const {broadcasts,videoDetails,reused} = live;
+    const {broadcasts,reused} = live;
     // Legacy channel metadata is not a subscriber-history observation. Start the
     // history with a fresh API value instead of waiting on the old metadata age.
-    if(!channelSnapshot&&((previous.subscriberCountAt===null&&!this.initialCountChecked)||this.now()-(previous.snapshots.channel?.updatedAt??0)>=youtubeSubscriberCountInterval(broadcasts.length>0))){
-      this.initialCountChecked=true;
-      try{
-        const response=await this.api('channels',{part:'statistics',id:tokens.userId},tokens);if(!valid())return 300000;
-        const own=(Array.isArray(response.items)?response.items:[]).find((item:any)=>item.id===tokens.userId);
-        if(!own||!own.statistics)throw new Error('INVALID_CHANNEL_COUNT');
-        channelSnapshot={...object(previous.snapshots.channel?.data??{}),...own};
-      }catch{if(valid())await this.db.call('gap','youtube','subscriber_count_unavailable',this.now(),this.now());}
+    if(!channelSnapshot&&((previous.subscriberCountAt===null&&!this.initialCountChecked)||this.now()-(snapshots.channel?.updatedAt??0)>=youtubeSubscriberCountInterval(broadcasts.length>0))){
+      const counted = await this.subscriberCount(tokens, snapshots, valid);
+      if (counted === null) return 300000;
+      channelSnapshot = counted;
     }
     const videoIds = broadcasts.map((broadcast) => string(broadcast.id));
-    const savedCursor=previous.snapshots['cursor:archivedVideos']?.data;
+    const archive = await this.archiveCursor(tokens, snapshots, videoIds, valid);
+    if (!archive) return 300000;
+    const observedAt = await this.saveDiscovery(tokens, snapshots, channelSnapshot, metadata.refreshed, live, valid);
+    if (observedAt === null) return 300000;
+    if (!await this.recordViewers(tokens, live, videoIds, observedAt, valid)) return 300000;
+    await this.db.call("platformMissing", "youtube", tokens.userId, videoIds, observedAt);
+    if (!valid()) return 300000;
+    const interval = await this.collectChats(tokens, broadcasts, snapshots, valid, reused);
+    if (interval === null || !valid()) return 300000;
+    if (!await this.collectReport(tokens, snapshots, valid)) return 300000;
+    await this.collectSubscribers(tokens,valid,this.now());if(!valid())return 300000;
+    const {cursor,removed,archivedIds} = archive;
+    if(archivedIds.length&&(removed.length||!Number.isFinite(Number(cursor.checkedAt))||this.now()-Number(cursor.checkedAt??0)>=21600000))await this.collectArchivedVideos(tokens,archivedIds,valid,this.now());if(!valid())return 300000;
+    await this.collectPublications(tokens, snapshots, channelSnapshot, valid);
+    if(!valid())return 300000;
+    this.status = { ...this.status,lastSyncAt:this.now(),state: "connected", account: tokens.userId, detail: broadcasts.length ? "Чат активных эфиров собирается" : "Канал подключён; активных эфиров нет" };
+    return Math.min(interval, 3600000);
+  }
+  /** Full channel metadata, read again every six hours. `null`: the connection changed meanwhile. */
+  private async channelMetadata(tokens:Tokens,snapshots:Snapshots,valid:()=>boolean):Promise<{snapshot:Record<string,unknown>|undefined;refreshed:boolean}|null>{
+    if (this.now() - (snapshots['cursor:channelMetadata']?.updatedAt??snapshots.channel?.updatedAt??0) >= 21600000) {
+      const channel = await this.api("channels", { part: "snippet,statistics,brandingSettings,contentDetails,topicDetails", mine: "true", maxResults: "50" }, tokens);
+      if (!valid()) return null;
+      const own = (Array.isArray(channel.items) ? channel.items : []).find((x: any) => x.id === tokens.userId);
+      if (!own) throw new Error("YOUTUBE_CHANNEL_CHANGED");
+      return {snapshot:own,refreshed:true};
+    }
+    return {snapshot:undefined,refreshed:false};
+  }
+  /** A fresh subscriber count merged into the saved channel; `undefined` after a recorded gap, `null` when the connection changed. */
+  private async subscriberCount(tokens:Tokens,snapshots:Snapshots,valid:()=>boolean):Promise<Record<string,unknown>|undefined|null>{
+    this.initialCountChecked=true;
+    try{
+      const response=await this.api('channels',{part:'statistics',id:tokens.userId},tokens);if(!valid())return null;
+      const own=(Array.isArray(response.items)?response.items:[]).find((item:any)=>item.id===tokens.userId);
+      if(!own||!own.statistics)throw new Error('INVALID_CHANNEL_COUNT');
+      return {...object(snapshots.channel?.data??{}),...own};
+    }catch{if(valid())await this.db.call('gap','youtube','subscriber_count_unavailable',this.now(),this.now());}
+    return undefined;
+  }
+  /** Broadcasts that left the live list join the archived-video cursor (at most 200 ids). */
+  private async archiveCursor(tokens:Tokens,snapshots:Snapshots,videoIds:string[],valid:()=>boolean){
+    const savedCursor=snapshots['cursor:archivedVideos']?.data;
     const cursor=savedCursor&&typeof savedCursor==='object'&&!Array.isArray(savedCursor)?savedCursor as Record<string,unknown>:{};
-    const oldBroadcasts=previous.snapshots.broadcasts?.data;
+    const oldBroadcasts=snapshots.broadcasts?.data;
     const removed=(Array.isArray(oldBroadcasts)?oldBroadcasts:[]).map((b:unknown)=>b&&typeof b==='object'&&!Array.isArray(b)?string((b as Record<string,unknown>).id):'').filter((id:string)=>id&&!videoIds.includes(id));
     const archivedIds=[...new Set([...removed,...(Array.isArray(cursor.ids)?cursor.ids:[])])].filter((id):id is string=>typeof id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(id)&&!videoIds.includes(id)).slice(0,200);
-    if(removed.length){await this.db.call('youtubeSnapshot',tokens.userId,'cursor:archivedVideos',{ids:archivedIds,checkedAt:0},this.now());if(!valid())return 300000;}
+    if(removed.length){await this.db.call('youtubeSnapshot',tokens.userId,'cursor:archivedVideos',{ids:archivedIds,checkedAt:0},this.now());if(!valid())return null;}
+    return {cursor,removed,archivedIds};
+  }
+  /** Saves the channel and discovery snapshots; returns their observation time, `null` when the connection changed. */
+  private async saveDiscovery(tokens:Tokens,snapshots:Snapshots,channelSnapshot:Record<string,unknown>|undefined,refreshedMetadata:boolean,{broadcasts,videoDetails}:LiveState,valid:()=>boolean):Promise<number|null>{
     const observedAt = this.now();
     if (channelSnapshot) {
       this.initialCountChecked=true;
       await this.db.call("youtubeSnapshot", tokens.userId, "channel", channelSnapshot, observedAt);
     }
-    if(valid()&&(refreshedMetadata||!previous.snapshots['cursor:channelMetadata']))await this.db.call('youtubeSnapshot',tokens.userId,'cursor:channelMetadata',true,refreshedMetadata?observedAt:previous.snapshots.channel?.updatedAt??observedAt);
-    if (!valid()) return 300000;
+    if(valid()&&(refreshedMetadata||!snapshots['cursor:channelMetadata']))await this.db.call('youtubeSnapshot',tokens.userId,'cursor:channelMetadata',true,refreshedMetadata?observedAt:snapshots.channel?.updatedAt??observedAt);
+    if (!valid()) return null;
     await this.db.call("youtubeSnapshot", tokens.userId, "broadcasts", broadcasts, observedAt);
-    if (!valid()) return 300000;
-    const logicalViewers = new Map<string, string[]>();
+    if (!valid()) return null;
     await this.db.call("youtubeSnapshot", tokens.userId, "liveVideoDetails", Object.fromEntries(videoDetails), observedAt);
-    if (!valid()) return 300000;
+    if (!valid()) return null;
+    return observedAt;
+  }
+  /** Links started broadcasts to logical streams and records one viewer sample per stream; `false` when the connection changed. */
+  private async recordViewers(tokens:Tokens,{broadcasts,videoDetails}:LiveState,videoIds:string[],observedAt:number,valid:()=>boolean):Promise<boolean>{
+    const logicalViewers = new Map<string, string[]>();
     for (const broadcast of broadcasts) {
       const actualStartTime = videoDetails.get(broadcast.id)?.liveStreamingDetails?.actualStartTime;
       if (typeof actualStartTime !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(actualStartTime)) continue;
@@ -307,7 +350,7 @@ export class YouTubeConnection {
       const url = `https://www.youtube.com/watch?v=${encodeURIComponent(broadcast.id)}`;
       const sessionId = await this.db.call("observePlatformStream", "youtube", tokens.userId, broadcast.id, startedAt, observedAt, url, string(broadcast.snippet?.title), videoIds);
       if (sessionId) logicalViewers.set(sessionId, [...(logicalViewers.get(sessionId) ?? []), broadcast.id]);
-      if (!valid()) return 300000;
+      if (!valid()) return false;
     }
     const counts = (ids: string[]): number | null => {
       const numbers = ids.map(id => videoDetails.get(id)?.liveStreamingDetails?.concurrentViewers);
@@ -318,36 +361,35 @@ export class YouTubeConnection {
     };
     for (const [sessionId, ids] of logicalViewers) {
       await this.db.call("youtubeViewers", observedAt, counts(ids), sessionId);
-      if (!valid()) return 300000;
+      if (!valid()) return false;
     }
     if (broadcasts.length && !logicalViewers.size) {
       await this.db.call("youtubeViewers", observedAt, counts(videoIds), null);
-      if (!valid()) return 300000;
+      if (!valid()) return false;
     }
-    await this.db.call("platformMissing", "youtube", tokens.userId, videoIds, observedAt);
-    if (!valid()) return 300000;
-    const interval = await this.collectChats(tokens, broadcasts, previous.snapshots, valid, reused);
-    if (interval === null || !valid()) return 300000;
-    if (this.now() - (previous.snapshots.report?.updatedAt ?? 0) >= 21600000) {
+    return true;
+  }
+  /** The 28-day YouTube Analytics report, refreshed every six hours; `false` when the connection changed. */
+  private async collectReport(tokens:Tokens,snapshots:Snapshots,valid:()=>boolean):Promise<boolean>{
+    if (this.now() - (snapshots.report?.updatedAt ?? 0) >= 21600000) {
       const end = new Date(this.now() - 86400000).toISOString().slice(0, 10), start = new Date(this.now() - 28 * 86400000).toISOString().slice(0, 10);
       const report = await this.authorizedJson(`https://youtubeanalytics.googleapis.com/v2/reports?${new URLSearchParams({ ids: `channel==${tokens.userId}`, startDate: start, endDate: end, metrics: "views,estimatedMinutesWatched,subscribersGained,subscribersLost", dimensions: "day", sort: "day" })}`, tokens);
-      if (!valid()) return 300000;
+      if (!valid()) return false;
       await this.db.call("youtubeSnapshot", tokens.userId, "report", { start, end, ...report }, this.now());
-      if (!valid()) return 300000;
+      if (!valid()) return false;
     }
-    await this.collectSubscribers(tokens,valid,this.now());if(!valid())return 300000;
-    if(archivedIds.length&&(removed.length||!Number.isFinite(Number(cursor.checkedAt))||this.now()-Number(cursor.checkedAt??0)>=21600000))await this.collectArchivedVideos(tokens,archivedIds,valid,this.now());if(!valid())return 300000;
+    return true;
+  }
+  /** Publication metadata; a failure is recorded as a gap and never fails the collection. */
+  private async collectPublications(tokens:Tokens,snapshots:Snapshots,channelSnapshot:Record<string,unknown>|undefined,valid:()=>boolean){
     try{
       await collectYouTubePublications({account:tokens.userId,at:this.now(),valid,
-        channel:channelSnapshot??object(previous.snapshots.channel?.data??{}),snapshots:previous.snapshots,
+        channel:channelSnapshot??object(snapshots.channel?.data??{}),snapshots,
         api:(resource,params)=>this.api(resource,params,tokens),
         types:params=>this.authorizedJson(`https://youtubeanalytics.googleapis.com/v2/reports?${new URLSearchParams(params)}`,tokens),
         save:(items,at)=>this.db.call('youtubePublications',tokens.userId,items,at),
         cursor:(key,data)=>this.db.call('youtubeSnapshot',tokens.userId,key,data,this.now())});
     }catch{if(valid())await this.db.call('gap','youtube','publications_unavailable',this.now(),this.now());}
-    if(!valid())return 300000;
-    this.status = { ...this.status,lastSyncAt:this.now(),state: "connected", account: tokens.userId, detail: broadcasts.length ? "Чат активных эфиров собирается" : "Канал подключён; активных эфиров нет" };
-    return Math.min(interval, 3600000);
   }
   /** Supplementary chat never creates sessions, viewer samples or analytical reports. */
   private async collectChatOnly(tokens:Tokens,previous:{snapshots:Record<string,{data:unknown;updatedAt:number}>},generation:number):Promise<number> {

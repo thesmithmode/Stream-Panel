@@ -13,6 +13,7 @@ import {
   object,
   string,
   type ConnectionStatus,
+  type ProviderConnection,
   type SocketFactory,
 } from "./provider-values.js";
 
@@ -78,7 +79,7 @@ export function findDonation(value: unknown, depth = 0): unknown | null {
   return null;
 }
 
-export class DonationAlertsConnection {
+export class DonationAlertsConnection implements ProviderConnection {
   status: ConnectionStatus = {
     state: "disconnected",
     detail: "Не подключён",

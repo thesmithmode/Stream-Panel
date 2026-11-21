@@ -9,6 +9,7 @@
   import { onMount, tick } from "svelte";
   import {initializeNavigation,saveNavigation,canGoBack,rememberScroll,navigationScroll} from "./navigation";
   import {readRoute,routeUrl,type View} from "./route";
+  import {PROFILES} from "../../../packages/core/src/profiles";
   import {ConnectionError} from "./request";
   import {isOutdatedRelease} from './release';
   import {viewRequests} from './view-requests';
@@ -61,7 +62,7 @@
     busy = $state(false);
   let username = $state(""), password = $state(""), user = $state<any>(null);
   let profile = $state<Profile>(getProfile());
-  const allowedProfiles = $derived<readonly Profile[]>(user?.allowedProfiles ?? ["ruslan", "gulnaz"]);
+  const allowedProfiles = $derived<readonly Profile[]>(user?.allowedProfiles ?? PROFILES);
   $effect(()=>{if(!authorized){clearAnalyticsCache();screens.clear();}});
   let changes=$state<Changes|null>(null);
   const accessibleProfile = (next: Profile): Profile => allowedProfiles.includes(next) ? next : allowedProfiles[0]!;
