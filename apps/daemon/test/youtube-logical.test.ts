@@ -1,16 +1,19 @@
-import type {StoreRequest} from "../src/store-contract.js";
+import type { StoreRequest } from '../src/store-contract.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { StoreClient } from '../src/db.js';
-import { YouTubeConnection } from '../src/youtube.js';
+import { YouTubeConnection, YOUTUBE_LIVE_DISCOVERY_MS } from '../src/youtube.js';
 import type { Configuration } from '../src/config.js';
 
 const startA = 'video_AAAAAA';
 const startB = 'video_BBBBBB';
-const scopes = ['https://www.googleapis.com/auth/youtube.readonly', 'https://www.googleapis.com/auth/yt-analytics.readonly'];
+const scopes = [
+  'https://www.googleapis.com/auth/youtube.readonly',
+  'https://www.googleapis.com/auth/yt-analytics.readonly',
+];
 
 test('YouTube discovery coalesces concurrent streams and closes only the absent stream across restart', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'sp-youtube-logical-'));
@@ -18,11 +21,32 @@ test('YouTube discovery coalesces concurrent streams and closes only the absent 
   const base = Date.parse('2026-10-07T12:00:00Z');
   let now = base + 60000;
   let broadcasts = [startA, startB];
-  const config = { value: { youtube: { access: 'access', refresh: 'refresh', userId: 'channel', scopes, expiresAt: now + 3600000 } }, save: async () => {} } as unknown as Configuration;
-  const request: typeof fetch = async input => {
+  const config = {
+    value: { youtube: { access: 'access', refresh: 'refresh', userId: 'channel', scopes, expiresAt: now + 3600000 } },
+    save: async () => {},
+  } as unknown as Configuration;
+  const request: typeof fetch = async (input) => {
     const url = new URL(String(input));
-    if (url.pathname.endsWith('/liveBroadcasts')) return Response.json({ items: broadcasts.map((id, index) => ({ id, snippet: { channelId: 'channel', title: `Stream ${index}`, liveChatId: '' } })) });
-    if (url.pathname.endsWith('/videos')) return Response.json({ items: url.searchParams.get('id')!.split(',').map(id => ({ id, liveStreamingDetails: { actualStartTime: new Date(base).toISOString(), concurrentViewers: id === startA ? '12' : '7' } })) });
+    if (url.pathname.endsWith('/liveBroadcasts'))
+      return Response.json({
+        items: broadcasts.map((id, index) => ({
+          id,
+          snippet: { channelId: 'channel', title: `Stream ${index}`, liveChatId: '' },
+        })),
+      });
+    if (url.pathname.endsWith('/videos'))
+      return Response.json({
+        items: url.searchParams
+          .get('id')!
+          .split(',')
+          .map((id) => ({
+            id,
+            liveStreamingDetails: {
+              actualStartTime: new Date(base).toISOString(),
+              concurrentViewers: id === startA ? '12' : '7',
+            },
+          })),
+      });
     return Response.json({});
   };
   let db = new StoreClient(path, 'ruslan');
@@ -36,9 +60,12 @@ test('YouTube discovery coalesces concurrent streams and closes only the absent 
     assert.equal(initial.length, 1);
     const sessionId = initial[0]!.id;
     let links = await (db.call('platformStreams', sessionId) as Promise<any[]>);
-    assert.deepEqual(links.map(link => link.external_id), [startA, startB]);
-    assert.ok(links.every(link => link.url === `https://www.youtube.com/watch?v=${link.external_id}`));
-    assert.ok(links.every(link => link.started_at_ms === base));
+    assert.deepEqual(
+      links.map((link) => link.external_id),
+      [startA, startB],
+    );
+    assert.ok(links.every((link) => link.url === `https://www.youtube.com/watch?v=${link.external_id}`));
+    assert.ok(links.every((link) => link.started_at_ms === base));
 
     await yt.stop();
     await db.stop();
@@ -52,11 +79,14 @@ test('YouTube discovery coalesces concurrent streams and closes only the absent 
     await yt.collectOnce();
 
     links = await (db.call('platformStreams', sessionId) as Promise<any[]>);
-    const absent = links.find(link => link.external_id === startA)!;
-    const present = links.find(link => link.external_id === startB)!;
+    const absent = links.find((link) => link.external_id === startA)!;
+    const present = links.find((link) => link.external_id === startB)!;
     assert.equal(absent.ended_at_ms, base + 120000);
     assert.equal(present.ended_at_ms, null);
-    assert.equal((await (db.call('sessions') as Promise<any[]>)).find(session => session.id === sessionId)?.ended_at_ms, null);
+    assert.equal(
+      (await (db.call('sessions') as Promise<any[]>)).find((session) => session.id === sessionId)?.ended_at_ms,
+      null,
+    );
   } finally {
     await yt.stop();
     await db.stop();
@@ -68,18 +98,47 @@ test('unknown provider start times retain viewer/chat collection without inventi
   const dir = await mkdtemp(join(tmpdir(), 'sp-youtube-unknown-start-'));
   const db = new StoreClient(join(dir, 'data.sqlite'), 'ruslan');
   const now = Date.parse('2026-10-07T12:00:00Z');
-  const config = { value: { youtube: { access: 'access', refresh: 'refresh', userId: 'channel', scopes, expiresAt: now + 3600000 } }, save: async () => {} } as unknown as Configuration;
+  const config = {
+    value: { youtube: { access: 'access', refresh: 'refresh', userId: 'channel', scopes, expiresAt: now + 3600000 } },
+    save: async () => {},
+  } as unknown as Configuration;
   const writes: Array<[string, ...unknown[]]> = [];
-  const request: typeof fetch = async input => {
+  const request: typeof fetch = async (input) => {
     const url = new URL(String(input));
-    if (url.pathname.endsWith('/liveBroadcasts')) return Response.json({ items: [{ id: startA, snippet: { channelId: 'channel', liveChatId: 'chat', title: 'Live title' } }] });
-    if (url.pathname.endsWith('/videos')) return Response.json({ items: [{ id: startA, liveStreamingDetails: { concurrentViewers: '9' } }] });
-    if (url.pathname.endsWith('/messages')) return Response.json({ items: [{ id: 'message', snippet: { type: 'textMessageEvent', publishedAt: new Date(now).toISOString(), displayMessage: 'hello' }, authorDetails: { channelId: 'viewer', displayName: 'Viewer' } }], pollingIntervalMillis: 60000 });
+    if (url.pathname.endsWith('/liveBroadcasts'))
+      return Response.json({
+        items: [{ id: startA, snippet: { channelId: 'channel', liveChatId: 'chat', title: 'Live title' } }],
+      });
+    if (url.pathname.endsWith('/videos'))
+      return Response.json({ items: [{ id: startA, liveStreamingDetails: { concurrentViewers: '9' } }] });
+    if (url.pathname.endsWith('/messages'))
+      return Response.json({
+        items: [
+          {
+            id: 'message',
+            snippet: { type: 'textMessageEvent', publishedAt: new Date(now).toISOString(), displayMessage: 'hello' },
+            authorDetails: { channelId: 'viewer', displayName: 'Viewer' },
+          },
+        ],
+        pollingIntervalMillis: 60000,
+      });
     return Response.json({});
   };
   const originalCall = db.call.bind(db);
-  const trackedDb = { call: async (...request:StoreRequest) => { writes.push(request); return originalCall(...request); } } as unknown as StoreClient;
-  const yt = new YouTubeConnection(config, trackedDb, 'https://panel.test/oauth/youtube/callback', 'ruslan', request, () => now);
+  const trackedDb = {
+    call: async (...request: StoreRequest) => {
+      writes.push(request);
+      return originalCall(...request);
+    },
+  } as unknown as StoreClient;
+  const yt = new YouTubeConnection(
+    config,
+    trackedDb,
+    'https://panel.test/oauth/youtube/callback',
+    'ruslan',
+    request,
+    () => now,
+  );
   try {
     await db.ready;
     await db.call('youtubeSnapshot', 'channel', 'channel', { id: 'channel' }, now);
@@ -88,7 +147,16 @@ test('unknown provider start times retain viewer/chat collection without inventi
     assert.equal((await (db.call('sessions') as Promise<any[]>)).length, 0);
     assert.ok(writes.some(([method, at, viewers]) => method === 'youtubeViewers' && at === now && viewers === 9));
     assert.ok(writes.some(([method, , chat]) => method === 'youtubeMessages' && chat === 'chat'));
-    assert.ok(writes.some(([method, platform, account, ids]) => method === 'platformMissing' && platform === 'youtube' && account === 'channel' && Array.isArray(ids) && ids.includes(startA)));
+    assert.ok(
+      writes.some(
+        ([method, platform, account, ids]) =>
+          method === 'platformMissing' &&
+          platform === 'youtube' &&
+          account === 'channel' &&
+          Array.isArray(ids) &&
+          ids.includes(startA),
+      ),
+    );
   } finally {
     await yt.stop();
     await db.stop();
@@ -100,26 +168,45 @@ test('malformed or capped broadcast discovery fails before snapshots or missing 
   const dir = await mkdtemp(join(tmpdir(), 'sp-youtube-invalid-discovery-'));
   const db = new StoreClient(join(dir, 'data.sqlite'), 'ruslan');
   const now = Date.parse('2026-10-07T12:00:00Z');
-  const config = { value: { youtube: { access: 'access', refresh: 'refresh', userId: 'channel', scopes, expiresAt: now + 3600000 } }, save: async () => {} } as unknown as Configuration;
+  const config = {
+    value: { youtube: { access: 'access', refresh: 'refresh', userId: 'channel', scopes, expiresAt: now + 3600000 } },
+    save: async () => {},
+  } as unknown as Configuration;
   let mode: 'valid' | 'missing' | 'malformed' | 'pagination-cap' = 'valid';
   let page = 0;
-  const request: typeof fetch = async input => {
+  const request: typeof fetch = async (input) => {
     const url = new URL(String(input));
     if (url.pathname.endsWith('/liveBroadcasts')) {
       if (mode === 'missing') return Response.json({});
       if (mode === 'malformed') return Response.json({ items: [{ id: startA }] });
-      if (mode === 'pagination-cap') { page++; return Response.json({ items: [], nextPageToken: `page-${page}` }); }
+      if (mode === 'pagination-cap') {
+        page++;
+        return Response.json({ items: [], nextPageToken: `page-${page}` });
+      }
       return Response.json({ items: [{ id: startA, snippet: { channelId: 'channel', title: 'Valid stream' } }] });
     }
-    if (url.pathname.endsWith('/videos')) return Response.json({ items: [{ id: startA, liveStreamingDetails: { actualStartTime: new Date(now - 60000).toISOString() } }] });
+    if (url.pathname.endsWith('/videos'))
+      return Response.json({
+        items: [{ id: startA, liveStreamingDetails: { actualStartTime: new Date(now - 60000).toISOString() } }],
+      });
     return Response.json({});
   };
-  const yt = new YouTubeConnection(config, db, 'https://panel.test/oauth/youtube/callback', 'ruslan', request, () => now);
+  let clock = now;
+  const yt = new YouTubeConnection(
+    config,
+    db,
+    'https://panel.test/oauth/youtube/callback',
+    'ruslan',
+    request,
+    () => clock,
+  );
   try {
     await db.ready;
     await db.call('youtubeSnapshot', 'channel', 'channel', { id: 'channel' }, now);
     await db.call('youtubeSnapshot', 'channel', 'report', {}, now);
     await yt.collectOnce();
+    // The live broadcast list is rediscovered once the five-minute reuse window has passed.
+    clock += YOUTUBE_LIVE_DISCOVERY_MS;
     const sessionId = (await (db.call('sessions') as Promise<any[]>))[0]!.id;
     const snapshotBefore = await (db.call('youtubeData', 'channel') as Promise<any>);
     const linkBefore = (await (db.call('platformStreams', sessionId) as Promise<any[]>))[0]!;
@@ -128,7 +215,8 @@ test('malformed or capped broadcast discovery fails before snapshots or missing 
     await assert.rejects(yt.collectOnce(), /YOUTUBE_INVALID_BROADCASTS/);
     mode = 'malformed';
     await assert.rejects(yt.collectOnce(), /YOUTUBE_INVALID_BROADCASTS/);
-    mode = 'pagination-cap'; page = 0;
+    mode = 'pagination-cap';
+    page = 0;
     await assert.rejects(yt.collectOnce(), /YOUTUBE_BROADCAST_PAGINATION_LIMIT/);
     const snapshotAfter = await (db.call('youtubeData', 'channel') as Promise<any>);
     const linkAfter = (await (db.call('platformStreams', sessionId) as Promise<any[]>))[0]!;
@@ -142,29 +230,71 @@ test('malformed or capped broadcast discovery fails before snapshots or missing 
   }
 });
 
-
-test('every confirmed concurrent YouTube broadcast collects its chat and durable cursor',async()=>{
- const dir=await mkdtemp(join(tmpdir(),'sp-youtube-all-chats-')),db=new StoreClient(join(dir,'data.sqlite'),'ruslan');
- const now=Date.parse('2026-10-07T12:00:00Z'),ids=['video_AAAAAA','video_BBBBBB','video_CCCCCC','video_DDDDDD'];
- const config={value:{youtube:{access:'access',refresh:'refresh',userId:'channel',scopes,expiresAt:now+3600000}},save:async()=>{}} as unknown as Configuration;
- const requested:string[]=[];
- const request:typeof fetch=async input=>{
-  const url=new URL(String(input));
-  if(url.pathname.endsWith('/liveBroadcasts'))return Response.json({items:ids.map(id=>({id,snippet:{channelId:'channel',liveChatId:`chat-${id}`,title:id}}))});
-  if(url.pathname.endsWith('/videos'))return Response.json({items:ids.map(id=>({id,liveStreamingDetails:{actualStartTime:new Date(now-60000).toISOString(),concurrentViewers:'2'}}))});
-  if(url.pathname.endsWith('/liveChat/messages')){
-   const chat=url.searchParams.get('liveChatId')!;requested.push(chat);
-   return Response.json({items:[{id:`message-${chat}`,snippet:{type:'textMessageEvent',publishedAt:new Date(now).toISOString(),displayMessage:chat},authorDetails:{channelId:`author-${chat}`,displayName:chat}}],nextPageToken:`cursor-${chat}`,pollingIntervalMillis:60000});
+test('every confirmed concurrent YouTube broadcast collects its chat and durable cursor', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sp-youtube-all-chats-')),
+    db = new StoreClient(join(dir, 'data.sqlite'), 'ruslan');
+  const now = Date.parse('2026-10-07T12:00:00Z'),
+    ids = ['video_AAAAAA', 'video_BBBBBB', 'video_CCCCCC', 'video_DDDDDD'];
+  const config = {
+    value: { youtube: { access: 'access', refresh: 'refresh', userId: 'channel', scopes, expiresAt: now + 3600000 } },
+    save: async () => {},
+  } as unknown as Configuration;
+  const requested: string[] = [];
+  const request: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/liveBroadcasts'))
+      return Response.json({
+        items: ids.map((id) => ({ id, snippet: { channelId: 'channel', liveChatId: `chat-${id}`, title: id } })),
+      });
+    if (url.pathname.endsWith('/videos'))
+      return Response.json({
+        items: ids.map((id) => ({
+          id,
+          liveStreamingDetails: { actualStartTime: new Date(now - 60000).toISOString(), concurrentViewers: '2' },
+        })),
+      });
+    if (url.pathname.endsWith('/liveChat/messages')) {
+      const chat = url.searchParams.get('liveChatId')!;
+      requested.push(chat);
+      return Response.json({
+        items: [
+          {
+            id: `message-${chat}`,
+            snippet: { type: 'textMessageEvent', publishedAt: new Date(now).toISOString(), displayMessage: chat },
+            authorDetails: { channelId: `author-${chat}`, displayName: chat },
+          },
+        ],
+        nextPageToken: `cursor-${chat}`,
+        pollingIntervalMillis: 60000,
+      });
+    }
+    return Response.json({});
+  };
+  const yt = new YouTubeConnection(
+    config,
+    db,
+    'https://panel.test/oauth/youtube/callback',
+    'ruslan',
+    request,
+    () => now,
+  );
+  try {
+    await db.ready;
+    await db.call('youtubeSnapshot', 'channel', 'channel', { id: 'channel' }, now);
+    await db.call('youtubeSnapshot', 'channel', 'report', {}, now);
+    assert.equal(await yt.collectOnce(), 60000);
+    assert.deepEqual(
+      requested,
+      ids.map((id) => `chat-${id}`),
+    );
+    const data = await (db.call('youtubeData', 'channel') as Promise<any>);
+    assert.equal(data.messages.length, 4);
+    for (const id of ids) assert.equal(data.snapshots[`cursor:chat-${id}`].data, `cursor-chat-${id}`);
+    assert.equal((await (db.call('persons') as Promise<any[]>)).length, 4);
+    assert.equal((await (db.call('sessions') as Promise<any[]>)).length, 1);
+  } finally {
+    await yt.stop();
+    await db.stop();
+    await rm(dir, { recursive: true, force: true });
   }
-  return Response.json({});
- };
- const yt=new YouTubeConnection(config,db,'https://panel.test/oauth/youtube/callback','ruslan',request,()=>now);
- try{
-  await db.ready;await db.call('youtubeSnapshot','channel','channel',{id:'channel'},now);await db.call('youtubeSnapshot','channel','report',{},now);
-  assert.equal(await yt.collectOnce(),60000);assert.deepEqual(requested,ids.map(id=>`chat-${id}`));
-  const data=await (db.call('youtubeData','channel') as Promise<any>);assert.equal(data.messages.length,4);
-  for(const id of ids)assert.equal(data.snapshots[`cursor:chat-${id}`].data,`cursor-chat-${id}`);
-  assert.equal((await (db.call('persons') as Promise<any[]>)).length,4);
-  assert.equal((await (db.call('sessions') as Promise<any[]>)).length,1);
- }finally{await yt.stop();await db.stop();await rm(dir,{recursive:true,force:true});}
 });

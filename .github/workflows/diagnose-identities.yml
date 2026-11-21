@@ -1,18 +1,27 @@
 name: Read-only identity diagnostics
+# Manual only. Names are a run-time input (never committed); the script prints
+# digests instead of viewer names/platform IDs, so public logs carry no personal data.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      names:
+        description: Comma-separated account names to inspect (masked in logs)
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
   diagnose:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
     environment: production
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - name: Read-only reported identity diagnostics
+        # The names input is deliberately NOT mapped into env: (step env values are printed
+        # in the log header before any command runs). It is read from the event payload
+        # and masked before anything else can print it.
         env:
           BOOTSTRAP_KEY: ${{ secrets.STREAM_PANEL_BOOTSTRAP_KEY }}
           DEPLOY_HOST: ${{ secrets.STREAM_PANEL_DEPLOY_HOST }}
@@ -21,8 +30,15 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+          names=$(jq -r '.inputs.names // ""' "$GITHUB_EVENT_PATH")
+          IFS=',' read -ra parts <<< "$(printf '%s' "$names" | tr '\n' ',')"
+          for name in "${parts[@]}"; do name="${name#"${name%%[![:space:]]*}"}"; name="${name%"${name##*[![:space:]]}"}"; if [[ -n "$name" ]]; then echo "::add-mask::$name"; fi; done
+          terms=$(printf '%s' "$names" | base64 -w0)
+          echo "::add-mask::$terms"
+          unset names parts
           task_dir=$(mktemp -d)
           trap 'rm -rf "$task_dir"' EXIT
           printf '%s\n' "$BOOTSTRAP_KEY" > "$task_dir/key"
           printf '%s\n' "$KNOWN_HOSTS" > "$task_dir/known-hosts"
-          ssh -i "$task_dir/key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$task_dir/known-hosts" -o ConnectTimeout=15 "root@$DEPLOY_HOST" 'python3 -' < ops/diagnose-identities.py
+          { printf 'DIAGNOSE_TERMS_B64 = %s\n' "'$terms'"; cat ops/diagnose-identities.py; } > "$task_dir/script.py"
+          ssh -i "$task_dir/key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$task_dir/known-hosts" -o ConnectTimeout=15 "root@$DEPLOY_HOST" 'python3 -' < "$task_dir/script.py"

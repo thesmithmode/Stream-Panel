@@ -2,11 +2,17 @@ import type Database from 'better-sqlite3';
 
 /** A presentation projection only: supplementary chat is never an analytical input. */
 export class SupplementaryChat {
- constructor(private db:Database.Database){}
- participants(session:string,botJson:string,now=Date.now(),activeOnly=false,includeExcluded=false){
-  const recording=this.db.prepare('SELECT started_at_ms,ended_at_ms FROM logical_sessions s WHERE id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)').get(session) as {started_at_ms:number;ended_at_ms:number|null}|undefined;
-  if(!recording)return [];
-  return this.db.prepare(`SELECT y.person_id AS id,p.display_name AS name,y.display_name AS accountName,m.account_id AS accountId,
+  constructor(private db: Database.Database) {}
+  participants(session: string, botJson: string, now = Date.now(), activeOnly = false, includeExcluded = false) {
+    const recording = this.db
+      .prepare(
+        'SELECT started_at_ms,ended_at_ms FROM logical_sessions s WHERE id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)',
+      )
+      .get(session) as { started_at_ms: number; ended_at_ms: number | null } | undefined;
+    if (!recording) return [];
+    return this.db
+      .prepare(
+        `SELECT y.person_id AS id,p.display_name AS name,y.display_name AS accountName,m.account_id AS accountId,
    count(*) AS messages,max(m.published_at_ms) AS lastMessageAt
    FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id
    JOIN persons p ON p.id=y.person_id
@@ -19,16 +25,45 @@ export class SupplementaryChat {
    AND (?=0 OR EXISTS(SELECT 1 FROM youtube_snapshots b,json_each(b.payload_json) video WHERE b.account_id=m.account_id AND b.key='broadcasts' AND b.updated_at_ms>? AND json_extract(video.value,'$.snippet.liveChatId')=m.chat_id))
    GROUP BY y.person_id,m.account_id
    HAVING ?=0 OR max(m.published_at_ms)>?
-   ORDER BY lastMessageAt DESC,y.person_id,m.account_id`).all(recording.started_at_ms,Math.min(now,recording.ended_at_ms??now),session,now,now,Number(includeExcluded),botJson,Number(activeOnly),now-180000,Number(activeOnly),now-600000) as {id:string;name:string;accountName:string;accountId:string;messages:number;lastMessageAt:number}[];
- }
- /** Only people known exclusively through supplementary YouTube receive this colour. */
- decorate<T>(rows:T[],personId:(row:T)=>string):(T&{youtubeSecondary:boolean})[]{
-  const ids=JSON.stringify(rows.map(personId));
-  const secondary=new Set((this.db.prepare(`SELECT DISTINCT y.person_id FROM youtube_identities y
+   ORDER BY lastMessageAt DESC,y.person_id,m.account_id`,
+      )
+      .all(
+        recording.started_at_ms,
+        Math.min(now, recording.ended_at_ms ?? now),
+        session,
+        now,
+        now,
+        Number(includeExcluded),
+        botJson,
+        Number(activeOnly),
+        now - 180000,
+        Number(activeOnly),
+        now - 600000,
+      ) as {
+      id: string;
+      name: string;
+      accountName: string;
+      accountId: string;
+      messages: number;
+      lastMessageAt: number;
+    }[];
+  }
+  /** Only people known exclusively through supplementary YouTube receive this colour. */
+  decorate<T>(rows: T[], personId: (row: T) => string): (T & { youtubeSecondary: boolean })[] {
+    const ids = JSON.stringify(rows.map(personId));
+    const secondary = new Set(
+      (
+        this.db
+          .prepare(
+            `SELECT DISTINCT y.person_id FROM youtube_identities y
    WHERE y.person_id IN(SELECT value FROM json_each(?))
    AND EXISTS(SELECT 1 FROM youtube_snapshots r WHERE r.account_id=y.account_id AND r.key='collectionRole' AND r.payload_json='"secondary"')
    AND NOT EXISTS(SELECT 1 FROM youtube_identities other WHERE other.person_id=y.person_id AND NOT EXISTS(SELECT 1 FROM youtube_snapshots r WHERE r.account_id=other.account_id AND r.key='collectionRole' AND r.payload_json='"secondary"'))
-   AND NOT EXISTS(SELECT 1 FROM identities i WHERE i.person_id=y.person_id AND i.source='twitch')`).all(ids) as {person_id:string}[]).map(r=>r.person_id));
-  return rows.map(row=>({...row,youtubeSecondary:secondary.has(personId(row))}));
- }
+   AND NOT EXISTS(SELECT 1 FROM identities i WHERE i.person_id=y.person_id AND i.source='twitch')`,
+          )
+          .all(ids) as { person_id: string }[]
+      ).map((r) => r.person_id),
+    );
+    return rows.map((row) => ({ ...row, youtubeSecondary: secondary.has(personId(row)) }));
+  }
 }

@@ -1,101 +1,224 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdir} from 'node:fs/promises';
-import {join} from 'node:path';
-import {application} from '../helpers/application.mjs';
-import {launchBrowser} from '../helpers/browser.mjs';
-import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';
-import {assertUiLayout} from '../helpers/ui-layout.mjs';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { application } from '../helpers/application.mjs';
+import { launchBrowser } from '../helpers/browser.mjs';
+import { goto, saveCoverage } from '../helpers/browser-coverage.mjs';
+import { assertUiLayout } from '../helpers/ui-layout.mjs';
 
-test('live chat combines silent Twitch members and recent YouTube authors, sorts on phone and updates keyed rows without blanking',{timeout:60000},async()=>{
- const a=await application();let browser;
- try{
-  const now=Date.now(),minute=60000,base=Math.floor((now-6*minute)/minute)*minute;
-  const sid=await a.db.call('observePlatformStream','twitch','owner','live',base,now,null,'Live audience');
-  await a.db.call('observePlatformStream','youtube','yt-owner','yt-live',base,now,null,'Live audience');
-  const names={silent:'SilentViewer',talker:'Talker',owner:'rlod',streamelements:'StreamElements'};
-  await a.db.call('ensureOwnerIdentity','owner','owner','rlod',now);
-  await a.db.call('recordPoll',sid,'owner',{startedAtMs:base,completedAtMs:now-60000,status:'complete',userIds:['silent'],userNames:names});
-  await a.db.call('recordPoll',sid,'owner',{startedAtMs:now-60000,completedAtMs:now-1000,status:'complete',userIds:['silent','talker','owner','streamelements'],userNames:names});
-  const chat=async(id)=>a.db.call('ingest',{source:'twitch',accountId:'owner',externalId:id,type:'chat.message',actor:{externalId:'talker',displayName:'Talker'},occurredAtMs:Date.now()-100,receivedAtMs:Date.now(),sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});
-  const talker=await chat('one');await chat('two');
-  await a.db.call('renamePerson',talker.personId,'Person Talker');
-  await a.db.call('youtubeMessages','yt-owner','yt-chat',[{id:'yt-one',snippet:{type:'textMessageEvent',publishedAt:new Date(now-60000).toISOString()},authorDetails:{channelId:'yt-person',displayName:'YouTubePerson'}}]);
-  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:900}});page.setDefaultTimeout(10000);
-  await page.clock.install({time:new Date()});
-  const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  let reads=0,release=null;
-  await page.route('**/current-chat?*',async route=>{reads++;if(release)await release.promise;await route.continue();});
-  await goto(page,a.bootstrap());await page.getByRole('button',{name:'Стримы',exact:true}).click();
-  await page.locator(`[data-session-id="${sid}"] .stream-open`).click();
-  await page.getByRole('tab',{name:'Текущие зрители',exact:true}).click();
-  const panel=page.getByRole('region',{name:'Текущие зрители',exact:true});
-  await panel.getByRole('button',{name:'SilentViewer',exact:true}).waitFor();
-  await panel.getByRole('button',{name:'Person Talker',exact:true}).waitFor();
-  assert.equal(await panel.locator('tbody tr').count(),3);assert.equal(await panel.locator('img,.avatar').count(),0);
-  const silent=panel.locator('tbody tr').filter({has:page.getByRole('button',{name:'SilentViewer',exact:true})});
-  assert.equal(await silent.locator('td').nth(2).textContent(),'0');assert.equal(await silent.locator('td').nth(3).textContent(),'Не писал');
-  const yt=panel.locator('tbody tr').filter({has:page.getByRole('button',{name:'@YouTubePerson',exact:true})});
-  assert.equal(await yt.locator('td').nth(1).textContent(),'—');
-  assert.equal(await yt.locator('.youtube').evaluate(el=>getComputedStyle(el).color),'rgb(255, 89, 89)');
-  assert.equal(await silent.locator('.twitch').evaluate(el=>getComputedStyle(el).color),'rgb(169, 112, 255)');
-  await panel.getByRole('button',{name:/^Сообщения/}).click();assert.ok((await panel.locator('tbody tr').first().textContent()).includes('Talker'));
-  await assertUiLayout(page);
-  const evidence=process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;
-  if(evidence){await mkdir(evidence,{recursive:true});await page.screenshot({path:join(evidence,'current-chat-desktop.png'),fullPage:true});}
-  await page.setViewportSize({width:390,height:844});
-  await panel.getByRole('button',{name:/^Последнее сообщение/}).click();await panel.getByRole('button',{name:/^В чате/}).click();
-  assert.ok((await panel.locator('tbody tr').first().textContent()).includes('SilentViewer'));
-  await panel.getByRole('button',{name:/^Сообщения/}).click();
-  await assertUiLayout(page);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
-  if(evidence)await page.screenshot({path:join(evidence,'current-chat-mobile.png'),fullPage:true});
-  const before=reads;await page.evaluate(()=>{window.__chatRow=document.querySelector('[data-chatter-key="twitch:owner:talker"]');window.dispatchEvent(new CustomEvent('sp:data-refresh',{detail:{validated:true}}));});
-  // A refresh in the same minute need not cause a second current-chat request.
-  assert.ok(reads<=before+1);
-  await chat('three');
-  let resolve;release={promise:new Promise(r=>{resolve=r;})};
-  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('sp:data-refresh',{detail:{validated:true,force:true}})));
-  await page.waitForFunction(()=>!!window.__chatRow);
-  assert.equal(await panel.locator('[data-chatter-key="twitch:owner:talker"] td').nth(2).textContent(),'2','previous values stay visible while a refresh waits');
-  resolve();release=null;
-  await page.waitForFunction(()=>document.querySelector('[data-chatter-key="twitch:owner:talker"] td:nth-child(3)')?.textContent==='3');
-  assert.equal(await page.evaluate(()=>window.__chatRow===document.querySelector('[data-chatter-key="twitch:owner:talker"]')),true,'keyed DOM row survives refresh');
-  assert.equal(await panel.locator('th').nth(2).getAttribute('aria-sort'),'descending');
-  await page.setViewportSize({width:1440,height:900});
-  await panel.getByRole('searchbox',{name:'Поиск по нику'}).fill('talk');
-  await chat('four');await page.clock.fastForward(60000);
-  await page.waitForFunction(()=>document.querySelector('[data-chatter-key="twitch:owner:talker"] td:nth-child(3)')?.textContent==='4');
-  assert.equal(await panel.locator('th').nth(2).getAttribute('aria-sort'),'descending','the actual App minute timer keeps the sort while refreshing counts');
-  assert.equal(await panel.getByRole('searchbox',{name:'Поиск по нику'}).inputValue(),'talk');
-  await panel.getByRole('searchbox',{name:'Поиск по нику'}).fill('');
-  const visibleReads=reads;await page.evaluate(()=>Object.defineProperty(document,'hidden',{value:true,configurable:true}));await page.clock.fastForward(60000);
-  assert.equal(reads,visibleReads,'a hidden page does not poll current chat');await page.evaluate(()=>Object.defineProperty(document,'hidden',{value:false,configurable:true}));
-  await panel.getByRole('searchbox',{name:'Поиск по нику'}).fill('@youtube');assert.equal(await panel.locator('tbody tr').count(),1);
-  await panel.getByRole('searchbox',{name:'Поиск по нику'}).fill('');
-  assert.equal(await panel.locator('.chat-note').count(),0);assert.equal(await panel.getByLabel('Показать владельца и ботов').count(),0);
-  assert.equal(await panel.locator('.action-menu').count(),0,'one global bot setting lives in profile settings');
-  const cache=await page.evaluate(async(id)=>{const path=`/api/v1/sessions/${id}/current-chat?includeExcluded=0`;const response=await fetch(path);return (await fetch(path,{headers:{'If-None-Match':response.headers.get('etag')}})).status;},sid);
-  assert.equal(cache,304);assert.deepEqual(errors,[]);await saveCoverage(page);
- }finally{if(browser)await browser.close();await a.close();}
-});
+test(
+  'live chat combines silent Twitch members and recent YouTube authors, sorts on phone and updates keyed rows without blanking',
+  { timeout: 60000 },
+  async () => {
+    const a = await application();
+    let browser;
+    try {
+      const now = Date.now(),
+        minute = 60000,
+        base = Math.floor((now - 6 * minute) / minute) * minute;
+      const sid = await a.db.call('observePlatformStream', 'twitch', 'owner', 'live', base, now, null, 'Live audience');
+      await a.db.call('observePlatformStream', 'youtube', 'yt-owner', 'yt-live', base, now, null, 'Live audience');
+      const names = { silent: 'SilentViewer', talker: 'Talker', owner: 'rlod', streamelements: 'StreamElements' };
+      await a.db.call('ensureOwnerIdentity', 'owner', 'owner', 'rlod', now);
+      await a.db.call('recordPoll', sid, 'owner', {
+        startedAtMs: base,
+        completedAtMs: now - 60000,
+        status: 'complete',
+        userIds: ['silent'],
+        userNames: names,
+      });
+      await a.db.call('recordPoll', sid, 'owner', {
+        startedAtMs: now - 60000,
+        completedAtMs: now - 1000,
+        status: 'complete',
+        userIds: ['silent', 'talker', 'owner', 'streamelements'],
+        userNames: names,
+      });
+      const chat = async (id) =>
+        a.db.call('ingest', {
+          source: 'twitch',
+          accountId: 'owner',
+          externalId: id,
+          type: 'chat.message',
+          actor: { externalId: 'talker', displayName: 'Talker' },
+          occurredAtMs: Date.now() - 100,
+          receivedAtMs: Date.now(),
+          sourceTime: null,
+          timeQuality: 'provider',
+          transport: 'eventsub',
+          payload: { text: 'hello' },
+        });
+      const talker = await chat('one');
+      await chat('two');
+      await a.db.call('renamePerson', talker.personId, 'Person Talker');
+      await a.db.call('youtubeMessages', 'yt-owner', 'yt-chat', [
+        {
+          id: 'yt-one',
+          snippet: { type: 'textMessageEvent', publishedAt: new Date(now - 60000).toISOString() },
+          authorDetails: { channelId: 'yt-person', displayName: 'YouTubePerson' },
+        },
+      ]);
+      browser = await launchBrowser();
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      page.setDefaultTimeout(10000);
+      await page.clock.install({ time: new Date() });
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      let reads = 0,
+        release = null;
+      await page.route('**/current-chat?*', async (route) => {
+        reads++;
+        if (release) await release.promise;
+        await route.continue();
+      });
+      await goto(page, a.bootstrap());
+      await page.getByRole('button', { name: 'Стримы', exact: true }).click();
+      await page.locator(`[data-session-id="${sid}"] .stream-open`).click();
+      await page.getByRole('tab', { name: 'Текущие зрители', exact: true }).click();
+      const panel = page.getByRole('region', { name: 'Текущие зрители', exact: true });
+      await panel.getByRole('button', { name: 'SilentViewer', exact: true }).waitFor();
+      await panel.getByRole('button', { name: 'Person Talker', exact: true }).waitFor();
+      assert.equal(await panel.locator('tbody tr').count(), 3);
+      assert.equal(await panel.locator('img,.avatar').count(), 0);
+      const silent = panel
+        .locator('tbody tr')
+        .filter({ has: page.getByRole('button', { name: 'SilentViewer', exact: true }) });
+      assert.equal(await silent.locator('td').nth(2).textContent(), '0');
+      assert.equal(await silent.locator('td').nth(3).textContent(), 'Не писал');
+      const yt = panel
+        .locator('tbody tr')
+        .filter({ has: page.getByRole('button', { name: '@YouTubePerson', exact: true }) });
+      assert.equal(await yt.locator('td').nth(1).textContent(), '—');
+      assert.equal(await yt.locator('.youtube').evaluate((el) => getComputedStyle(el).color), 'rgb(255, 89, 89)');
+      assert.equal(await silent.locator('.twitch').evaluate((el) => getComputedStyle(el).color), 'rgb(169, 112, 255)');
+      await panel.getByRole('button', { name: /^Сообщения/ }).click();
+      assert.ok((await panel.locator('tbody tr').first().textContent()).includes('Talker'));
+      await assertUiLayout(page);
+      const evidence = process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;
+      if (evidence) {
+        await mkdir(evidence, { recursive: true });
+        await page.screenshot({ path: join(evidence, 'current-chat-desktop.png'), fullPage: true });
+      }
+      await page.setViewportSize({ width: 390, height: 844 });
+      await panel.getByRole('button', { name: /^Последнее сообщение/ }).click();
+      await panel.getByRole('button', { name: /^В чате/ }).click();
+      assert.ok((await panel.locator('tbody tr').first().textContent()).includes('SilentViewer'));
+      await panel.getByRole('button', { name: /^Сообщения/ }).click();
+      await assertUiLayout(page);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      if (evidence) await page.screenshot({ path: join(evidence, 'current-chat-mobile.png'), fullPage: true });
+      const before = reads;
+      await page.evaluate(() => {
+        window.__chatRow = document.querySelector('[data-chatter-key="twitch:owner:talker"]');
+        window.dispatchEvent(new CustomEvent('sp:data-refresh', { detail: { validated: true } }));
+      });
+      // A refresh in the same minute need not cause a second current-chat request.
+      assert.ok(reads <= before + 1);
+      await chat('three');
+      let resolve;
+      release = {
+        promise: new Promise((r) => {
+          resolve = r;
+        }),
+      };
+      await page.evaluate(() =>
+        window.dispatchEvent(new CustomEvent('sp:data-refresh', { detail: { validated: true, force: true } })),
+      );
+      await page.waitForFunction(() => !!window.__chatRow);
+      assert.equal(
+        await panel.locator('[data-chatter-key="twitch:owner:talker"] td').nth(2).textContent(),
+        '2',
+        'previous values stay visible while a refresh waits',
+      );
+      resolve();
+      release = null;
+      await page.waitForFunction(
+        () => document.querySelector('[data-chatter-key="twitch:owner:talker"] td:nth-child(3)')?.textContent === '3',
+      );
+      assert.equal(
+        await page.evaluate(
+          () => window.__chatRow === document.querySelector('[data-chatter-key="twitch:owner:talker"]'),
+        ),
+        true,
+        'keyed DOM row survives refresh',
+      );
+      assert.equal(await panel.locator('th').nth(2).getAttribute('aria-sort'), 'descending');
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await panel.getByRole('searchbox', { name: 'Поиск по нику' }).fill('talk');
+      await chat('four');
+      await page.clock.fastForward(60000);
+      await page.waitForFunction(
+        () => document.querySelector('[data-chatter-key="twitch:owner:talker"] td:nth-child(3)')?.textContent === '4',
+      );
+      assert.equal(
+        await panel.locator('th').nth(2).getAttribute('aria-sort'),
+        'descending',
+        'the actual App minute timer keeps the sort while refreshing counts',
+      );
+      assert.equal(await panel.getByRole('searchbox', { name: 'Поиск по нику' }).inputValue(), 'talk');
+      await panel.getByRole('searchbox', { name: 'Поиск по нику' }).fill('');
+      const visibleReads = reads;
+      await page.evaluate(() => Object.defineProperty(document, 'hidden', { value: true, configurable: true }));
+      await page.clock.fastForward(60000);
+      assert.equal(reads, visibleReads, 'a hidden page does not poll current chat');
+      await page.evaluate(() => Object.defineProperty(document, 'hidden', { value: false, configurable: true }));
+      await panel.getByRole('searchbox', { name: 'Поиск по нику' }).fill('@youtube');
+      assert.equal(await panel.locator('tbody tr').count(), 1);
+      await panel.getByRole('searchbox', { name: 'Поиск по нику' }).fill('');
+      assert.equal(await panel.locator('.chat-note').count(), 0);
+      assert.equal(await panel.getByLabel('Показать владельца и ботов').count(), 0);
+      assert.equal(await panel.locator('.action-menu').count(), 0, 'one global bot setting lives in profile settings');
+      const cache = await page.evaluate(async (id) => {
+        const path = `/api/v1/sessions/${id}/current-chat?includeExcluded=0`;
+        const response = await fetch(path);
+        return (await fetch(path, { headers: { 'If-None-Match': response.headers.get('etag') } })).status;
+      }, sid);
+      assert.equal(cache, 304);
+      assert.deepEqual(errors, []);
+      await saveCoverage(page);
+    } finally {
+      if (browser) await browser.close();
+      await a.close();
+    }
+  },
+);
 
-test('finished streams hide current viewers and old current links fall back to results without polling live chat',{timeout:60000},async()=>{
- const a=await application();let browser;
- try{
-  const at=Date.now()-86400000,id=await a.db.call('startSession','owner','finished',at,'platform',at);
-  await a.db.call('streamSample',id,at,'game','Game','Finished stream',4);
-  await a.db.call('endSession',id,at+60000);
-  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:900}});let currentReads=0;
-  page.on('request',request=>{if(new URL(request.url()).pathname.endsWith('/current-chat'))currentReads++;});
-  await goto(page,a.bootstrap());
-  await page.getByRole('button',{name:'Стримы',exact:true}).click();
-  await page.locator(`[data-session-id="${id}"] .stream-open`).click();
-  await page.getByRole('tab',{name:'Итоги',exact:true}).waitFor();
-  assert.equal(await page.getByRole('tab',{name:'Текущие зрители',exact:true}).count(),0);
-  const url=new URL(page.url());url.searchParams.set('section','current');await page.goto(url.toString());
-  await page.getByRole('tab',{name:'Итоги',exact:true,selected:true}).waitFor();
-  assert.equal(await page.getByRole('region',{name:'Текущие зрители',exact:true}).count(),0);
-  await assertUiLayout(page);await page.setViewportSize({width:390,height:844});await assertUiLayout(page);
-  assert.equal(currentReads,0,'a finished recording never starts current-chat requests');await saveCoverage(page);
- }finally{await browser?.close();await a.close();}
-});
+test(
+  'finished streams hide current viewers and old current links fall back to results without polling live chat',
+  { timeout: 60000 },
+  async () => {
+    const a = await application();
+    let browser;
+    try {
+      const at = Date.now() - 86400000,
+        id = await a.db.call('startSession', 'owner', 'finished', at, 'platform', at);
+      await a.db.call('streamSample', id, at, 'game', 'Game', 'Finished stream', 4);
+      await a.db.call('endSession', id, at + 60000);
+      browser = await launchBrowser();
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      let currentReads = 0;
+      page.on('request', (request) => {
+        if (new URL(request.url()).pathname.endsWith('/current-chat')) currentReads++;
+      });
+      await goto(page, a.bootstrap());
+      await page.getByRole('button', { name: 'Стримы', exact: true }).click();
+      await page.locator(`[data-session-id="${id}"] .stream-open`).click();
+      await page.getByRole('tab', { name: 'Итоги', exact: true }).waitFor();
+      assert.equal(await page.getByRole('tab', { name: 'Текущие зрители', exact: true }).count(), 0);
+      const url = new URL(page.url());
+      url.searchParams.set('section', 'current');
+      await page.goto(url.toString());
+      await page.getByRole('tab', { name: 'Итоги', exact: true, selected: true }).waitFor();
+      assert.equal(await page.getByRole('region', { name: 'Текущие зрители', exact: true }).count(), 0);
+      await assertUiLayout(page);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await assertUiLayout(page);
+      assert.equal(currentReads, 0, 'a finished recording never starts current-chat requests');
+      await saveCoverage(page);
+    } finally {
+      await browser?.close();
+      await a.close();
+    }
+  },
+);

@@ -2,7 +2,11 @@
 export function latestRequest() {
   let controller: AbortController | undefined;
   return {
-    async run<T>(load: (signal: AbortSignal) => Promise<T>, apply: (value: T) => void, fail: (error: Error) => void = () => {}) {
+    async run<T>(
+      load: (signal: AbortSignal) => Promise<T>,
+      apply: (value: T) => void,
+      fail: (error: Error) => void = () => {},
+    ) {
       controller?.abort();
       const current = new AbortController();
       controller = current;
@@ -13,6 +17,8 @@ export function latestRequest() {
         if (!current.signal.aborted) fail(error instanceof Error ? error : new Error(String(error)));
       }
     },
-    cancel() { controller?.abort(); },
+    cancel() {
+      controller?.abort();
+    },
   };
 }

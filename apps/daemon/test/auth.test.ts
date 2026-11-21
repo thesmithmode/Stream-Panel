@@ -1,82 +1,133 @@
-import test from "node:test";
-import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import Database from "better-sqlite3";
-import { AccountStore } from "../src/auth.js";
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import Database from 'better-sqlite3';
+import { AccountStore } from '../src/auth.js';
 
-test("password sessions persist, expire and revoke without exposing hashes or accepting forged cookies", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sp-auth-"));
-  const path = join(dir, "data.sqlite");
+test('password sessions persist, expire and revoke without exposing hashes or accepting forged cookies', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sp-auth-'));
+  const path = join(dir, 'data.sqlite');
   let now = 1000;
   const auth = new AccountStore(path, () => now);
   try {
-    await auth.createUser("ruslan", "ruslan", "Руслан", "correct-long-password");
-    await auth.createUser("gulnaz", "gulnaz", "Гульназ", "another-long-password");
-    assert.equal(await auth.login("ruslan", "bad", "ip"), null);
-    assert.equal(await auth.login("missing", "bad", "ip"), null);
-    const login = await auth.login("ruslan", "correct-long-password", "ip");
+    await auth.createUser('ruslan', 'ruslan', 'Руслан', 'correct-long-password');
+    await auth.createUser('gulnaz', 'gulnaz', 'Гульназ', 'another-long-password');
+    assert.equal(await auth.login('ruslan', 'bad', 'ip'), null);
+    assert.equal(await auth.login('missing', 'bad', 'ip'), null);
+    const login = await auth.login('ruslan', 'correct-long-password', 'ip');
     assert.ok(login);
-    assert.equal(login.user.profile, "ruslan");
-    assert.equal(JSON.stringify(login.user).includes("hash"), false);
-    assert.equal(auth.session(`sp_session=${login.token}`)?.profile, "ruslan");
-    assert.equal(auth.session("sp_session=forged"), null);
+    assert.equal(login.user.profile, 'ruslan');
+    assert.equal(JSON.stringify(login.user).includes('hash'), false);
+    assert.equal(auth.session(`sp_session=${login.token}`)?.profile, 'ruslan');
+    assert.equal(auth.session('sp_session=forged'), null);
     assert.equal(auth.validCsrf(auth.session(`sp_session=${login.token}`)!, login.csrf), true);
-    assert.equal(auth.validCsrf(auth.session(`sp_session=${login.token}`)!, "wrong"), false);
-    const second = await auth.login("gulnaz", "another-long-password", "ip2");
+    assert.equal(auth.validCsrf(auth.session(`sp_session=${login.token}`)!, 'wrong'), false);
+    const second = await auth.login('gulnaz', 'another-long-password', 'ip2');
     assert.ok(second);
     auth.logout(login.token);
     assert.equal(auth.session(`sp_session=${login.token}`), null);
-    assert.equal(auth.session(`sp_session=${second.token}`)?.profile, "gulnaz");
+    assert.equal(auth.session(`sp_session=${second.token}`)?.profile, 'gulnaz');
     now += 30 * 86400000;
     assert.equal(auth.session(`sp_session=${second.token}`), null);
     assert.equal(auth.session(undefined), null);
-    await assert.rejects(auth.createUser("unknown", "abc", "X", "correct-long-password"), /INVALID_PROFILE/);
-    await assert.rejects(auth.createUser("ruslan", "abc", "X", "short"), /INVALID_PASSWORD/);
-    for (let i = 0; i < 5; i++) await auth.login("ruslan", "bad", "blocked");
-    await assert.rejects(auth.login("ruslan", "correct-long-password", "blocked"), /LOGIN_RATE_LIMIT/);
+    await assert.rejects(auth.createUser('unknown', 'abc', 'X', 'correct-long-password'), /INVALID_PROFILE/);
+    await assert.rejects(auth.createUser('ruslan', 'abc', 'X', 'short'), /INVALID_PASSWORD/);
+    for (let i = 0; i < 5; i++) await auth.login('ruslan', 'bad', 'blocked');
+    await assert.rejects(auth.login('ruslan', 'correct-long-password', 'blocked'), /LOGIN_RATE_LIMIT/);
     now += 900001;
-    assert.ok(await auth.login("ruslan", "correct-long-password", "blocked"));
-  } finally { auth.close(); await rm(dir, { recursive: true, force: true }); }
+    assert.ok(await auth.login('ruslan', 'correct-long-password', 'blocked'));
+  } finally {
+    auth.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
-test('account login survives daily returns and server restarts for 30 days, then expires',async()=>{
-  const dir=await mkdtemp(join(tmpdir(),'sp-auth-persist-')),path=join(dir,'data.sqlite');
-  const started=1000;let now=started,auth=new AccountStore(path,()=>now);
-  try{
-    await auth.createUser('ruslan','ruslan','Руслан','correct-long-password');
-    const login=await auth.login('ruslan','correct-long-password','ip');assert.ok(login);
-    const cookie=`sp_session=${login.token}`;
-    auth.close();now+=2*86400000;auth=new AccountStore(path,()=>now);
-    assert.equal(auth.session(cookie)?.profile,'ruslan');
-    assert.equal(auth.validCsrf(auth.session(cookie)!,login.csrf),true);
-    now=started+30*86400000-1;assert.equal(auth.session(cookie)?.profile,'ruslan');
-    now++;assert.equal(auth.session(cookie),null);
-  }finally{auth.close();await rm(dir,{recursive:true,force:true});}
+test('account login survives daily returns and server restarts for 30 days, then expires', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sp-auth-persist-')),
+    path = join(dir, 'data.sqlite');
+  const started = 1000;
+  let now = started,
+    auth = new AccountStore(path, () => now);
+  try {
+    await auth.createUser('ruslan', 'ruslan', 'Руслан', 'correct-long-password');
+    const login = await auth.login('ruslan', 'correct-long-password', 'ip');
+    assert.ok(login);
+    const cookie = `sp_session=${login.token}`;
+    auth.close();
+    now += 2 * 86400000;
+    auth = new AccountStore(path, () => now);
+    assert.equal(auth.session(cookie)?.profile, 'ruslan');
+    assert.equal(auth.validCsrf(auth.session(cookie)!, login.csrf), true);
+    now = started + 30 * 86400000 - 1;
+    assert.equal(auth.session(cookie)?.profile, 'ruslan');
+    now++;
+    assert.equal(auth.session(cookie), null);
+  } finally {
+    auth.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
-test("authenticated requests record throttled panel activity for the server watchdog", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sp-auth-activity-"));
-  const path = join(dir, "data.sqlite");
+test('authenticated requests record throttled panel activity for the server watchdog', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sp-auth-activity-'));
+  const path = join(dir, 'data.sqlite');
   let now = 1000;
   const auth = new AccountStore(path, () => now);
   const seen = () => {
     const db = new Database(path, { readonly: true });
-    try { return (db.prepare("SELECT last_seen_ms AS at FROM sp_panel_activity").get() as { at: number } | undefined)?.at; }
-    finally { db.close(); }
+    try {
+      return (db.prepare('SELECT last_seen_ms AS at FROM sp_panel_activity').get() as { at: number } | undefined)?.at;
+    } finally {
+      db.close();
+    }
   };
   try {
-    await auth.createUser("ruslan", "ruslan", "Руслан", "correct-long-password");
-    const login = await auth.login("ruslan", "correct-long-password", "ip");
+    await auth.createUser('ruslan', 'ruslan', 'Руслан', 'correct-long-password');
+    const login = await auth.login('ruslan', 'correct-long-password', 'ip');
     assert.ok(login);
-    assert.equal(auth.session("sp_session=" + "0".repeat(64)), null);
+    assert.equal(auth.session('sp_session=' + '0'.repeat(64)), null);
     assert.equal(seen(), undefined);
     auth.session(`sp_session=${login.token}`);
     assert.equal(seen(), 1000);
-    now += 59000; auth.session(`sp_session=${login.token}`);
+    now += 59000;
+    auth.session(`sp_session=${login.token}`);
     assert.equal(seen(), 1000);
-    now += 1000; auth.session(`sp_session=${login.token}`);
+    now += 1000;
+    auth.session(`sp_session=${login.token}`);
     assert.equal(seen(), 61000);
-  } finally { auth.close(); await rm(dir, { recursive: true, force: true }); }
+  } finally {
+    auth.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the 21st login signs out the oldest session of that profile instead of refusing', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sp-auth-'));
+  let now = 1000;
+  const auth = new AccountStore(join(dir, 'data.sqlite'), () => now);
+  try {
+    await auth.createUser('ruslan', 'ruslan', 'Руслан', 'correct-long-password');
+    await auth.createUser('gulnaz', 'gulnaz', 'Гульназ', 'another-long-password');
+    const other = await auth.login('gulnaz', 'another-long-password', 'ip-g');
+    const tokens: string[] = [];
+    for (let i = 0; i < 21; i++) {
+      now += 1000;
+      const login = await auth.login('ruslan', 'correct-long-password', `ip-${i}`);
+      assert.ok(login, `login ${i + 1}`);
+      tokens.push(login.token);
+    }
+    assert.equal(auth.session(`sp_session=${tokens[0]}`), null);
+    for (const token of tokens.slice(1)) assert.equal(auth.session(`sp_session=${token}`)?.profile, 'ruslan');
+    assert.equal(auth.session(`sp_session=${other!.token}`)?.profile, 'gulnaz');
+    now += 1000;
+    const next = await auth.login('ruslan', 'correct-long-password', 'ip-next');
+    assert.ok(next);
+    assert.equal(auth.session(`sp_session=${tokens[1]}`), null);
+    assert.equal(auth.session(`sp_session=${tokens[2]}`)?.profile, 'ruslan');
+  } finally {
+    auth.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 });

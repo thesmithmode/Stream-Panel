@@ -1,5 +1,11 @@
-"""Read-only investigation of the account group explicitly reported by its owner."""
-import json, sqlite3, unicodedata
+"""Read-only investigation of an account group reported by the owner.
+
+Names are supplied at run time (``DIAGNOSE_TERMS_B64``: base64 of a comma/newline
+separated list), never stored in the repository. Free-text identifiers in the
+output are replaced by short SHA-256 digests so public Actions logs carry no
+viewer names or platform IDs; the owner compares digests of known names.
+"""
+import base64, hashlib, json, sqlite3, unicodedata
 from pathlib import Path
 
 config = {}
@@ -11,9 +17,18 @@ path = Path(config.get('STREAM_PANEL_DATA_DIR', '/var/lib/stream-panel')) / 'dat
 db = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)
 db.row_factory = sqlite3.Row
 db.execute('PRAGMA query_only=ON')
-terms = {'chikist007', 'egorbarinov6515', 'егор4ик', 'egor4ik', 'егорчик', 'егор баринов'}
+def normalize(value):
+    return unicodedata.normalize('NFKC', value).strip().lower().lstrip('@#')
+def digest(value):
+    return None if value is None else 'sha256:' + hashlib.sha256(normalize(str(value)).encode()).hexdigest()[:12]
+raw_terms = base64.b64decode(globals().get('DIAGNOSE_TERMS_B64', '')).decode() if globals().get('DIAGNOSE_TERMS_B64') else ''
+terms = {normalize(t) for t in raw_terms.replace('\n', ',').split(',') if normalize(t)}
+if not terms:
+    raise SystemExit('No names supplied')
 def matches(value):
-    return unicodedata.normalize('NFKC', value).strip().lower().lstrip('@#') in terms
+    return normalize(value) in terms
+def redact(row):
+    return {k: (digest(v) if k in ('display_name', 'external_id', 'name_key') else v) for k, v in row.items()}
 for profile in ('ruslan', 'gulnaz'):
     p = 'p_' + profile + '_'
     identities = [dict(r) for r in db.execute(f"SELECT id,person_id,source,external_id,display_name,account_id FROM {p}identities UNION ALL SELECT id,person_id,'youtube',external_id,display_name,account_id FROM {p}youtube_identities")]
@@ -28,7 +43,7 @@ for profile in ('ruslan', 'gulnaz'):
         merged = bool(db.execute(f'SELECT 1 FROM {p}person_merges WHERE source_person_id=? AND undone_at_ms IS NULL', (person,)).fetchone())
         has_metadata = any(db.execute(f'SELECT 1 FROM {p}{table} WHERE person_id=? LIMIT 1', (person,)).fetchone() for table in ('person_notes', 'person_tags', 'person_preferences'))
         row['directory_visible'] = has_account or (not merged and has_metadata)
-    print('people=' + json.dumps({'profile': profile, 'rows': [people[x] for x in sorted(selected)]}, ensure_ascii=False))
+    print('people=' + json.dumps({'profile': profile, 'rows': [redact(people[x]) for x in sorted(selected)]}, ensure_ascii=False))
     rows = []
     for row in identities:
         if row['person_id'] not in selected:
@@ -37,10 +52,10 @@ for profile in ('ruslan', 'gulnaz'):
         row['kind'] = 'correction' if account.startswith('correction:') else 'manual' if account.startswith('manual:') else 'provider'
         row['events'] = db.execute(f'SELECT count(*) FROM {p}events WHERE identity_id=?', (row['id'],)).fetchone()[0]
         row['corrections'] = db.execute(f'SELECT count(*) FROM {p}donation_corrections WHERE identity_id=?', (row['id'],)).fetchone()[0]
-        rows.append(row)
+        rows.append(redact(row))
     print('accounts=' + json.dumps({'profile': profile, 'rows': rows}, ensure_ascii=False))
     for person in sorted(selected):
-        bindings = [dict(r) for r in db.execute(f'SELECT name_key,person_id,identity_id FROM {p}donor_bindings WHERE person_id=?', (person,))]
+        bindings = [redact(dict(r)) for r in db.execute(f'SELECT name_key,person_id,identity_id FROM {p}donor_bindings WHERE person_id=?', (person,))]
         merges = [dict(r) for r in db.execute(f'SELECT source_person_id,target_person_id,undone_at_ms FROM {p}person_merges WHERE source_person_id=? OR target_person_id=?', (person, person))]
         print('links=' + json.dumps({'profile': profile, 'person': person, 'bindings': bindings, 'merges': merges}, ensure_ascii=False))
 db.close()

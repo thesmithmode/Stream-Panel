@@ -22,6 +22,10 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+      - name: Formatting
+        run: pnpm format:check
       - run: pnpm build
       - name: Archive exact build for tests and release
         run: |

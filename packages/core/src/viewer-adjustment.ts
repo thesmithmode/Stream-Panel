@@ -1,6 +1,6 @@
 /** Keep provider samples intact; subtract the Twitch streamer's baseline on every read.
  * NULL is an unknown measurement, while zero must stay zero. */
-export const viewerAdjustmentSchema=`
+export const viewerAdjustmentSchema = `
 DROP VIEW logical_stream_samples;
 CREATE VIEW logical_stream_samples AS
  SELECT p.session_id,p.observed_at_ms,p.category_id,p.category_name,p.title,

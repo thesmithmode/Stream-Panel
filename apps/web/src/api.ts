@@ -1,68 +1,116 @@
-import {rememberResponse} from './response-equality';
-export {sameResponse,mergeResponseBlocks} from './response-equality';
-import { createProfileSelection } from "./profile";
+import { rememberResponse } from './response-equality';
+export { sameResponse, mergeResponseBlocks } from './response-equality';
+import { createProfileSelection } from './profile';
 
-import {requestJson} from "./request";
-import {money} from './format';
-export {money} from './format';
-let csrf = "";
-const revisions=new Map<string,number>();
-export const getDataRevision=(profile:string)=>revisions.get(profile)??0;
-const serverVersions=new Map<string,Record<string,string>>();
-export const getServerRevision=(profile:string,scope='report')=>serverVersions.get(profile)?.[scope]??'';
-export const bumpReadRevision=(profile:string)=>revisions.set(profile,getDataRevision(profile)+1);
-export function setServerVersions(profile:string,change:{versions:Record<string,number>;stream:{id:string;revision:number;endedAt:number|null}|null;configRevision?:string;dataEpoch?:string;checkedAt?:number;activeStream?:string|null;requestedSession?:string|null}){
- const config=[change.configRevision,change.dataEpoch];
- const v=change.versions,values=serverVersions.get(profile)??{};
- values.report=JSON.stringify([v.activity,v.people,v.donations,v.follows,config]);
- values.overview=JSON.stringify([v.activity,v.people,v.donations,config]);
- values.subscribers=JSON.stringify([v.subscribers,v.follows,config]);
- values.bands=JSON.stringify([v.activity,config]);
- values.people=JSON.stringify([v.people,v.activity,v.donations,v.follows,config]);
- values.classifications=JSON.stringify([v.people,v.donations,config]);
- values.donations=JSON.stringify([v.donations,v.people,config]);
- if(change.stream){const value=JSON.stringify([change.stream,v.follows,config]);values['stream:'+change.stream.id]=value;if(change.requestedSession)values['stream:'+change.requestedSession]=value;}
- else if(change.requestedSession)values['stream:'+change.requestedSession]=JSON.stringify([null,config]);
- serverVersions.set(profile,values);
+import { requestJson } from './request';
+import { money } from './format';
+export { money } from './format';
+let csrf = '';
+const revisions = new Map<string, number>();
+export const getDataRevision = (profile: string) => revisions.get(profile) ?? 0;
+const serverVersions = new Map<string, Record<string, string>>();
+export const getServerRevision = (profile: string, scope = 'report') => serverVersions.get(profile)?.[scope] ?? '';
+export const bumpReadRevision = (profile: string) => revisions.set(profile, getDataRevision(profile) + 1);
+export function setServerVersions(
+  profile: string,
+  change: {
+    versions: Record<string, number>;
+    stream: { id: string; revision: number; endedAt: number | null } | null;
+    configRevision?: string;
+    dataEpoch?: string;
+    checkedAt?: number;
+    activeStream?: string | null;
+    requestedSession?: string | null;
+  },
+) {
+  const config = [change.configRevision, change.dataEpoch];
+  const v = change.versions,
+    values = serverVersions.get(profile) ?? {};
+  values.report = JSON.stringify([v.activity, v.people, v.donations, v.follows, config]);
+  values.overview = JSON.stringify([v.activity, v.people, v.donations, config]);
+  values.subscribers = JSON.stringify([v.subscribers, v.follows, config]);
+  values.bands = JSON.stringify([v.activity, config]);
+  values.people = JSON.stringify([v.people, v.activity, v.donations, v.follows, config]);
+  values.classifications = JSON.stringify([v.people, v.donations, config]);
+  values.donations = JSON.stringify([v.donations, v.people, config]);
+  if (change.stream) {
+    const value = JSON.stringify([change.stream, v.follows, config]);
+    values['stream:' + change.stream.id] = value;
+    if (change.requestedSession) values['stream:' + change.requestedSession] = value;
+  } else if (change.requestedSession) values['stream:' + change.requestedSession] = JSON.stringify([null, config]);
+  serverVersions.set(profile, values);
 }
 
-export type { Profile } from "./profile";
+export type { Profile } from './profile';
 const selection = createProfileSelection(() => localStorage);
 export const getProfile = selection.get;
 export const setProfile = selection.set;
 export const setCsrf = (value: string) => (csrf = value);
-export async function importBackup(file:File,key:string){
-  if(file.size>64*1024*1024*1024)throw new Error('BACKUP_SIZE_LIMIT');
-  return requestJson('/api/v1/backups/restore',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-CSRF-Token':csrf,'X-Stream-Panel-Profile':getProfile(),...(key?{'X-Backup-Key':key}:{})},body:file,signal:new AbortController().signal,timeoutMs:30*60*1000});
+export async function importBackup(file: File, key: string) {
+  if (file.size > 64 * 1024 * 1024 * 1024) throw new Error('BACKUP_SIZE_LIMIT');
+  return requestJson('/api/v1/backups/restore', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'X-CSRF-Token': csrf,
+      'X-Stream-Panel-Profile': getProfile(),
+      ...(key ? { 'X-Backup-Key': key } : {}),
+    },
+    body: file,
+    signal: new AbortController().signal,
+    timeoutMs: 30 * 60 * 1000,
+  });
 }
-const validators=new Map<string,{etag:string;value:unknown;bytes:number}>();
-let validatorBytes=0;
-export async function api<T = any>(path: string, body?: unknown, signal?: AbortSignal, profile: string = getProfile()): Promise<T> {
-  const conditionalKey=JSON.stringify([profile,path]),retained=body===undefined?validators.get(conditionalKey):undefined;
-  const result=await requestJson<T>(`/api/v1/${path}`, {
-    method: body === undefined ? "GET" : "POST",
+const validators = new Map<string, { etag: string; value: unknown; bytes: number }>();
+let validatorBytes = 0;
+export async function api<T = any>(
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+  profile: string = getProfile(),
+): Promise<T> {
+  const conditionalKey = JSON.stringify([profile, path]),
+    retained = body === undefined ? validators.get(conditionalKey) : undefined;
+  const result = await requestJson<T>(`/api/v1/${path}`, {
+    method: body === undefined ? 'GET' : 'POST',
     headers:
       body === undefined
-        ? { "X-Stream-Panel-Profile": profile,...(retained?{"If-None-Match":retained.etag}:{}) }
-        : { "Content-Type": "application/json", "X-CSRF-Token": csrf, "X-Stream-Panel-Profile": profile },
+        ? { 'X-Stream-Panel-Profile': profile, ...(retained ? { 'If-None-Match': retained.etag } : {}) }
+        : { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'X-Stream-Panel-Profile': profile },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    ...(retained?{conditional:{etag:retained.etag,value:retained.value as T}}:{}),
-    onResponse:(response,value)=>{const etag=response.headers.get('etag');if(!etag||body!==undefined)return;rememberResponse(value,etag,response.headers.get('x-stream-panel-blocks'));
-      const reported=Number(response.headers.get('x-stream-panel-bytes'));const bytes=reported>0&&Number.isSafeInteger(reported)?reported*2:JSON.stringify(value).length*2;if(bytes>4*1024*1024)return;
-      validatorBytes-=validators.get(conditionalKey)?.bytes??0;validators.delete(conditionalKey);
-      while(validators.size>=16||validatorBytes+bytes>8*1024*1024){const oldest=validators.keys().next().value!;validatorBytes-=validators.get(oldest)!.bytes;validators.delete(oldest);}
-      validators.set(conditionalKey,{etag,value,bytes});validatorBytes+=bytes;
+    ...(retained ? { conditional: { etag: retained.etag, value: retained.value as T } } : {}),
+    onResponse: (response, value) => {
+      const etag = response.headers.get('etag');
+      if (!etag || body !== undefined) return;
+      rememberResponse(value, etag, response.headers.get('x-stream-panel-blocks'));
+      const reported = Number(response.headers.get('x-stream-panel-bytes'));
+      const bytes = reported > 0 && Number.isSafeInteger(reported) ? reported * 2 : JSON.stringify(value).length * 2;
+      if (bytes > 4 * 1024 * 1024) return;
+      validatorBytes -= validators.get(conditionalKey)?.bytes ?? 0;
+      validators.delete(conditionalKey);
+      while (validators.size >= 16 || validatorBytes + bytes > 8 * 1024 * 1024) {
+        const oldest = validators.keys().next().value!;
+        validatorBytes -= validators.get(oldest)!.bytes;
+        validators.delete(oldest);
+      }
+      validators.set(conditionalKey, { etag, value, bytes });
+      validatorBytes += bytes;
     },
-    ...(signal ? {signal} : {}),
+    ...(signal ? { signal } : {}),
   });
 
-  if(body!==undefined){revisions.set(profile,getDataRevision(profile)+1);for(const [key,value] of validators)if(JSON.parse(key)[0]===profile){validators.delete(key);validatorBytes-=value.bytes;}}
+  if (body !== undefined) {
+    revisions.set(profile, getDataRevision(profile) + 1);
+    for (const [key, value] of validators)
+      if (JSON.parse(key)[0] === profile) {
+        validators.delete(key);
+        validatorBytes -= value.bytes;
+      }
+  }
   return result;
 }
 export function date(at: number | null) {
-  return at === null
-    ? "Время неизвестно"
-    : new Date(at).toLocaleString("ru-RU",{timeZone:'Europe/Moscow'});
+  return at === null ? 'Время неизвестно' : new Date(at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
 }
 export interface Event {
   id: string;
@@ -83,11 +131,12 @@ export interface Event {
     originChannelId?: string;
   };
 }
-export interface PlatformLink {identityId:string;source:'twitch'|'youtube';url:string}
+export type { PlatformLink } from '../../../packages/core/src/domain';
 export interface Person {
-  youtubeSecondary?:boolean;
-  is_bot?: number|boolean;
-  is_human?:boolean;is_donor?:boolean;
+  youtubeSecondary?: boolean;
+  is_bot?: number | boolean;
+  is_human?: boolean;
+  is_donor?: boolean;
   id: string;
   display_name: string;
   revision: number;
@@ -95,20 +144,28 @@ export interface Person {
   sources: string;
 }
 export interface Session {
-  memberIds?:string[];
+  memberIds?: string[];
   id: string;
   kind: string;
   account_id: string;
   started_at_ms: number;
   ended_at_ms: number | null;
   event_count: number;
-  messageCount?:number;
+  messageCount?: number;
   end_quality: string;
-  durationMs?:number;viewerMean?:number|null;viewerPeak?:number|null;viewerKnownMean?:number|null;viewerKnownPeak?:number|null;viewerPartial?:boolean;donationTotals?:Record<string,string>;donationCount?:number;
-  platforms?: Array<"twitch" | "youtube">;
+  durationMs?: number;
+  viewerMean?: number | null;
+  viewerCoverageRatio?: number | null;
+  viewerPeak?: number | null;
+  viewerKnownMean?: number | null;
+  viewerKnownPeak?: number | null;
+  viewerPartial?: boolean;
+  donationTotals?: Record<string, string>;
+  donationCount?: number;
+  platforms?: Array<'twitch' | 'youtube'>;
   primaryTitle?: string | null;
-  breaks?:Array<{from:number;to:number}>;
-  confirmedUrls?: Array<{ platform: "twitch" | "youtube"; url: string }>;
+  breaks?: Array<{ from: number; to: number }>;
+  confirmedUrls?: Array<{ platform: 'twitch' | 'youtube'; url: string }>;
 }
 export interface Summary {
   messages: number;
@@ -128,7 +185,7 @@ export interface Summary {
     totalMinutes: number;
     ratio: number | null;
   } | null;
-  participants?: {personId:string;name:string;messages:number}[];
+  participants?: { personId: string; name: string; messages: number }[];
   chattersOverTime?: { atMs: number; chatters: number }[];
   gapCount?: number;
 }
@@ -157,7 +214,9 @@ export interface PersonStats {
   observedBeforeFollowMinutes: number | null;
 }
 export interface PersonTop {
-  is_bot?:boolean|number;is_human?:boolean;is_donor?:boolean;
+  is_bot?: boolean | number;
+  is_human?: boolean;
+  is_donor?: boolean;
   id: string;
   display_name: string;
   revision: number;
@@ -167,11 +226,21 @@ export interface PersonTop {
   donationTotals: Record<string, string>;
   observedMinutes: number;
 }
-export type {InsightCard} from '../../../packages/core/src/insights';
+export type { InsightCard } from '../../../packages/core/src/insights';
 
-export function donationMoney(row:{amountMinor:string;currency:string;rubAmountMinor?:string|null;exchangeRateDate?:string|null}) {
- const original=money(row.amountMinor,row.currency);
- if(row.currency==='RUB')return original;
- const rub=row.rubAmountMinor!=null?money(row.rubAmountMinor,'RUB').replace(/,([0-9]*?)0+(?= RUB$)/,(_,digits:string)=>digits?`,${digits}`:''):null;
- return `${original} (${rub??'пересчёт в RUB ожидается'})`;
+export function donationMoney(row: {
+  amountMinor: string;
+  currency: string;
+  rubAmountMinor?: string | null;
+  exchangeRateDate?: string | null;
+}) {
+  const original = money(row.amountMinor, row.currency);
+  if (row.currency === 'RUB') return original;
+  const rub =
+    row.rubAmountMinor != null
+      ? money(row.rubAmountMinor, 'RUB').replace(/,([0-9]*?)0+(?= RUB$)/, (_, digits: string) =>
+          digits ? `,${digits}` : '',
+        )
+      : null;
+  return `${original} (${rub ?? 'пересчёт в RUB ожидается'})`;
 }

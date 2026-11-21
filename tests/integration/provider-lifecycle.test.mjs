@@ -1,15 +1,10 @@
-import test from "node:test";
-import assert from "node:assert/strict";
-import { EventEmitter } from "node:events";
-import { setImmediate as turn } from "node:timers/promises";
-import {
-  TwitchConnection,
-  object,
-  string,
-} from "../../dist/apps/daemon/src/twitch.js";
-import { DonationAlertsConnection } from "../../dist/apps/daemon/src/donationalerts.js";
-const response = (data, status = 200, headers = {}) =>
-  new Response(JSON.stringify(data), { status, headers });
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { setImmediate as turn } from 'node:timers/promises';
+import { TwitchConnection, object, string } from '../../dist/apps/daemon/src/twitch.js';
+import { DonationAlertsConnection } from '../../dist/apps/daemon/src/donationalerts.js';
+const response = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers });
 const flush = async () => {
   for (let i = 0; i < 25; i++) await turn();
 };
@@ -22,25 +17,22 @@ class Socket extends EventEmitter {
   close() {
     if (!this.closed) {
       this.closed = true;
-      this.emit("close");
+      this.emit('close');
     }
   }
   terminate() {
     this.close();
   }
   ping() {
-    this.emit("pong");
+    this.emit('pong');
   }
   push(data) {
-    this.emit(
-      "message",
-      Buffer.from(typeof data === "string" ? data : JSON.stringify(data)),
-    );
+    this.emit('message', Buffer.from(typeof data === 'string' ? data : JSON.stringify(data)));
   }
 }
 function fixture(t) {
   t.mock.timers.enable({
-    apis: ["Date", "setTimeout", "setInterval"],
+    apis: ['Date', 'setTimeout', 'setInterval'],
     now: Date.now(),
   });
   const calls = [],
@@ -50,54 +42,87 @@ function fixture(t) {
   let nextSession = 0;
   const config = {
     value: {
-      twitchClientId: "client123",
+      twitchClientId: 'client123',
       twitch: {
-        access: "a",
-        refresh: "r",
+        access: 'a',
+        refresh: 'r',
         expiresAt: Date.now() + 7200000,
-        userId: "owner",
+        userId: 'owner',
         scopes: [],
       },
-      daAccessToken: "da",
-      daRefreshToken: "refresh",
-      daClientId: "app",
-      daClientSecret: "secret",
+      daAccessToken: 'da',
+      daRefreshToken: 'refresh',
+      daClientId: 'app',
+      daClientSecret: 'secret',
       daUtcOffsetMinutes: null,
       chattersPollSeconds: 60,
       excludedBotLogins: [],
     },
     save: async () => {},
   };
-  const failures=new Map();
+  const failures = new Map();
   const db = {
     call: async (method, ...args) => {
       const call = { method, args };
       calls.push(call);
-      if(method==='pendingDonationImports')return [...failures.values()];
-      if(method==='donationImportStates')return [];
-      if(method==='pendingDonationImportCount')return failures.size;
-      if(method==='saveDonationImportFailure'){const serialized=args[1],id=String(JSON.parse(serialized)?.id??serialized);failures.set(id,{id,serialized});return;}
-      if(method==='removePendingDonation'){failures.delete(args[1]);return;}
-      if(method==='ingest')return {inserted:true};
-      if (method === "sessions") return sessions;
-      if (method === "observePlatformStream") {
+      if (method === 'pendingDonationImports') return [...failures.values()];
+      if (method === 'donationImportStates') return [];
+      if (method === 'pendingDonationImportCount') return failures.size;
+      if (method === 'saveDonationImportFailure') {
+        const serialized = args[1],
+          id = String(JSON.parse(serialized)?.id ?? serialized);
+        failures.set(id, { id, serialized });
+        return;
+      }
+      if (method === 'removePendingDonation') {
+        failures.delete(args[1]);
+        return;
+      }
+      if (method === 'ingest') return { inserted: true };
+      if (method === 'sessions') return sessions;
+      if (method === 'observePlatformStream') {
         const [platform, account_id, external_id, started_at_ms, observed_at_ms] = args;
-        let link = platformLinks.find(row => row.platform === platform &&
-          row.account_id === account_id && row.external_id === external_id);
-        if (link?.ended_at_ms !== null && link) { call.result = null; return null; }
+        let link = platformLinks.find(
+          (row) => row.platform === platform && row.account_id === account_id && row.external_id === external_id,
+        );
+        if (link?.ended_at_ms !== null && link) {
+          call.result = null;
+          return null;
+        }
         if (!link) {
-          const occupied = sessions.some(row => row.account_id === account_id && row.ended_at_ms === null);
-          const active = sessions.find(row => row.kind === "platform" && row.ended_at_ms === null &&
-            platformLinks.some(item => item.session_id === row.id && item.ended_at_ms === null));
-          if (occupied && !active) { call.result = null; return null; }
+          const occupied = sessions.some((row) => row.account_id === account_id && row.ended_at_ms === null);
+          const active = sessions.find(
+            (row) =>
+              row.kind === 'platform' &&
+              row.ended_at_ms === null &&
+              platformLinks.some((item) => item.session_id === row.id && item.ended_at_ms === null),
+          );
+          if (occupied && !active) {
+            call.result = null;
+            return null;
+          }
           let session = active;
           if (!session) {
-            session = { id: `session-db-${++nextSession}`, account_id, kind: "platform", started_at_ms, ended_at_ms: null };
+            session = {
+              id: `session-db-${++nextSession}`,
+              account_id,
+              kind: 'platform',
+              started_at_ms,
+              ended_at_ms: null,
+            };
             sessions.push(session);
           }
-          link = { session_id: session.id, platform, account_id, external_id,
-            started_at_ms, last_observed_at_ms: observed_at_ms, offline_checks: 0,
-            first_missing_at_ms: null, ended_at_ms: null };
+          link = {
+            session_id: session.id,
+            platform,
+            account_id,
+            external_id,
+            started_at_ms,
+            last_observed_at_ms: observed_at_ms,
+            offline_checks: 0,
+            first_missing_at_ms: null,
+            ended_at_ms: null,
+          };
           platformLinks.push(link);
         } else if (observed_at_ms > link.last_observed_at_ms) {
           link.last_observed_at_ms = observed_at_ms;
@@ -107,26 +132,35 @@ function fixture(t) {
         call.result = link.session_id;
         return link.session_id;
       }
-      if (method === "platformMissing") {
+      if (method === 'platformMissing') {
         const [platform, account_id, present_ids, observed_at_ms] = args;
-        for (const link of platformLinks.filter(row => row.platform === platform && row.account_id === account_id && row.ended_at_ms === null)) {
+        for (const link of platformLinks.filter(
+          (row) => row.platform === platform && row.account_id === account_id && row.ended_at_ms === null,
+        )) {
           if (present_ids.includes(link.external_id) || observed_at_ms <= link.last_observed_at_ms) continue;
           link.last_observed_at_ms = observed_at_ms;
           link.first_missing_at_ms ??= observed_at_ms;
           if (++link.offline_checks >= 2) {
             link.ended_at_ms = link.first_missing_at_ms;
-            const session = sessions.find(row => row.id === link.session_id);
-            if (session && !platformLinks.some(row => row.session_id === session.id && row.ended_at_ms === null))
+            const session = sessions.find((row) => row.id === link.session_id);
+            if (session && !platformLinks.some((row) => row.session_id === session.id && row.ended_at_ms === null))
               session.ended_at_ms = link.ended_at_ms;
           }
         }
       }
-      if (method === "activeLogicalStream")
-        return sessions.filter(row => row.kind === "platform" && row.ended_at_ms === null &&
-          platformLinks.some(link => link.session_id === row.id && link.ended_at_ms === null))
-          .sort((a, b) => b.started_at_ms - a.started_at_ms)[0] ?? null;
-      if (method === "platformStreams") return platformLinks.filter(row => row.session_id === args[0]);
-      if (method === "streamSample") return null;
+      if (method === 'activeLogicalStream')
+        return (
+          sessions
+            .filter(
+              (row) =>
+                row.kind === 'platform' &&
+                row.ended_at_ms === null &&
+                platformLinks.some((link) => link.session_id === row.id && link.ended_at_ms === null),
+            )
+            .sort((a, b) => b.started_at_ms - a.started_at_ms)[0] ?? null
+        );
+      if (method === 'platformStreams') return platformLinks.filter((row) => row.session_id === args[0]);
+      if (method === 'streamSample') return null;
       return null;
     },
   };
@@ -153,13 +187,13 @@ function fixture(t) {
   };
 }
 const welcome = {
-  metadata: { message_type: "session_welcome" },
-  payload: { session: { id: "wire", keepalive_timeout_seconds: 60 } },
+  metadata: { message_type: 'session_welcome' },
+  payload: { session: { id: 'wire', keepalive_timeout_seconds: 60 } },
 };
 const notification = (type, event = {}) => ({
   metadata: {
-    message_type: "notification",
-    message_id: "n" + type,
+    message_type: 'notification',
+    message_id: 'n' + type,
     message_timestamp: new Date().toISOString(),
   },
   payload: { subscription: { type }, event },
@@ -167,59 +201,61 @@ const notification = (type, event = {}) => ({
 function twitchRequest(f, options = {}) {
   return async (url, init) => {
     const path = new URL(url).pathname;
-    if (path.endsWith("/device"))
+    if (path.endsWith('/device'))
       return response({
-        device_code: "device",
-        verification_uri: "https://twitch.tv/activate",
-        user_code: "CODE",
+        device_code: 'device',
+        verification_uri: 'https://twitch.tv/activate',
+        user_code: 'CODE',
         expires_in: 60,
         interval: 5,
       });
-    if (path.endsWith("/validate"))
+    if (path.endsWith('/validate'))
       return response({
-        client_id: "client123",
-        user_id: "owner",
-        login: "Owner",
+        client_id: 'client123',
+        user_id: 'owner',
+        login: 'Owner',
         scopes: options.scopes ?? [
-          "user:read:chat",
-          "moderator:read:chatters",
-          "bits:read",
-          "moderator:read:followers",
-          "channel:read:subscriptions",
+          'user:read:chat',
+          'moderator:read:chatters',
+          'bits:read',
+          'moderator:read:followers',
+          'channel:read:subscriptions',
         ],
       });
-    if (path.endsWith("/streams"))
+    if (path.endsWith('/streams'))
       return response({
         data: options.offline
           ? []
           : [
               {
-                id: "stream",
+                id: 'stream',
                 started_at: new Date(Date.now() - 60000).toISOString(),
               },
             ],
       });
-    if (path.endsWith("/chatters"))
+    if (path.endsWith('/chatters'))
       return response(
         options.badPoll
           ? { data: [{ user_id: 0 }], pagination: {} }
-          : { data: [{ user_id: "42", user_name: "Viewer" }], pagination: {} },
+          : { data: [{ user_id: '42', user_name: 'Viewer' }], pagination: {} },
       );
-    if (path.endsWith("/subscriptions")) {
+    if (path.endsWith('/subscriptions')) {
       const b = JSON.parse(init.body);
       options.subs?.push(b);
       return response({}, b.type === options.failType ? 403 : 202);
     }
-    throw new Error("unexpected " + url);
+    throw new Error('unexpected ' + url);
   };
 }
 
-test("Twitch polls offline every five minutes, reacts online immediately and never closes on malformed responses", async t => {
-  const f = fixture(t), opts = { offline: true };
-  let polls = 0, malformed = false;
+test('Twitch polls offline every five minutes, reacts online immediately and never closes on malformed responses', async (t) => {
+  const f = fixture(t),
+    opts = { offline: true };
+  let polls = 0,
+    malformed = false;
   const original = twitchRequest(f, opts);
   const request = async (url, init) => {
-    if (new URL(url).pathname.endsWith("/streams")) {
+    if (new URL(url).pathname.endsWith('/streams')) {
       polls++;
       if (malformed) return response({ data: {} });
     }
@@ -228,22 +264,34 @@ test("Twitch polls offline every five minutes, reacts online immediately and nev
   const c = new TwitchConnection(f.config, f.db, request, f.socket);
   try {
     await c.start();
-    f.sockets[0].push({ ...welcome, payload: { session: { id: "wire", keepalive_timeout_seconds: 3600 } } });
+    f.sockets[0].push({ ...welcome, payload: { session: { id: 'wire', keepalive_timeout_seconds: 3600 } } });
     await flush();
     assert.equal(polls, 1);
-    await f.tick(299999); assert.equal(polls, 1);
-    await f.tick(1); assert.equal(polls, 2);
+    await f.tick(299999);
+    assert.equal(polls, 1);
+    await f.tick(1);
+    assert.equal(polls, 2);
     opts.offline = false;
-    f.sockets[0].push(notification("stream.online", { broadcaster_user_id: "owner", id: "online", started_at: new Date().toISOString() }));
-    await flush(); assert.equal(polls, 3);
-    await f.tick(59999); assert.equal(polls, 3);
-    await f.tick(1); assert.equal(polls, 4);
-    const missingBefore = f.calls.filter(x => x.method === "platformMissing").length;
+    f.sockets[0].push(
+      notification('stream.online', {
+        broadcaster_user_id: 'owner',
+        id: 'online',
+        started_at: new Date().toISOString(),
+      }),
+    );
+    await flush();
+    assert.equal(polls, 3);
+    await f.tick(59999);
+    assert.equal(polls, 3);
+    await f.tick(1);
+    assert.equal(polls, 4);
+    const missingBefore = f.calls.filter((x) => x.method === 'platformMissing').length;
     malformed = true;
     await f.tick(60000);
-    assert.equal(f.calls.filter(x => x.method === "platformMissing").length, missingBefore);
-    assert.equal(c.status.detail, "INVALID_TWITCH_STREAMS");
-    malformed = false; opts.offline = true;
+    assert.equal(f.calls.filter((x) => x.method === 'platformMissing').length, missingBefore);
+    assert.equal(c.status.detail, 'INVALID_TWITCH_STREAMS');
+    malformed = false;
+    opts.offline = true;
     await f.tick(60000);
     assert.equal(c.status.state, 'connected');
     assert.equal(c.status.detail, 'Сбор событий включён', 'successful stream polling clears its own recovered error');
@@ -254,110 +302,134 @@ test("Twitch polls offline every five minutes, reacts online immediately and nev
     assert.equal(f.platformLinks[0].ended_at_ms, f.platformLinks[0].first_missing_at_ms);
     assert.equal(f.getSessions()[0].ended_at_ms, f.platformLinks[0].first_missing_at_ms);
     const count = polls;
-    await f.tick(299999); assert.equal(polls, count);
-    await f.tick(1); assert.equal(polls, count + 1);
+    await f.tick(299999);
+    assert.equal(polls, count);
+    await f.tick(1);
+    assert.equal(polls, count + 1);
     await c.stop();
-    await f.tick(300000); assert.equal(polls, count + 1);
-  } finally { await c.stop(); }
+    await f.tick(300000);
+    assert.equal(polls, count + 1);
+  } finally {
+    await c.stop();
+  }
 });
 
-test('Twitch polling recovery preserves an independent revoked subscription warning',async t=>{
- const f=fixture(t),original=twitchRequest(f);let fail=false;
- const request=async(url,init)=>fail&&new URL(url).pathname.endsWith('/streams')?response({data:{}}):original(url,init);
- const c=new TwitchConnection(f.config,f.db,request,f.socket);
- try{
-  await c.start();f.sockets[0].push({...welcome,payload:{session:{id:'wire',keepalive_timeout_seconds:3600}}});await flush();
-  fail=true;await f.tick(60000);assert.equal(c.status.detail,'INVALID_TWITCH_STREAMS');
-  f.sockets[0].push({metadata:{message_type:'revocation'},payload:{subscription:{type:'channel.follow',status:'authorization_revoked'}}});await flush();
-  fail=false;await f.tick(60000);
-  assert.equal(c.status.detail,'Часть подписок отозвана');
-  assert.equal(c.status.capabilities['channel.follow'],'authorization_revoked');
- }finally{await c.stop();}
+test('Twitch polling recovery preserves an independent revoked subscription warning', async (t) => {
+  const f = fixture(t),
+    original = twitchRequest(f);
+  let fail = false;
+  const request = async (url, init) =>
+    fail && new URL(url).pathname.endsWith('/streams') ? response({ data: {} }) : original(url, init);
+  const c = new TwitchConnection(f.config, f.db, request, f.socket);
+  try {
+    await c.start();
+    f.sockets[0].push({ ...welcome, payload: { session: { id: 'wire', keepalive_timeout_seconds: 3600 } } });
+    await flush();
+    fail = true;
+    await f.tick(60000);
+    assert.equal(c.status.detail, 'INVALID_TWITCH_STREAMS');
+    f.sockets[0].push({
+      metadata: { message_type: 'revocation' },
+      payload: { subscription: { type: 'channel.follow', status: 'authorization_revoked' } },
+    });
+    await flush();
+    fail = false;
+    await f.tick(60000);
+    assert.equal(c.status.detail, 'Часть подписок отозвана');
+    assert.equal(c.status.capabilities['channel.follow'], 'authorization_revoked');
+  } finally {
+    await c.stop();
+  }
 });
-test("Twitch restart does not let an old pending poll block or overwrite the new generation", async t => {
-  const f = fixture(t), options = { offline: true, scopes: ["user:read:chat"] };
-  let polls = 0, release;
-  const pending = new Promise(resolve => { release = resolve; });
+test('Twitch restart does not let an old pending poll block or overwrite the new generation', async (t) => {
+  const f = fixture(t),
+    options = { offline: true, scopes: ['user:read:chat'] };
+  let polls = 0,
+    release;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
   const original = twitchRequest(f, options);
   const request = async (url, init) => {
-    if (new URL(url).pathname.endsWith("/streams")) {
+    if (new URL(url).pathname.endsWith('/streams')) {
       if (++polls === 1) return pending;
     }
     return original(url, init);
   };
   const c = new TwitchConnection(f.config, f.db, request, f.socket);
   try {
-    await c.start(); await flush(); assert.equal(polls, 1);
-    await c.start(); await flush(); assert.equal(polls, 2);
-    f.sockets.at(-1).push({ ...welcome, payload: { session: { id: "new", keepalive_timeout_seconds: 3600 } } });
+    await c.start();
     await flush();
-    release(response({ data: [{ id: "stale", started_at: new Date().toISOString() }] }));
+    assert.equal(polls, 1);
+    await c.start();
     await flush();
-    assert.equal(f.calls.filter(x => x.method === "observePlatformStream").length, 0);
-    await f.tick(300000); assert.equal(polls, 3);
-    await c.stop(); await f.tick(300000); assert.equal(polls, 3);
-  } finally { release(response({ data: [] })); await c.stop(); }
+    assert.equal(polls, 2);
+    f.sockets.at(-1).push({ ...welcome, payload: { session: { id: 'new', keepalive_timeout_seconds: 3600 } } });
+    await flush();
+    release(response({ data: [{ id: 'stale', started_at: new Date().toISOString() }] }));
+    await flush();
+    assert.equal(f.calls.filter((x) => x.method === 'observePlatformStream').length, 0);
+    await f.tick(300000);
+    assert.equal(polls, 3);
+    await c.stop();
+    await f.tick(300000);
+    assert.equal(polls, 3);
+  } finally {
+    release(response({ data: [] }));
+    await c.stop();
+  }
 });
 
-test("Twitch lifecycle: full subscriptions, safe handoff, transient gap, offline confirmation and stop", async (t) => {
+test('Twitch lifecycle: full subscriptions, safe handoff, transient gap, offline confirmation and stop', async (t) => {
   const f = fixture(t),
     subs = [],
     opts = { subs };
-  const c = new TwitchConnection(
-    f.config,
-    f.db,
-    twitchRequest(f, opts),
-    f.socket,
-  );
+  const c = new TwitchConnection(f.config, f.db, twitchRequest(f, opts), f.socket);
   try {
     await c.start();
     f.sockets[0].push(welcome);
     await flush();
-    assert.equal(c.status.state, "connected");
+    assert.equal(c.status.state, 'connected');
     assert.equal(subs.length, 13);
-    assert.equal(subs.find((x) => x.type === "channel.update").version, "2");
-    assert.equal(subs.find((x) => x.type === "channel.follow").version, "2");
+    assert.equal(subs.find((x) => x.type === 'channel.update').version, '2');
+    assert.equal(subs.find((x) => x.type === 'channel.follow').version, '2');
     f.sockets[0].push({
-      metadata: { message_type: "session_reconnect" },
-      payload: { session: { reconnect_url: "wss://evil.example/ws" } },
+      metadata: { message_type: 'session_reconnect' },
+      payload: { session: { reconnect_url: 'wss://evil.example/ws' } },
     });
     await flush();
-    assert.equal(c.status.detail, "INVALID_RECONNECT_URL");
+    assert.equal(c.status.detail, 'INVALID_RECONNECT_URL');
     assert.equal(f.sockets.length, 1);
     f.sockets[0].push({
-      metadata: { message_type: "session_reconnect" },
+      metadata: { message_type: 'session_reconnect' },
       payload: {
-        session: { reconnect_url: "wss://eventsub.wss.twitch.tv/ws?handoff=1" },
+        session: { reconnect_url: 'wss://eventsub.wss.twitch.tv/ws?handoff=1' },
       },
     });
     await flush();
     f.sockets[1].push(welcome);
     await flush();
     assert.equal(f.sockets[0].closed, true);
-    assert.equal(subs.length, 13, "handoff must not duplicate subscriptions");
-    f.sockets[1].push("invalid json");
+    assert.equal(subs.length, 13, 'handoff must not duplicate subscriptions');
+    f.sockets[1].push('invalid json');
     await flush();
-    assert.equal(c.status.state, "degraded");
-    f.sockets[1].emit("error", new Error("wire"));
-    assert.equal(c.status.detail, "Ошибка WebSocket");
+    assert.equal(c.status.state, 'degraded');
+    f.sockets[1].emit('error', new Error('wire'));
+    assert.equal(c.status.detail, 'Ошибка WebSocket');
     f.sockets[1].close();
     await f.tick(2100);
     assert.equal(f.sockets.length, 3);
     f.sockets[2].push(welcome);
     await flush();
-    assert.ok(
-      f.calls.some(
-        (x) => x.method === "gap" && x.args[1] === "connection_lost_no_replay",
-      ),
-    );
-    assert.equal(c.status.state, "connected");
+    assert.ok(f.calls.some((x) => x.method === 'gap' && x.args[1] === 'connection_lost_no_replay'));
+    assert.equal(c.status.state, 'connected');
     opts.offline = true;
     await f.tick(60000);
     assert.equal(f.platformLinks[0].offline_checks, 1);
     await f.tick(60000);
     assert.equal(f.platformLinks[0].offline_checks, 2);
     await c.disconnect();
-    assert.equal(c.status.state, "disconnected");
+    assert.equal(c.status.state, 'disconnected');
     assert.equal(f.config.value.twitch, undefined);
     await f.tick(3600000);
     assert.equal(f.sockets.length, 3);
@@ -365,35 +437,34 @@ test("Twitch lifecycle: full subscriptions, safe handoff, transient gap, offline
     await c.stop();
   }
 });
-test("Twitch partial poll and optional subscription rejection remain observable; manual session remains open", async (t) => {
+test('Twitch partial poll and optional subscription rejection remain observable; manual session remains open', async (t) => {
   const f = fixture(t);
-  f.setSessions([{ id: "manual", account_id: "owner", kind: "manual", ended_at_ms: null }]);
-  const opts = { offline: true, badPoll: true, failType: "channel.cheer" };
-  const c = new TwitchConnection(
-    f.config,
-    f.db,
-    twitchRequest(f, opts),
-    f.socket,
-  );
+  f.setSessions([{ id: 'manual', account_id: 'owner', kind: 'manual', ended_at_ms: null }]);
+  const opts = { offline: true, badPoll: true, failType: 'channel.cheer' };
+  const c = new TwitchConnection(f.config, f.db, twitchRequest(f, opts), f.socket);
   try {
     await c.start();
     f.sockets[0].push(welcome);
     await flush();
     assert.equal(c.status.capabilities.presence, undefined);
-    assert.equal(c.status.capabilities["channel.cheer"], "TWITCH_HTTP_403");
-    assert.equal(f.calls.filter(x => x.method === "recordPoll").length, 0, "manual sessions cannot collect presence while Twitch is offline");
+    assert.equal(c.status.capabilities['channel.cheer'], 'TWITCH_HTTP_403');
+    assert.equal(
+      f.calls.filter((x) => x.method === 'recordPoll').length,
+      0,
+      'manual sessions cannot collect presence while Twitch is offline',
+    );
     await f.tick(60000);
-    const manual = f.getSessions().find(row => row.id === "manual");
+    const manual = f.getSessions().find((row) => row.id === 'manual');
     assert.equal(manual.ended_at_ms, null);
     assert.equal(f.platformLinks.length, 0);
-    assert.equal(f.calls.filter(x => x.method === "observePlatformStream").length, 0);
+    assert.equal(f.calls.filter((x) => x.method === 'observePlatformStream').length, 0);
     await f.tick(3600000);
-    assert.equal(c.status.account, "Owner");
+    assert.equal(c.status.account, 'Owner');
   } finally {
     await c.stop();
   }
 });
-test("Twitch device authorization: pending, slow down, rotating tokens and successful connection", async (t) => {
+test('Twitch device authorization: pending, slow down, rotating tokens and successful connection', async (t) => {
   const f = fixture(t);
   let polls = 0;
   const fallback = twitchRequest(f);
@@ -401,20 +472,16 @@ test("Twitch device authorization: pending, slow down, rotating tokens and succe
     f.config,
     f.db,
     async (url, init) => {
-      if (url.endsWith("/token")) {
+      if (url.endsWith('/token')) {
         polls++;
-        if (polls === 1)
-          return response({ message: "authorization_pending" }, 400);
-        if (polls === 2) return response({ message: "slow_down" }, 400);
-        assert.equal(
-          new URLSearchParams(init.body).get("device_code"),
-          "device",
-        );
+        if (polls === 1) return response({ message: 'authorization_pending' }, 400);
+        if (polls === 2) return response({ message: 'slow_down' }, 400);
+        assert.equal(new URLSearchParams(init.body).get('device_code'), 'device');
         return response({
-          access_token: "new",
-          refresh_token: "rotated",
+          access_token: 'new',
+          refresh_token: 'rotated',
           expires_in: 7200,
-          scope: ["user:read:chat"],
+          scope: ['user:read:chat'],
         });
       }
       return fallback(url, init);
@@ -422,86 +489,80 @@ test("Twitch device authorization: pending, slow down, rotating tokens and succe
     f.socket,
   );
   try {
-    await c.beginAuth("client123", true);
-    assert.equal(c.status.state, "authorizing");
-    assert.equal(c.device.userCode, "CODE");
+    await c.beginAuth('client123', true);
+    assert.equal(c.status.state, 'authorizing');
+    assert.equal(c.device.userCode, 'CODE');
     await f.tick(5000);
     await f.tick(5000);
     assert.equal(polls, 2);
     await f.tick(5000);
     assert.equal(polls, 2);
     await f.tick(5000);
-    assert.equal(f.config.value.twitch.access, "new");
-    assert.equal(f.config.value.twitch.refresh, "rotated");
+    assert.equal(f.config.value.twitch.access, 'new');
+    assert.equal(f.config.value.twitch.refresh, 'rotated');
     assert.equal(c.device, null);
     assert.equal(f.sockets.length, 1);
   } finally {
     await c.stop();
   }
 });
-test("Twitch authentication rejects invalid app/device, expires after errors and cancels pending login", async (t) => {
+test('Twitch authentication rejects invalid app/device, expires after errors and cancels pending login', async (t) => {
   const f = fixture(t);
-  let mode = "http",
+  let mode = 'http',
     polls = 0;
   const c = new TwitchConnection(
     f.config,
     f.db,
     async (url) => {
-      if (url.endsWith("/device")) {
-        if (mode === "http") return response({}, 503);
-        if (mode === "invalid") return response({});
-        return response({ device_code: "x", expires_in: 6, interval: 5 });
+      if (url.endsWith('/device')) {
+        if (mode === 'http') return response({}, 503);
+        if (mode === 'invalid') return response({});
+        return response({ device_code: 'x', expires_in: 6, interval: 5 });
       }
       polls++;
       return response({}, 403);
     },
     f.socket,
   );
-  await assert.rejects(c.beginAuth("!bad", false), /INVALID_CLIENT_ID/);
-  await assert.rejects(
-    c.beginAuth("client123", false),
-    /TWITCH_DEVICE_HTTP_503/,
-  );
-  mode = "invalid";
-  await assert.rejects(
-    c.beginAuth("client123", false),
-    /INVALID_DEVICE_RESPONSE/,
-  );
-  mode = "ok";
-  await c.beginAuth("client123", false);
+  await assert.rejects(c.beginAuth('!bad', false), /INVALID_CLIENT_ID/);
+  await assert.rejects(c.beginAuth('client123', false), /TWITCH_DEVICE_HTTP_503/);
+  mode = 'invalid';
+  await assert.rejects(c.beginAuth('client123', false), /INVALID_DEVICE_RESPONSE/);
+  mode = 'ok';
+  await c.beginAuth('client123', false);
   await f.tick(5000);
-  assert.equal(c.status.detail, "TWITCH_AUTH_HTTP_403");
+  assert.equal(c.status.detail, 'TWITCH_AUTH_HTTP_403');
   await f.tick(5000);
-  assert.equal(c.status.state, "error");
+  assert.equal(c.status.state, 'error');
   assert.equal(c.device, null);
-  await c.beginAuth("client123", false);
+  await c.beginAuth('client123', false);
   await c.disconnect();
   await f.tick(10000);
   assert.equal(polls, 2);
-  assert.equal(c.status.state, "disconnected");
+  assert.equal(c.status.state, 'disconnected');
 });
-test("Twitch validate refresh retry, scope failure, fatal subscription and keepalive recovery", async (t) => {
+test('Twitch validate refresh retry, scope failure, fatal subscription and keepalive recovery', async (t) => {
   const f = fixture(t);
   let validations = 0,
-    mode = "missing";
-  const fallback = twitchRequest(f, { failType: "channel.chat.message" });
+    mode = 'missing';
+  const fallback = twitchRequest(f, { failType: 'channel.chat.message' });
   const c = new TwitchConnection(
     f.config,
     f.db,
     async (url, init) => {
-      if (url.endsWith("/validate")) {
+      if (url.endsWith('/validate')) {
         validations++;
         if (validations === 1) return response({}, 401);
         return response({
-          client_id: "client123",
-          user_id: "owner",
-          scopes: mode === "missing" ? [] : ["user:read:chat"],
+          client_id: 'client123',
+          user_id: 'owner',
+          scopes: mode === 'missing' ? [] : ['user:read:chat'],
         });
       }
-      if (url.endsWith("/token"))
+      if (url.endsWith('/token'))
         return response({
-          access_token: "rotated",
-          refresh_token: "r2",
+          access_token: 'rotated',
+          refresh_token: 'r2',
           expires_in: 7200,
         });
       return fallback(url, init);
@@ -510,37 +571,37 @@ test("Twitch validate refresh retry, scope failure, fatal subscription and keepa
   );
   try {
     await c.start();
-    assert.equal(c.status.detail, "MISSING_CHAT_SCOPE");
-    assert.equal(f.config.value.twitch.access, "rotated");
-    mode = "ok";
+    assert.equal(c.status.detail, 'MISSING_CHAT_SCOPE');
+    assert.equal(f.config.value.twitch.access, 'rotated');
+    mode = 'ok';
     await f.tick(2100);
     assert.equal(f.sockets.length, 1);
     f.sockets[0].push(welcome);
     await flush();
-    assert.equal(c.status.detail, "TWITCH_HTTP_403");
+    assert.equal(c.status.detail, 'TWITCH_HTTP_403');
     await f.tick(66000);
     assert.equal(f.sockets[0].closed, true);
     await c.stop();
     delete f.config.value.twitch;
     await c.start();
-    assert.equal(c.status.state, "disconnected");
-    await assert.rejects(c.api("anything"), /TWITCH_LOGIN_REQUIRED/);
+    assert.equal(c.status.state, 'disconnected');
+    await assert.rejects(c.api('anything'), /TWITCH_LOGIN_REQUIRED/);
     assert.throws(() => object([]), /INVALID_PROVIDER_OBJECT/);
-    assert.equal(string(1), "");
+    assert.equal(string(1), '');
   } finally {
     await c.stop();
   }
 });
-test("Twitch token mismatch and repeat 401 are errors, not empty successful responses", async (t) => {
+test('Twitch token mismatch and repeat 401 are errors, not empty successful responses', async (t) => {
   const f = fixture(t);
   const c = new TwitchConnection(
     f.config,
     f.db,
     async (url) =>
-      url.endsWith("/token")
+      url.endsWith('/token')
         ? response({
-            access_token: "a2",
-            refresh_token: "r2",
+            access_token: 'a2',
+            refresh_token: 'r2',
             expires_in: 7200,
           })
         : response({}, 401),
@@ -548,115 +609,92 @@ test("Twitch token mismatch and repeat 401 are errors, not empty successful resp
   );
   try {
     await c.start();
-    assert.equal(c.status.detail, "TWITCH_TOKEN_MISMATCH");
-    await assert.rejects(c.api("streams"), /TWITCH_HTTP_401/);
+    assert.equal(c.status.detail, 'TWITCH_TOKEN_MISMATCH');
+    await assert.rejects(c.api('streams'), /TWITCH_HTTP_401/);
     f.config.value.twitch.expiresAt = 0;
-    await assert.rejects(c.api("streams"), /TWITCH_HTTP_401/);
+    await assert.rejects(c.api('streams'), /TWITCH_HTTP_401/);
   } finally {
     await c.stop();
   }
 });
 function daRequest(f, opts = {}) {
-  return async (url, init) => {
-    if (url.endsWith("/oauth/token"))
-      return response(
-        opts.token ?? { access_token: "new-da", refresh_token: "rotated-da" },
-      );
-    if (url.endsWith("/user/oauth"))
+  return async (url, _init) => {
+    if (url.endsWith('/oauth/token'))
+      return response(opts.token ?? { access_token: 'new-da', refresh_token: 'rotated-da' });
+    if (url.endsWith('/user/oauth'))
       return response({
-        data: { id: 7, name: "Owner", socket_connection_token: "socket" },
+        data: { id: 7, name: 'Owner', socket_connection_token: 'socket' },
       });
-    if (url.includes("donations"))
-      return response(opts.history ?? { data: [], links: { next: null } });
-    if (url.endsWith("/centrifuge/subscribe"))
+    if (url.includes('donations')) return response(opts.history ?? { data: [], links: { next: null } });
+    if (url.endsWith('/centrifuge/subscribe'))
       return response({
-        channels: opts.noChannel
-          ? []
-          : [{ channel: "$alerts:donation_7", token: "channel" }],
+        channels: opts.noChannel ? [] : [{ channel: '$alerts:donation_7', token: 'channel' }],
       });
     throw new Error(url);
   };
 }
-test("DA OAuth state is single use; handshake, history, rate limiting and disconnect lifecycle", async (t) => {
+test('DA OAuth state is single use; handshake, history, rate limiting and disconnect lifecycle', async (t) => {
   const f = fixture(t),
     opts = {};
-  const c = new DonationAlertsConnection(
-    f.config,
-    f.db,
-    daRequest(f, opts),
-    f.socket,
-  );
-  const url = new URL(c.authUrl("http://local/callback")),
-    state = url.searchParams.get("state");
+  const c = new DonationAlertsConnection(f.config, f.db, daRequest(f, opts), f.socket);
+  const url = new URL(c.authUrl('http://local/callback')),
+    state = url.searchParams.get('state');
   try {
-    await assert.rejects(
-      c.finishAuth("code", "wrong", "http://local/callback"),
-      /INVALID_OAUTH_STATE/,
-    );
-    await c.finishAuth("code", state, "http://local/callback");
-    assert.equal(f.config.value.daRefreshToken, "rotated-da");
-    await assert.rejects(
-      c.finishAuth("code", state, "http://local/callback"),
-      /INVALID_OAUTH_STATE/,
-    );
+    await assert.rejects(c.finishAuth('code', 'wrong', 'http://local/callback'), /INVALID_OAUTH_STATE/);
+    await c.finishAuth('code', state, 'http://local/callback');
+    assert.equal(f.config.value.daRefreshToken, 'rotated-da');
+    await assert.rejects(c.finishAuth('code', state, 'http://local/callback'), /INVALID_OAUTH_STATE/);
     const s = f.sockets[0];
-    s.emit("open");
-    assert.equal(s.sent[0].params.token, "socket");
+    s.emit('open');
+    assert.equal(s.sent[0].params.token, 'socket');
     await f.tick(1100);
-    assert.equal(c.status.state, "degraded");
-    assert.equal(c.status.capabilities.history,"Импорт доступных страниц завершён");
-    s.push({ id: 1, result: { client: "client" } });
+    assert.equal(c.status.state, 'degraded');
+    assert.equal(c.status.capabilities.history, 'Импорт доступных страниц завершён');
+    s.push({ id: 1, result: { client: 'client' } });
     await f.tick(1100);
     assert.equal(s.sent[1].method, 1);
     s.push({ id: 2, result: {} });
     await flush();
-    assert.equal(c.status.state, "connected");
+    assert.equal(c.status.state, 'connected');
     s.push({ error: { code: 109 } });
     await flush();
-    assert.equal(c.status.detail, "DA_CENTRIFUGO_ERROR");
-    s.emit("error", new Error("socket"));
-    assert.equal(c.status.capabilities.realtime, "Ошибка WebSocket");
+    assert.equal(c.status.detail, 'DA_CENTRIFUGO_ERROR');
+    s.emit('error', new Error('socket'));
+    assert.equal(c.status.capabilities.realtime, 'Ошибка WebSocket');
     s.close();
     await f.tick(30000);
     await f.tick(1100);
     assert.equal(f.sockets.length, 2);
     await c.disconnect();
-    assert.equal(f.config.value.daAccessToken, "");
-    assert.equal(f.config.value.daRefreshToken, "");
-    assert.equal(c.status.state, "disconnected");
+    assert.equal(f.config.value.daAccessToken, '');
+    assert.equal(f.config.value.daRefreshToken, '');
+    assert.equal(c.status.state, 'disconnected');
     await c.start();
-    assert.equal(c.status.state, "disconnected");
+    assert.equal(c.status.state, 'disconnected');
   } finally {
     await c.stop();
   }
 });
-test("DA failed channel authorization preserves REST, missing history metadata fails and queue recovers", async (t) => {
+test('DA failed channel authorization preserves REST, missing history metadata fails and queue recovers', async (t) => {
   const f = fixture(t),
     opts = { noChannel: true, history: { data: [], links: { next: null } } };
-  const c = new DonationAlertsConnection(
-    f.config,
-    f.db,
-    daRequest(f, opts),
-    f.socket,
-  );
+  const c = new DonationAlertsConnection(f.config, f.db, daRequest(f, opts), f.socket);
   try {
     await c.start();
-    f.sockets[0].emit("open");
-    f.sockets[0].push({ id: 1, result: { client: "client" } });
+    f.sockets[0].emit('open');
+    f.sockets[0].push({ id: 1, result: { client: 'client' } });
     await f.tick(1100);
     await f.tick(1100);
-    assert.equal(c.status.detail, "DA_CHANNEL_TOKEN_MISSING");
+    assert.equal(c.status.detail, 'DA_CHANNEL_TOKEN_MISSING');
     const initialImport = c.scanHistory();
-    await f.tick(1100); await initialImport;
-    assert.equal(
-      c.status.capabilities.history,
-      "Импорт доступных страниц завершён",
-    );
+    await f.tick(1100);
+    await initialImport;
+    assert.equal(c.status.capabilities.history, 'Импорт доступных страниц завершён');
     opts.history = { data: null };
     const invalid = assert.rejects(c.scanHistory(), /INVALID_DA_HISTORY/);
     await f.tick(1100);
     await invalid;
-    assert.equal(c.status.capabilities.history, "Ошибка импорта");
+    assert.equal(c.status.capabilities.history, 'Ошибка импорта');
     opts.history = { data: [] };
     const unknown = assert.rejects(c.scanHistory(), /DA_PAGINATION_UNKNOWN/);
     await f.tick(1100);
@@ -665,61 +703,47 @@ test("DA failed channel authorization preserves REST, missing history metadata f
     const good = c.scanHistory();
     await f.tick(1100);
     await good;
-    assert.equal(
-      c.status.capabilities.history,
-      "Импорт доступных страниц завершён",
-    );
+    assert.equal(c.status.capabilities.history, 'Импорт доступных страниц завершён');
     await f.tick(20000);
     assert.equal(f.sockets[0].closed, true);
-    assert.equal(c.status.capabilities.realtime, "отключено");
+    assert.equal(c.status.capabilities.realtime, 'отключено');
   } finally {
     await c.stop();
   }
 });
-test("DA expired/missing app credentials and failed authorization never persist tokens", async (t) => {
+test('DA expired/missing app credentials and failed authorization never persist tokens', async (t) => {
   const f = fixture(t);
-  f.config.value.daClientSecret = "";
-  const c = new DonationAlertsConnection(
-    f.config,
-    f.db,
-    async () => response({}, 400),
-    f.socket,
-  );
-  assert.throws(() => c.authUrl("http://local"), /DA_APP_CREDENTIALS_REQUIRED/);
-  f.config.value.daClientSecret = "secret";
-  let state = new URL(c.authUrl("http://local")).searchParams.get("state");
+  f.config.value.daClientSecret = '';
+  const c = new DonationAlertsConnection(f.config, f.db, async () => response({}, 400), f.socket);
+  assert.throws(() => c.authUrl('http://local'), /DA_APP_CREDENTIALS_REQUIRED/);
+  f.config.value.daClientSecret = 'secret';
+  let state = new URL(c.authUrl('http://local')).searchParams.get('state');
   await f.tick(600001);
-  await assert.rejects(
-    c.finishAuth("code", state, "http://local"),
-    /INVALID_OAUTH_STATE/,
-  );
-  state = new URL(c.authUrl("http://local")).searchParams.get("state");
-  await assert.rejects(
-    c.finishAuth("code", state, "http://local"),
-    /DA_OAUTH_HTTP_400/,
-  );
-  assert.equal(f.config.value.daAccessToken, "da");
+  await assert.rejects(c.finishAuth('code', state, 'http://local'), /INVALID_OAUTH_STATE/);
+  state = new URL(c.authUrl('http://local')).searchParams.get('state');
+  await assert.rejects(c.finishAuth('code', state, 'http://local'), /DA_OAUTH_HTTP_400/);
+  assert.equal(f.config.value.daAccessToken, 'da');
   await c.stop();
 });
-test("DA API retries rotated token once, reports 429/403 and requires refresh credentials", async (t) => {
+test('DA API retries rotated token once, reports 429/403 and requires refresh credentials', async (t) => {
   const f = fixture(t);
-  let mode = "401",
+  let mode = '401',
     requests = 0;
   const c = new DonationAlertsConnection(
     f.config,
     f.db,
-    async (url, init) => {
-      if (url.endsWith("/oauth/token"))
+    async (url, _init) => {
+      if (url.endsWith('/oauth/token'))
         return response({
-          access_token: "rotated",
-          refresh_token: "rotated-refresh",
+          access_token: 'rotated',
+          refresh_token: 'rotated-refresh',
         });
       requests++;
-      if (mode === "401" && requests === 1) return response({}, 401);
-      if (mode === "429") return response({}, 429, { "retry-after": "1" });
-      if (mode === "403") return response({}, 403);
+      if (mode === '401' && requests === 1) return response({}, 401);
+      if (mode === '429') return response({}, 429, { 'retry-after': '1' });
+      if (mode === '403') return response({}, 403);
       return response({
-        data: { id: 7, name: "Owner", socket_connection_token: "socket" },
+        data: { id: 7, name: 'Owner', socket_connection_token: 'socket' },
       });
     },
     f.socket,
@@ -729,81 +753,64 @@ test("DA API retries rotated token once, reports 429/403 and requires refresh cr
     await flush();
     await f.tick(1100);
     await starting;
-    assert.equal(f.config.value.daAccessToken, "rotated");
-    mode = "429";
+    assert.equal(f.config.value.daAccessToken, 'rotated');
+    mode = '429';
     const limited = assert.rejects(c.scanHistory(), /DA_RATE_LIMIT/);
-    await f.tick(1100); await limited;
-    assert.equal(c.status.capabilities.history, "Ошибка импорта");
+    await f.tick(1100);
+    await limited;
+    assert.equal(c.status.capabilities.history, 'Ошибка импорта');
     await c.stop();
-    mode = "403";
+    mode = '403';
     const forbidden = c.start();
     await flush();
     await f.tick(2100);
     await forbidden;
-    assert.equal(c.status.detail, "DA_HTTP_403");
+    assert.equal(c.status.detail, 'DA_HTTP_403');
     await c.stop();
-    mode = "401";
+    mode = '401';
     requests = 0;
-    f.config.value.daRefreshToken = "";
+    f.config.value.daRefreshToken = '';
     const missing = c.start();
     await flush();
     await f.tick(1100);
     await missing;
-    assert.equal(c.status.detail, "DA_LOGIN_REQUIRED");
+    assert.equal(c.status.detail, 'DA_LOGIN_REQUIRED');
   } finally {
     await c.stop();
   }
 });
-test("logout invalidates an in-flight Twitch device request and DA authorization-code exchange", async (t) => {
+test('logout invalidates an in-flight Twitch device request and DA authorization-code exchange', async (t) => {
   const f = fixture(t);
   let resolveDevice;
-  const twitch = new TwitchConnection(
-    f.config,
-    f.db,
-    () => new Promise((r) => (resolveDevice = r)),
-    f.socket,
-  );
-  const pending = assert.rejects(
-    twitch.beginAuth("client123", false),
-    /TWITCH_AUTH_CANCELLED/,
-  );
+  const twitch = new TwitchConnection(f.config, f.db, () => new Promise((r) => (resolveDevice = r)), f.socket);
+  const pending = assert.rejects(twitch.beginAuth('client123', false), /TWITCH_AUTH_CANCELLED/);
   await flush();
   await twitch.disconnect();
   resolveDevice(
     response({
-      device_code: "d",
+      device_code: 'd',
       expires_in: 600,
       interval: 5,
-      user_code: "CODE",
+      user_code: 'CODE',
     }),
   );
   await pending;
-  assert.equal(twitch.status.state, "disconnected");
+  assert.equal(twitch.status.state, 'disconnected');
   assert.equal(twitch.device, null);
   let resolveToken;
-  const da = new DonationAlertsConnection(
-    f.config,
-    f.db,
-    () => new Promise((r) => (resolveToken = r)),
-    f.socket,
-  );
-  const state = new URL(da.authUrl("http://local")).searchParams.get("state");
-  const auth = assert.rejects(
-    da.finishAuth("code", state, "http://local"),
-    /DA_AUTH_CANCELLED/,
-  );
+  const da = new DonationAlertsConnection(f.config, f.db, () => new Promise((r) => (resolveToken = r)), f.socket);
+  const state = new URL(da.authUrl('http://local')).searchParams.get('state');
+  const auth = assert.rejects(da.finishAuth('code', state, 'http://local'), /DA_AUTH_CANCELLED/);
   await flush();
   await da.disconnect();
-  resolveToken(
-    response({ access_token: "late-secret", refresh_token: "late-refresh" }),
-  );
+  resolveToken(response({ access_token: 'late-secret', refresh_token: 'late-refresh' }));
   await auth;
-  assert.equal(f.config.value.daAccessToken, "");
-  assert.equal(f.config.value.daRefreshToken, "");
-  assert.equal(da.status.state, "disconnected");
+  assert.equal(f.config.value.daAccessToken, '');
+  assert.equal(f.config.value.daRefreshToken, '');
+  assert.equal(da.status.state, 'disconnected');
   assert.equal(f.sockets.length, 0);
 });
-test("DA logout invalidates an authorization link before its callback arrives", async (t) => {
+test('DA logout invalidates an authorization link before its callback arrives', async (t) => {
   const f = fixture(t);
   let requests = 0;
   const c = new DonationAlertsConnection(
@@ -811,66 +818,55 @@ test("DA logout invalidates an authorization link before its callback arrives", 
     f.db,
     async () => {
       requests++;
-      return response({ access_token: "late", refresh_token: "late" });
+      return response({ access_token: 'late', refresh_token: 'late' });
     },
     f.socket,
   );
-  const state = new URL(c.authUrl("http://local")).searchParams.get("state");
+  const state = new URL(c.authUrl('http://local')).searchParams.get('state');
   try {
     await c.disconnect();
-    await assert.rejects(
-      c.finishAuth("code", state, "http://local"),
-      /INVALID_OAUTH_STATE/,
-    );
+    await assert.rejects(c.finishAuth('code', state, 'http://local'), /INVALID_OAUTH_STATE/);
     assert.equal(requests, 0);
-    assert.equal(f.config.value.daAccessToken, "");
+    assert.equal(f.config.value.daAccessToken, '');
   } finally {
     await c.stop();
   }
 });
-test("disconnect during startup validation/refresh preserves disconnected status and empty credentials", async (t) => {
+test('disconnect during startup validation/refresh preserves disconnected status and empty credentials', async (t) => {
   const f = fixture(t);
   let validate;
-  const twitch = new TwitchConnection(
-    f.config,
-    f.db,
-    () => new Promise((r) => (validate = r)),
-    f.socket,
-  );
+  const twitch = new TwitchConnection(f.config, f.db, () => new Promise((r) => (validate = r)), f.socket);
   const starting = twitch.start();
   await flush();
   await twitch.disconnect();
   validate(
     response({
-      client_id: "client123",
-      user_id: "owner",
-      scopes: ["user:read:chat"],
+      client_id: 'client123',
+      user_id: 'owner',
+      scopes: ['user:read:chat'],
     }),
   );
   await starting;
-  assert.equal(twitch.status.state, "disconnected");
+  assert.equal(twitch.status.state, 'disconnected');
   assert.equal(f.config.value.twitch, undefined);
   let refresh;
   const da = new DonationAlertsConnection(
     f.config,
     f.db,
-    async (url) =>
-      url.endsWith("/oauth/token")
-        ? new Promise((r) => (refresh = r))
-        : response({}, 401),
+    async (url) => (url.endsWith('/oauth/token') ? new Promise((r) => (refresh = r)) : response({}, 401)),
     f.socket,
   );
   const connecting = da.start();
   await flush();
   await da.disconnect();
-  refresh(response({ access_token: "late", refresh_token: "late" }));
+  refresh(response({ access_token: 'late', refresh_token: 'late' }));
   await connecting;
-  assert.equal(da.status.state, "disconnected");
-  assert.equal(f.config.value.daAccessToken, "");
-  assert.equal(f.config.value.daRefreshToken, "");
+  assert.equal(da.status.state, 'disconnected');
+  assert.equal(f.config.value.daAccessToken, '');
+  assert.equal(f.config.value.daRefreshToken, '');
   assert.equal(f.sockets.length, 0);
 });
-test("a refresh response from the previous login cannot overwrite a new device login", async (t) => {
+test('a refresh response from the previous login cannot overwrite a new device login', async (t) => {
   const f = fixture(t);
   let oldResponse;
   const fallback = twitchRequest(f);
@@ -878,15 +874,14 @@ test("a refresh response from the previous login cannot overwrite a new device l
     f.config,
     f.db,
     async (url, init) => {
-      if (url.endsWith("/token")) {
-        const grant = new URLSearchParams(init.body).get("grant_type");
-        if (grant === "refresh_token")
-          return new Promise((resolve) => (oldResponse = resolve));
+      if (url.endsWith('/token')) {
+        const grant = new URLSearchParams(init.body).get('grant_type');
+        if (grant === 'refresh_token') return new Promise((resolve) => (oldResponse = resolve));
         return response({
-          access_token: "new-login-access",
-          refresh_token: "new-login-refresh",
+          access_token: 'new-login-access',
+          refresh_token: 'new-login-refresh',
           expires_in: 7200,
-          scope: ["user:read:chat"],
+          scope: ['user:read:chat'],
         });
       }
       return fallback(url, init);
@@ -897,24 +892,24 @@ test("a refresh response from the previous login cannot overwrite a new device l
     const stale = assert.rejects(c.refresh(), /TWITCH_AUTH_CANCELLED/);
     await flush();
     await c.disconnect();
-    await c.beginAuth("client123", false);
+    await c.beginAuth('client123', false);
     await f.tick(5000);
-    assert.equal(f.config.value.twitch.access, "new-login-access");
+    assert.equal(f.config.value.twitch.access, 'new-login-access');
     oldResponse(
       response({
-        access_token: "old-login-access",
-        refresh_token: "old-login-refresh",
+        access_token: 'old-login-access',
+        refresh_token: 'old-login-refresh',
         expires_in: 7200,
       }),
     );
     await stale;
-    assert.equal(f.config.value.twitch.access, "new-login-access");
-    assert.equal(f.config.value.twitch.refresh, "new-login-refresh");
+    assert.equal(f.config.value.twitch.access, 'new-login-access');
+    assert.equal(f.config.value.twitch.refresh, 'new-login-refresh');
   } finally {
     await c.stop();
   }
 });
-test("a stream poll from the previous account is never applied to the new login", async (t) => {
+test('a stream poll from the previous account is never applied to the new login', async (t) => {
   const f = fixture(t);
   let oldStream;
   let streams = 0;
@@ -923,17 +918,16 @@ test("a stream poll from the previous account is never applied to the new login"
     f.config,
     f.db,
     async (url, init) => {
-      if (url.endsWith("/validate"))
+      if (url.endsWith('/validate'))
         return response({
-          client_id: "client123",
+          client_id: 'client123',
           user_id: f.config.value.twitch.userId,
-          scopes: ["user:read:chat"],
+          scopes: ['user:read:chat'],
         });
-      if (new URL(url).pathname.endsWith("/streams")) {
-        if (++streams === 1)
-          return new Promise((resolve) => (oldStream = resolve));
+      if (new URL(url).pathname.endsWith('/streams')) {
+        if (++streams === 1) return new Promise((resolve) => (oldStream = resolve));
         return response({
-          data: [{ id: "new-stream", started_at: new Date().toISOString() }],
+          data: [{ id: 'new-stream', started_at: new Date().toISOString() }],
         });
       }
       return fallback(url, init);
@@ -947,30 +941,38 @@ test("a stream poll from the previous account is never applied to the new login"
     await c.disconnect();
     f.config.value.twitch = {
       ...token,
-      userId: "new-owner",
-      access: "new-access",
+      userId: 'new-owner',
+      access: 'new-access',
     };
     await c.start();
     oldStream(
       response({
-        data: [{ id: "old-stream", started_at: new Date().toISOString() }],
+        data: [{ id: 'old-stream', started_at: new Date().toISOString() }],
       }),
     );
     await starting;
-    assert.equal(f.calls.filter(x => x.method === "observePlatformStream" && x.args[1] === "owner").length, 0, "a cancelled response must not attach the old stream to the new owner");
+    assert.equal(
+      f.calls.filter((x) => x.method === 'observePlatformStream' && x.args[1] === 'owner').length,
+      0,
+      'a cancelled response must not attach the old stream to the new owner',
+    );
     f.sockets.at(-1).push(welcome);
     await flush();
     await f.tick(60000);
-    const sessions = f.calls.filter((x) => x.method === "observePlatformStream");
-    assert.equal(sessions.length, 2, "the new login checks immediately and again after one minute");
-    assert.ok(sessions.every(x => x.args[1] === "new-owner" && x.args[2] === "new-stream"));
-    assert.equal(sessions[0].result, sessions[1].result, "repeated observations of one stream reuse its logical session ID");
+    const sessions = f.calls.filter((x) => x.method === 'observePlatformStream');
+    assert.equal(sessions.length, 2, 'the new login checks immediately and again after one minute');
+    assert.ok(sessions.every((x) => x.args[1] === 'new-owner' && x.args[2] === 'new-stream'));
+    assert.equal(
+      sessions[0].result,
+      sessions[1].result,
+      'repeated observations of one stream reuse its logical session ID',
+    );
   } finally {
     await c.stop();
   }
 });
 
-test("a validation response from the previous account cannot mutate or reconnect a new login", async (t) => {
+test('a validation response from the previous account cannot mutate or reconnect a new login', async (t) => {
   const f = fixture(t);
   let oldValidate;
   let validations = 0;
@@ -979,14 +981,13 @@ test("a validation response from the previous account cannot mutate or reconnect
     f.config,
     f.db,
     async (url, init) => {
-      if (url.endsWith("/validate")) {
-        if (++validations === 1)
-          return new Promise((resolve) => (oldValidate = resolve));
+      if (url.endsWith('/validate')) {
+        if (++validations === 1) return new Promise((resolve) => (oldValidate = resolve));
         return response({
-          client_id: "client123",
-          user_id: "new-owner",
-          login: "New owner",
-          scopes: ["user:read:chat"],
+          client_id: 'client123',
+          user_id: 'new-owner',
+          login: 'New owner',
+          scopes: ['user:read:chat'],
         });
       }
       return fallback(url, init);
@@ -1000,149 +1001,310 @@ test("a validation response from the previous account cannot mutate or reconnect
     await c.disconnect();
     f.config.value.twitch = {
       ...token,
-      userId: "new-owner",
-      access: "new-access",
+      userId: 'new-owner',
+      access: 'new-access',
     };
     await c.start();
     assert.equal(f.sockets.length, 1);
     oldValidate(
       response({
-        client_id: "client123",
-        user_id: "old-owner",
-        login: "Old owner",
-        scopes: ["user:read:chat"],
+        client_id: 'client123',
+        user_id: 'old-owner',
+        login: 'Old owner',
+        scopes: ['user:read:chat'],
       }),
     );
     await starting;
-    assert.equal(f.config.value.twitch.userId, "new-owner");
-    assert.equal(f.config.value.twitch.access, "new-access");
-    assert.equal(c.status.account, "New owner");
-    assert.equal(
-      f.sockets.length,
-      1,
-      "cancelled validation must not create a second connection",
-    );
+    assert.equal(f.config.value.twitch.userId, 'new-owner');
+    assert.equal(f.config.value.twitch.access, 'new-access');
+    assert.equal(c.status.account, 'New owner');
+    assert.equal(f.sockets.length, 1, 'cancelled validation must not create a second connection');
   } finally {
     await c.stop();
   }
 });
 
-test("DA automatically checks history offline and after a stream, with explicit refresh still available", async t => {
-  const f=fixture(t);let historyRequests=0;const fallback=daRequest(f);
-  const request=async(url,init)=>{if(url.includes('alerts/donations'))historyRequests++;return fallback(url,init);};
-  const c=new DonationAlertsConnection(f.config,f.db,request,f.socket);
-  try{
-   await c.start();await f.tick(1100);assert.equal(historyRequests,1);
-   const socket=f.sockets[0];socket.emit('open');socket.push({id:1,result:{client:'client'}});await f.tick(1100);socket.push({id:2,result:{}});await flush();
-   for(let n=0;n<6;n++){socket.push({});await f.tick(10000);}assert.equal(historyRequests,2);
-   const explicit=c.scanHistory();await f.tick(1100);await explicit;assert.equal(historyRequests,3);
-   await f.db.call('observePlatformStream','youtube','yt','live',Date.now(),Date.now(),null,'Live');
-   const active=c.scanHistory(true);await f.tick(1100);await active;assert.equal(historyRequests,4);
-   f.setSessions([]);const offline=c.scanHistory(true);await f.tick(1100);await offline;assert.equal(historyRequests,5);
-  }finally{await c.stop();}
-});
-
-test("Twitch channel.update v2 preserves category and title changes as timestamped raw events", async t => {
- const f=fixture(t); const c=new TwitchConnection(f.config,f.db,twitchRequest(f),f.socket);
- try {
-  await c.start();f.sockets[0].push(welcome);await flush();
-  const updated=f.calls.filter(row=>row.method==='ingest');
-  f.sockets[0].push(notification('channel.update',{broadcaster_user_id:'owner',title:'Second title',category_id:'wow',category_name:'World of Warcraft'}));
-  await flush();
-  const events=f.calls.filter(row=>row.method==='ingest');
-  assert.equal(events.length,updated.length+1);
-  assert.equal(events.at(-1).args[0].type,'channel.update');
-  assert.equal(events.at(-1).args[0].payload.categoryId,'wow');
-  assert.equal(events.at(-1).args[0].payload.categoryName,'World of Warcraft');
-  assert.equal(events.at(-1).args[0].payload.title,'Second title');
- }finally{await c.stop();}
-});
-
-test('failed Twitch presence polls retain missing intervals and recover without bridging them', async t => {
-  const f=fixture(t), original=twitchRequest(f);
-  let fail=false;
-  const request=async(url,init)=>new URL(url).pathname.endsWith('/chatters')&&fail
-    ? response({message:'unavailable'},503) : original(url,init);
-  const c=new TwitchConnection(f.config,f.db,request,f.socket);
+test('DA automatically checks history offline and after a stream, with explicit refresh still available', async (t) => {
+  const f = fixture(t);
+  let historyRequests = 0;
+  const fallback = daRequest(f);
+  const request = async (url, init) => {
+    if (url.includes('alerts/donations')) historyRequests++;
+    return fallback(url, init);
+  };
+  const c = new DonationAlertsConnection(f.config, f.db, request, f.socket);
   try {
     await c.start();
-    f.sockets[0].push({...welcome,payload:{session:{id:'wire',keepalive_timeout_seconds:3600}}});
+    await f.tick(1100);
+    assert.equal(historyRequests, 1);
+    const socket = f.sockets[0];
+    socket.emit('open');
+    socket.push({ id: 1, result: { client: 'client' } });
+    await f.tick(1100);
+    socket.push({ id: 2, result: {} });
     await flush();
-    const successful=f.calls.find(x=>x.method==='recordPoll').args[2];
-    fail=true;await f.tick(60000);
-    assert.equal(c.status.capabilities.presence,'failed');
-    let gaps=f.calls.filter(x=>x.method==='gap'&&x.args[1]==='chatters_poll_failed');
-    assert.equal(gaps.length,1);
-    assert.equal(gaps[0].args[2],successful.completedAtMs);
-    assert.equal(gaps[0].args[3],Date.now());
-    await f.tick(60000);
-    gaps=f.calls.filter(x=>x.method==='gap'&&x.args[1]==='chatters_poll_failed');
-    assert.equal(gaps.length,2);
-    assert.ok(gaps[1].args[2]>gaps[0].args[3]);
-    fail=false;await f.tick(60000);
-    assert.equal(c.status.capabilities.presence,'complete');
-    const recovered=f.calls.filter(x=>x.method==='recordPoll').at(-1).args[2];
-    assert.equal(recovered.startedAtMs,recovered.completedAtMs,'recovery does not invent observation through the outage');
-    assert.equal(f.calls.filter(x=>x.method==='gap'&&x.args[1]==='chatters_poll_failed').length,2);
-  } finally {await c.stop();}
+    for (let n = 0; n < 6; n++) {
+      socket.push({});
+      await f.tick(10000);
+    }
+    assert.equal(historyRequests, 2);
+    const explicit = c.scanHistory();
+    await f.tick(1100);
+    await explicit;
+    assert.equal(historyRequests, 3);
+    await f.db.call('observePlatformStream', 'youtube', 'yt', 'live', Date.now(), Date.now(), null, 'Live');
+    const active = c.scanHistory(true);
+    await f.tick(1100);
+    await active;
+    assert.equal(historyRequests, 4);
+    f.setSessions([]);
+    const offline = c.scanHistory(true);
+    await f.tick(1100);
+    await offline;
+    assert.equal(historyRequests, 5);
+  } finally {
+    await c.stop();
+  }
 });
 
-test('a failed presence request after Twitch stop cannot append a stale gap',async t=>{
-  const f=fixture(t),original=twitchRequest(f);
-  let rejectPoll;
-  const pending=new Promise((_,reject)=>{rejectPoll=reject;});
-  const request=(url,init)=>new URL(url).pathname.endsWith('/chatters')?pending:original(url,init);
-  const c=new TwitchConnection(f.config,f.db,request,f.socket);
+test('Twitch channel.update v2 preserves category and title changes as timestamped raw events', async (t) => {
+  const f = fixture(t);
+  const c = new TwitchConnection(f.config, f.db, twitchRequest(f), f.socket);
   try {
-    await c.start();await flush();
-    await c.stop();rejectPoll(new Error('old request failed'));await flush();
-    assert.equal(f.calls.some(x=>x.method==='gap'),false);
-    assert.equal(c.status.capabilities.presence,undefined);
-  }finally{await c.stop();}
+    await c.start();
+    f.sockets[0].push(welcome);
+    await flush();
+    const updated = f.calls.filter((row) => row.method === 'ingest');
+    f.sockets[0].push(
+      notification('channel.update', {
+        broadcaster_user_id: 'owner',
+        title: 'Second title',
+        category_id: 'wow',
+        category_name: 'World of Warcraft',
+      }),
+    );
+    await flush();
+    const events = f.calls.filter((row) => row.method === 'ingest');
+    assert.equal(events.length, updated.length + 1);
+    assert.equal(events.at(-1).args[0].type, 'channel.update');
+    assert.equal(events.at(-1).args[0].payload.categoryId, 'wow');
+    assert.equal(events.at(-1).args[0].payload.categoryName, 'World of Warcraft');
+    assert.equal(events.at(-1).args[0].payload.title, 'Second title');
+  } finally {
+    await c.stop();
+  }
 });
 
-test('DA disconnect while subscribing ignores the late channel token and sends nothing to the closed socket',async t=>{
- const f=fixture(t),original=daRequest(f);let release,requested=false;
- const pending=new Promise(resolve=>{release=resolve;});
- const request=async(url,init)=>{if(url.endsWith('/centrifuge/subscribe')){requested=true;return pending;}return original(url,init);};
- const c=new DonationAlertsConnection(f.config,f.db,request,f.socket);
- try{
-  await c.start();f.sockets[0].emit('open');f.sockets[0].push({id:1,result:{client:'client'}});await f.tick(1100);await f.tick(1100);assert.equal(requested,true);
-  const sent=f.sockets[0].sent.length;await c.disconnect();release(response({channels:[{channel:'$alerts:donation_7',token:'late'}]}));await flush();
-  assert.equal(f.sockets[0].sent.length,sent);assert.equal(c.status.state,'disconnected');assert.equal(f.config.value.daAccessToken,'');
- }finally{release(response({channels:[]}));await c.stop();}
+test('failed Twitch presence polls retain missing intervals and recover without bridging them', async (t) => {
+  const f = fixture(t),
+    original = twitchRequest(f);
+  let fail = false;
+  const request = async (url, init) =>
+    new URL(url).pathname.endsWith('/chatters') && fail
+      ? response({ message: 'unavailable' }, 503)
+      : original(url, init);
+  const c = new TwitchConnection(f.config, f.db, request, f.socket);
+  try {
+    await c.start();
+    f.sockets[0].push({ ...welcome, payload: { session: { id: 'wire', keepalive_timeout_seconds: 3600 } } });
+    await flush();
+    const successful = f.calls.find((x) => x.method === 'recordPoll').args[2];
+    fail = true;
+    await f.tick(60000);
+    assert.equal(c.status.capabilities.presence, 'failed');
+    let gaps = f.calls.filter((x) => x.method === 'gap' && x.args[1] === 'chatters_poll_failed');
+    assert.equal(gaps.length, 1);
+    assert.equal(gaps[0].args[2], successful.completedAtMs);
+    assert.equal(gaps[0].args[3], Date.now());
+    await f.tick(60000);
+    gaps = f.calls.filter((x) => x.method === 'gap' && x.args[1] === 'chatters_poll_failed');
+    assert.equal(gaps.length, 2);
+    assert.ok(gaps[1].args[2] > gaps[0].args[3]);
+    fail = false;
+    await f.tick(60000);
+    assert.equal(c.status.capabilities.presence, 'complete');
+    const recovered = f.calls.filter((x) => x.method === 'recordPoll').at(-1).args[2];
+    assert.equal(
+      recovered.startedAtMs,
+      recovered.completedAtMs,
+      'recovery does not invent observation through the outage',
+    );
+    assert.equal(f.calls.filter((x) => x.method === 'gap' && x.args[1] === 'chatters_poll_failed').length, 2);
+  } finally {
+    await c.stop();
+  }
 });
 
-test('DA history continues past an invalid row, stops at its page budget and never reports complete',async t=>{
- const f=fixture(t);let pages=0,inserted=0;
- const logs=t.mock.method(console,'error',()=>{});
- const db={call:async(method,...args)=>{if(method==='ingest'){inserted++;return {inserted:true};}return f.db.call(method,...args);}};
- const request=async()=>{pages++;t.mock.timers.tick(1100);return response({data:pages===1?[{id:'invalid'}, {id:2,amount:'1',currency:'RUB',created_at:'',username:'Valid'}]:[],links:{next:'next'}});};
- const c=new DonationAlertsConnection(f.config,db,request,f.socket);c.stopped=false;c.recipient='7';
- try{
-  await c.scanHistory();assert.equal(pages,1000);assert.equal(inserted,1);assert.equal(logs.mock.callCount(),1);
-  assert.equal(c.status.capabilities.history,'Импорт неполный (лимит/остановка)');assert.equal(c.status.state,'degraded');
- }finally{await c.stop();}
+test('a failed presence request after Twitch stop cannot append a stale gap', async (t) => {
+  const f = fixture(t),
+    original = twitchRequest(f);
+  let rejectPoll;
+  const pending = new Promise((_, reject) => {
+    rejectPoll = reject;
+  });
+  const request = (url, init) => (new URL(url).pathname.endsWith('/chatters') ? pending : original(url, init));
+  const c = new TwitchConnection(f.config, f.db, request, f.socket);
+  try {
+    await c.start();
+    await flush();
+    await c.stop();
+    rejectPoll(new Error('old request failed'));
+    await flush();
+    assert.equal(
+      f.calls.some((x) => x.method === 'gap'),
+      false,
+    );
+    assert.equal(c.status.capabilities.presence, undefined);
+  } finally {
+    await c.stop();
+  }
 });
 
-test('DA automatic scan checks the 48-hour window and duplicate automatic calls share in-flight work',async t=>{
- const f=fixture(t);await f.db.call('observePlatformStream','twitch','owner','live',Date.now()-60000,Date.now(),null,'Live');
- let pages=0,release;const pending=new Promise(resolve=>{release=resolve;});
- const row={id:1,amount:'1',currency:'RUB',created_at:'2026-10-10 07:00:00',username:'Known'};f.config.value.daUtcOffsetMinutes=0;
- f.setSessions([{id:'live',kind:'platform',started_at_ms:0,ended_at_ms:null}]);
- const db={call:async(method,...args)=>method==='activeLogicalStream'?{id:'live',started_at_ms:0}:method==='donationImportStates'?[{id:'1',needsImport:false,occurredAtMs:Date.parse('2026-10-10T07:00:00Z')}]:f.db.call(method,...args)};
- const request=async()=>{pages++;t.mock.timers.tick(1100);if(pages===1)return pending;return response({data:[{...row,id:2,created_at:'2026-10-07 07:00:00'}],links:{next:'next'}});};
- const c=new DonationAlertsConnection(f.config,db,request,f.socket);c.stopped=false;c.recipient='7';
- try{
-  const scan=c.scanHistory(true);await flush();await c.scanHistory(true);assert.equal(pages,1);
-  release(response({data:[row],links:{next:'next'}}));await scan;assert.equal(pages,2);assert.equal(c.status.capabilities.history,'Импорт доступных страниц завершён');
- }finally{release(response({data:[],links:{next:null}}));await c.stop();}
+test('DA disconnect while subscribing ignores the late channel token and sends nothing to the closed socket', async (t) => {
+  const f = fixture(t),
+    original = daRequest(f);
+  let release,
+    requested = false;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  const request = async (url, init) => {
+    if (url.endsWith('/centrifuge/subscribe')) {
+      requested = true;
+      return pending;
+    }
+    return original(url, init);
+  };
+  const c = new DonationAlertsConnection(f.config, f.db, request, f.socket);
+  try {
+    await c.start();
+    f.sockets[0].emit('open');
+    f.sockets[0].push({ id: 1, result: { client: 'client' } });
+    await f.tick(1100);
+    await f.tick(1100);
+    assert.equal(requested, true);
+    const sent = f.sockets[0].sent.length;
+    await c.disconnect();
+    release(response({ channels: [{ channel: '$alerts:donation_7', token: 'late' }] }));
+    await flush();
+    assert.equal(f.sockets[0].sent.length, sent);
+    assert.equal(c.status.state, 'disconnected');
+    assert.equal(f.config.value.daAccessToken, '');
+  } finally {
+    release(response({ channels: [] }));
+    await c.stop();
+  }
 });
 
-test('DA a finished page with a rejected row stays incomplete while its valid donation survives',async t=>{
- const f=fixture(t);let ingested=0;t.mock.method(console,'error',()=>{});
- const db={call:async(method,...args)=>{if(method==='ingest'){ingested++;return {inserted:true};}return f.db.call(method,...args);}};
- const request=async()=>response({data:[{id:'broken'},{id:2,amount:'2.90',currency:'RUB',created_at:'',username:'Valid'}],links:{next:null}});
- const c=new DonationAlertsConnection(f.config,db,request,f.socket);c.stopped=false;c.recipient='7';
- try{await c.scanHistory();assert.equal(ingested,1);assert.equal(c.status.capabilities.history,'Импорт неполный: пропущено записей 1');}finally{await c.stop();}
+test('DA history continues past an invalid row, stops at its page budget and never reports complete', async (t) => {
+  const f = fixture(t);
+  let pages = 0,
+    inserted = 0;
+  const logs = t.mock.method(console, 'error', () => {});
+  const db = {
+    call: async (method, ...args) => {
+      if (method === 'ingest') {
+        inserted++;
+        return { inserted: true };
+      }
+      return f.db.call(method, ...args);
+    },
+  };
+  const request = async () => {
+    pages++;
+    t.mock.timers.tick(1100);
+    return response({
+      data:
+        pages === 1
+          ? [{ id: 'invalid' }, { id: 2, amount: '1', currency: 'RUB', created_at: '', username: 'Valid' }]
+          : [],
+      links: { next: 'next' },
+    });
+  };
+  const c = new DonationAlertsConnection(f.config, db, request, f.socket);
+  c.stopped = false;
+  c.recipient = '7';
+  try {
+    await c.scanHistory();
+    assert.equal(pages, 1000);
+    assert.equal(inserted, 1);
+    assert.equal(logs.mock.callCount(), 1);
+    assert.equal(c.status.capabilities.history, 'Импорт неполный (лимит/остановка)');
+    assert.equal(c.status.state, 'degraded');
+  } finally {
+    await c.stop();
+  }
+});
+
+test('DA automatic scan checks the 48-hour window and duplicate automatic calls share in-flight work', async (t) => {
+  const f = fixture(t);
+  await f.db.call('observePlatformStream', 'twitch', 'owner', 'live', Date.now() - 60000, Date.now(), null, 'Live');
+  let pages = 0,
+    release;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  const row = { id: 1, amount: '1', currency: 'RUB', created_at: '2026-10-10 07:00:00', username: 'Known' };
+  f.config.value.daUtcOffsetMinutes = 0;
+  f.setSessions([{ id: 'live', kind: 'platform', started_at_ms: 0, ended_at_ms: null }]);
+  const db = {
+    call: async (method, ...args) =>
+      method === 'activeLogicalStream'
+        ? { id: 'live', started_at_ms: 0 }
+        : method === 'donationImportStates'
+          ? [{ id: '1', needsImport: false, occurredAtMs: Date.parse('2026-10-10T07:00:00Z') }]
+          : f.db.call(method, ...args),
+  };
+  const request = async () => {
+    pages++;
+    t.mock.timers.tick(1100);
+    if (pages === 1) return pending;
+    return response({ data: [{ ...row, id: 2, created_at: '2026-10-07 07:00:00' }], links: { next: 'next' } });
+  };
+  const c = new DonationAlertsConnection(f.config, db, request, f.socket);
+  c.stopped = false;
+  c.recipient = '7';
+  try {
+    const scan = c.scanHistory(true);
+    await flush();
+    await c.scanHistory(true);
+    assert.equal(pages, 1);
+    release(response({ data: [row], links: { next: 'next' } }));
+    await scan;
+    assert.equal(pages, 2);
+    assert.equal(c.status.capabilities.history, 'Импорт доступных страниц завершён');
+  } finally {
+    release(response({ data: [], links: { next: null } }));
+    await c.stop();
+  }
+});
+
+test('DA a finished page with a rejected row stays incomplete while its valid donation survives', async (t) => {
+  const f = fixture(t);
+  let ingested = 0;
+  t.mock.method(console, 'error', () => {});
+  const db = {
+    call: async (method, ...args) => {
+      if (method === 'ingest') {
+        ingested++;
+        return { inserted: true };
+      }
+      return f.db.call(method, ...args);
+    },
+  };
+  const request = async () =>
+    response({
+      data: [{ id: 'broken' }, { id: 2, amount: '2.90', currency: 'RUB', created_at: '', username: 'Valid' }],
+      links: { next: null },
+    });
+  const c = new DonationAlertsConnection(f.config, db, request, f.socket);
+  c.stopped = false;
+  c.recipient = '7';
+  try {
+    await c.scanHistory();
+    assert.equal(ingested, 1);
+    assert.equal(c.status.capabilities.history, 'Импорт неполный: пропущено записей 1');
+  } finally {
+    await c.stop();
+  }
 });
