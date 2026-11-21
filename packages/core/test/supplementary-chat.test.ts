@@ -61,10 +61,12 @@ test('supplementary chat excludes merged breaks and keeps profile-specific roles
 
 test('supplementary requests cannot spend the primary local quota reserve',()=>{
  const s=new StreamStore(':memory:');try{
-  assert.equal(s.youtubeQuota('11/09/2026','ruslan:secondary',1000,1000),true);
-  assert.equal(s.youtubeQuota('11/09/2026','ruslan:secondary',1,1000),false);
-  assert.equal(s.youtubeQuota('11/09/2026','ruslan',4000),true);
+  assert.equal(s.youtubeQuota('11/09/2026','ruslan:secondary',3000,3000),true);
+  assert.equal(s.youtubeQuota('11/09/2026','ruslan:secondary',1,3000),false);
+  assert.equal(s.youtubeQuota('11/09/2026','ruslan',9000,9000),true);
+  assert.equal(s.youtubeQuota('11/09/2026','ruslan',1,9000),false);
   assert.throws(()=>s.youtubeQuota('11/09/2026','ruslan',1,0),/INVALID_QUOTA/);
-  assert.throws(()=>s.youtubeQuota('11/09/2026','ruslan',1,4001),/INVALID_QUOTA/);
+  assert.throws(()=>s.youtubeQuota('11/09/2026','ruslan',1,100001),/INVALID_QUOTA/);
+  assert.throws(()=>s.youtubeQuota('11/09/2026','ruslan',100001,100000),/INVALID_QUOTA/);
  }finally{s.close();}
 });

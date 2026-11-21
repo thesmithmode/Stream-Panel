@@ -1,4 +1,4 @@
-import {subscriberInterval} from './subscriber-cadence.js';
+import {youtubeSubscriberCountInterval,youtubeSubscriberListInterval} from './subscriber-cadence.js';
 import {collectYouTubePublications} from './youtube-publications.js';
 import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import type { ConfigurationPort, Tokens } from "./config.js";
@@ -7,6 +7,16 @@ type YoutubeStore = StorePort<'youtubePublications' | 'followingSnapshot' | 'gap
 import { object, string } from "./provider-values.js";
 const scopes = ["https://www.googleapis.com/auth/youtube.readonly", "https://www.googleapis.com/auth/yt-analytics.readonly"];
 const videoParts='snippet,statistics,contentDetails,liveStreamingDetails,status,recordingDetails,topicDetails,localizations,paidProductPlacementDetails';
+/** Google quota units per Data API read (https://developers.google.com/youtube/v3/determine_quota_cost): every list used here costs 1, a live chat read costs 5. */
+export const youtubeUnitCost=(resource:string)=>resource==='liveChat/messages'?5:1;
+/** Local daily budgets in Google units (default project quota: 10 000 units/day, reset at midnight Pacific Time). */
+export const YOUTUBE_DAILY_UNITS={primary:9000,secondary:3000} as const;
+/** While live, the active broadcast list is rediscovered at most this often; per-minute video reads confirm that known broadcasts are still live. */
+export const YOUTUBE_LIVE_DISCOVERY_MS=5*60_000;
+/** Chat pacing: 60 s while messages arrive, 120 s while quiet, never faster than a 90 s long-run average (small burst allowance). */
+export const YOUTUBE_CHAT_PACE={activeMs:60_000,quietMs:120_000,averageMs:90_000,burst:4,toleranceMs:5_000} as const;
+type ChatPace={at:number;credits:number;quiet:boolean;floor:number};
+const stillLive=(video:Record<string,any>|undefined)=>!!video&&!!video.liveStreamingDetails&&typeof video.liveStreamingDetails==='object'&&!video.liveStreamingDetails.actualEndTime;
 export class YouTubeConnection {
   status:{state:string;account:string;detail:string;lastSyncAt?:number;lastFollowersAt?:number} = { state: "disconnected", account: "", detail: "" };
   private pending: { state: string; verifier: string; expires: number; clientId: string; secret: string } | undefined;
@@ -17,6 +27,8 @@ export class YouTubeConnection {
   private requests = new Set<AbortController>();
   private refreshing: Promise<void> | undefined;
   private initialCountChecked = false;
+  private broadcastCache:{at:number;items:Record<string,any>[]}|undefined;
+  private readonly chatPace=new Map<string,ChatPace>();
   constructor(private config: ConfigurationPort, private db: YoutubeStore, private redirect: string,
     private profile: string, private request: typeof fetch = fetch, private now = Date.now,private mode:{chatOnly?:boolean;otherAccount?:()=>string|undefined}={}) {}
   acceptsState(state:string){return !!this.pending&&this.pending.state===state;}
@@ -108,7 +120,7 @@ export class YouTubeConnection {
   private async api(resource: string, params: Record<string,string>, tokens: Tokens) {
     const generation=this.generation;
     const day = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(this.now());
-    if (!await this.db.call("youtubeQuota", day, this.mode.chatOnly?`${this.profile}:secondary`:this.profile, 1,this.mode.chatOnly?1000:4000)) throw new Error("YOUTUBE_DAILY_BUDGET");
+    if (!await this.db.call("youtubeQuota", day, this.mode.chatOnly?`${this.profile}:secondary`:this.profile, youtubeUnitCost(resource),this.mode.chatOnly?YOUTUBE_DAILY_UNITS.secondary:YOUTUBE_DAILY_UNITS.primary)) throw new Error("YOUTUBE_DAILY_BUDGET");
     const data=await this.authorizedJson(`https://www.googleapis.com/youtube/v3/${resource}?${new URLSearchParams(params)}`, tokens);
     if(generation!==this.generation)return {};
 
@@ -142,6 +154,94 @@ export class YouTubeConnection {
     }
     throw new Error("YOUTUBE_BROADCAST_PAGINATION_LIMIT");
   }
+  private async discoverBroadcasts(tokens:Tokens,valid:()=>boolean){
+    const broadcasts=await this.activeBroadcasts(tokens,valid);
+    if(broadcasts&&valid())this.broadcastCache=broadcasts.length?{at:this.now(),items:broadcasts}:undefined;
+    return broadcasts;
+  }
+  /** Validated video details by ID; a malformed batch is left out. */
+  private async videoDetails(ids:string[],tokens:Tokens,valid:()=>boolean){
+    const videoDetails = new Map<string, Record<string, any>>();
+    for (let offset = 0; offset < ids.length; offset += 50) {
+      const batchIds = ids.slice(offset, offset + 50);
+      const response = await this.api("videos", { part: videoParts, id: batchIds.join(",") }, tokens);
+      if (!valid()) return null;
+      if (!Array.isArray(response.items)) continue;
+      const batch = new Map<string, Record<string, any>>();
+      let malformed = false;
+      for (const value of response.items) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) { malformed = true; break; }
+        const item = value as Record<string, any>, id = string(item.id);
+        if (!batchIds.includes(id) || batch.has(id)) { malformed = true; break; }
+        batch.set(id, item);
+      }
+      if (malformed || batch.size !== batchIds.length || batchIds.some(id => !batch.has(id))) continue;
+      for (const [id, item] of batch) videoDetails.set(id, item);
+    }
+    return videoDetails;
+  }
+  /**
+   * Active broadcasts with their video details. While live, a recent broadcast list is reused
+   * when the per-minute video read confirms every known broadcast is still live; otherwise
+   * (ended, missing or unconfirmed) the list is rediscovered at once.
+   */
+  private async liveState(tokens:Tokens,valid:()=>boolean){
+    const cached=this.broadcastCache;let known:Map<string,Record<string,any>>|undefined,knownIds:string[]=[];
+    if(cached&&this.now()-cached.at<YOUTUBE_LIVE_DISCOVERY_MS){
+      knownIds=cached.items.map(b=>string(b.id));
+      const details=await this.videoDetails(knownIds,tokens,valid);if(!details)return null;
+      if(knownIds.every(id=>stillLive(details.get(id))))return {broadcasts:cached.items,videoDetails:details,reused:true};
+      known=details;
+    }
+    const broadcasts=await this.discoverBroadcasts(tokens,valid);if(!broadcasts||!valid())return null;
+    const ids=broadcasts.map(b=>string(b.id));
+    if(known&&ids.length===knownIds.length&&ids.every((id,i)=>id===knownIds[i]))return {broadcasts,videoDetails:known,reused:false};
+    const videoDetails=await this.videoDetails(ids,tokens,valid);if(!videoDetails)return null;
+    return {broadcasts,videoDetails,reused:false};
+  }
+  private chatDue(chat:string):boolean{
+    const pace=this.chatPace.get(chat);if(!pace)return true;
+    const elapsed=this.now()-pace.at,credits=Math.min(YOUTUBE_CHAT_PACE.burst,pace.credits+elapsed/YOUTUBE_CHAT_PACE.averageMs);
+    return credits>=1&&elapsed>=Math.max(pace.quiet?YOUTUBE_CHAT_PACE.quietMs:YOUTUBE_CHAT_PACE.activeMs,pace.floor)-YOUTUBE_CHAT_PACE.toleranceMs;
+  }
+  private chatPolled(chat:string,messages:number,floor:number){
+    const now=this.now(),pace=this.chatPace.get(chat);
+    const credits=pace?Math.min(YOUTUBE_CHAT_PACE.burst,pace.credits+(now-pace.at)/YOUTUBE_CHAT_PACE.averageMs):YOUTUBE_CHAT_PACE.burst;
+    this.chatPace.set(chat,{at:now,credits:credits-1,quiet:messages===0,floor});
+  }
+  /**
+   * Reads every due chat from its saved cursor (skipped polls lose nothing) and returns the
+   * loop interval: 60 s while live, raised to YouTube's pollingIntervalMillis like before.
+   */
+  private async collectChats(tokens:Tokens,broadcasts:Record<string,any>[],snapshots:Record<string,{data:unknown;updatedAt:number}>,valid:()=>boolean,reused:boolean):Promise<number|null>{
+    let interval=broadcasts.length?60000:300000,ended=false;
+    const chats=new Set<string>();
+    for(const broadcast of broadcasts){
+      const chat=string(broadcast.snippet?.liveChatId);if(!chat)continue;chats.add(chat);
+      if(!this.chatDue(chat)){interval=Math.max(interval,this.chatPace.get(chat)!.floor);continue;}
+      const cursor=string(snapshots[`cursor:${chat}`]?.data);
+      let response:Record<string,any>;
+      try{response=await this.api('liveChat/messages',{part:'id,snippet,authorDetails',liveChatId:chat,maxResults:'2000',...(cursor?{pageToken:cursor}:{})},tokens);}
+      catch(error){
+        // A reused list may name a broadcast that just ended: confirm before reporting a failure.
+        if(!reused||!valid())throw error;
+        const fresh=await this.discoverBroadcasts(tokens,valid);if(!fresh||!valid())return null;
+        if(fresh.some(item=>string(item.snippet?.liveChatId)===chat))throw error;
+        if(!fresh.length)ended=true;
+        continue;
+      }
+      if(!valid())return null;
+      const items=Array.isArray(response.items)?response.items:[];
+      await this.db.call('youtubeMessages',tokens.userId,chat,items,broadcast.id);if(!valid())return null;
+      await this.db.call('youtubeSnapshot',tokens.userId,`cursor:${chat}`,string(response.nextPageToken),this.now());if(!valid())return null;
+      const floor=Number(response.pollingIntervalMillis)||60000;
+      this.chatPolled(chat,items.length,floor);
+      if(response.offlineAt)this.broadcastCache=undefined;
+      interval=Math.max(interval,floor);
+    }
+    for(const chat of this.chatPace.keys())if(!chats.has(chat))this.chatPace.delete(chat);
+    return ended?300000:interval;
+  }
   async collectOnce(): Promise<number> {
     const generation = this.generation, tokens = this.config.value.youtube;
     if (!tokens) return 300000;
@@ -163,12 +263,12 @@ export class YouTubeConnection {
       channelSnapshot = own;refreshedMetadata=true;
     }
     // Finish and validate every discovery page before changing session or snapshot state.
-    const discovered = await this.activeBroadcasts(tokens, valid);
-    if (!discovered || !valid()) return 300000;
-    const broadcasts = discovered;
+    const live = await this.liveState(tokens, valid);
+    if (!live || !valid()) return 300000;
+    const {broadcasts,videoDetails,reused} = live;
     // Legacy channel metadata is not a subscriber-history observation. Start the
     // history with a fresh API value instead of waiting on the old metadata age.
-    if(!channelSnapshot&&((previous.subscriberCountAt===null&&!this.initialCountChecked)||this.now()-(previous.snapshots.channel?.updatedAt??0)>=subscriberInterval(broadcasts.length>0))){
+    if(!channelSnapshot&&((previous.subscriberCountAt===null&&!this.initialCountChecked)||this.now()-(previous.snapshots.channel?.updatedAt??0)>=youtubeSubscriberCountInterval(broadcasts.length>0))){
       this.initialCountChecked=true;
       try{
         const response=await this.api('channels',{part:'statistics',id:tokens.userId},tokens);if(!valid())return 300000;
@@ -184,23 +284,6 @@ export class YouTubeConnection {
     const removed=(Array.isArray(oldBroadcasts)?oldBroadcasts:[]).map((b:unknown)=>b&&typeof b==='object'&&!Array.isArray(b)?string((b as Record<string,unknown>).id):'').filter((id:string)=>id&&!videoIds.includes(id));
     const archivedIds=[...new Set([...removed,...(Array.isArray(cursor.ids)?cursor.ids:[])])].filter((id):id is string=>typeof id==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(id)&&!videoIds.includes(id)).slice(0,200);
     if(removed.length){await this.db.call('youtubeSnapshot',tokens.userId,'cursor:archivedVideos',{ids:archivedIds,checkedAt:0},this.now());if(!valid())return 300000;}
-    const videoDetails = new Map<string, Record<string, any>>();
-    for (let offset = 0; offset < videoIds.length; offset += 50) {
-      const ids = videoIds.slice(offset, offset + 50);
-      const response = await this.api("videos", { part: videoParts, id: ids.join(",") }, tokens);
-      if (!valid()) return 300000;
-      if (!Array.isArray(response.items)) continue;
-      const batch = new Map<string, Record<string, any>>();
-      let malformed = false;
-      for (const value of response.items) {
-        if (!value || typeof value !== "object" || Array.isArray(value)) { malformed = true; break; }
-        const item = value as Record<string, any>, id = string(item.id);
-        if (!ids.includes(id) || batch.has(id)) { malformed = true; break; }
-        batch.set(id, item);
-      }
-      if (malformed || batch.size !== ids.length || ids.some(id => !batch.has(id))) continue;
-      for (const [id, item] of batch) videoDetails.set(id, item);
-    }
     const observedAt = this.now();
     if (channelSnapshot) {
       this.initialCountChecked=true;
@@ -240,18 +323,8 @@ export class YouTubeConnection {
     }
     await this.db.call("platformMissing", "youtube", tokens.userId, videoIds, observedAt);
     if (!valid()) return 300000;
-    let interval = broadcasts.length ? 60000 : 300000;
-    for (const broadcast of broadcasts) {
-      const chat = string(broadcast.snippet?.liveChatId); if (!chat) continue;
-      const cursor = string(previous.snapshots[`cursor:${chat}`]?.data);
-      const response = await this.api("liveChat/messages", { part: "id,snippet,authorDetails", liveChatId: chat, maxResults: "2000", ...(cursor ? { pageToken: cursor } : {}) }, tokens);
-      if (!valid()) return 300000;
-      await this.db.call("youtubeMessages", tokens.userId, chat, Array.isArray(response.items) ? response.items : [],broadcast.id);
-      if (!valid()) return 300000;
-      await this.db.call("youtubeSnapshot", tokens.userId, `cursor:${chat}`, string(response.nextPageToken), this.now());
-      if (!valid()) return 300000;
-      interval = Math.max(interval, Number(response.pollingIntervalMillis) || 60000);
-    }
+    const interval = await this.collectChats(tokens, broadcasts, previous.snapshots, valid, reused);
+    if (interval === null || !valid()) return 300000;
     if (this.now() - (previous.snapshots.report?.updatedAt ?? 0) >= 21600000) {
       const end = new Date(this.now() - 86400000).toISOString().slice(0, 10), start = new Date(this.now() - 28 * 86400000).toISOString().slice(0, 10);
       const report = await this.authorizedJson(`https://youtubeanalytics.googleapis.com/v2/reports?${new URLSearchParams({ ids: `channel==${tokens.userId}`, startDate: start, endDate: end, metrics: "views,estimatedMinutesWatched,subscribersGained,subscribersLost", dimensions: "day", sort: "day" })}`, tokens);
@@ -259,7 +332,7 @@ export class YouTubeConnection {
       await this.db.call("youtubeSnapshot", tokens.userId, "report", { start, end, ...report }, this.now());
       if (!valid()) return 300000;
     }
-    await this.collectSubscribers(tokens,valid,this.now(),broadcasts.length>0);if(!valid())return 300000;
+    await this.collectSubscribers(tokens,valid,this.now());if(!valid())return 300000;
     if(archivedIds.length&&(removed.length||!Number.isFinite(Number(cursor.checkedAt))||this.now()-Number(cursor.checkedAt??0)>=21600000))await this.collectArchivedVideos(tokens,archivedIds,valid,this.now());if(!valid())return 300000;
     try{
       await collectYouTubePublications({account:tokens.userId,at:this.now(),valid,
@@ -276,18 +349,12 @@ export class YouTubeConnection {
   /** Supplementary chat never creates sessions, viewer samples or analytical reports. */
   private async collectChatOnly(tokens:Tokens,previous:{snapshots:Record<string,{data:unknown;updatedAt:number}>},generation:number):Promise<number> {
     const valid=()=>generation===this.generation&&this.config.value.youtube===tokens;
-    const broadcasts=await this.activeBroadcasts(tokens,valid);if(!broadcasts||!valid())return 300000;
+    // The supplementary collector has no per-minute video read: a chat reporting offlineAt or a failed read triggers rediscovery.
+    const cached=this.broadcastCache&&this.now()-this.broadcastCache.at<YOUTUBE_LIVE_DISCOVERY_MS?this.broadcastCache:undefined,reused=!!cached;
+    const broadcasts=cached?cached.items:await this.discoverBroadcasts(tokens,valid);if(!broadcasts||!valid())return 300000;
     await this.db.call('youtubeSnapshot',tokens.userId,'collectionRole','secondary',this.now());if(!valid())return 300000;
     await this.db.call('youtubeSnapshot',tokens.userId,'broadcasts',broadcasts,this.now());if(!valid())return 300000;
-    let interval=broadcasts.length?60000:300000;
-    for(const broadcast of broadcasts){
-      const chat=string(broadcast.snippet?.liveChatId);if(!chat)continue;
-      const cursor=string(previous.snapshots[`cursor:${chat}`]?.data);
-      const response=await this.api('liveChat/messages',{part:'id,snippet,authorDetails',liveChatId:chat,maxResults:'2000',...(cursor?{pageToken:cursor}:{})},tokens);if(!valid())return 300000;
-      await this.db.call('youtubeMessages',tokens.userId,chat,Array.isArray(response.items)?response.items:[],broadcast.id);if(!valid())return 300000;
-      await this.db.call('youtubeSnapshot',tokens.userId,`cursor:${chat}`,string(response.nextPageToken),this.now());if(!valid())return 300000;
-      interval=Math.max(interval,Number(response.pollingIntervalMillis)||60000);
-    }
+    const interval=await this.collectChats(tokens,broadcasts,previous.snapshots,valid,reused);if(interval===null||!valid())return 300000;
     this.status={...this.status,state:'connected',account:tokens.userId,detail:'Дополнительный чат подключён',lastSyncAt:this.now()};
     return Math.min(interval,3600000);
   }
@@ -302,8 +369,8 @@ export class YouTubeConnection {
       await this.db.call('youtubeSnapshot',tokens.userId,'cursor:archivedVideos',{ids,checkedAt:at},at);
     }catch{if(valid())await this.db.call('gap','youtube','archived_video_metadata_unavailable',at,at);}
   }
-  private async collectSubscribers(tokens:Tokens,valid:()=>boolean,at:number,live=false){
-    const previous=await this.db.call('youtubeData',tokens.userId);if(!valid()||at-(previous.snapshots["cursor:followers"]?.updatedAt??-Infinity)<subscriberInterval(live))return;
+  private async collectSubscribers(tokens:Tokens,valid:()=>boolean,at:number){
+    const previous=await this.db.call('youtubeData',tokens.userId);if(!valid()||at-(previous.snapshots["cursor:followers"]?.updatedAt??-Infinity)<youtubeSubscriberListInterval)return;
     try{
       const channelStats=object(object(previous.snapshots.channel?.data??{}).statistics??{}),count=Number(channelStats.subscriberCount);
       const subscriberTotal=channelStats.hiddenSubscriberCount===true||!Number.isSafeInteger(count)||count<0?null:count;
@@ -336,7 +403,7 @@ export class YouTubeConnection {
     clearTimeout(this.timer); this.timer = undefined;
     for (const controller of this.requests) controller.abort();
     await this.running; this.running = undefined;
-    this.initialCountChecked=false;
+    this.initialCountChecked=false;this.broadcastCache=undefined;this.chatPace.clear();
     this.status = { state: "disconnected", account: "", detail: "" };
   }
   async disconnect() { await this.stop(); delete this.config.value.youtube; await this.config.save(); }

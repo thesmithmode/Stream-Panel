@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { StoreClient } from '../src/db.js';
-import { YouTubeConnection } from '../src/youtube.js';
+import { YouTubeConnection, YOUTUBE_LIVE_DISCOVERY_MS } from '../src/youtube.js';
 import type { Configuration } from '../src/config.js';
 
 const startA = 'video_AAAAAA';
@@ -114,12 +114,15 @@ test('malformed or capped broadcast discovery fails before snapshots or missing 
     if (url.pathname.endsWith('/videos')) return Response.json({ items: [{ id: startA, liveStreamingDetails: { actualStartTime: new Date(now - 60000).toISOString() } }] });
     return Response.json({});
   };
-  const yt = new YouTubeConnection(config, db, 'https://panel.test/oauth/youtube/callback', 'ruslan', request, () => now);
+  let clock = now;
+  const yt = new YouTubeConnection(config, db, 'https://panel.test/oauth/youtube/callback', 'ruslan', request, () => clock);
   try {
     await db.ready;
     await db.call('youtubeSnapshot', 'channel', 'channel', { id: 'channel' }, now);
     await db.call('youtubeSnapshot', 'channel', 'report', {}, now);
     await yt.collectOnce();
+    // The live broadcast list is rediscovered once the five-minute reuse window has passed.
+    clock += YOUTUBE_LIVE_DISCOVERY_MS;
     const sessionId = (await (db.call('sessions') as Promise<any[]>))[0]!.id;
     const snapshotBefore = await (db.call('youtubeData', 'channel') as Promise<any>);
     const linkBefore = (await (db.call('platformStreams', sessionId) as Promise<any[]>))[0]!;
