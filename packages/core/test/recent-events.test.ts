@@ -86,22 +86,51 @@ test('cleanup is indexed, bounded and excludes the other profile after restart',
   const mine=new StreamStore(path,'ruslan');assert.equal(mine.recentEvents().length,0);assert.equal(mine.summary().messages,1);mine.close();
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
-test('Twitch moderation redacts recent messages, including deletion arriving first',()=>{
- const s=new StreamStore(':memory:');try{
-  const at=Date.now()-5000;
-  s.ingest(message('one',at));
-  s.ingest({...message('delete',at+1000),type:'chat.message_delete',actor:null,payload:{targetMessageId:'one'}});
-  assert.equal(s.recentEvents().find(r=>r.external_id==='one')!.payload.text,'');
-  s.ingest({...message('delete-first',at+2000),type:'chat.message_delete',actor:null,payload:{targetMessageId:'two'}});
-  s.ingest(message('two',at));assert.equal(s.recentEvents().find(r=>r.external_id==='two')!.payload.text,'');
-  s.ingest(message('three',at));
-  s.ingest({...message('clear-user',at+3000),type:'chat.clear_user_messages',actor:null,payload:{targetUserId:'viewer'}});
-  assert.equal(s.recentEvents().find(r=>r.external_id==='three')!.payload.text,'');
-  s.ingest({...message('four',at),actor:{externalId:'other',displayName:'Other'}});
-  s.ingest({...message('clear',at+4000),type:'chat.clear',actor:null,payload:{}});
-  assert.equal(s.recentEvents().find(r=>r.external_id==='four')!.payload.text,'');
- }finally{s.close();}
-});
+for (const type of ['chat.message_delete', 'chat.clear_user_messages', 'chat.clear']) {
+ test(`Twitch archive preserves messages across ${type}, delivery order and restart`, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sp-moderated-archive-'));
+  const path = join(dir, 'data.sqlite');
+  const at = Date.now() - 10_000;
+  const text = 'Привет 👋\n  <сообщение>  ';
+  const before = {...message('before', at), payload: {text}};
+  const after = {...message('after', at + 1), payload: {text}};
+  const notice = (targetMessageId: string): EventInput => ({
+   ...message(`moderation-${targetMessageId}`, at + 1000),
+   type,
+   actor: null,
+   payload: {targetMessageId, targetUserId: 'viewer'},
+  });
+  try {
+   const writer = new StreamStore(path);
+   try {
+    writer.ingest(before);
+    writer.ingest(notice('before'));
+    if (type === 'chat.message_delete') writer.ingest(notice('after'));
+   } finally { writer.close(); }
+
+   const reader = new StreamStore(path);
+   try {
+    reader.ingest(after);
+    assert.equal(reader.ingest({...before, payload: {text: 'duplicate'}}).inserted, false);
+    assert.equal(reader.ingest(notice('before')).inserted, false);
+    const rows = reader.recentEvents();
+    assert.equal(rows.filter(row => row.type === type).length, type === 'chat.message_delete' ? 2 : 1);
+    const messages = rows.filter(row => row.type === 'chat.message');
+    assert.equal(messages.length, 2);
+    for (const original of [before, after]) {
+     const row = messages.find(item => item.external_id === original.externalId)!;
+     assert.equal(row.payload.text, text);
+     assert.equal(row.actor_id, 'viewer');
+     assert.equal(row.at_ms, original.occurredAtMs);
+     const permanent = reader.events().find(item => item.external_id === original.externalId)!;
+     const payload = permanent.payload as Record<string, unknown>;
+     assert.equal(payload.redacted, 1);
+     assert.equal(payload.text, undefined);
+    }
+   } finally { reader.close(); }
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+ });
+}
 test('YouTube retains compact text, deduplicates, separates accounts and honors moderation',()=>{
  const s=new StreamStore(':memory:');try{
   const at=Date.now()-1000,m={id:'yt',snippet:{type:'textMessageEvent',publishedAt:new Date(at).toISOString(),displayMessage:'YouTube text'},authorDetails:{channelId:'viewer',displayName:'Viewer'}};

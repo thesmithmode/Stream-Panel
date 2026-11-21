@@ -195,7 +195,7 @@
  "table presence_poll_keys": "a512a60252954623ffcd1a7ba31b08fbbc705964c00543f9431122b789caaa4f",
  "table presence_polls": "4030f957b53699b3c35dc0625a718c6b1eb3f92c7ef59db7eb4e716be662a670",
  "table provider_snapshots": "09fdbe1a5c96f14d9796d624c92532cd743e6035007f16de44e1369cdf160e64",
- "table recent_events": "c1ebad8b20b4091444989c84998f1719cfb84327bee677c40d6e2f37f16d2358",
+ "table recent_events": "a81355fef2d7f48fde795e83ea7f88077652c0c89b9a0904cd048b111e320e5f",
  "table session_groups": "d019f5ff618297bddcbb06c043c9df1921442b672aeee50082eaf61b424648a1",
  "table session_tombstones": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
  "table sessions": "6ccd7c3df81dce69b2abdfe6a63d0a73022f19650f86a19cb0036ec8bf2709f1",
