@@ -409,7 +409,8 @@ test('the last page of an ended broadcast is read once without waiting for the q
     f.state.messages = 1;
     assert.equal(await f.yt.collectOnce(), 300000);
     assert.equal(f.count('messages'), 2);
-    assert.equal(f.calls.filter((call) => call.path === 'messages').at(-1)?.params.get('pageToken'), 'page-1');
+    const polls = f.calls.filter((call) => call.path === 'messages');
+    assert.equal(polls.at(-1)?.params.get('pageToken'), 'page-1');
     assert.equal(f.messages.at(-1)?.[1].length, 1);
     f.state.at += 300000;
     await f.yt.collectOnce();
