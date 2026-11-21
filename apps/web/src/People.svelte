@@ -1,160 +1,310 @@
 <script lang="ts">
- import {personAccounts} from './person-accounts';
- import PlatformProfileLink from './PlatformProfileLink.svelte';
- import type {PlatformLink} from './api';
- import PersonBot from './PersonBot.svelte';
- import PersonPicker from './PersonPicker.svelte';
-  import {screenData} from './screen-data';
-  import SectionTabs from "./SectionTabs.svelte";
-  import {latestRequest} from './latest-request';
-  import {platformClass} from './period';
-  import DonorLinks from "./DonorLinks.svelte";
-  import {
-    api,
-    getProfile,
-    date,
-    money,
-    type Person,
-    type PersonStats,
-    type PersonTop,
-  } from "./api";
-  import { formatDuration } from "./duration";
-  import PersonActivity from "./PersonActivity.svelte";
-  import {tick,untrack} from "svelte";
-  import Icon from "./Icon.svelte";
-  import {confirmAction} from "./confirmation.svelte";
-  import Help from "./Help.svelte";
-  import PersonNotes from "./PersonNotes.svelte";
+  import { personAccounts } from './person-accounts';
+  import PlatformProfileLink from './PlatformProfileLink.svelte';
+  import type { PlatformLink } from './api';
+  import PersonBot from './PersonBot.svelte';
+  import PersonPicker from './PersonPicker.svelte';
+  import { screenData } from './screen-data';
+  import SectionTabs from './SectionTabs.svelte';
+  import { latestRequest } from './latest-request';
+  import { platformClass } from './period';
+  import DonorLinks from './DonorLinks.svelte';
+  import { api, getProfile, date, money, type Person, type PersonStats, type PersonTop } from './api';
+  import { formatDuration } from './duration';
+  import PersonActivity from './PersonActivity.svelte';
+  import { tick, untrack } from 'svelte';
+  import Icon from './Icon.svelte';
+  import { confirmAction } from './confirmation.svelte';
+  import Help from './Help.svelte';
+  import PersonNotes from './PersonNotes.svelte';
   import RecentEvents from './RecentEvents.svelte';
-  import PersonDonations from "./PersonDonations.svelte";
-  import AccountFollowStatus from "./AccountFollowStatus.svelte";
-  import type {FollowState} from "../../../packages/core/src/following";
-  import PersonMetadata from "./PersonMetadata.svelte";
+  import PersonDonations from './PersonDonations.svelte';
+  import AccountFollowStatus from './AccountFollowStatus.svelte';
+  import type { FollowState } from '../../../packages/core/src/following';
+  import PersonMetadata from './PersonMetadata.svelte';
   let {
-    includeBots=false,section='',onSection,
-    period = "",
-    initialId = "",
+    includeBots = false,
+    section = '',
+    onSection,
+    period = '',
+    initialId = '',
     onChange,
     onSelect,
   }: {
-    includeBots?:boolean;section?:string;onSection:(section:string)=>void;
+    includeBots?: boolean;
+    section?: string;
+    onSection: (section: string) => void;
     period?: string;
     initialId?: string;
-    onSelect:(id:string)=>void;
+    onSelect: (id: string) => void;
     onChange: () => Promise<void>;
   } = $props();
-  function selectAccount(ids:string[],checked:boolean){selectedIdentities=checked?[...new Set([...selectedIdentities,...ids])]:selectedIdentities.filter(id=>!ids.includes(id));}
-  let detailTab=$state("overview"),detailLoading=$state(false),showDonorLinks=$state(false);
-  const botFilter=$derived(includeBots?"all":"humans");
-  const savedDirectory=history.state?.peopleDirectory?.profile===getProfile()?history.state.peopleDirectory:undefined;
-  let search = $state<string>(savedDirectory?.search??""),
-    selectedId = $state(""),
+  function selectAccount(ids: string[], checked: boolean) {
+    selectedIdentities = checked
+      ? [...new Set([...selectedIdentities, ...ids])]
+      : selectedIdentities.filter((id) => !ids.includes(id));
+  }
+  let detailTab = $state('overview'),
+    detailLoading = $state(false),
+    showDonorLinks = $state(false);
+  const botFilter = $derived(includeBots ? 'all' : 'humans');
+  const savedDirectory =
+    history.state?.peopleDirectory?.profile === getProfile() ? history.state.peopleDirectory : undefined;
+  let search = $state<string>(savedDirectory?.search ?? ''),
+    selectedId = $state(''),
     detail = $state<any>(null),
     stats = $state<PersonStats | null>(null),
-    error = $state(""),
-    name = $state(""),
-    target = $state(""),
-
+    error = $state(''),
+    name = $state(''),
+    target = $state(''),
     selectedIdentities = $state<string[]>([]),
-    splitName = $state(""),
+    splitName = $state(''),
     merges = $state<any[]>([]),
     candidates = $state<string[]>([]),
     busy = $state(false),
-    sortBy = $state<"default" | "messages" | "donations" | "observed_minutes">(
-      savedDirectory?.sort??"default",
-    ),
+    sortBy = $state<'default' | 'messages' | 'donations' | 'observed_minutes'>(savedDirectory?.sort ?? 'default'),
     tops = $state<PersonTop[]>([]);
-  const accounts=$derived(personAccounts(detail?.identities??[],detail?.display_name??''));
-  let platformLinks=$state<PlatformLink[]>([]);
-  const platformLinkScope=$derived(detail?JSON.stringify([detail.id,detail.identities.map((i:any)=>[i.id,i.source,i.external_id])]):'');
-  $effect(()=>{
-    const scope=platformLinkScope;platformLinks=[];
-    if(!scope)return;
-    const [id]=JSON.parse(scope) as [string,unknown];
-    const controller=new AbortController();
-    void api<PlatformLink[]>(`persons/${encodeURIComponent(id)}/platform-links`,undefined,controller.signal).then(links=>{if(!controller.signal.aborted)platformLinks=links;}).catch(()=>{/* External addresses are optional; the card remains usable. */});
-    return()=>controller.abort();
+  const accounts = $derived(personAccounts(detail?.identities ?? [], detail?.display_name ?? ''));
+  let platformLinks = $state<PlatformLink[]>([]);
+  const platformLinkScope = $derived(
+    detail ? JSON.stringify([detail.id, detail.identities.map((i: any) => [i.id, i.source, i.external_id])]) : '',
+  );
+  $effect(() => {
+    const scope = platformLinkScope;
+    platformLinks = [];
+    if (!scope) return;
+    const [id] = JSON.parse(scope) as [string, unknown];
+    const controller = new AbortController();
+    void api<PlatformLink[]>(`persons/${encodeURIComponent(id)}/platform-links`, undefined, controller.signal)
+      .then((links) => {
+        if (!controller.signal.aborted) platformLinks = links;
+      })
+      .catch(() => {
+        /* External addresses are optional; the card remains usable. */
+      });
+    return () => controller.abort();
   });
-  const accountLink=(ids:string[])=>platformLinks.find(link=>ids.includes(link.identityId));
-  let following=$state<FollowState[]>([]);
-  $effect(()=>{
-    const id=detail?.id;following=[];if(!id)return;
-    const request=latestRequest();
-    const load=()=>void request.run(signal=>api<FollowState[]>(`persons/${id}/following?session=`,undefined,signal),rows=>following=rows,()=>{});
-    load();window.addEventListener('sp:data-refresh',load);return()=>{request.cancel();window.removeEventListener('sp:data-refresh',load);};
+  const accountLink = (ids: string[]) => platformLinks.find((link) => ids.includes(link.identityId));
+  let following = $state<FollowState[]>([]);
+  $effect(() => {
+    const id = detail?.id;
+    following = [];
+    if (!id) return;
+    const request = latestRequest();
+    const load = () =>
+      void request.run(
+        (signal) => api<FollowState[]>(`persons/${id}/following?session=`, undefined, signal),
+        (rows) => (following = rows),
+        () => {},
+      );
+    load();
+    window.addEventListener('sp:data-refresh', load);
+    return () => {
+      request.cancel();
+      window.removeEventListener('sp:data-refresh', load);
+    };
   });
-  function accountFollowing(ids:string[]){const matches=following.filter(row=>row.status!==null&&detail?.identities.some((i:any)=>ids.includes(i.id)&&i.source===row.source&&i.external_id===row.externalId&&i.account_id===row.account));return matches.sort((a,b)=>(b.checkedAtMs??0)-(a.checkedAtMs??0))[0];}
+  function accountFollowing(ids: string[]) {
+    const matches = following.filter(
+      (row) =>
+        row.status !== null &&
+        detail?.identities.some(
+          (i: any) =>
+            ids.includes(i.id) &&
+            i.source === row.source &&
+            i.external_id === row.externalId &&
+            i.account_id === row.account,
+        ),
+    );
+    return matches.sort((a, b) => (b.checkedAtMs ?? 0) - (a.checkedAtMs ?? 0))[0];
+  }
 
+  const subscriptionHistory = $derived(
+    accounts
+      .flatMap((identity) => {
+        const row = accountFollowing(identity.ids);
+        return (row?.history ?? [])
+          .filter((item) => item.status !== null)
+          .map((item) => ({ ...item, name: identity.display_name, source: identity.source }));
+      })
+      .sort((a, b) => b.at - a.at),
+  );
 
-  const subscriptionHistory=$derived(accounts.flatMap(identity=>{
-    const row=accountFollowing(identity.ids);
-    return (row?.history??[]).filter(item=>item.status!==null).map(item=>({...item,name:identity.display_name,source:identity.source}));
-  }).sort((a,b)=>b.at-a.at));
-
-  let donorCurrency=$state('RUB'),rankRefresh=$state(0);
-  const donorCurrencies=$derived([...new Set(tops.flatMap(p=>Object.keys(p.donationTotals)))].sort());
-  const rankLabels=$derived(new Map(tops.map(t=>[t.id,sortBy==='donations'?Object.entries(t.donationTotals).map(([currency,amount])=>money(amount,currency)).join(' · ')||`${t.donationCount} донатов`:sortBy==='observed_minutes'?formatDuration(t.observedMinutes):`${t.messageCount} сообщ.`])));
-  let pageRows = $state<Person[]>([]), peopleOffset = $state<number>(savedDirectory?.offset??0), peopleTotal = $state(0), peopleLoading = $state(false), peopleLoaded=$state(false);
+  let donorCurrency = $state('RUB'),
+    rankRefresh = $state(0);
+  const donorCurrencies = $derived([...new Set(tops.flatMap((p) => Object.keys(p.donationTotals)))].sort());
+  const rankLabels = $derived(
+    new Map(
+      tops.map((t) => [
+        t.id,
+        sortBy === 'donations'
+          ? Object.entries(t.donationTotals)
+              .map(([currency, amount]) => money(amount, currency))
+              .join(' · ') || `${t.donationCount} донатов`
+          : sortBy === 'observed_minutes'
+            ? formatDuration(t.observedMinutes)
+            : `${t.messageCount} сообщ.`,
+      ]),
+    ),
+  );
+  let pageRows = $state<Person[]>([]),
+    peopleOffset = $state<number>(savedDirectory?.offset ?? 0),
+    peopleTotal = $state(0),
+    peopleLoading = $state(false),
+    peopleLoaded = $state(false);
   const directory = latestRequest();
   let selectedSession = '';
   const rows = $derived(
-    sortBy === "default"
+    sortBy === 'default'
       ? pageRows
       : tops.map(
           (t) =>
             ({
-              is_bot:t.is_bot,is_human:t.is_human,is_donor:t.is_donor,
+              is_bot: t.is_bot,
+              is_human: t.is_human,
+              is_donor: t.is_donor,
               id: t.id,
               display_name: t.display_name,
               revision: t.revision,
               event_count:
-                sortBy === "messages"
-                  ? t.messageCount
-                  : sortBy === "donations"
-                    ? t.donationCount
-                    : t.observedMinutes,
+                sortBy === 'messages' ? t.messageCount : sortBy === 'donations' ? t.donationCount : t.observedMinutes,
               sources: t.sources,
             }) as Person,
         ),
   );
-  const visible=$derived(sortBy==='default'?rows:rows.filter(person=>(botFilter==='all'||!person.is_bot)).filter(person=>person.display_name.toLocaleLowerCase('ru-RU').includes(search.trim().toLocaleLowerCase('ru-RU'))));
-  $effect(()=>{detailTab=['overview','activity','messages','donations','notes','accounts'].includes(section)?section:'overview';});
-  const personTabs=[["overview","Обзор"],["activity","Активность"],["messages","Сообщения"],["donations","Донаты"],["notes","Заметки"],["accounts","Аккаунты"]] as const;
-  let directoryScroll=savedDirectory?.scroll??0,forceDirectory=false;
-  let directoryKey=untrack(()=>JSON.stringify([search,period,sortBy]));
-  function clearSelection(){selectedId='';detail=null;stats=null;detailLoading=false;}
-  async function backToDirectory(){clearSelection();onSelect('');await tick();window.scrollTo({top:directoryScroll});}
-  async function openPerson(id:string){directoryScroll=window.scrollY;rememberDirectory();await select(id);if(matchMedia('(max-width:900px)').matches)window.scrollTo({top:0});}
-  function sourcesLabel(sources:string|null){return (sources?.split(',')??[]).map(source=>({twitch:'Twitch',youtube:'YouTube',donationalerts:'DonationAlerts'}[source.trim()]??source.trim())).join(' · ');}
-  $effect(()=>{if(detailTab==='accounts'&&detail)untrack(()=>{void loadAudit().catch(e=>error=e.message);const id=detail.id;void api<string[]>(`persons/${id}/candidates`).then(value=>{if(selectedId===id)candidates=value;}).catch(e=>error=e.message);});});
-  $effect(()=>{const key=JSON.stringify([search,period,sortBy]);if(key!==directoryKey){directoryKey=key;peopleOffset=0;}});
-  function rememberDirectory(){const directory={profile:getProfile(),search,sort:sortBy,offset:peopleOffset,scroll:directoryScroll};history.replaceState({...history.state,peopleDirectory:directory},'');}
-  $effect(rememberDirectory);
+  const visible = $derived(
+    sortBy === 'default'
+      ? rows
+      : rows
+          .filter((person) => botFilter === 'all' || !person.is_bot)
+          .filter((person) =>
+            person.display_name.toLocaleLowerCase('ru-RU').includes(search.trim().toLocaleLowerCase('ru-RU')),
+          ),
+  );
   $effect(() => {
-    const term=search.trim(), offset=peopleOffset, currentPeriod=period, bots=botFilter;void rankRefresh;
-    const forced=forceDirectory;forceDirectory=false;
-    if(sortBy!=='default'){peopleLoading=false;return;}
-    peopleLoading=true;
-    const timer=setTimeout(()=>{
-      const query=new URLSearchParams({search:term,period:currentPeriod,bots,offset:String(offset),limit:'50'});
-      void directory.run(signal=>screenData<{items:Person[];total:number}>(`persons/page?${query}`,'people',signal,forced),result=>{
-        pageRows=result.items;peopleTotal=result.total;peopleLoading=false;peopleLoaded=true;
-        if(offset>=result.total&&offset>0)peopleOffset=Math.max(0,Math.floor(Math.max(0,result.total-1)/50)*50);
-      },failure=>{error=failure.message;peopleLoading=false;});
-    },term?200:0);
-    return ()=>{clearTimeout(timer);directory.cancel();};
+    detailTab = ['overview', 'activity', 'messages', 'donations', 'notes', 'accounts'].includes(section)
+      ? section
+      : 'overview';
+  });
+  const personTabs = [
+    ['overview', 'Обзор'],
+    ['activity', 'Активность'],
+    ['messages', 'Сообщения'],
+    ['donations', 'Донаты'],
+    ['notes', 'Заметки'],
+    ['accounts', 'Аккаунты'],
+  ] as const;
+  let directoryScroll = savedDirectory?.scroll ?? 0,
+    forceDirectory = false;
+  let directoryKey = untrack(() => JSON.stringify([search, period, sortBy]));
+  function clearSelection() {
+    selectedId = '';
+    detail = null;
+    stats = null;
+    detailLoading = false;
+  }
+  async function backToDirectory() {
+    clearSelection();
+    onSelect('');
+    await tick();
+    window.scrollTo({ top: directoryScroll });
+  }
+  async function openPerson(id: string) {
+    directoryScroll = window.scrollY;
+    rememberDirectory();
+    await select(id);
+    if (matchMedia('(max-width:900px)').matches) window.scrollTo({ top: 0 });
+  }
+  function sourcesLabel(sources: string | null) {
+    return (sources?.split(',') ?? [])
+      .map(
+        (source) =>
+          ({ twitch: 'Twitch', youtube: 'YouTube', donationalerts: 'DonationAlerts' })[source.trim()] ?? source.trim(),
+      )
+      .join(' · ');
+  }
+  $effect(() => {
+    if (detailTab === 'accounts' && detail)
+      untrack(() => {
+        void loadAudit().catch((e) => (error = e.message));
+        const id = detail.id;
+        void api<string[]>(`persons/${id}/candidates`)
+          .then((value) => {
+            if (selectedId === id) candidates = value;
+          })
+          .catch((e) => (error = e.message));
+      });
   });
   $effect(() => {
-    const by = sortBy,currency=donorCurrency;void rankRefresh;
+    const key = JSON.stringify([search, period, sortBy]);
+    if (key !== directoryKey) {
+      directoryKey = key;
+      peopleOffset = 0;
+    }
+  });
+  function rememberDirectory() {
+    const directory = { profile: getProfile(), search, sort: sortBy, offset: peopleOffset, scroll: directoryScroll };
+    history.replaceState({ ...history.state, peopleDirectory: directory }, '');
+  }
+  $effect(rememberDirectory);
+  $effect(() => {
+    const term = search.trim(),
+      offset = peopleOffset,
+      currentPeriod = period,
+      bots = botFilter;
+    void rankRefresh;
+    const forced = forceDirectory;
+    forceDirectory = false;
+    if (sortBy !== 'default') {
+      peopleLoading = false;
+      return;
+    }
+    peopleLoading = true;
+    const timer = setTimeout(
+      () => {
+        const query = new URLSearchParams({
+          search: term,
+          period: currentPeriod,
+          bots,
+          offset: String(offset),
+          limit: '50',
+        });
+        void directory.run(
+          (signal) => screenData<{ items: Person[]; total: number }>(`persons/page?${query}`, 'people', signal, forced),
+          (result) => {
+            pageRows = result.items;
+            peopleTotal = result.total;
+            peopleLoading = false;
+            peopleLoaded = true;
+            if (offset >= result.total && offset > 0)
+              peopleOffset = Math.max(0, Math.floor(Math.max(0, result.total - 1) / 50) * 50);
+          },
+          (failure) => {
+            error = failure.message;
+            peopleLoading = false;
+          },
+        );
+      },
+      term ? 200 : 0,
+    );
+    return () => {
+      clearTimeout(timer);
+      directory.cancel();
+    };
+  });
+  $effect(() => {
+    const by = sortBy,
+      currency = donorCurrency;
+    void rankRefresh;
     const session = period;
     let cancelled = false;
-    if (by === "default") {
+    if (by === 'default') {
       tops = [];
       return;
     }
     const q = new URLSearchParams({ by });
-    if (session) q.set("period", session);
-    if(by==='donations')q.set('currency',currency);
+    if (session) q.set('period', session);
+    if (by === 'donations') q.set('currency', currency);
     void api<PersonTop[]>(`persons/tops?${q}`)
       .then((rows) => {
         if (!cancelled) tops = rows;
@@ -167,33 +317,41 @@
     };
   });
   async function loadStats(id: string) {
-    const q = period ? `?period=${period}` : "";
+    const q = period ? `?period=${period}` : '';
     const value = await api<PersonStats>(`persons/${id}/stats${q}`);
     if (selectedId === id) stats = value;
   }
-  async function refreshPerson(id:string,notify=true) {
-    const person=await api(`persons/${id}?events=false`);
-    if(selectedId===id){detail=person;await loadStats(id);}
-    if(notify)await onChange();
+  async function refreshPerson(id: string, notify = true) {
+    const person = await api(`persons/${id}?events=false`);
+    if (selectedId === id) {
+      detail = person;
+      await loadStats(id);
+    }
+    if (notify) await onChange();
   }
   async function select(id: string) {
-    if(selectedId!==id&&initialId!==id)onSelect(id);
-    if(selectedId!==id){showDonorLinks=false;}
+    if (selectedId !== id && initialId !== id) onSelect(id);
+    if (selectedId !== id) {
+      showDonorLinks = false;
+    }
     selectedId = id;
     selectedSession = period;
-    error = "";
+    error = '';
     stats = null;
     detail = null;
     detailLoading = true;
     try {
-      const [person,metrics] = await Promise.all([api(`persons/${id}?events=false`),api<PersonStats>(`persons/${id}/stats${period ? `?period=${period}` : ""}`)]);
+      const [person, metrics] = await Promise.all([
+        api(`persons/${id}?events=false`),
+        api<PersonStats>(`persons/${id}/stats${period ? `?period=${period}` : ''}`),
+      ]);
       if (selectedId !== id) return;
       detail = person;
       name = detail.display_name;
       selectedIdentities = [];
-      target = "";
+      target = '';
       candidates = [];
-      stats=metrics;
+      stats = metrics;
     } catch (e) {
       if (selectedId === id) error = (e as Error).message;
     } finally {
@@ -201,16 +359,20 @@
     }
   }
   async function loadAudit() {
-    const [joined,separated]=await Promise.all([api<any[]>("merges"),api<any[]>("splits")]);
-    merges=[...joined.map(row=>({...row,kind:"merge"})),...separated.map(row=>({...row,kind:"split"}))].sort((a,b)=>b.created_at_ms-a.created_at_ms);
+    const [joined, separated] = await Promise.all([api<any[]>('merges'), api<any[]>('splits')]);
+    merges = [
+      ...joined.map((row) => ({ ...row, kind: 'merge' })),
+      ...separated.map((row) => ({ ...row, kind: 'split' })),
+    ].sort((a, b) => b.created_at_ms - a.created_at_ms);
   }
   async function operation(action: () => Promise<void>) {
     busy = true;
-    error = "";
+    error = '';
     try {
-      const editingTab=detailTab;
+      const editingTab = detailTab;
       await action();
-      detailTab=editingTab;onSection(detailTab);
+      detailTab = editingTab;
+      onSection(detailTab);
       await onChange();
       await loadAudit();
     } catch (e) {
@@ -220,9 +382,9 @@
     }
   }
   async function merge() {
-    const other = target?await api<Person>(`persons/${encodeURIComponent(target)}?events=false`):null;
+    const other = target ? await api<Person>(`persons/${encodeURIComponent(target)}?events=false`) : null;
     if (!other || !detail) return;
-    await api("persons/merge", {
+    await api('persons/merge', {
       sourceId: detail.id,
       targetId: other.id,
       sourceRevision: detail.revision,
@@ -231,67 +393,95 @@
     await select(other.id);
   }
   $effect(() => {
-    const id=initialId,session=period;
-    untrack(()=>{if(id){if(selectedId!==id||selectedSession!==session)void select(id);}else if(selectedId)clearSelection();});
+    const id = initialId,
+      session = period;
+    untrack(() => {
+      if (id) {
+        if (selectedId !== id || selectedSession !== session) void select(id);
+      } else if (selectedId) clearSelection();
+    });
   });
-  import { onMount } from "svelte";
+  import { onMount } from 'svelte';
   onMount(() => {
-    const update=(event:Event)=>{forceDirectory=!(event instanceof CustomEvent)||!event.detail?.validated||!!event.detail.force;rankRefresh++;if(selectedId)void refreshPerson(selectedId,false).catch(e=>error=e.message);};
-    window.addEventListener('sp:data-refresh',update);
-    return()=>window.removeEventListener('sp:data-refresh',update);
+    const update = (event: Event) => {
+      forceDirectory = !(event instanceof CustomEvent) || !event.detail?.validated || !!event.detail.force;
+      rankRefresh++;
+      if (selectedId) void refreshPerson(selectedId, false).catch((e) => (error = e.message));
+    };
+    window.addEventListener('sp:data-refresh', update);
+    return () => window.removeEventListener('sp:data-refresh', update);
   });
 </script>
 
 <div class="people-grid" class:has-selection={!!selectedId}>
   <section class="panel people-directory" aria-label="Список людей">
     <div class="tops-tabs" role="tablist" aria-label="Сортировка людей">
-      {#each [
-        ["default", "Все"],
-        ["messages", "Чаттеры"],
-        ["donations", "Донатеры"],
-        ["observed_minutes", "Зрители"],
-      ] as const as [key, label]}<button
+      {#each [['default', 'Все'], ['messages', 'Чаттеры'], ['donations', 'Донатеры'], ['observed_minutes', 'Зрители']] as const as [key, label]}<button
           type="button"
           role="tab"
           class:active={sortBy === key}
           aria-selected={sortBy === key}
-          onclick={() => (sortBy = key)}>{label}</button
-        >{/each}
+          onclick={() => (sortBy = key)}
+        >
+          {label}
+        </button>{/each}
     </div>
-    {#if sortBy==='donations'}<div class="donor-filters">{#if donorCurrencies.length>1}<label>Сортировать по валюте<select aria-label="Валюта сортировки донатеров" bind:value={donorCurrency}>{#each [...new Set(['RUB',...donorCurrencies])] as c}<option value={c}>{c}</option>{/each}</select></label>{/if}</div>{/if}
+    {#if sortBy === 'donations'}<div class="donor-filters">
+        {#if donorCurrencies.length > 1}<label>
+            Сортировать по валюте<select aria-label="Валюта сортировки донатеров" bind:value={donorCurrency}>
+              {#each [...new Set(['RUB', ...donorCurrencies])] as c}<option value={c}>{c}</option>{/each}
+            </select>
+          </label>{/if}
+      </div>{/if}
     <div class="search">
-      <input
-        aria-label="Поиск человека"
-        placeholder="Найти по имени…"
-        bind:value={search}
-      />
+      <input aria-label="Поиск человека" placeholder="Найти по имени…" bind:value={search} />
     </div>
     <div class="people-list">
-    {#if peopleLoading&&!peopleLoaded&&sortBy==='default'}<p class="small muted" role="status">Загружаем людей…</p>{/if}
-    {#if !visible.length&&(peopleLoaded||!peopleLoading)}<div class="empty-small">
-        <Icon name="people" size={36} />
-        <p>{search.trim()?'Никого не найдено':'Пока никого нет'}</p>
-        <span class="small muted"
-          >{search.trim()?'Попробуйте другое имя.':'Аккаунты и донаты появятся после подключения.'}</span
+      {#if peopleLoading && !peopleLoaded && sortBy === 'default'}<p class="small muted" role="status">
+          Загружаем людей…
+        </p>{/if}
+      {#if !visible.length && (peopleLoaded || !peopleLoading)}<div class="empty-small">
+          <Icon name="people" size={36} />
+          <p>{search.trim() ? 'Никого не найдено' : 'Пока никого нет'}</p>
+          <span class="small muted">
+            {search.trim() ? 'Попробуйте другое имя.' : 'Аккаунты и донаты появятся после подключения.'}
+          </span>
+        </div>{/if}{#each visible as person (person.id)}<button
+          class:chosen={selectedId === person.id}
+          class="person-row"
+          class:bot-person={person.is_bot}
+          class:human-person={person.is_human}
+          aria-label={person.display_name}
+          onclick={() => openPerson(person.id)}
         >
-      </div>{/if}{#each visible as person (person.id)}<button
-        class:chosen={selectedId === person.id}
-        class="person-row" class:bot-person={person.is_bot} class:human-person={person.is_human}
-        aria-label={person.display_name}
-        onclick={() => openPerson(person.id)}
-        ><span class="avatar sr-only"
-          >{person.display_name.slice(0, 1).toUpperCase()}</span
-        ><span
-          ><strong class={platformClass(person.sources)} class:youtube-secondary={person.youtubeSecondary}>{person.display_name}</strong><small class:sr-only={!person.sources?.includes(',')}>{sourcesLabel(person.sources)}</small
-          ></span
-        >{#if sortBy!=='default'}<span class="count">{rankLabels.get(person.id)}</span>{/if}</button
-      >{/each}
+          <span class="avatar sr-only">{person.display_name.slice(0, 1).toUpperCase()}</span><span>
+            <strong class={platformClass(person.sources)} class:youtube-secondary={person.youtubeSecondary}>
+              {person.display_name}
+            </strong><small class:sr-only={!person.sources?.includes(',')}>{sourcesLabel(person.sources)}</small>
+          </span>{#if sortBy !== 'default'}<span class="count">{rankLabels.get(person.id)}</span>{/if}
+        </button>{/each}
     </div>
-    {#if sortBy==='default'&&peopleTotal>50}<div class="people-pages" aria-label="Страницы людей">
-      <button class="outline small" disabled={peopleLoading||peopleOffset===0} aria-label="Предыдущие люди" onclick={()=>peopleOffset=Math.max(0,peopleOffset-50)}>Предыдущие</button>
-      <span class="small muted">{peopleOffset+1}–{Math.min(peopleOffset+50,peopleTotal)} из {peopleTotal} записей</span>
-      <button class="outline small" disabled={peopleLoading||peopleOffset+50>=peopleTotal} aria-label="Следующие люди" onclick={()=>peopleOffset+=50}>Следующие</button>
-    </div>{/if}
+    {#if sortBy === 'default' && peopleTotal > 50}<div class="people-pages" aria-label="Страницы людей">
+        <button
+          class="outline small"
+          disabled={peopleLoading || peopleOffset === 0}
+          aria-label="Предыдущие люди"
+          onclick={() => (peopleOffset = Math.max(0, peopleOffset - 50))}
+        >
+          Предыдущие
+        </button>
+        <span class="small muted">
+          {peopleOffset + 1}–{Math.min(peopleOffset + 50, peopleTotal)} из {peopleTotal} записей
+        </span>
+        <button
+          class="outline small"
+          disabled={peopleLoading || peopleOffset + 50 >= peopleTotal}
+          aria-label="Следующие люди"
+          onclick={() => (peopleOffset += 50)}
+        >
+          Следующие
+        </button>
+      </div>{/if}
   </section>
   <section class="panel person-detail">
     <button class="text-button people-back" onclick={backToDirectory}>Все люди</button>
@@ -300,178 +490,511 @@
         <h3>Выберите человека</h3>
         <p>Активность, донаты и связи аккаунтов.</p>
       </div>{:else}<header>
-        <h2 class={platformClass(detail.identities.map((i:any)=>i.source))} class:youtube-secondary={detail.youtubeSecondary}>{detail.display_name}</h2>
+        <h2
+          class={platformClass(detail.identities.map((i: any) => i.source))}
+          class:youtube-secondary={detail.youtubeSecondary}
+        >
+          {detail.display_name}
+        </h2>
 
-       <PersonBot personId={detail.id} revision={detail.revision} onState={state=>{const human=state.manualHuman||state.automaticHuman,bot=Number(!human&&(state.manualBot||state.knownBot));pageRows=pageRows.map(p=>p.id===detail.id?{...p,is_bot:bot,is_human:human}:p);tops=tops.map(p=>p.id===detail.id?{...p,is_bot:bot,is_human:human}:p);}} onChange={()=>refreshPerson(detail.id)} />
+        <PersonBot
+          personId={detail.id}
+          revision={detail.revision}
+          onState={(state) => {
+            const human = state.manualHuman || state.automaticHuman,
+              bot = Number(!human && (state.manualBot || state.knownBot));
+            pageRows = pageRows.map((p) => (p.id === detail.id ? { ...p, is_bot: bot, is_human: human } : p));
+            tops = tops.map((p) => (p.id === detail.id ? { ...p, is_bot: bot, is_human: human } : p));
+          }}
+          onChange={() => refreshPerson(detail.id)}
+        />
       </header>
 
-      <div class="person-tab-wrap"><SectionTabs items={personTabs} bind:value={detailTab} onchange={()=>onSection(detailTab)} label="Разделы человека" panelId="person-tabpanel"/></div>
-      <div class="settings-body person-scroll" id="person-tabpanel" role="tabpanel" aria-label={personTabs.find(([key])=>key===detailTab)?.[1]}>
-      {#if detailTab==='overview'}
-      {#if stats}<div class="kpi-strip" aria-label="Показатели человека">
-          <div class="kpi">
-            <span>Сообщения</span><strong
-              >{stats.messageCount.toLocaleString("ru-RU")}</strong
-            >
+      <div class="person-tab-wrap">
+        <SectionTabs
+          items={personTabs}
+          bind:value={detailTab}
+          onchange={() => onSection(detailTab)}
+          label="Разделы человека"
+          panelId="person-tabpanel"
+        />
+      </div>
+      <div
+        class="settings-body person-scroll"
+        id="person-tabpanel"
+        role="tabpanel"
+        aria-label={personTabs.find(([key]) => key === detailTab)?.[1]}
+      >
+        {#if detailTab === 'overview'}
+          {#if stats}<div class="kpi-strip" aria-label="Показатели человека">
+              <div class="kpi">
+                <span>Сообщения</span><strong>{stats.messageCount.toLocaleString('ru-RU')}</strong>
+              </div>
+              <div class="kpi">
+                <span>Донаты</span><strong>
+                  {Object.keys(stats.donationTotals).length
+                    ? Object.entries(stats.donationTotals)
+                        .map(([c, a]) => money(a, c))
+                        .join(' · ')
+                    : stats.donationCount
+                      ? String(stats.donationCount)
+                      : '—'}
+                </strong>
+              </div>
+              <div class="kpi">
+                <span>Наблюдаемое время</span><strong>{formatDuration(stats.totalObservedMinutes)}</strong>
+              </div>
+              <div class="kpi">
+                <span>Среднее за посещённый стрим</span><strong>{formatDuration(stats.avgObservedMinutes)}</strong>
+              </div>
+              <div class="kpi">
+                <span>Посещаемость</span><strong>
+                  {stats.attendanceRatio == null ? '—' : `${Math.round(stats.attendanceRatio * 100)}%`}
+                </strong>
+              </div>
+              {#if stats.estimatedChatMinutes != null && stats.estimatedChatMinutes > 0}
+                <div class="kpi">
+                  <span>Оценка активности YouTube</span><strong>{formatDuration(stats.estimatedChatMinutes)}</strong>
+                </div>
+              {/if}
+            </div>{/if}
+          <h3>Связанные аккаунты</h3>
+          <div class="account-summary">
+            {#each accounts as identity}<span>
+                <span class="account-name">
+                  <strong class:twitch={identity.source === 'twitch'} class:youtube={identity.source === 'youtube'}>
+                    {identity.display_name}
+                  </strong><PlatformProfileLink
+                    link={accountLink(identity.ids)}
+                    name={identity.display_name}
+                    iconOnly
+                  />
+                </span><AccountFollowStatus row={accountFollowing(identity.ids)} showHistory={false} />
+              </span>{/each}
           </div>
-          <div class="kpi">
-            <span>Донаты</span><strong
-              >{Object.keys(stats.donationTotals).length
-                ? Object.entries(stats.donationTotals)
-                    .map(([c, a]) => money(a, c))
-                    .join(" · ")
-                : stats.donationCount
-                  ? String(stats.donationCount)
-                  : "—"}</strong
+          {#if subscriptionHistory.length}<details class="account-follow-history">
+              <summary>История подписок ({subscriptionHistory.length})</summary>
+              <ul>
+                {#each subscriptionHistory as item}<li>
+                    <strong class:twitch={item.source === 'twitch'} class:youtube={item.source === 'youtube'}>
+                      {item.name}
+                    </strong><span><time>{date(item.at)}</time> · {item.status ? 'Подписан' : 'Не подписан'}</span>
+                  </li>{/each}
+              </ul>
+            </details>{/if}
+          <div class="actions">
+            <button
+              class="outline small"
+              onclick={() => {
+                detailTab = 'donations';
+                onSection(detailTab);
+                showDonorLinks = true;
+              }}
             >
+              Привязать донаты
+            </button>
           </div>
-          <div class="kpi">
-            <span>Наблюдаемое время</span><strong
-              >{formatDuration(stats.totalObservedMinutes)}</strong
-            >
-          </div>
-          <div class="kpi">
-            <span>Среднее за посещённый стрим</span><strong
-              >{formatDuration(stats.avgObservedMinutes)}</strong
-            >
-          </div>
-          <div class="kpi">
-            <span>Посещаемость</span><strong>{stats.attendanceRatio == null ? "—" : `${Math.round(stats.attendanceRatio * 100)}%`}</strong>
+        {:else if detailTab === 'messages'}
+          <RecentEvents personId={detail.id} messagesOnly onPerson={onSelect} />
+        {:else if detailTab === 'accounts'}
+          <label>
+            Имя человека
+            <div class="inline">
+              <input bind:value={name} /><button
+                class="outline"
+                disabled={busy}
+                onclick={() =>
+                  operation(async () => {
+                    await api(`persons/${detail.id}/rename`, { name });
+                    await select(detail.id);
+                  })}
+              >
+                Сохранить
+              </button>
+            </div>
+          </label>
 
-          </div>
-          {#if stats.estimatedChatMinutes != null && stats.estimatedChatMinutes > 0}
-          <div class="kpi"><span>Оценка активности YouTube</span><strong>{formatDuration(stats.estimatedChatMinutes)}</strong></div>
-          {/if}
-
-        </div>{/if}
-        <h3>Связанные аккаунты</h3>
-        <div class="account-summary">{#each accounts as identity}<span><span class="account-name"><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong><PlatformProfileLink link={accountLink(identity.ids)} name={identity.display_name} iconOnly/></span><AccountFollowStatus row={accountFollowing(identity.ids)} showHistory={false}/></span>{/each}</div>
-        {#if subscriptionHistory.length}<details class="account-follow-history"><summary>История подписок ({subscriptionHistory.length})</summary><ul>{#each subscriptionHistory as item}<li><strong class:twitch={item.source==='twitch'} class:youtube={item.source==='youtube'}>{item.name}</strong><span><time>{date(item.at)}</time> · {item.status?'Подписан':'Не подписан'}</span></li>{/each}</ul></details>{/if}
-        <div class="actions"><button class="outline small" onclick={()=>{detailTab='donations';onSection(detailTab);showDonorLinks=true;}}>Привязать донаты</button></div>
-      {:else if detailTab==='messages'}
-       <RecentEvents personId={detail.id} messagesOnly onPerson={onSelect} />
-      {:else if detailTab==='accounts'}
-        <label
-          >Имя человека
+          <h3>
+            Связанные аккаунты <Help
+              id="person-identities-help"
+              label="О связях аккаунтов"
+              text="Здесь собраны аккаунты одного человека. Совпадающие никнеймы связываются автоматически. При неоднозначном совпадении выберите человека вручную; выбранный аккаунт можно разъединить, сохранив события."
+            />
+          </h3>
+          {#each accounts as identity}<div class="identity-account">
+              <label class="identity-row">
+                <input
+                  type="checkbox"
+                  checked={identity.ids.every((id) => selectedIdentities.includes(id))}
+                  onchange={(event) => selectAccount(identity.ids, event.currentTarget.checked)}
+                /><strong class:twitch={identity.source === 'twitch'} class:youtube={identity.source === 'youtube'}>
+                  {identity.display_name}
+                </strong><span class="small muted">
+                  {identity.source === 'donationalerts' ? 'Донатер' : 'Участник'} · {identity.source === 'twitch'
+                    ? 'Twitch'
+                    : identity.source === 'youtube'
+                      ? 'YouTube'
+                      : 'DonationAlerts'}
+                </span>{#if identity.aliases.length}<small class="account-aliases">
+                    Имена: {identity.aliases.join(', ')}
+                  </small>{/if}
+              </label><AccountFollowStatus row={accountFollowing(identity.ids)} /><PlatformProfileLink
+                link={accountLink(identity.ids)}
+                name={identity.display_name}
+              />
+            </div>{/each}
+          {#if selectedIdentities.length}<div class="inline">
+              <input aria-label="Имя нового человека" placeholder="Имя нового человека" bind:value={splitName} /><button
+                class="outline"
+                disabled={busy || !splitName.trim()}
+                onclick={() =>
+                  operation(async () => {
+                    if (
+                      !(await confirmAction(
+                        'Разъединить аккаунты?',
+                        'Выбранные аккаунты перейдут в отдельную карточку. История событий сохранится.',
+                      ))
+                    )
+                      return;
+                    const result = await api('persons/split', {
+                      identityIds: selectedIdentities,
+                      name: splitName,
+                      revision: detail.revision,
+                    });
+                    await select(result.id);
+                  })}
+              >
+                Разъединить выбранные
+              </button>
+            </div>{/if}
+          <h3>Объединить с человеком</h3>
           <div class="inline">
-            <input bind:value={name} /><button
-              class="outline"
-              disabled={busy}
+            <PersonPicker
+              label="Целевой человек"
+              searchLabel="Поиск целевого человека"
+              bind:value={target}
+              includeBots={true}
+              excludeId={selectedId ?? ''}
+              suggestedIds={candidates}
+            />
+            <button
+              class="primary"
+              disabled={busy || !target}
               onclick={() =>
                 operation(async () => {
-                  await api(`persons/${detail.id}/rename`, { name });
-                  await select(detail.id);
-                })}>Сохранить</button
+                  if (await confirmAction('Объединить людей?', 'Аккаунты и история обеих карточек будут объединены.'))
+                    await merge();
+                })}
             >
-          </div></label
-        >
-
-        <h3>Связанные аккаунты <Help id="person-identities-help" label="О связях аккаунтов" text="Здесь собраны аккаунты одного человека. Совпадающие никнеймы связываются автоматически. При неоднозначном совпадении выберите человека вручную; выбранный аккаунт можно разъединить, сохранив события." /></h3>
-        {#each accounts as identity}<div class="identity-account"><label class="identity-row"
-            ><input
-              type="checkbox"
-              checked={identity.ids.every(id=>selectedIdentities.includes(id))}
-              onchange={event=>selectAccount(identity.ids,event.currentTarget.checked)}
-            /><strong class:twitch={identity.source==='twitch'} class:youtube={identity.source==='youtube'}>{identity.display_name}</strong><span class="small muted"
-              >{identity.source === "donationalerts" ? "Донатер" : "Участник"} · {identity.source === "twitch" ? "Twitch" : identity.source === "youtube" ? "YouTube" : "DonationAlerts"}</span
-            >{#if identity.aliases.length}<small class="account-aliases">Имена: {identity.aliases.join(", ")}</small>{/if}</label
-          ><AccountFollowStatus row={accountFollowing(identity.ids)}/><PlatformProfileLink link={accountLink(identity.ids)} name={identity.display_name}/></div>{/each}
-        {#if selectedIdentities.length}<div class="inline">
-            <input
-              aria-label="Имя нового человека"
-              placeholder="Имя нового человека"
-              bind:value={splitName}
-            /><button
-              class="outline"
-              disabled={busy || !splitName.trim()}
-              onclick={() =>
-                operation(async () => {
-                  if(!await confirmAction("Разъединить аккаунты?","Выбранные аккаунты перейдут в отдельную карточку. История событий сохранится."))return;
-                  const result = await api("persons/split", {
-                    identityIds: selectedIdentities,
-                    name: splitName,
-                    revision: detail.revision,
-                  });
-                  await select(result.id);
-                })}>Разъединить выбранные</button
-            >
-          </div>{/if}
-        <h3>Объединить с человеком</h3>
-        <div class="inline">
-          <PersonPicker label="Целевой человек" searchLabel="Поиск целевого человека" bind:value={target} includeBots={true} excludeId={selectedId??''} suggestedIds={candidates}/>
+              Объединить
+            </button>
+          </div>
+          {#if target}<p class="small muted">
+              Все события и наблюдения этих групп будут связаны. Содержимое событий сохранится; отмена доступна ниже.
+            </p>{/if}
+          {#if merges.length}<section class="panel audit">
+              <header><h2>История связей</h2></header>
+              {#each merges as merge}<div class="capability">
+                  <span>
+                    {date(merge.created_at_ms)} · {merge.undone_at_ms
+                      ? 'Отменено'
+                      : merge.kind === 'split'
+                        ? 'Разъединение'
+                        : 'Объединение'}
+                  </span><button
+                    class="outline small"
+                    disabled={busy || merge.undone_at_ms !== null}
+                    onclick={() =>
+                      operation(async () => {
+                        if (
+                          !(await confirmAction(
+                            'Отменить изменение связей?',
+                            'Связи аккаунтов вернутся к состоянию до этой операции.',
+                          ))
+                        )
+                          return;
+                        await api(`${merge.kind === 'split' ? 'splits' : 'merges'}/${merge.id}/undo`, {});
+                        await select(selectedId);
+                      })}
+                  >
+                    Отменить
+                  </button>
+                </div>{/each}
+            </section>{/if}
+        {:else if detailTab === 'donations'}
           <button
-            class="primary"
-            disabled={busy || !target}
-            onclick={() => operation(async()=>{if(await confirmAction("Объединить людей?","Аккаунты и история обеих карточек будут объединены."))await merge();})}>Объединить</button
+            class="outline small"
+            aria-expanded={showDonorLinks}
+            onclick={() => (showDonorLinks = !showDonorLinks)}
           >
-        </div>
-        {#if target}<p class="small muted">
-            Все события и наблюдения этих групп будут связаны. Содержимое
-            событий сохранится; отмена доступна ниже.
-          </p>{/if}
-{#if merges.length}<section class="panel audit">
-    <header><h2>История связей</h2></header>
-    {#each merges as merge}<div class="capability">
-        <span
-          >{date(merge.created_at_ms)} · {merge.undone_at_ms
-            ? "Отменено"
-            : merge.kind === "split" ? "Разъединение" : "Объединение"}</span
-        ><button
-          class="outline small"
-          disabled={busy || merge.undone_at_ms !== null}
-          onclick={() =>
-            operation(async () => {
-              if(!await confirmAction("Отменить изменение связей?","Связи аккаунтов вернутся к состоянию до этой операции."))return;
-              await api(`${merge.kind === "split" ? "splits" : "merges"}/${merge.id}/undo`, {});
-              await select(selectedId);
-            })}>Отменить</button
-        >
-      </div>{/each}
-  </section>{/if}
-      {:else if detailTab==='donations'}
-       <button class="outline small" aria-expanded={showDonorLinks} onclick={()=>showDonorLinks=!showDonorLinks}>{showDonorLinks?'Скрыть привязку':'Привязать донаты по нику'}</button>
-       {#if showDonorLinks}<DonorLinks personId={detail.id} onChange={()=>refreshPerson(detail.id)} />{/if}
-       {#key detail.id}<PersonDonations personId={detail.id} revision={detail.revision} onChange={()=>refreshPerson(detail.id)} />{/key}
-      {:else if detailTab==='notes'}
-       <PersonMetadata personId={detail.id} onChange={()=>refreshPerson(detail.id)} />
-       <PersonNotes personId={detail.id} />
-      {:else}
-       <PersonActivity personId={detail.id} />
-      {/if}
+            {showDonorLinks ? 'Скрыть привязку' : 'Привязать донаты по нику'}
+          </button>
+          {#if showDonorLinks}<DonorLinks personId={detail.id} onChange={() => refreshPerson(detail.id)} />{/if}
+          {#key detail.id}<PersonDonations
+              personId={detail.id}
+              revision={detail.revision}
+              onChange={() => refreshPerson(detail.id)}
+            />{/key}
+        {:else if detailTab === 'notes'}
+          <PersonMetadata personId={detail.id} onChange={() => refreshPerson(detail.id)} />
+          <PersonNotes personId={detail.id} />
+        {:else}
+          <PersonActivity personId={detail.id} />
+        {/if}
       </div>{/if}
   </section>
 </div>
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 
 <style>
- .identity-account{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}.identity-account .identity-row{flex:1;min-width:0;margin:0}.account-summary :global(.platform-profile-link){justify-self:start}
- .account-aliases{flex-basis:100%;color:var(--muted);font-size:11px;overflow-wrap:anywhere}.donor-filters{display:flex;gap:12px;flex-wrap:wrap;padding:8px 12px}.donor-filters label{display:grid;gap:6px;font-size:12px}.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}
- .people-grid{display:grid;grid-template-columns:280px minmax(0,1fr);align-items:stretch;gap:16px;min-height:0;flex:1;}
- .people-grid>section{min-height:0;height:100%;max-height:100%;display:flex;flex-direction:column;overflow:hidden;margin-bottom:0;}
- .people-directory{padding-top:8px;}.people-list{min-height:0;flex:1;max-height:none;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-bottom:4px}.people-pages{display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:8px;padding:10px 12px;flex:0 0 auto;border-top:1px solid var(--border)}.people-pages span{grid-column:1/-1;grid-row:1;text-align:center;font-size:12px}.people-pages button{min-width:0;min-height:40px}
- .person-scroll{min-height:0;overflow-y:auto;flex:1;padding:14px;}
- .people-back{display:none;}
- .person-detail>.empty{min-height:160px;padding:20px;}
- .person-detail>header{padding:14px;border:0;display:flex;align-items:center;gap:12px;}.person-detail>header h2{flex:1;min-width:0;margin:0;}
- .person-detail .kpi-strip{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:0;margin-bottom:16px;gap:12px;}
- .person-detail .kpi{background:none;border:0;padding:0;min-height:48px;}
- .person-detail .kpi span{font-size:12px;}.person-detail .kpi strong{font-size:20px;color:#fff;}
- .account-summary{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}.account-summary>span{display:grid;gap:4px;align-content:start;align-items:start;min-width:0;max-width:100%;}.account-name{display:flex;align-items:center;gap:2px;min-width:0;max-width:100%;}.account-name strong{min-width:0;overflow-wrap:anywhere;}.account-follow-history{width:100%;border-top:1px solid var(--border);margin:12px 0;}.account-follow-history summary{font-size:14px;font-weight:400;}.account-follow-history ul{list-style:none;margin:0;padding:0;max-height:240px;overflow-y:auto;}.account-follow-history li{display:grid;gap:4px;padding:8px 0;font-size:12px;overflow-wrap:anywhere;}.account-follow-history li>span{color:var(--muted);}
- .person-tab-wrap{padding:0 14px;}
- .person-tab-wrap :global(.section-tabs){display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 12px;margin:0;}
- .person-tab-wrap :global(.section-tabs button){white-space:normal;font-size:12px;line-height:1.3;padding:8px 0;min-height:44px;}
- @media(min-width:901px){:global(main.people-page){display:flex;flex-direction:column;height:100dvh;min-height:0}.people-grid{overflow:hidden;width:100%}}
- @media(min-width:1200px){
-  .person-tab-wrap :global(.section-tabs){grid-template-columns:repeat(6,minmax(0,1fr));}
-  .person-detail .kpi-strip{grid-template-columns:repeat(3,minmax(0,1fr));}
- }
- @media(max-width:900px){
-  .people-grid{display:block;height:auto;min-height:0;}
-  .people-grid>section{overflow:visible;height:auto;}
-  .people-grid:not(.has-selection)>.person-detail,.people-grid.has-selection>.people-directory{display:none;}
-  .people-list{max-height:none;overflow:visible;}
-  .people-back{display:flex;align-items:center;gap:6px;min-height:44px;margin:0 12px;}
-  .person-detail>header{padding-top:4px;}
-  .person-scroll{overflow:visible;}
- }
+  .identity-account {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .identity-account .identity-row {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+  }
+  .account-summary :global(.platform-profile-link) {
+    justify-self: start;
+  }
+  .account-aliases {
+    flex-basis: 100%;
+    color: var(--muted);
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+  .donor-filters {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+  }
+  .donor-filters label {
+    display: grid;
+    gap: 6px;
+    font-size: 12px;
+  }
+  .twitch {
+    color: var(--twitch, #a970ff) !important;
+  }
+  .youtube {
+    color: var(--youtube, #ff5959) !important;
+  }
+  .people-grid {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    align-items: stretch;
+    gap: 16px;
+    min-height: 0;
+    flex: 1;
+  }
+  .people-grid > section {
+    min-height: 0;
+    height: 100%;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    margin-bottom: 0;
+  }
+  .people-directory {
+    padding-top: 8px;
+  }
+  .people-list {
+    min-height: 0;
+    flex: 1;
+    max-height: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    padding-bottom: 4px;
+  }
+  .people-pages {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    flex: 0 0 auto;
+    border-top: 1px solid var(--border);
+  }
+  .people-pages span {
+    grid-column: 1/-1;
+    grid-row: 1;
+    text-align: center;
+    font-size: 12px;
+  }
+  .people-pages button {
+    min-width: 0;
+    min-height: 40px;
+  }
+  .person-scroll {
+    min-height: 0;
+    overflow-y: auto;
+    flex: 1;
+    padding: 14px;
+  }
+  .people-back {
+    display: none;
+  }
+  .person-detail > .empty {
+    min-height: 160px;
+    padding: 20px;
+  }
+  .person-detail > header {
+    padding: 14px;
+    border: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .person-detail > header h2 {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+  }
+  .person-detail .kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 0;
+    margin-bottom: 16px;
+    gap: 12px;
+  }
+  .person-detail .kpi {
+    background: none;
+    border: 0;
+    padding: 0;
+    min-height: 48px;
+  }
+  .person-detail .kpi span {
+    font-size: 12px;
+  }
+  .person-detail .kpi strong {
+    font-size: 20px;
+    color: #fff;
+  }
+  .account-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .account-summary > span {
+    display: grid;
+    gap: 4px;
+    align-content: start;
+    align-items: start;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .account-name {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .account-name strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .account-follow-history {
+    width: 100%;
+    border-top: 1px solid var(--border);
+    margin: 12px 0;
+  }
+  .account-follow-history summary {
+    font-size: 14px;
+    font-weight: 400;
+  }
+  .account-follow-history ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 240px;
+    overflow-y: auto;
+  }
+  .account-follow-history li {
+    display: grid;
+    gap: 4px;
+    padding: 8px 0;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+  .account-follow-history li > span {
+    color: var(--muted);
+  }
+  .person-tab-wrap {
+    padding: 0 14px;
+  }
+  .person-tab-wrap :global(.section-tabs) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0 12px;
+    margin: 0;
+  }
+  .person-tab-wrap :global(.section-tabs button) {
+    white-space: normal;
+    font-size: 12px;
+    line-height: 1.3;
+    padding: 8px 0;
+    min-height: 44px;
+  }
+  @media (min-width: 901px) {
+    :global(main.people-page) {
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+      min-height: 0;
+    }
+    .people-grid {
+      overflow: hidden;
+      width: 100%;
+    }
+  }
+  @media (min-width: 1200px) {
+    .person-tab-wrap :global(.section-tabs) {
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+    .person-detail .kpi-strip {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 900px) {
+    .people-grid {
+      display: block;
+      height: auto;
+      min-height: 0;
+    }
+    .people-grid > section {
+      overflow: visible;
+      height: auto;
+    }
+    .people-grid:not(.has-selection) > .person-detail,
+    .people-grid.has-selection > .people-directory {
+      display: none;
+    }
+    .people-list {
+      max-height: none;
+      overflow: visible;
+    }
+    .people-back {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 44px;
+      margin: 0 12px;
+    }
+    .person-detail > header {
+      padding-top: 4px;
+    }
+    .person-scroll {
+      overflow: visible;
+    }
+  }
 </style>

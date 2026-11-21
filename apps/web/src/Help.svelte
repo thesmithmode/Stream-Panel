@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick } from 'svelte';
 
-  let { label, text, id, trigger='?' }: { label: string; text: string; id: string; trigger?: string } = $props();
+  let { label, text, id, trigger = '?' }: { label: string; text: string; id: string; trigger?: string } = $props();
   let open = $state(false);
   let root = $state<HTMLDivElement | undefined>();
   let popup = $state<HTMLDivElement | undefined>();
@@ -15,25 +15,29 @@
   }
 
   function positionPopover() {
-    const trigger = root?.querySelector("button");
+    const trigger = root?.querySelector('button');
     if (!trigger || !popup) return;
     const anchor = trigger.getBoundingClientRect();
-    if(anchor.bottom<0||anchor.top>window.innerHeight){closePopover();return;}
+    if (anchor.bottom < 0 || anchor.top > window.innerHeight) {
+      closePopover();
+      return;
+    }
     const box = popup.getBoundingClientRect();
     const margin = 8;
     left = Math.max(margin, Math.min(anchor.left, window.innerWidth - box.width - margin));
     const below = anchor.bottom + margin;
     const above = anchor.top - box.height - margin;
-    top = below + box.height <= window.innerHeight - margin
-      ? below
-      : above >= margin
-        ? above
-        : Math.max(margin, Math.min(below, window.innerHeight - box.height - margin));
+    top =
+      below + box.height <= window.innerHeight - margin
+        ? below
+        : above >= margin
+          ? above
+          : Math.max(margin, Math.min(below, window.innerHeight - box.height - margin));
   }
 
   function closePopover(restoreFocus = false) {
     open = false;
-    if (restoreFocus) root?.querySelector("button")?.focus();
+    if (restoreFocus) root?.querySelector('button')?.focus();
   }
 
   async function togglePopover() {
@@ -46,34 +50,39 @@
       if (open && root && !root.contains(event.target as Node)) closePopover();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && open) closePopover(true);
+      if (event.key === 'Escape' && open) closePopover(true);
     };
-    const onViewportChange=(event:Event)=>{if(open&&(event.type!=="scroll"||!popup?.contains(event.target as Node)))positionPopover();};
-    window.addEventListener("resize",onViewportChange);
-    window.addEventListener("scroll",onViewportChange,true);
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
+    const onViewportChange = (event: Event) => {
+      if (open && (event.type !== 'scroll' || !popup?.contains(event.target as Node))) positionPopover();
+    };
+    window.addEventListener('resize', onViewportChange);
+    window.addEventListener('scroll', onViewportChange, true);
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
     return () => {
-      window.removeEventListener("resize",onViewportChange);
-      window.removeEventListener("scroll",onViewportChange,true);
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener('resize', onViewportChange);
+      window.removeEventListener('scroll', onViewportChange, true);
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
     };
   });
 </script>
 
 <div class="help" bind:this={root}>
   <button
-    class="help-button" class:help-text={trigger!=='?'}
+    class="help-button"
+    class:help-text={trigger !== '?'}
     type="button"
     aria-label={label}
     aria-expanded={open}
     aria-controls={id}
     onclick={togglePopover}
-  >{trigger}</button>
+  >
+    {trigger}
+  </button>
   {#if open}<div
       class="help-popover"
-      id={id}
+      {id}
       role="dialog"
       aria-label={label}
       bind:this={popup}
@@ -107,7 +116,20 @@
     line-height: 1;
   }
 
-  .help-text { width:auto; height:auto; min-height:28px; padding:2px 0; border:0; border-radius:0; background:none; color:var(--muted); font-size:12px; font-weight:400; text-decoration:underline dotted; text-underline-offset:3px; }
+  .help-text {
+    width: auto;
+    height: auto;
+    min-height: 28px;
+    padding: 2px 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 400;
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+  }
 
   .help-popover {
     position: fixed;

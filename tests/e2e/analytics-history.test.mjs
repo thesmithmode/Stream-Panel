@@ -1,18 +1,76 @@
-import {clockSettings} from '../helpers/navigation.mjs';
-import test from 'node:test';import assert from 'node:assert/strict';
-import {application} from '../helpers/application.mjs';import {launchBrowser} from '../helpers/browser.mjs';import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';import {assertUiLayout} from '../helpers/ui-layout.mjs';
-test('long history prepares, paginates, averages clock activity and drills into original minute data',{timeout:120000},async()=>{
- const a=await application();let browser;
- try{const day=86400000,base=Math.floor((Date.now()-202*day)/day)*day+12*3600000;
- for(let n=0;n<201;n++){const at=base+n*day,id=await a.db.call('observePlatformStream','twitch','owner',String(n),at,at,null,'History '+n);
- await a.db.call('ingest',{source:'twitch',accountId:'owner',externalId:String(n),type:'chat.message',actor:{externalId:'viewer',displayName:'History viewer'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{count:1}});await a.db.call('endSession',id,at+60000);}
- browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(30000);const errors=[];page.on('pageerror',e=>errors.push(e.message));await goto(page,a.bootstrap());
- await page.getByRole('button',{name:'Стримы',exact:true}).click();const history=page.locator('.history-pages');await history.getByText('Страница 1',{exact:true}).waitFor();await history.getByRole('button',{name:'Следующие',exact:true}).click();await history.getByText('Страница 2',{exact:true}).waitFor();await history.getByRole('button',{name:'Предыдущие',exact:true}).click();await history.getByText('Страница 1',{exact:true}).waitFor();
- await page.getByRole('button',{name:'Аналитика',exact:true}).click();await page.getByRole('tab',{name:'Время',exact:true}).click();await page.locator('.activity-clock').waitFor({timeout:60000});
- await clockSettings(page);const chart=page.locator('.activity-clock');await chart.getByLabel('Метрика графика').selectOption('activeAudience');await chart.getByLabel('Шаг графика').selectOption('60');await chart.getByRole('button',{name:/15:00–16:00: 1 активных/}).click();await chart.getByRole('cell',{name:'201 / 201',exact:true}).waitFor();
- for(const group of ['weekends','weekdays']){await chart.getByLabel('Дни недели').selectOption(group);await chart.getByRole('button',{name:/15:00–16:00: 1 активных/}).click();}
- await chart.getByLabel('Шаг графика').selectOption('1');await chart.getByRole('button',{name:/15:00–15:01: 1 активных/}).click();
+import { clockSettings } from '../helpers/navigation.mjs';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { application } from '../helpers/application.mjs';
+import { launchBrowser } from '../helpers/browser.mjs';
+import { goto, saveCoverage } from '../helpers/browser-coverage.mjs';
+import { assertUiLayout } from '../helpers/ui-layout.mjs';
+test(
+  'long history prepares, paginates, averages clock activity and drills into original minute data',
+  { timeout: 120000 },
+  async () => {
+    const a = await application();
+    let browser;
+    try {
+      const day = 86400000,
+        base = Math.floor((Date.now() - 202 * day) / day) * day + 12 * 3600000;
+      for (let n = 0; n < 201; n++) {
+        const at = base + n * day,
+          id = await a.db.call('observePlatformStream', 'twitch', 'owner', String(n), at, at, null, 'History ' + n);
+        await a.db.call('ingest', {
+          source: 'twitch',
+          accountId: 'owner',
+          externalId: String(n),
+          type: 'chat.message',
+          actor: { externalId: 'viewer', displayName: 'History viewer' },
+          occurredAtMs: at,
+          receivedAtMs: at,
+          sourceTime: null,
+          timeQuality: 'provider',
+          transport: 'eventsub',
+          payload: { count: 1 },
+        });
+        await a.db.call('endSession', id, at + 60000);
+      }
+      browser = await launchBrowser();
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      page.setDefaultTimeout(30000);
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      await goto(page, a.bootstrap());
+      await page.getByRole('button', { name: 'Стримы', exact: true }).click();
+      const history = page.locator('.history-pages');
+      await history.getByText('Страница 1', { exact: true }).waitFor();
+      await history.getByRole('button', { name: 'Следующие', exact: true }).click();
+      await history.getByText('Страница 2', { exact: true }).waitFor();
+      await history.getByRole('button', { name: 'Предыдущие', exact: true }).click();
+      await history.getByText('Страница 1', { exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Аналитика', exact: true }).click();
+      await page.getByRole('tab', { name: 'Время', exact: true }).click();
+      await page.locator('.activity-clock').waitFor({ timeout: 60000 });
+      await clockSettings(page);
+      const chart = page.locator('.activity-clock');
+      await chart.getByLabel('Метрика графика').selectOption('activeAudience');
+      await chart.getByLabel('Шаг графика').selectOption('60');
+      await chart.getByRole('button', { name: /15:00–16:00: 1 активных/ }).click();
+      await chart.getByRole('cell', { name: '201 / 201', exact: true }).waitFor();
+      for (const group of ['weekends', 'weekdays']) {
+        await chart.getByLabel('Дни недели').selectOption(group);
+        await chart.getByRole('button', { name: /15:00–16:00: 1 активных/ }).click();
+      }
+      await chart.getByLabel('Шаг графика').selectOption('1');
+      await chart.getByRole('button', { name: /15:00–15:01: 1 активных/ }).click();
 
- await assertUiLayout(page);await page.locator('.activity-clock').getByLabel('Метрика графика').selectOption('messages');await page.locator('.activity-clock').getByLabel('Шаг графика').selectOption('1');await page.locator('.activity-clock svg [role="button"]').filter({hasText:''}).nth(900).click();assert.ok((await page.locator('.activity-clock [role="status"]').textContent()).includes('60 сообщ./ч')); assert.deepEqual(errors,[]);await saveCoverage(page);
- }finally{await browser?.close();await a.close();}
-});
+      await assertUiLayout(page);
+      await page.locator('.activity-clock').getByLabel('Метрика графика').selectOption('messages');
+      await page.locator('.activity-clock').getByLabel('Шаг графика').selectOption('1');
+      await page.locator('.activity-clock svg [role="button"]').filter({ hasText: '' }).nth(900).click();
+      assert.ok((await page.locator('.activity-clock [role="status"]').textContent()).includes('60 сообщ./ч'));
+      assert.deepEqual(errors, []);
+      await saveCoverage(page);
+    } finally {
+      await browser?.close();
+      await a.close();
+    }
+  },
+);

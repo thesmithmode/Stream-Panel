@@ -1,51 +1,351 @@
 <script lang="ts">
- import PersonPicker from './PersonPicker.svelte';
- import {screenData} from './screen-data';
- import AudioDonation from './AudioDonation.svelte';
- import {isAudioDonation} from './labels';
- import {onMount,untrack} from 'svelte';
- import Icon from './Icon.svelte';
- import {api,date,donationMoney} from './api';
- type Donation={id:string;personId:string|null;personName:string|null;amountMinor:string;currency:string;rubAmountMinor?:string|null;exchangeRateDate?:string|null;occurredAtMs:number|null;sourceTime?:string|null;sessionIds?:string[];message:string;originalActorName:string;revision:number};
- type Candidate={id:string;name:string;messages:number};
- let {sessionId,onPerson,changed}:{sessionId?:string;onPerson:(id:string)=>void;changed:()=>Promise<void>}=$props();
- let loaded=$state(false);
- let rows=$state<Donation[]>([]),total=$state(0),statisticsCount=$state(0),offset=$state(0),loading=$state(false),busy=$state(false),error=$state('');
- let editing=$state<Donation|null>(null),candidates=$state<Candidate[]>([]),recipient=$state(''),finding=$state(false);
- const value=(row:Donation)=>/^\d+$/.test(row.amountMinor)?donationMoney(row):'Сумма неизвестна';
- let generation=0,editorGeneration=0;
- let connection=$state('');
- const showAll=$derived(!sessionId);
- async function refresh(force=false){const ticket=++generation;loading=true;try{const result=await screenData(`donations?${showAll?'':`session=${encodeURIComponent(sessionId!)}&`}offset=${offset}&limit=10`,'donations',undefined,force);if(ticket===generation){rows=result.items;total=result.total;loaded=true;statisticsCount=result.statisticsCount??result.total;error='';}}catch(e){if(ticket===generation)error=(e as Error).message;}finally{if(ticket===generation)loading=false;}}
- $effect(()=>{sessionId;offset;showAll;untrack(()=>void refresh());return()=>{generation++;};});
- onMount(()=>{let alive=true;void api('status').then(status=>{if(alive)connection=status.donationalerts.state;}).catch(()=>{});const update=(event:Event)=>void refresh(!(event instanceof CustomEvent)||!event.detail?.validated||!!event.detail.force);window.addEventListener('sp:data-refresh',update);return()=>{alive=false;editorGeneration++;window.removeEventListener('sp:data-refresh',update);};});
- async function edit(row:Donation){const ticket=++editorGeneration;editing=row;recipient=row.personId??'';candidates=[];finding=true;error='';try{const suggested=await api<Candidate[]>(`donations/${encodeURIComponent(row.id)}/candidates`);if(ticket===editorGeneration)candidates=suggested;}catch(e){if(ticket===editorGeneration)error=(e as Error).message;}finally{if(ticket===editorGeneration)finding=false;}}
- async function assign(){if(!editing||!recipient)return;busy=true;error='';try{await api(`donations/${encodeURIComponent(editing.id)}/assign`,{personId:recipient,revision:editing.revision});editing=null;editorGeneration++;await changed();}catch(e){error=(e as Error).message==='DONATION_CONFLICT'?'Привязка уже изменилась. Закройте форму и откройте донат снова.':(e as Error).message;await refresh();}finally{busy=false;}}
- async function rescan(){busy=true;error='';try{await api('donationalerts/rescan?recent=1',{},AbortSignal.timeout(60000));await changed();}catch(e){error=(e as Error).message;}finally{busy=false;}}
+  import PersonPicker from './PersonPicker.svelte';
+  import { screenData } from './screen-data';
+  import AudioDonation from './AudioDonation.svelte';
+  import { isAudioDonation } from './labels';
+  import { onMount, untrack } from 'svelte';
+  import Icon from './Icon.svelte';
+  import { api, date, donationMoney } from './api';
+  type Donation = {
+    id: string;
+    personId: string | null;
+    personName: string | null;
+    amountMinor: string;
+    currency: string;
+    rubAmountMinor?: string | null;
+    exchangeRateDate?: string | null;
+    occurredAtMs: number | null;
+    sourceTime?: string | null;
+    sessionIds?: string[];
+    message: string;
+    originalActorName: string;
+    revision: number;
+  };
+  type Candidate = { id: string; name: string; messages: number };
+  let {
+    sessionId,
+    onPerson,
+    changed,
+  }: { sessionId?: string; onPerson: (id: string) => void; changed: () => Promise<void> } = $props();
+  let loaded = $state(false);
+  let rows = $state<Donation[]>([]),
+    total = $state(0),
+    statisticsCount = $state(0),
+    offset = $state(0),
+    loading = $state(false),
+    busy = $state(false),
+    error = $state('');
+  let editing = $state<Donation | null>(null),
+    candidates = $state<Candidate[]>([]),
+    recipient = $state(''),
+    finding = $state(false);
+  const value = (row: Donation) => (/^\d+$/.test(row.amountMinor) ? donationMoney(row) : 'Сумма неизвестна');
+  let generation = 0,
+    editorGeneration = 0;
+  let connection = $state('');
+  const showAll = $derived(!sessionId);
+  async function refresh(force = false) {
+    const ticket = ++generation;
+    loading = true;
+    try {
+      const result = await screenData(
+        `donations?${showAll ? '' : `session=${encodeURIComponent(sessionId!)}&`}offset=${offset}&limit=10`,
+        'donations',
+        undefined,
+        force,
+      );
+      if (ticket === generation) {
+        rows = result.items;
+        total = result.total;
+        loaded = true;
+        statisticsCount = result.statisticsCount ?? result.total;
+        error = '';
+      }
+    } catch (e) {
+      if (ticket === generation) error = (e as Error).message;
+    } finally {
+      if (ticket === generation) loading = false;
+    }
+  }
+  $effect(() => {
+    sessionId;
+    offset;
+    showAll;
+    untrack(() => void refresh());
+    return () => {
+      generation++;
+    };
+  });
+  onMount(() => {
+    let alive = true;
+    void api('status')
+      .then((status) => {
+        if (alive) connection = status.donationalerts.state;
+      })
+      .catch(() => {});
+    const update = (event: Event) =>
+      void refresh(!(event instanceof CustomEvent) || !event.detail?.validated || !!event.detail.force);
+    window.addEventListener('sp:data-refresh', update);
+    return () => {
+      alive = false;
+      editorGeneration++;
+      window.removeEventListener('sp:data-refresh', update);
+    };
+  });
+  async function edit(row: Donation) {
+    const ticket = ++editorGeneration;
+    editing = row;
+    recipient = row.personId ?? '';
+    candidates = [];
+    finding = true;
+    error = '';
+    try {
+      const suggested = await api<Candidate[]>(`donations/${encodeURIComponent(row.id)}/candidates`);
+      if (ticket === editorGeneration) candidates = suggested;
+    } catch (e) {
+      if (ticket === editorGeneration) error = (e as Error).message;
+    } finally {
+      if (ticket === editorGeneration) finding = false;
+    }
+  }
+  async function assign() {
+    if (!editing || !recipient) return;
+    busy = true;
+    error = '';
+    try {
+      await api(`donations/${encodeURIComponent(editing.id)}/assign`, {
+        personId: recipient,
+        revision: editing.revision,
+      });
+      editing = null;
+      editorGeneration++;
+      await changed();
+    } catch (e) {
+      error =
+        (e as Error).message === 'DONATION_CONFLICT'
+          ? 'Привязка уже изменилась. Закройте форму и откройте донат снова.'
+          : (e as Error).message;
+      await refresh();
+    } finally {
+      busy = false;
+    }
+  }
+  async function rescan() {
+    busy = true;
+    error = '';
+    try {
+      await api('donationalerts/rescan?recent=1', {}, AbortSignal.timeout(60000));
+      await changed();
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      busy = false;
+    }
+  }
 </script>
-{#if showAll||total>0||error}
-<section class="panel stream-donations" aria-label={sessionId?'Донаты стрима':'Все донаты'}>
- <header><h2>{sessionId?'Донаты стрима':'Все донаты'} <span class="small muted">{statisticsCount}</span></h2><button class="icon-button" aria-label="Обновить донаты" disabled={busy||loading} onclick={rescan}><Icon name="refresh" size={18}/></button></header>
- <div class="donation-list">
- {#if total!==statisticsCount}<p class="small muted">В статистике: {statisticsCount} · Всего записей: {total}. Донаты исключённых аккаунтов сохранены в журнале.</p>{/if}
- {#if connection==='disconnected'||connection==='error'}<p class="small muted">DonationAlerts не подключён. Проверьте «Интеграции».</p>{/if}
- {#if error}<p class="notice error" role="alert">{error}</p>{/if}
- {#each rows as row (row.id)}<article data-donation-id={row.id}>
-  <div class="donation-summary"><div class="donation-owner">{#if row.personId}<button class="text-button" aria-label={`Связан: ${row.personName}`} onclick={()=>onPerson(row.personId!)}>{row.personName}</button>{#if row.originalActorName&&row.originalActorName!==row.personName}<small class="muted">{row.originalActorName}</small>{/if}{:else}<span>{row.originalActorName||'Аноним'}</span>{/if}</div><strong>{value(row)}</strong><button class="icon-button" aria-label="Привязать к человеку" title={row.personId?"Изменить привязку":"Привязать к человеку"} disabled={busy} onclick={()=>void edit(row)}><Icon name={row.personId?"pencil":"connections"} size={18}/></button></div>
-  <time class="small muted">{row.occurredAtMs===null&&row.sourceTime?`${row.sourceTime} · время DA`:date(row.occurredAtMs)}</time>
-  {#if showAll&&!row.sessionIds?.length}<span class="small muted">Без привязки к эфиру</span>{/if}
- {#if row.message}<p class="donation-message">{#if isAudioDonation({text:row.message})}<AudioDonation text={row.message}/>{:else}{row.message}{/if}</p>{/if}
-  {#if editing?.id===row.id}<form class="donation-editor" onsubmit={e=>{e.preventDefault();void assign();}}>
-   {#if finding}<p class="small muted" role="status">Ищем участников…</p>{:else if candidates.length}<p class="small muted">Писали в чат за 2 минуты до и после доната — выберите, если узнаёте человека.</p><div class="candidate-list">{#each candidates as candidate}<button type="button" class="outline small" class:active={recipient===candidate.id} onclick={()=>recipient=candidate.id}>{candidate.name}<span class="muted">{candidate.messages} сообщ.</span></button>{/each}</div>{:else}<p class="small muted">{row.occurredAtMs===null?'Время доната неизвестно: подсказки по чату недоступны.':'В этом интервале сообщений нет. Найдите человека по имени.'}</p>{/if}
-   <PersonPicker label="Получатель привязки доната" bind:value={recipient} disabled={busy||finding}/>
-   <div class="actions"><button class="primary small" disabled={busy||finding||!recipient}>Сохранить привязку</button><button type="button" class="outline small" onclick={()=>{editing=null;editorGeneration++;}}>Отмена</button></div>
-  </form>{/if}
- </article>{/each}
- {#if loading&&!loaded}<p class="muted" role="status">Загружаем донаты…</p>{:else if !rows.length}<p class="muted">{showAll?'Сохранённых донатов пока нет.':'Донатов в этом стриме пока нет.'}</p>{/if}
- {#if total>10}<div class="actions"><button class="outline small" disabled={loading||offset===0} onclick={()=>offset-=10}>Предыдущие</button><span class="small muted">{offset+1}–{Math.min(offset+10,total)} из {total}</span><button class="outline small" disabled={loading||offset+10>=total} onclick={()=>offset+=10}>Следующие</button></div>{/if}
- </div>
-</section>
+
+{#if showAll || total > 0 || error}
+  <section class="panel stream-donations" aria-label={sessionId ? 'Донаты стрима' : 'Все донаты'}>
+    <header>
+      <h2>{sessionId ? 'Донаты стрима' : 'Все донаты'} <span class="small muted">{statisticsCount}</span></h2>
+      <button class="icon-button" aria-label="Обновить донаты" disabled={busy || loading} onclick={rescan}>
+        <Icon name="refresh" size={18} />
+      </button>
+    </header>
+    <div class="donation-list">
+      {#if total !== statisticsCount}<p class="small muted">
+          В статистике: {statisticsCount} · Всего записей: {total}. Донаты исключённых аккаунтов сохранены в журнале.
+        </p>{/if}
+      {#if connection === 'disconnected' || connection === 'error'}<p class="small muted">
+          DonationAlerts не подключён. Проверьте «Интеграции».
+        </p>{/if}
+      {#if error}<p class="notice error" role="alert">{error}</p>{/if}
+      {#each rows as row (row.id)}<article data-donation-id={row.id}>
+          <div class="donation-summary">
+            <div class="donation-owner">
+              {#if row.personId}<button
+                  class="text-button"
+                  aria-label={`Связан: ${row.personName}`}
+                  onclick={() => onPerson(row.personId!)}
+                >
+                  {row.personName}
+                </button>{#if row.originalActorName && row.originalActorName !== row.personName}<small class="muted">
+                    {row.originalActorName}
+                  </small>{/if}{:else}<span>{row.originalActorName || 'Аноним'}</span>{/if}
+            </div>
+            <strong>{value(row)}</strong><button
+              class="icon-button"
+              aria-label="Привязать к человеку"
+              title={row.personId ? 'Изменить привязку' : 'Привязать к человеку'}
+              disabled={busy}
+              onclick={() => void edit(row)}
+            >
+              <Icon name={row.personId ? 'pencil' : 'connections'} size={18} />
+            </button>
+          </div>
+          <time class="small muted">
+            {row.occurredAtMs === null && row.sourceTime ? `${row.sourceTime} · время DA` : date(row.occurredAtMs)}
+          </time>
+          {#if showAll && !row.sessionIds?.length}<span class="small muted">Без привязки к эфиру</span>{/if}
+          {#if row.message}<p class="donation-message">
+              {#if isAudioDonation({ text: row.message })}<AudioDonation text={row.message} />{:else}{row.message}{/if}
+            </p>{/if}
+          {#if editing?.id === row.id}<form
+              class="donation-editor"
+              onsubmit={(e) => {
+                e.preventDefault();
+                void assign();
+              }}
+            >
+              {#if finding}<p class="small muted" role="status">Ищем участников…</p>{:else if candidates.length}<p
+                  class="small muted"
+                >
+                  Писали в чат за 2 минуты до и после доната — выберите, если узнаёте человека.
+                </p>
+                <div class="candidate-list">
+                  {#each candidates as candidate}<button
+                      type="button"
+                      class="outline small"
+                      class:active={recipient === candidate.id}
+                      onclick={() => (recipient = candidate.id)}
+                    >
+                      {candidate.name}<span class="muted">{candidate.messages} сообщ.</span>
+                    </button>{/each}
+                </div>{:else}<p class="small muted">
+                  {row.occurredAtMs === null
+                    ? 'Время доната неизвестно: подсказки по чату недоступны.'
+                    : 'В этом интервале сообщений нет. Найдите человека по имени.'}
+                </p>{/if}
+              <PersonPicker label="Получатель привязки доната" bind:value={recipient} disabled={busy || finding} />
+              <div class="actions">
+                <button class="primary small" disabled={busy || finding || !recipient}>
+                  Сохранить привязку
+                </button><button
+                  type="button"
+                  class="outline small"
+                  onclick={() => {
+                    editing = null;
+                    editorGeneration++;
+                  }}
+                >
+                  Отмена
+                </button>
+              </div>
+            </form>{/if}
+        </article>{/each}
+      {#if loading && !loaded}<p class="muted" role="status">Загружаем донаты…</p>{:else if !rows.length}<p
+          class="muted"
+        >
+          {showAll ? 'Сохранённых донатов пока нет.' : 'Донатов в этом стриме пока нет.'}
+        </p>{/if}
+      {#if total > 10}<div class="actions">
+          <button class="outline small" disabled={loading || offset === 0} onclick={() => (offset -= 10)}>
+            Предыдущие
+          </button><span class="small muted">{offset + 1}–{Math.min(offset + 10, total)} из {total}</span><button
+            class="outline small"
+            disabled={loading || offset + 10 >= total}
+            onclick={() => (offset += 10)}
+          >
+            Следующие
+          </button>
+        </div>{/if}
+    </div>
+  </section>
 {/if}
+
 <style>
-header{gap:12px;flex-wrap:wrap;}h2{display:flex;align-items:baseline;gap:10px;}.donation-list{padding:0 18px 12px;}article{padding:8px 0;border-bottom:1px solid var(--border);}article:last-child{border-bottom:0;}.donation-summary,.donation-owner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}.donation-summary{display:grid;grid-template-columns:minmax(0,1fr) auto 44px;gap:8px;margin-bottom:0;}.donation-owner{min-width:0;overflow-wrap:anywhere;}.donation-owner .text-button{text-align:left;white-space:normal;}.donation-summary strong{color:var(--text);font-size:17px;}.donation-message{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0;color:var(--text);}.donation-editor{display:grid;gap:10px;padding:14px;border-radius:8px;background:var(--bg);margin-top:12px;}.candidate-list{display:flex;gap:8px;flex-wrap:wrap;}.candidate-list button{display:flex;gap:8px;}.candidate-list button.active{border-color:var(--accent);}@media(max-width:600px){.donation-summary{grid-template-columns:minmax(0,1fr) 44px;}.donation-owner{grid-column:1;}.donation-summary>strong{grid-column:1;grid-row:2;font-size:15px;overflow-wrap:anywhere;}.donation-summary>.icon-button{grid-column:2;grid-row:1 / 3;}.donation-list{padding:0 12px 12px;}.donation-list article>time{font-size:11px;}}
+  header {
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  h2 {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .donation-list {
+    padding: 0 18px 12px;
+  }
+  article {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  article:last-child {
+    border-bottom: 0;
+  }
+  .donation-summary,
+  .donation-owner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .donation-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 44px;
+    gap: 8px;
+    margin-bottom: 0;
+  }
+  .donation-owner {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .donation-owner .text-button {
+    text-align: left;
+    white-space: normal;
+  }
+  .donation-summary strong {
+    color: var(--text);
+    font-size: 17px;
+  }
+  .donation-message {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    margin: 4px 0;
+    color: var(--text);
+  }
+  .donation-editor {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 8px;
+    background: var(--bg);
+    margin-top: 12px;
+  }
+  .candidate-list {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .candidate-list button {
+    display: flex;
+    gap: 8px;
+  }
+  .candidate-list button.active {
+    border-color: var(--accent);
+  }
+  @media (max-width: 600px) {
+    .donation-summary {
+      grid-template-columns: minmax(0, 1fr) 44px;
+    }
+    .donation-owner {
+      grid-column: 1;
+    }
+    .donation-summary > strong {
+      grid-column: 1;
+      grid-row: 2;
+      font-size: 15px;
+      overflow-wrap: anywhere;
+    }
+    .donation-summary > .icon-button {
+      grid-column: 2;
+      grid-row: 1 / 3;
+    }
+    .donation-list {
+      padding: 0 12px 12px;
+    }
+    .donation-list article > time {
+      font-size: 11px;
+    }
+  }
 </style>

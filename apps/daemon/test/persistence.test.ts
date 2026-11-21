@@ -1,139 +1,155 @@
-import {Worker} from "node:worker_threads";
-import {once} from "node:events";
-import test from "node:test";
-import assert from "node:assert/strict";
-import { mkdtemp, rm, mkdir, writeFile, readFile, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import Database from "better-sqlite3";
-import { Configuration } from "../src/config.js";
-import { StoreClient } from "../src/db.js";
-test("configuration rejects invalid versions/JSON and recovers its serialized write queue after a disk failure", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sp-config-errors-"));
+import { Worker } from 'node:worker_threads';
+import { once } from 'node:events';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm, mkdir, writeFile, readFile, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import Database from 'better-sqlite3';
+import { Configuration } from '../src/config.js';
+import { StoreClient } from '../src/db.js';
+test('configuration rejects invalid versions/JSON and recovers its serialized write queue after a disk failure', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sp-config-errors-'));
   try {
-    const path = join(dir, "secrets.json");
-    await writeFile(path, "{");
+    const path = join(dir, 'secrets.json');
+    await writeFile(path, '{');
     await assert.rejects(new Configuration(dir).load(), SyntaxError);
     await writeFile(path, JSON.stringify({ version: 2 }));
     await assert.rejects(new Configuration(dir).load(), /UNSUPPORTED_CONFIG/);
     await rm(path);
     await mkdir(path);
     const c = new Configuration(dir);
-    c.value.daClientId = "own-app";
+    c.value.daClientId = 'own-app';
     await assert.rejects(c.save());
     await rm(path, { recursive: true });
     await c.save();
-    assert.equal(
-      JSON.parse(await readFile(path, "utf8")).daClientId,
-      "own-app",
-    );
+    assert.equal(JSON.parse(await readFile(path, 'utf8')).daClientId, 'own-app');
     const loaded = new Configuration(dir);
     await loaded.load();
-    assert.equal(loaded.value.daClientId, "own-app");
+    assert.equal(loaded.value.daClientId, 'own-app');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
-test("concurrent configuration saves persist the last value with private permissions", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sp-config-durable-"));
+test('concurrent configuration saves persist the last value with private permissions', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sp-config-durable-'));
   try {
     const config = new Configuration(dir);
-    config.value.daClientId = "first-app";
-    config.value.daAccessToken = "existing-access";
-    config.value.daRefreshToken = "existing-refresh";
+    config.value.daClientId = 'first-app';
+    config.value.daAccessToken = 'existing-access';
+    config.value.daRefreshToken = 'existing-refresh';
     const first = config.save();
-    config.value.daClientId = "last-app";
+    config.value.daClientId = 'last-app';
     const last = config.save();
     await Promise.all([first, last]);
 
-    const path = join(dir, "secrets.json");
+    const path = join(dir, 'secrets.json');
     const loaded = new Configuration(dir);
     await loaded.load();
-    assert.equal(loaded.value.daClientId, "last-app");
-    assert.equal(loaded.value.daAccessToken, "existing-access");
-    assert.equal(loaded.value.daRefreshToken, "existing-refresh");
-    if (process.platform !== "win32")
-      assert.equal((await stat(path)).mode & 0o777, 0o600);
+    assert.equal(loaded.value.daClientId, 'last-app');
+    assert.equal(loaded.value.daAccessToken, 'existing-access');
+    assert.equal(loaded.value.daRefreshToken, 'existing-refresh');
+    if (process.platform !== 'win32') assert.equal((await stat(path)).mode & 0o777, 0o600);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
-test("worker RPC rejects unsupported operations and oversubscription but remains usable", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sp-queue-"));
-  const db = new StoreClient(join(dir, "db.sqlite"));
+test('worker RPC rejects unsupported operations and oversubscription but remains usable', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sp-queue-'));
+  const db = new StoreClient(join(dir, 'db.sqlite'));
   try {
     await db.ready;
     // @ts-expect-error Exercise rejection of an untrusted runtime operation.
-    await assert.rejects(db.call("not-an-operation"), /UNKNOWN_OPERATION/);
-    const results = await Promise.allSettled(
-      Array.from({ length: 10002 }, () => db.call("changes")),
-    );
-    assert.equal(results.filter((x) => x.status === "rejected").length, 2);
-    for (const x of results)
-      if (x.status === "rejected")
-        assert.match(x.reason.message, /QUEUE_OVERFLOW/);
-    assert.deepEqual(await db.call("persons"), []);
+    await assert.rejects(db.call('not-an-operation'), /UNKNOWN_OPERATION/);
+    const results = await Promise.allSettled(Array.from({ length: 10002 }, () => db.call('changes')));
+    assert.equal(results.filter((x) => x.status === 'rejected').length, 2);
+    for (const x of results) if (x.status === 'rejected') assert.match(x.reason.message, /QUEUE_OVERFLOW/);
+    assert.deepEqual(await db.call('persons'), []);
   } finally {
     await db.stop();
     await db.stop();
     await rm(dir, { recursive: true, force: true });
   }
 });
-test("future schema fails worker startup and rejects callers instead of waiting forever", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sp-worker-start-"));
-  const path = join(dir, "db.sqlite");
+test('future schema fails worker startup and rejects callers instead of waiting forever', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sp-worker-start-'));
+  const path = join(dir, 'db.sqlite');
   const sql = new Database(path);
-  sql.pragma("user_version=999");
+  sql.pragma('user_version=999');
   sql.close();
   const db = new StoreClient(path);
   try {
     await assert.rejects(db.ready, /UNSUPPORTED_SCHEMA_VERSION/);
-    await assert.rejects(db.call("persons"), /UNSUPPORTED_SCHEMA_VERSION/);
+    await assert.rejects(db.call('persons'), /UNSUPPORTED_SCHEMA_VERSION/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
-test("uncloneable worker arguments never consume queue capacity", async () => {
-  const db = new StoreClient(":memory:");
+test('uncloneable worker arguments never consume queue capacity', async () => {
+  const db = new StoreClient(':memory:');
   try {
     await db.ready;
     for (let i = 0; i < 10000; i++)
       await assert.rejects(
         // @ts-expect-error Exercise a runtime payload that cannot cross the worker boundary.
-        db.call("persons", () => {}),
+        db.call('persons', () => {}),
         /could not be cloned/,
       );
-    assert.deepEqual(await db.call("persons"), []);
+    assert.deepEqual(await db.call('persons'), []);
   } finally {
     await db.stop();
   }
 });
 
-test('legacy configuration preserves saved YouTube history and restores required exclusions from a malformed optional bot list',async()=>{
- const dir=await mkdtemp(join(tmpdir(),'sp-legacy-config-'));
- try {
-  const path=join(dir,'secrets.json');
-  await writeFile(path,JSON.stringify({version:1,youtubeAccountId:'history-owner',excludedBotLogins:'wrong-type'}));
-  const config=new Configuration(dir);await config.load();
-  assert.equal(config.value.youtubeAccountId,'history-owner');
-  assert.deepEqual(config.value.excludedBotLogins,['jeetbot','streemelements','streamelements']);
-  await writeFile(path,JSON.stringify({version:1,excludedBotLogins:[' @FullRandomName_Twitch ','CustomBot','AmaliaMelina']}));await config.load();
-  assert.deepEqual(config.value.excludedBotLogins,['jeetbot','streemelements','streamelements','CustomBot','AmaliaMelina']);
-  await writeFile(path,JSON.stringify({version:1,youtube:{userId:'connected-owner'}}));await config.load();
-  assert.equal(config.value.youtubeAccountId,'connected-owner');
- } finally {await rm(dir,{recursive:true,force:true});}
+test('legacy configuration preserves saved YouTube history and restores required exclusions from a malformed optional bot list', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sp-legacy-config-'));
+  try {
+    const path = join(dir, 'secrets.json');
+    await writeFile(
+      path,
+      JSON.stringify({ version: 1, youtubeAccountId: 'history-owner', excludedBotLogins: 'wrong-type' }),
+    );
+    const config = new Configuration(dir);
+    await config.load();
+    assert.equal(config.value.youtubeAccountId, 'history-owner');
+    assert.deepEqual(config.value.excludedBotLogins, ['jeetbot', 'streemelements', 'streamelements']);
+    await writeFile(
+      path,
+      JSON.stringify({ version: 1, excludedBotLogins: [' @FullRandomName_Twitch ', 'CustomBot', 'AmaliaMelina'] }),
+    );
+    await config.load();
+    assert.deepEqual(config.value.excludedBotLogins, [
+      'jeetbot',
+      'streemelements',
+      'streamelements',
+      'CustomBot',
+      'AmaliaMelina',
+    ]);
+    await writeFile(path, JSON.stringify({ version: 1, youtube: { userId: 'connected-owner' } }));
+    await config.load();
+    assert.equal(config.value.youtubeAccountId, 'connected-owner');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
-test('worker rejects untrusted commands even when a caller bypasses the typed client',{timeout:10000},async()=>{
- const worker=new Worker(new URL('../src/db-worker.js',import.meta.url),{workerData:{path:':memory:'}});
- try{
-  const [ready]=await once(worker,'message');assert.equal(ready.ready,true);
-  for(const method of ['not-an-operation','constructor','__proto__']){
-   const reply=once(worker,'message');worker.postMessage({id:1,method,args:[]});
-   assert.deepEqual((await reply)[0],{clientId:'legacy',id:1,error:'UNKNOWN_OPERATION'});
+test('worker rejects untrusted commands even when a caller bypasses the typed client', { timeout: 10000 }, async () => {
+  const worker = new Worker(new URL('../src/db-worker.js', import.meta.url), { workerData: { path: ':memory:' } });
+  try {
+    const [ready] = await once(worker, 'message');
+    assert.equal(ready.ready, true);
+    for (const method of ['not-an-operation', 'constructor', '__proto__']) {
+      const reply = once(worker, 'message');
+      worker.postMessage({ id: 1, method, args: [] });
+      assert.deepEqual((await reply)[0], { clientId: 'legacy', id: 1, error: 'UNKNOWN_OPERATION' });
+    }
+    const started = once(worker, 'message');
+    worker.postMessage({ id: 2, method: 'summary', args: [] });
+    assert.deepEqual((await started)[0], { clientId: 'legacy', id: 2, started: true, method: 'summary' });
+    const result = (await once(worker, 'message'))[0];
+    assert.equal(result.error, undefined);
+    assert.equal(result.result.messages, 0);
+  } finally {
+    await worker.terminate();
   }
-  const started=once(worker,'message');worker.postMessage({id:2,method:'summary',args:[]});
-  assert.deepEqual((await started)[0],{clientId:'legacy',id:2,started:true,method:'summary'});
-  const result=(await once(worker,'message'))[0];assert.equal(result.error,undefined);assert.equal(result.result.messages,0);
- }finally{await worker.terminate();}
 });

@@ -10,14 +10,18 @@ import { BackupService, restoreBackup } from '../src/backup.js';
 
 test('cloud failure returns a restorable local backup and a later upload retry records independent success', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'sp-backup-independent-'));
-  const key = randomBytes(32), dbPath = join(dir, 'data.sqlite');
+  const key = randomBytes(32),
+    dbPath = join(dir, 'data.sqlite');
   const auth = new AccountStore(dbPath);
   await auth.createUser('ruslan', 'ruslan', 'Руслан', 'backup-independent-password');
   const db = new StreamStore(dbPath, 'ruslan');
   await writeFile(join(dir, 'key'), key.toString('hex'));
   await writeFile(join(dir, 'service-key'), 'service-secret');
   await mkdir(join(dir, 'profiles', 'ruslan'), { recursive: true });
-  await writeFile(join(dir, 'profiles', 'ruslan', 'secrets.json'), JSON.stringify({ version: 1, daAccessToken: 'fixture-secret' }));
+  await writeFile(
+    join(dir, 'profiles', 'ruslan', 'secrets.json'),
+    JSON.stringify({ version: 1, daAccessToken: 'fixture-secret' }),
+  );
   let mode: 'fail' | 'ok' = 'fail';
   const uploaded: string[] = [];
   const remoteBlobs = new Map<string, Buffer>();
@@ -25,7 +29,11 @@ test('cloud failure returns a restorable local backup and a later upload retry r
   const request: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     if (url.pathname.includes('/bucket/')) return Response.json({ public: false });
-    if (mode === 'fail' && init?.method === 'POST' && url.pathname.includes('/object/stream-panel-backups/stream-panel/')) {
+    if (
+      mode === 'fail' &&
+      init?.method === 'POST' &&
+      url.pathname.includes('/object/stream-panel-backups/stream-panel/')
+    ) {
       failedUploads++;
       return Response.json({}, { status: 503 });
     }
@@ -34,14 +42,26 @@ test('cloud failure returns a restorable local backup and a later upload retry r
       const blob = remoteBlobs.get(name);
       return blob ? new Response(new Uint8Array(blob)) : Response.json({}, { status: 404 });
     }
-    if (url.pathname.includes('/object/list/')) return Response.json(uploaded.map(name => ({ name })));
+    if (url.pathname.includes('/object/list/')) return Response.json(uploaded.map((name) => ({ name })));
     if (init?.method === 'DELETE') {
       const removed = JSON.parse(String(init.body)).prefixes.map((value: string) => value.split('/').at(-1));
-      for (let i = uploaded.length - 1; i >= 0; i--) if (removed.includes(uploaded[i])) { remoteBlobs.delete(uploaded[i]!); uploaded.splice(i, 1); }
-    } else {const name=url.pathname.split('/').at(-1)!;uploaded.push(name);remoteBlobs.set(name,Buffer.from(init?.body as Uint8Array));}
+      for (let i = uploaded.length - 1; i >= 0; i--)
+        if (removed.includes(uploaded[i])) {
+          remoteBlobs.delete(uploaded[i]!);
+          uploaded.splice(i, 1);
+        }
+    } else {
+      const name = url.pathname.split('/').at(-1)!;
+      uploaded.push(name);
+      remoteBlobs.set(name, Buffer.from(init?.body as Uint8Array));
+    }
     return Response.json({ ok: true });
   };
-  const backup = new BackupService(dir, { keyFile: join(dir, 'key'), url: 'https://fixture.supabase.co', serviceKeyFile: join(dir, 'service-key') }, request);
+  const backup = new BackupService(
+    dir,
+    { keyFile: join(dir, 'key'), url: 'https://fixture.supabase.co', serviceKeyFile: join(dir, 'service-key') },
+    request,
+  );
   try {
     const partial = await backup.run();
     assert.ok(failedUploads > 0, 'upload-failure mock must intercept the object POST');
@@ -56,7 +76,10 @@ test('cloud failure returns a restorable local backup and a later upload retry r
     const localPath = join(dir, 'backups', partial.filename);
     const blob = await readFile(localPath);
     await restoreBackup(blob, key, join(dir, 'restored'));
-    assert.equal(JSON.parse(await readFile(join(dir, 'restored', 'profiles', 'ruslan', 'secrets.json'), 'utf8')).daAccessToken, 'fixture-secret');
+    assert.equal(
+      JSON.parse(await readFile(join(dir, 'restored', 'profiles', 'ruslan', 'secrets.json'), 'utf8')).daAccessToken,
+      'fixture-secret',
+    );
     const restored = new StreamStore(join(dir, 'restored', 'data.sqlite'), 'ruslan');
     restored.close();
 
@@ -68,7 +91,7 @@ test('cloud failure returns a restorable local backup and a later upload retry r
     assert.equal(backup.status.cloud.state, 'success');
     assert.equal(backup.status.cloud.filename, recovered.filename);
     assert.ok(backup.status.cloud.lastSuccessAt > 0);
-    assert.deepEqual(await readFile(localPath),blob); // The latest seven local recovery points stay restorable.
+    assert.deepEqual(await readFile(localPath), blob); // The latest seven local recovery points stay restorable.
     assert.ok(uploaded.includes(recovered.filename));
 
     const cloudSuccessAt = backup.status.cloud.lastSuccessAt;
@@ -104,7 +127,7 @@ test('local failure keeps the last successful local file metadata and never repo
     assert.equal(backup.status.local.lastSuccessAt, succeededAt);
     assert.equal(backup.status.local.filename, first.filename);
     assert.ok(await readFile(join(dir, 'backups', first.filename)));
-    assert.equal((await readdir(join(dir, 'backups'))).filter(name => name.endsWith('.spbk')).length, 1);
+    assert.equal((await readdir(join(dir, 'backups'))).filter((name) => name.endsWith('.spbk')).length, 1);
   } finally {
     await backup.stop();
     store.close();
@@ -115,10 +138,11 @@ test('local failure keeps the last successful local file metadata and never repo
 test('wrong key or corrupted persisted blob never rotates prior local backups', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'sp-backup-local-verify-'));
   const store = new StreamStore(join(dir, 'data.sqlite'));
-  const keyPath = join(dir, 'key'), key = randomBytes(32).toString('hex');
+  const keyPath = join(dir, 'key'),
+    key = randomBytes(32).toString('hex');
   await writeFile(keyPath, key);
   const backup = new BackupService(dir, { keyFile: keyPath });
-  const corruptReader: (path: string) => Promise<Buffer> = async path => {
+  const corruptReader: (path: string) => Promise<Buffer> = async (path) => {
     const persisted = Buffer.from(await readFile(path));
     persisted[persisted.length - 1] = persisted.at(-1)! ^ 1;
     return persisted;
@@ -126,13 +150,13 @@ test('wrong key or corrupted persisted blob never rotates prior local backups', 
   const corrupted = new BackupService(dir, { keyFile: keyPath }, fetch, corruptReader);
   try {
     for (let i = 0; i < 3; i++) await backup.run();
-    const before = (await readdir(join(dir, 'backups'))).filter(name => name.endsWith('.spbk')).sort();
+    const before = (await readdir(join(dir, 'backups'))).filter((name) => name.endsWith('.spbk')).sort();
     await writeFile(keyPath, 'wrong-key');
     await assert.rejects(new BackupService(dir, { keyFile: keyPath }).run(), /INVALID_BACKUP_KEY/);
-    assert.deepEqual((await readdir(join(dir, 'backups'))).filter(name => name.endsWith('.spbk')).sort(), before);
+    assert.deepEqual((await readdir(join(dir, 'backups'))).filter((name) => name.endsWith('.spbk')).sort(), before);
     await writeFile(keyPath, key);
     await assert.rejects(corrupted.run(), /BACKUP_LOCAL_VERIFY_FAILED/);
-    assert.deepEqual((await readdir(join(dir, 'backups'))).filter(name => name.endsWith('.spbk')).sort(), before);
+    assert.deepEqual((await readdir(join(dir, 'backups'))).filter((name) => name.endsWith('.spbk')).sort(), before);
   } finally {
     await backup.stop();
     await corrupted.stop();
@@ -141,24 +165,48 @@ test('wrong key or corrupted persisted blob never rotates prior local backups', 
   }
 });
 
-test('manual local creation and downloads finish while the cloud request is still pending',async()=>{
- const dir=await mkdtemp(join(tmpdir(),'sp-backup-async-cloud-'));
- const db=new StreamStore(join(dir,'data.sqlite'));
- await writeFile(join(dir,'key'),'a'.repeat(64));await writeFile(join(dir,'service-key'),'fixture');
- let release!:(response:Response)=>void,started!:()=>void;
- const cloudStarted=new Promise<void>(resolve=>started=resolve);
- const request:typeof fetch=async()=>{started();return new Promise<Response>(resolve=>release=resolve);};
- const backup=new BackupService(dir,{keyFile:join(dir,'key'),url:'https://fixture.supabase.co',serviceKeyFile:join(dir,'service-key')},request);
- let timer:ReturnType<typeof setTimeout>|undefined;
- try{
-  const result=await Promise.race([backup.run({waitForCloud:false}),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('LOCAL_BACKUP_WAITED_FOR_CLOUD')),3000);})]);
-  clearTimeout(timer);await cloudStarted;
-  assert.equal(backup.status.local.state,'success');assert.equal(backup.status.cloud.state,'pending');
-  const stream=await backup.download(result.filename);const chunks:Buffer[]=[];
-  for await(const chunk of stream)chunks.push(Buffer.from(chunk));
-  assert.deepEqual(Buffer.concat(chunks),await readFile(join(dir,'backups',result.filename)));
-  assert.deepEqual((await readdir(join(dir,'backups'))),[result.filename]);
-  release(Response.json({}, {status:503}));await backup.stop();
-  assert.equal(backup.status.cloud.state,'error');assert.equal(backup.status.pendingUploads,1);
- }finally{clearTimeout(timer);release?.(Response.json({}, {status:503}));await backup.stop();db.close();await rm(dir,{recursive:true,force:true});}
+test('manual local creation and downloads finish while the cloud request is still pending', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sp-backup-async-cloud-'));
+  const db = new StreamStore(join(dir, 'data.sqlite'));
+  await writeFile(join(dir, 'key'), 'a'.repeat(64));
+  await writeFile(join(dir, 'service-key'), 'fixture');
+  let release!: (response: Response) => void, started!: () => void;
+  const cloudStarted = new Promise<void>((resolve) => (started = resolve));
+  const request: typeof fetch = async () => {
+    started();
+    return new Promise<Response>((resolve) => (release = resolve));
+  };
+  const backup = new BackupService(
+    dir,
+    { keyFile: join(dir, 'key'), url: 'https://fixture.supabase.co', serviceKeyFile: join(dir, 'service-key') },
+    request,
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      backup.run({ waitForCloud: false }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('LOCAL_BACKUP_WAITED_FOR_CLOUD')), 3000);
+      }),
+    ]);
+    clearTimeout(timer);
+    await cloudStarted;
+    assert.equal(backup.status.local.state, 'success');
+    assert.equal(backup.status.cloud.state, 'pending');
+    const stream = await backup.download(result.filename);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+    assert.deepEqual(Buffer.concat(chunks), await readFile(join(dir, 'backups', result.filename)));
+    assert.deepEqual(await readdir(join(dir, 'backups')), [result.filename]);
+    release(Response.json({}, { status: 503 }));
+    await backup.stop();
+    assert.equal(backup.status.cloud.state, 'error');
+    assert.equal(backup.status.pendingUploads, 1);
+  } finally {
+    clearTimeout(timer);
+    release?.(Response.json({}, { status: 503 }));
+    await backup.stop();
+    db.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 });

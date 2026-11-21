@@ -1,39 +1,55 @@
-import Database from "better-sqlite3";
-import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
-import { PROFILES, type ProfileName } from "../../../packages/core/src/profiles.js";
+import Database from 'better-sqlite3';
+import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { PROFILES, type ProfileName } from '../../../packages/core/src/profiles.js';
 
 export const profiles = PROFILES;
 export const ACCOUNT_SESSION_SECONDS = 30 * 24 * 60 * 60;
 export type Profile = ProfileName;
 export type UserSession = { profile: Profile; username: string; displayName: string; csrf: string; tokenHash: string };
 /** Ruslan owns the installation; Gulnaz can use only her own profile. */
-export function allowedProfiles(profile: Profile): readonly Profile[] { return profile === "ruslan" ? profiles : [profile]; }
-export function canAccessProfile(account: Profile, selected: Profile): boolean { return allowedProfiles(account).includes(selected); }
-export function publicUser(user: Pick<UserSession, "profile" | "username" | "displayName">, selected=user.profile) {
-  return {profile:selected,accountProfile:user.profile,username:user.username,displayName:user.displayName,
-    allowedProfiles:allowedProfiles(user.profile),canManageBackups:user.profile === "ruslan",canViewCredentials:user.profile === "ruslan"};
+export function allowedProfiles(profile: Profile): readonly Profile[] {
+  return profile === 'ruslan' ? profiles : [profile];
+}
+export function canAccessProfile(account: Profile, selected: Profile): boolean {
+  return allowedProfiles(account).includes(selected);
+}
+export function publicUser(user: Pick<UserSession, 'profile' | 'username' | 'displayName'>, selected = user.profile) {
+  return {
+    profile: selected,
+    accountProfile: user.profile,
+    username: user.username,
+    displayName: user.displayName,
+    allowedProfiles: allowedProfiles(user.profile),
+    canManageBackups: user.profile === 'ruslan',
+    canViewCredentials: user.profile === 'ruslan',
+  };
 }
 type User = { profile: Profile; username: string; display_name: string; salt: string; password_hash: string };
-const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 const hashPassword = (password: string, salt: string): Promise<Buffer> =>
-  new Promise((resolve, reject) => scrypt(password, salt, 32,
-    { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 },
-    (error, result) => error ? reject(error) : resolve(result)));
+  new Promise((resolve, reject) =>
+    scrypt(password, salt, 32, { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }, (error, result) =>
+      error ? reject(error) : resolve(result),
+    ),
+  );
 
 export class AccountStore {
   private db: Database.Database;
   private attempts = new Map<string, { count: number; until: number }>();
   private pending = 0;
   private activityWrittenAt = -Infinity;
-  constructor(path: string, private now: () => number = Date.now) {
+  constructor(
+    path: string,
+    private now: () => number = Date.now,
+  ) {
     this.db = new Database(path);
-    this.db.pragma("busy_timeout = 5000");
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("synchronous = FULL");
-    this.db.pragma("foreign_keys = ON");
+    this.db.pragma('busy_timeout = 5000');
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('synchronous = FULL');
+    this.db.pragma('foreign_keys = ON');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS sp_users (
-        profile TEXT PRIMARY KEY CHECK(profile IN (${profiles.map(profile=>`'${profile}'`).join(',')})),
+        profile TEXT PRIMARY KEY CHECK(profile IN (${profiles.map((profile) => `'${profile}'`).join(',')})),
         username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
         salt TEXT NOT NULL, password_hash TEXT NOT NULL
       ) STRICT;
@@ -48,53 +64,83 @@ export class AccountStore {
     `);
   }
   users(): { profile: Profile; username: string; displayName: string }[] {
-    return this.db.prepare("SELECT profile, username, display_name AS displayName FROM sp_users ORDER BY profile").all() as ReturnType<AccountStore["users"]>;
+    return this.db
+      .prepare('SELECT profile, username, display_name AS displayName FROM sp_users ORDER BY profile')
+      .all() as ReturnType<AccountStore['users']>;
   }
   async createUser(profile: string, username: string, displayName: string, password: string): Promise<void> {
-    if (!profiles.includes(profile as Profile)) throw new Error("INVALID_PROFILE");
-    if (!/^[a-z][a-z0-9_.-]{2,31}$/.test(username) || !displayName.trim() || displayName.length > 100) throw new Error("INVALID_USER");
-    if (password.length < 14 || password.length > 256) throw new Error("INVALID_PASSWORD");
-    const salt = randomBytes(32).toString("hex");
-    const hash = (await hashPassword(password, salt)).toString("hex");
-    this.db.prepare("INSERT INTO sp_users VALUES (?, ?, ?, ?, ?)").run(profile, username, displayName, salt, hash);
+    if (!profiles.includes(profile as Profile)) throw new Error('INVALID_PROFILE');
+    if (!/^[a-z][a-z0-9_.-]{2,31}$/.test(username) || !displayName.trim() || displayName.length > 100)
+      throw new Error('INVALID_USER');
+    if (password.length < 14 || password.length > 256) throw new Error('INVALID_PASSWORD');
+    const salt = randomBytes(32).toString('hex');
+    const hash = (await hashPassword(password, salt)).toString('hex');
+    this.db.prepare('INSERT INTO sp_users VALUES (?, ?, ?, ?, ?)').run(profile, username, displayName, salt, hash);
   }
   async login(username: string, password: string, ip: string) {
     const key = `${ip}:${username.toLowerCase()}`;
     const ipKey = `ip:${ip}`;
     const now = this.now();
     for (const [k, value] of this.attempts) if (value.until <= now) this.attempts.delete(k);
-    if (this.attempts.size >= 10000 || (this.attempts.get(key)?.count ?? 0) >= 5 || (this.attempts.get(ipKey)?.count ?? 0) >= 20) throw new Error("LOGIN_RATE_LIMIT");
-    if (this.pending >= 4) throw new Error("AUTH_BUSY");
+    if (
+      this.attempts.size >= 10000 ||
+      (this.attempts.get(key)?.count ?? 0) >= 5 ||
+      (this.attempts.get(ipKey)?.count ?? 0) >= 20
+    )
+      throw new Error('LOGIN_RATE_LIMIT');
+    if (this.pending >= 4) throw new Error('AUTH_BUSY');
     const entry = this.attempts.get(key) ?? { count: 0, until: now + 900000 };
     entry.count++;
     this.attempts.set(key, entry);
     const ipEntry = this.attempts.get(ipKey) ?? { count: 0, until: now + 900000 };
-    ipEntry.count++; this.attempts.set(ipKey, ipEntry);
+    ipEntry.count++;
+    this.attempts.set(ipKey, ipEntry);
     this.pending++;
     try {
-      const user = this.db.prepare("SELECT * FROM sp_users WHERE username=?").get(username.toLowerCase()) as User | undefined;
-      const actual = await hashPassword(password, user?.salt ?? "dummy-salt-for-unknown-user");
-      const expected = user ? Buffer.from(user.password_hash, "hex") : Buffer.alloc(32);
+      const user = this.db.prepare('SELECT * FROM sp_users WHERE username=?').get(username.toLowerCase()) as
+        User | undefined;
+      const actual = await hashPassword(password, user?.salt ?? 'dummy-salt-for-unknown-user');
+      const expected = user ? Buffer.from(user.password_hash, 'hex') : Buffer.alloc(32);
       if (!timingSafeEqual(actual, expected) || !user) return null;
       this.attempts.delete(key);
-      const token = randomBytes(32).toString("hex"), csrf = randomBytes(32).toString("hex");
-      this.db.transaction(() => {
-        this.db.prepare("DELETE FROM sp_auth_sessions WHERE expires_at_ms<=?").run(now);
-        const active = (this.db.prepare("SELECT count(*) AS n FROM sp_auth_sessions WHERE profile=?").get(user.profile) as { n: number }).n;
-        // Keep at most 20 sessions per profile: a new login signs out the oldest ones
-        // (sessions share one lifetime, so the earliest expiry is the oldest login).
-        if (active >= 20) this.db.prepare("DELETE FROM sp_auth_sessions WHERE token_hash IN (SELECT token_hash FROM sp_auth_sessions WHERE profile=? ORDER BY expires_at_ms, token_hash LIMIT ?)").run(user.profile, active - 19);
-        this.db.prepare("INSERT INTO sp_auth_sessions VALUES (?, ?, ?, ?)").run(digest(token), user.profile, csrf, now + ACCOUNT_SESSION_SECONDS * 1000);
-      }).immediate();
+      const token = randomBytes(32).toString('hex'),
+        csrf = randomBytes(32).toString('hex');
+      this.db
+        .transaction(() => {
+          this.db.prepare('DELETE FROM sp_auth_sessions WHERE expires_at_ms<=?').run(now);
+          const active = (
+            this.db.prepare('SELECT count(*) AS n FROM sp_auth_sessions WHERE profile=?').get(user.profile) as {
+              n: number;
+            }
+          ).n;
+          // Keep at most 20 sessions per profile: a new login signs out the oldest ones
+          // (sessions share one lifetime, so the earliest expiry is the oldest login).
+          if (active >= 20)
+            this.db
+              .prepare(
+                'DELETE FROM sp_auth_sessions WHERE token_hash IN (SELECT token_hash FROM sp_auth_sessions WHERE profile=? ORDER BY expires_at_ms, token_hash LIMIT ?)',
+              )
+              .run(user.profile, active - 19);
+          this.db
+            .prepare('INSERT INTO sp_auth_sessions VALUES (?, ?, ?, ?)')
+            .run(digest(token), user.profile, csrf, now + ACCOUNT_SESSION_SECONDS * 1000);
+        })
+        .immediate();
       return { token, csrf, user: { profile: user.profile, username: user.username, displayName: user.display_name } };
-    } finally { this.pending--; }
+    } finally {
+      this.pending--;
+    }
   }
   session(cookie?: string): UserSession | null {
-    const token = /(?:^|;\s*)sp_session=([a-f0-9]{64})(?:;|$)/.exec(cookie ?? "")?.[1];
+    const token = /(?:^|;\s*)sp_session=([a-f0-9]{64})(?:;|$)/.exec(cookie ?? '')?.[1];
     if (!token) return null;
-    const row = this.db.prepare(`SELECT u.profile, u.username, u.display_name AS displayName, s.csrf, s.token_hash AS tokenHash
+    const row = this.db
+      .prepare(
+        `SELECT u.profile, u.username, u.display_name AS displayName, s.csrf, s.token_hash AS tokenHash
       FROM sp_auth_sessions s JOIN sp_users u ON u.profile=s.profile
-      WHERE s.token_hash=? AND s.expires_at_ms>?`).get(digest(token), this.now()) as UserSession | undefined;
+      WHERE s.token_hash=? AND s.expires_at_ms>?`,
+      )
+      .get(digest(token), this.now()) as UserSession | undefined;
     if (row) this.recordActivity();
     return row ?? null;
   }
@@ -103,15 +149,29 @@ export class AccountStore {
     const now = this.now();
     if (now - this.activityWrittenAt < 60000) return;
     this.activityWrittenAt = now;
-    try { this.db.prepare("INSERT INTO sp_panel_activity VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET last_seen_ms=max(last_seen_ms, excluded.last_seen_ms)").run(now); }
-    catch { /* Activity is advisory only. */ }
+    try {
+      this.db
+        .prepare(
+          'INSERT INTO sp_panel_activity VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET last_seen_ms=max(last_seen_ms, excluded.last_seen_ms)',
+        )
+        .run(now);
+    } catch {
+      /* Activity is advisory only. */
+    }
   }
   validCsrf(session: UserSession, token: unknown): boolean {
-    if (typeof token !== "string") return false;
-    const left = Buffer.from(token), right = Buffer.from(session.csrf);
+    if (typeof token !== 'string') return false;
+    const left = Buffer.from(token),
+      right = Buffer.from(session.csrf);
     return left.length === right.length && timingSafeEqual(left, right);
   }
-  logout(token: string): void { this.db.prepare("DELETE FROM sp_auth_sessions WHERE token_hash=?").run(digest(token)); }
-  revoke(session: UserSession): void { this.db.prepare("DELETE FROM sp_auth_sessions WHERE token_hash=?").run(session.tokenHash); }
-  close(): void { this.db.close(); }
+  logout(token: string): void {
+    this.db.prepare('DELETE FROM sp_auth_sessions WHERE token_hash=?').run(digest(token));
+  }
+  revoke(session: UserSession): void {
+    this.db.prepare('DELETE FROM sp_auth_sessions WHERE token_hash=?').run(session.tokenHash);
+  }
+  close(): void {
+    this.db.close();
+  }
 }

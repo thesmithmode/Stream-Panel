@@ -1,45 +1,107 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {audienceRanking} from './audience-ranking.ts';
-test('minutes rank includes silent participants and keeps estimates and missing observations separate',()=>{
- const people=[{id:'talker',name:'Talker',messages:20,observedMinutes:3},{id:'silent',name:'Silent',messages:0,observedMinutes:5},{id:'yt',name:'YouTube',messages:2,estimatedChatMinutes:30}];
- assert.deepEqual(audienceRanking(people,'observedMinutes').map(p=>p.id),['silent','talker']);
- assert.deepEqual(audienceRanking(people,'messages').map(p=>p.id),['talker','yt']);
- assert.deepEqual(audienceRanking(people,'estimatedChatMinutes').map(p=>p.id),['yt']);
- assert.equal(people[0].id,'talker');
- assert.deepEqual(audienceRanking([{id:'b',name:'Same',messages:1},{id:'a',name:'Same',messages:1}],'messages').map(p=>p.id),['a','b']);
+import { audienceRanking } from './audience-ranking.ts';
+test('minutes rank includes silent participants and keeps estimates and missing observations separate', () => {
+  const people = [
+    { id: 'talker', name: 'Talker', messages: 20, observedMinutes: 3 },
+    { id: 'silent', name: 'Silent', messages: 0, observedMinutes: 5 },
+    { id: 'yt', name: 'YouTube', messages: 2, estimatedChatMinutes: 30 },
+  ];
+  assert.deepEqual(
+    audienceRanking(people, 'observedMinutes').map((p) => p.id),
+    ['silent', 'talker'],
+  );
+  assert.deepEqual(
+    audienceRanking(people, 'messages').map((p) => p.id),
+    ['talker', 'yt'],
+  );
+  assert.deepEqual(
+    audienceRanking(people, 'estimatedChatMinutes').map((p) => p.id),
+    ['yt'],
+  );
+  assert.equal(people[0].id, 'talker');
+  assert.deepEqual(
+    audienceRanking(
+      [
+        { id: 'b', name: 'Same', messages: 1 },
+        { id: 'a', name: 'Same', messages: 1 },
+      ],
+      'messages',
+    ).map((p) => p.id),
+    ['a', 'b'],
+  );
 });
 
-import {presenceMinutes,rankTable,intervalRows,durationLabel} from './audience-ranking.ts';
-test('table combines overlapping platforms, retains zero rows, sorts exact currency amounts, and measures gaps',()=>{
- const intervals=[{from:0,to:120000,kind:'observed'},{from:60000,to:180000,kind:'chat_proxy'},{from:300000,to:360000,kind:'observed'}];
- assert.equal(presenceMinutes({id:'a',name:'A',intervals}),4);
- assert.equal(presenceMinutes({id:'a',name:'A',intervals,activityMinutes:500}),500);
- assert.equal(presenceMinutes({id:'a',name:'A',intervals,activityMinutes:NaN}),4);
- assert.equal(presenceMinutes({id:'a',name:'A',observedMinutes:2,estimatedChatMinutes:3}),5);
- const people=[{id:'a',name:'A',intervals,messages:0,donations:{RUB:'9007199254740992'}},{id:'b',name:'B',messages:2,donations:{RUB:'9007199254740993'}},{id:'c',name:'C'}];
- assert.deepEqual(rankTable(people,'presence').map(p=>p.id),['a','b','c']);
- assert.deepEqual(rankTable(people,'messages').map(p=>p.id),['b','a','c']);
- assert.deepEqual(rankTable(people,'donation:RUB').map(p=>p.id),['b','a','c']);
- assert.deepEqual(rankTable(people,'name',false).map(p=>p.id),['a','b','c']);
- assert.equal(intervalRows(intervals)[2].gap,180000);
- assert.equal(durationLabel(80),'1 ч 20 мин');assert.equal(durationLabel(60),'1 ч');assert.equal(durationLabel(0),'0 мин');
+import { presenceMinutes, rankTable, intervalRows, durationLabel } from './audience-ranking.ts';
+test('table combines overlapping platforms, retains zero rows, sorts exact currency amounts, and measures gaps', () => {
+  const intervals = [
+    { from: 0, to: 120000, kind: 'observed' },
+    { from: 60000, to: 180000, kind: 'chat_proxy' },
+    { from: 300000, to: 360000, kind: 'observed' },
+  ];
+  assert.equal(presenceMinutes({ id: 'a', name: 'A', intervals }), 4);
+  assert.equal(presenceMinutes({ id: 'a', name: 'A', intervals, activityMinutes: 500 }), 500);
+  assert.equal(presenceMinutes({ id: 'a', name: 'A', intervals, activityMinutes: NaN }), 4);
+  assert.equal(presenceMinutes({ id: 'a', name: 'A', observedMinutes: 2, estimatedChatMinutes: 3 }), 5);
+  const people = [
+    { id: 'a', name: 'A', intervals, messages: 0, donations: { RUB: '9007199254740992' } },
+    { id: 'b', name: 'B', messages: 2, donations: { RUB: '9007199254740993' } },
+    { id: 'c', name: 'C' },
+  ];
+  assert.deepEqual(
+    rankTable(people, 'presence').map((p) => p.id),
+    ['a', 'b', 'c'],
+  );
+  assert.deepEqual(
+    rankTable(people, 'messages').map((p) => p.id),
+    ['b', 'a', 'c'],
+  );
+  assert.deepEqual(
+    rankTable(people, 'donation:RUB').map((p) => p.id),
+    ['b', 'a', 'c'],
+  );
+  assert.deepEqual(
+    rankTable(people, 'name', false).map((p) => p.id),
+    ['a', 'b', 'c'],
+  );
+  assert.equal(intervalRows(intervals)[2].gap, 180000);
+  assert.equal(durationLabel(80), '1 ч 20 мин');
+  assert.equal(durationLabel(60), '1 ч');
+  assert.equal(durationLabel(0), '0 мин');
 });
-import {platformNicknames,intervalSource} from './audience-ranking.ts';
-test('platform nicknames appear only when they add something to the group name and label interval groups',()=>{
- const tw={source:'twitch',name:'viewer4207'},yt={source:'youtube',name:'@samplechannel6515'};
- assert.deepEqual(platformNicknames({id:'a',name:'viewer4207',accounts:[tw]}),[]);
- assert.deepEqual(platformNicknames({id:'a',name:'Иван4ик',accounts:[tw]}),[tw]);
- assert.deepEqual(platformNicknames({id:'a',name:'viewer4207',accounts:[tw,tw,yt,{source:'donationalerts',name:'Иван4ик'},{source:'twitch',name:''}]}),[tw,yt]);
- assert.deepEqual(platformNicknames({id:'a',name:'x'}),[]);
- assert.deepEqual(intervalSource('observed',[tw,yt]),{platform:'Twitch',nick:'viewer4207',estimate:false});
- assert.deepEqual(intervalSource('chat_proxy',[tw,yt,{source:'youtube',name:'Second'}]),{platform:'YouTube',nick:'@samplechannel6515, Second',estimate:true});
- assert.deepEqual(intervalSource('chat_proxy',undefined),{platform:'YouTube',nick:'',estimate:true});
+import { platformNicknames, intervalSource } from './audience-ranking.ts';
+test('platform nicknames appear only when they add something to the group name and label interval groups', () => {
+  const tw = { source: 'twitch', name: 'viewer4207' },
+    yt = { source: 'youtube', name: '@samplechannel6515' };
+  assert.deepEqual(platformNicknames({ id: 'a', name: 'viewer4207', accounts: [tw] }), []);
+  assert.deepEqual(platformNicknames({ id: 'a', name: 'Иван4ик', accounts: [tw] }), [tw]);
+  assert.deepEqual(
+    platformNicknames({
+      id: 'a',
+      name: 'viewer4207',
+      accounts: [tw, tw, yt, { source: 'donationalerts', name: 'Иван4ик' }, { source: 'twitch', name: '' }],
+    }),
+    [tw, yt],
+  );
+  assert.deepEqual(platformNicknames({ id: 'a', name: 'x' }), []);
+  assert.deepEqual(intervalSource('observed', [tw, yt]), { platform: 'Twitch', nick: 'viewer4207', estimate: false });
+  assert.deepEqual(intervalSource('chat_proxy', [tw, yt, { source: 'youtube', name: 'Second' }]), {
+    platform: 'YouTube',
+    nick: '@samplechannel6515, Second',
+    estimate: true,
+  });
+  assert.deepEqual(intervalSource('chat_proxy', undefined), { platform: 'YouTube', nick: '', estimate: true });
 });
 
-test('supplementary identities extend only participant display and preserve cached primary measurements',async()=>{
- const {withSupplementaryChat}=await import('./audience-ranking.ts');
- const original=[{id:'a',name:'A',messages:3,accounts:[{source:'youtube',name:'A'}]}];
- const result=withSupplementaryChat(original,[{id:'a',name:'A',accountName:'A second',messages:5},{id:'b',name:'B',accountName:'B',messages:2}]);
- assert.equal(original[0]!.accounts.length,1);assert.equal(result[0]!.messages,3);assert.equal(result[0]!.accounts!.length,2);assert.equal(result[1]!.youtubeSecondary,true);
+test('supplementary identities extend only participant display and preserve cached primary measurements', async () => {
+  const { withSupplementaryChat } = await import('./audience-ranking.ts');
+  const original = [{ id: 'a', name: 'A', messages: 3, accounts: [{ source: 'youtube', name: 'A' }] }];
+  const result = withSupplementaryChat(original, [
+    { id: 'a', name: 'A', accountName: 'A second', messages: 5 },
+    { id: 'b', name: 'B', accountName: 'B', messages: 2 },
+  ]);
+  assert.equal(original[0]!.accounts.length, 1);
+  assert.equal(result[0]!.messages, 3);
+  assert.equal(result[0]!.accounts!.length, 2);
+  assert.equal(result[1]!.youtubeSecondary, true);
 });

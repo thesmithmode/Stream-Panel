@@ -1,1 +1,5 @@
-export async function acceptConfirmation(page,label='Подтвердить'){const dialog=page.getByRole('dialog');await dialog.getByRole('button',{name:label,exact:true}).click();await dialog.waitFor({state:'hidden'});}
+export async function acceptConfirmation(page, label = 'Подтвердить') {
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: label, exact: true }).click();
+  await dialog.waitFor({ state: 'hidden' });
+}

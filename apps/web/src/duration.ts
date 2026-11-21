@@ -1,16 +1,10 @@
-const UNKNOWN_DURATION = "—";
+const UNKNOWN_DURATION = '—';
 
 export function formatDuration(minutes: number | null | undefined): string {
-  if (
-    minutes === null ||
-    minutes === undefined ||
-    !Number.isFinite(minutes) ||
-    minutes < 0
-  )
-    return UNKNOWN_DURATION;
+  if (minutes === null || minutes === undefined || !Number.isFinite(minutes) || minutes < 0) return UNKNOWN_DURATION;
 
-  if (minutes === 0) return "0 мин";
-  if (minutes < 1) return "<1 мин";
+  if (minutes === 0) return '0 мин';
+  if (minutes < 1) return '<1 мин';
 
   const totalMinutes = Math.floor(minutes);
   if (!Number.isSafeInteger(totalMinutes)) return UNKNOWN_DURATION;
@@ -30,11 +24,12 @@ export function formatDuration(minutes: number | null | undefined): string {
   const parts = [`${days} д`];
   if (hours > 0) parts.push(`${hours} ч`);
   if (remainingMinutes > 0) parts.push(`${remainingMinutes} мин`);
-  return parts.join(" ");
+  return parts.join(' ');
 }
 
 /** Total hours use the same recorded minutes; no history is recomputed. */
-export function formatHours(minutes:number|null|undefined):string {
- if(minutes==null||!Number.isFinite(minutes)||minutes<0||!Number.isSafeInteger(Math.floor(minutes)))return UNKNOWN_DURATION;
- return `${(minutes/60).toLocaleString('ru-RU',{maximumFractionDigits:2})} ч`;
+export function formatHours(minutes: number | null | undefined): string {
+  if (minutes == null || !Number.isFinite(minutes) || minutes < 0 || !Number.isSafeInteger(Math.floor(minutes)))
+    return UNKNOWN_DURATION;
+  return `${(minutes / 60).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ч`;
 }
