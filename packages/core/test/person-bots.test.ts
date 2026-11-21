@@ -20,7 +20,7 @@ test('manual marks rebuild only affected stream facts, separate both modes and s
   const id=s.candidatePersons('suspect')[0]!,q={fromMs:at,toMs:at+5*minute,summaryOnly:true};
   assert.equal(s.analytics(q).summary.attendees,3);
   const before=raw(s).prepare('SELECT session_id,activity FROM analytics_fact_versions ORDER BY session_id').all() as {session_id:string;activity:number}[];
-  const bPayload=raw(s).prepare('SELECT payload FROM analytics_stream_facts WHERE session_id=?').get(b);
+  const bPayload=raw(s).prepare('SELECT settings_key,payload FROM analytics_stream_facts WHERE session_id=?').get(b) as {settings_key:string;payload:Buffer};
   const state=mark(s,id);assert.equal(state.manualBot,true);assert.equal(state.canMarkBot,true);
   const after=raw(s).prepare('SELECT session_id,activity FROM analytics_fact_versions ORDER BY session_id').all() as typeof before;
   assert.ok(after.find(x=>x.session_id===a)!.activity>before.find(x=>x.session_id===a)!.activity);
@@ -30,7 +30,7 @@ test('manual marks rebuild only affected stream facts, separate both modes and s
   assert.equal(clean.summary.messages,2);assert.equal(all.summary.messages,3);
   assert.equal(all.audience.find(p=>p.id===id)!.is_bot,1);
   assert.equal(clean.streamComparison.find(p=>p.id===a)!.viewers.twitch.mean,9);assert.equal(all.streamComparison.find(p=>p.id===a)!.viewers.twitch.mean,10);assert.equal(all.streamComparison.find(p=>p.id===a)!.botViewers.twitch.mean,1);
-  assert.deepEqual(raw(s).prepare('SELECT payload FROM analytics_stream_facts WHERE session_id=?').get(b),bPayload);
+  assert.deepEqual(raw(s).prepare('SELECT settings_key,payload FROM analytics_stream_facts WHERE session_id=? AND settings_key=?').get(b,bPayload.settings_key),bPayload);
   assert.equal(s.analytics(q).summary.attendees,2);
   assert.equal(s.channelOverview().records.peakChat?.value,1);assert.equal(s.channelOverview(false).records.peakChat?.value,2);
   assert.equal(s.summary(a).messages,1);assert.equal(s.summary(a,false).messages,2);
