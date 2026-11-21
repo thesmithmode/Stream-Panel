@@ -119,18 +119,18 @@ test("DA same display name + same account is one Donor identity / one Person; Tw
   try {
     const a = store.ingest({
       ...donation,
-      externalId: "donation-egor-1",
-      actor: { externalId: daDonorExternalId("Егор4ик"), displayName: "Егор4ик" },
+      externalId: "donation-ivan-1",
+      actor: { externalId: daDonorExternalId("Иван4ик"), displayName: "Иван4ик" },
     });
     const b = store.ingest({
       ...donation,
-      externalId: "donation-egor-2",
-      actor: { externalId: daDonorExternalId("Егор4ик"), displayName: "Егор4ик" },
+      externalId: "donation-ivan-2",
+      actor: { externalId: daDonorExternalId("Иван4ик"), displayName: "Иван4ик" },
     });
     const c = store.ingest({
       ...donation,
-      externalId: "donation-egor-3",
-      actor: { externalId: daDonorExternalId("Егор4ик"), displayName: "Егор4ик" },
+      externalId: "donation-ivan-3",
+      actor: { externalId: daDonorExternalId("Иван4ик"), displayName: "Иван4ик" },
     });
     assert.equal(a.personId, b.personId);
     assert.equal(b.personId, c.personId);
@@ -141,13 +141,13 @@ test("DA same display name + same account is one Donor identity / one Person; Tw
     };
     assert.equal(detail.identities.length, 1);
     assert.equal(detail.identities[0]!.source, "donationalerts");
-    assert.equal(detail.identities[0]!.external_id, daDonorExternalId("Егор4ик"));
+    assert.equal(detail.identities[0]!.external_id, daDonorExternalId("Иван4ик"));
     // Different DA account keeps separate people even with same nick.
     const other = store.ingest({
       ...donation,
       accountId: "recipient-other",
-      externalId: "donation-egor-x",
-      actor: { externalId: daDonorExternalId("Егор4ик"), displayName: "Егор4ик" },
+      externalId: "donation-ivan-x",
+      actor: { externalId: daDonorExternalId("Иван4ик"), displayName: "Иван4ик" },
     });
     assert.notEqual(other.personId, a.personId);
     // Twitch stable ids with same display name stay separate persons.

@@ -17,8 +17,8 @@ test('a backup carries the shared account groups and a restore keeps them for bo
  const accounts=new AccountStore(join(source,'data.sqlite')),a=new StreamStore(join(source,'data.sqlite'),'ruslan'),b=new StreamStore(join(source,'data.sqlite'),'gulnaz'),backup=new BackupService(source,{keyFile:key});
  try{
   await accounts.createUser('ruslan','ruslan','Руслан','shared-backup-password');
-  const tw=chat(a,'100','chikist007'),yt=youtube(a,'UCegor','@egorbarinov');a.merge(yt,tw,a.personRevision(yt),a.personRevision(tw),at);
-  const bTw=chat(b,'100','chikist007');youtube(b,'UCegor','@egorbarinov');
+  const tw=chat(a,'100','viewer4207'),yt=youtube(a,'UCsample','@samplechannel');a.merge(yt,tw,a.personRevision(yt),a.personRevision(tw),at);
+  const bTw=chat(b,'100','viewer4207');youtube(b,'UCsample','@samplechannel');
   assert.equal((b.person(bTw).identities as any[]).length,2,'a late YouTube account joins its shared group');
   const file=join(dir,'input.spbk');await writeFile(file,await backup.file((await backup.run()).filename));
   const stage=join(dir,'staged');await stageRestore(file,Buffer.from('c'.repeat(64),'hex'),stage);
@@ -26,7 +26,7 @@ test('a backup carries the shared account groups and a restore keeps them for bo
  }finally{await backup.stop();a.close();b.close();accounts.close();}
  const raw=new Database(join(target,'data.sqlite'),{readonly:true});
  try{
-  assert.deepEqual(raw.prepare('SELECT link_key FROM sp_identity_links ORDER BY link_key').all(),[{link_key:'twitch:100'},{link_key:'youtube:UCegor'}]);
+  assert.deepEqual(raw.prepare('SELECT link_key FROM sp_identity_links ORDER BY link_key').all(),[{link_key:'twitch:100'},{link_key:'youtube:UCsample'}]);
   assert.deepEqual(raw.prepare('SELECT profile FROM sp_identity_sync_profiles ORDER BY profile').all(),[{profile:'gulnaz'},{profile:'ruslan'}]);
  }finally{raw.close();}
  const restored=new StreamStore(join(target,'data.sqlite'),'gulnaz');

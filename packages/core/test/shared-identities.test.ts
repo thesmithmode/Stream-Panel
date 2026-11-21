@@ -25,38 +25,38 @@ function files(){const dir=mkdtempSync(join(tmpdir(),'sp-shared-identities-'));r
 test('a merge, its undo, a split and its undo in one profile apply at once to every profile; names are common while notes and events stay per profile',()=>{
  const {path,done}=files(),a=new StreamStore(path,'ruslan'),b=new StreamStore(path,'gulnaz');
  try{
-  const aTw=tw(a,'100','chikist007'),aYt=yt(a,'UCegor','@egorbarinov');da(a,'Егор4ик');
-  tw(b,'100','chikist007');const bYt=yt(b,'UCegor','@egorbarinov'),bDa=da(b,'Егор4ик');
+  const aTw=tw(a,'100','viewer4207'),aYt=yt(a,'UCsample','@samplechannel');da(a,'Иван4ик');
+  tw(b,'100','viewer4207');const bYt=yt(b,'UCsample','@samplechannel'),bDa=da(b,'Иван4ик');
   b.renamePerson(bYt,'Гульназ name');b.createPersonNote(bYt,'only gulnaz',at);
-  assert.deepEqual(groups(b),['da:егор4ик','twitch:100','youtube:UCegor']);
+  assert.deepEqual(groups(b),['da:иван4ик','twitch:100','youtube:UCsample']);
   merge(a,aYt,aTw);
   // The renamed gulnaz group keeps its own name and receives the other account.
-  assert.deepEqual(groups(b),['da:егор4ик','twitch:100+youtube:UCegor']);
+  assert.deepEqual(groups(b),['da:иван4ик','twitch:100+youtube:UCsample']);
   assert.equal(personOf(b,'twitch:100'),bYt);assert.equal(b.person(bYt).display_name,'Гульназ name');
   assert.equal(b.events(undefined,bYt).length,2);assert.equal(a.person(aTw).display_name,'Гульназ name');
   assert.equal(queue(a)+queue(b),0);
   assert.deepEqual(a.syncSharedIdentities().sort(),['gulnaz','ruslan']);assert.deepEqual(a.syncSharedIdentities(),[]);
   // A merge in the second profile extends the same group in the first one without echoing back.
   merge(b,bDa,bYt);
-  assert.deepEqual(groups(a),['da:егор4ик+twitch:100+youtube:UCegor']);
+  assert.deepEqual(groups(a),['da:иван4ик+twitch:100+youtube:UCsample']);
   assert.equal(a.person(aTw).display_name,'Гульназ name');
   assert.deepEqual(b.syncSharedIdentities(),['ruslan']);
   // Undoing the replicated merge in the first profile undoes the original one in the second.
   a.undoMerge(String(a.merges()[0]!.id),at+1);
-  assert.deepEqual(groups(a),['da:егор4ик','twitch:100+youtube:UCegor']);
-  assert.deepEqual(groups(b),['da:егор4ик','twitch:100+youtube:UCegor']);
+  assert.deepEqual(groups(a),['da:иван4ик','twitch:100+youtube:UCsample']);
+  assert.deepEqual(groups(b),['da:иван4ик','twitch:100+youtube:UCsample']);
   assert.ok(b.merges().find(m=>m.source_person_id===bDa)!.undone_at_ms);
   assert.equal(b.personNotes(bYt).length,1);
   // A split in the second profile, then its undo.
-  const ytIdentity=(b.person(bYt).identities as any[]).find(i=>i.external_id==='UCegor');
+  const ytIdentity=(b.person(bYt).identities as any[]).find(i=>i.external_id==='UCsample');
   b.splitIdentities([ytIdentity.id],'Ютуб',b.personRevision(bYt),at+2);
-  assert.deepEqual(groups(a),['da:егор4ик','twitch:100','youtube:UCegor']);
+  assert.deepEqual(groups(a),['da:иван4ик','twitch:100','youtube:UCsample']);
   assert.equal(personOf(a,'twitch:100'),aTw);assert.equal(a.person(aTw).display_name,'Гульназ name');
   assert.equal(personOf(b,'twitch:100'),bYt);assert.equal(b.person(bYt).display_name,'Гульназ name');
   b.undoSplit(String(b.splits()[0]!.id),at+3);
-  assert.deepEqual(groups(a),['da:егор4ик','twitch:100+youtube:UCegor']);
-  assert.deepEqual(groups(b),['da:егор4ик','twitch:100+youtube:UCegor']);
-  assert.ok(a.splits()[0]!.undone_at_ms);assert.equal(personOf(a,'youtube:UCegor'),aTw);
+  assert.deepEqual(groups(a),['da:иван4ик','twitch:100+youtube:UCsample']);
+  assert.deepEqual(groups(b),['da:иван4ик','twitch:100+youtube:UCsample']);
+  assert.ok(a.splits()[0]!.undone_at_ms);assert.equal(personOf(a,'youtube:UCsample'),aTw);
   assert.equal(queue(a)+queue(b),0);
  }finally{a.close();b.close();done();}
 });
@@ -95,8 +95,8 @@ test('rollout joins existing groups of every profile once, idempotently, and reb
  let owner:string,s1:string,s2:string;
  try{
   // Before rollout: ruslan has four separate accounts; gulnaz has three of them plus an unrelated viewer.
-  owner=tw(a,'100','chikist007');yt(a,'UCegor','@egorbarinov');da(a,'Егор4ик');da(a,'Egor4ik');
-  s1=b.startSession('owner','one',at,'platform',at);tw(b,'100','chikist007',at+minute);yt(b,'UCegor','@egorbarinov',at+minute);da(b,'Egor4ik',at+minute);b.endSession(s1,at+10*minute);
+  owner=tw(a,'100','viewer4207');yt(a,'UCsample','@samplechannel');da(a,'Иван4ик');da(a,'Ivan4ik');
+  s1=b.startSession('owner','one',at,'platform',at);tw(b,'100','viewer4207',at+minute);yt(b,'UCsample','@samplechannel',at+minute);da(b,'Ivan4ik',at+minute);b.endSession(s1,at+10*minute);
   s2=b.startSession('owner','two',at+86400000,'platform',at+86400000);tw(b,'900','stranger',at+86400000+minute);b.endSession(s2,at+86400000+10*minute);
  }finally{a.close();b.close();}
  // Rewind the file to schema 28 and group ruslan's accounts the way an earlier manual merge did.
@@ -114,12 +114,12 @@ test('rollout joins existing groups of every profile once, idempotently, and reb
   stable=version.get(s2);(stable as {activity:number}).activity++;affected=version.get(s1);
  }finally{db.close();}
  b=new StreamStore(path,'gulnaz');
- try{assert.deepEqual(groups(b),['da:egor4ik','twitch:100','twitch:900','youtube:UCegor']);}finally{b.close();}
+ try{assert.deepEqual(groups(b),['da:ivan4ik','twitch:100','twitch:900','youtube:UCsample']);}finally{b.close();}
  a=new StreamStore(path,'ruslan');b=new StreamStore(path,'gulnaz');
  try{
-  assert.deepEqual(groups(a),['da:egor4ik+da:егор4ик+twitch:100+youtube:UCegor']);
-  assert.deepEqual(groups(b),['da:egor4ik+twitch:100+youtube:UCegor','twitch:900']);
-  assert.equal(b.person(personOf(b,'twitch:100')!).display_name,'chikist007');
+  assert.deepEqual(groups(a),['da:ivan4ik+da:иван4ик+twitch:100+youtube:UCsample']);
+  assert.deepEqual(groups(b),['da:ivan4ik+twitch:100+youtube:UCsample','twitch:900']);
+  assert.equal(b.person(personOf(b,'twitch:100')!).display_name,'viewer4207');
   const versions=(id:string)=>raw(b).prepare('SELECT activity,money FROM analytics_fact_versions WHERE session_id=?').get(id);
   assert.deepEqual(versions(s2),stable);assert.notDeepEqual(versions(s1),affected);
   const snapshot=[versions(s2),versions(s1),b.changeStamp(),a.changeStamp(),groups(a),groups(b)];

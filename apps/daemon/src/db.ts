@@ -35,6 +35,10 @@ export class StoreClient {
   private lastProgress=0;
   private readonly executing=new Map<string,string>();
   private watchdog:ReturnType<typeof setTimeout>|undefined;
+  // A database copy is asynchronous, so other requests keep the worker "progressing" while
+  // it runs; its own hard deadline (from pickup) still bounds a copy that never finishes.
+  private readonly copyDeadlines=new Map<number,ReturnType<typeof setTimeout>>();
+  private clearCopyDeadline(id:number){const timer=this.copyDeadlines.get(id);if(timer!==undefined){clearTimeout(timer);this.copyDeadlines.delete(id);}}
   constructor(private readonly path: string, private readonly profile?: string, private readonly requestTimeoutMs=60000,private readonly lane='facts',acquire:typeof acquireStoreWorker=acquireStoreWorker) {
     this.storage=new StorageGuard(path);
     this.lease=acquire(path,profile,lane);this.worker=this.lease.worker;
@@ -44,6 +48,8 @@ export class StoreClient {
         if(message.started)this.executing.set(`${message.clientId}:${message.id}`,String(message.method));
         else if(!message.ready&&!message.invalidate)this.executing.delete(`${message.clientId}:${message.id}`);
         this.armWatchdog();
+        if(message.started&&message.clientId===this.lease.clientId&&message.method==='backup'&&this.pending.has(message.id)&&!this.copyDeadlines.has(message.id))
+          this.copyDeadlines.set(message.id,setTimeout(()=>{this.copyDeadlines.delete(message.id);if(!this.pending.has(message.id)||this.dead)return;this.fatal(new Error('DB_WORKER_TIMEOUT'));void this.worker.terminate();},Math.max(this.requestTimeoutMs,600000)));
         if(message.started||message.clientId!==this.lease.clientId)return;
         if(message.invalidate){this.cache.invalidate();this.analyticsClient?.cache.invalidate();for(const listener of this.changeListeners)listener();return;}
         if (message.ready) {
@@ -52,7 +58,7 @@ export class StoreClient {
         }
         const request = this.pending.get(message.id);
         if (!request) return;
-        this.pending.delete(message.id);
+        this.pending.delete(message.id);this.clearCopyDeadline(message.id);
         this.armWatchdog();
         if (message.error) request.reject(new Error(message.error));
         else request.resolve(message.result,message.executionMs);
@@ -61,7 +67,7 @@ export class StoreClient {
         this.fatal(error);
         reject(error);
         for (const p of this.pending.values()) p.reject(error);
-        this.pending.clear();
+        this.pending.clear();for(const id of [...this.copyDeadlines.keys()])this.clearCopyDeadline(id);
         this.armWatchdog();
       };
       const onExit=() => {
@@ -69,7 +75,7 @@ export class StoreClient {
         reject(new Error("DB_WORKER_STOPPED"));
         for (const p of this.pending.values())
           p.reject(new Error("DB_WORKER_STOPPED"));
-        this.pending.clear();
+        this.pending.clear();for(const id of [...this.copyDeadlines.keys()])this.clearCopyDeadline(id);
         this.armWatchdog();
       };
       this.worker.on('message',onMessage);this.worker.on('error',onError);this.worker.on('exit',onExit);
@@ -157,6 +163,6 @@ export class StoreClient {
     await this.analyticsRestart?.catch(()=>{});
     await this.analyticsClient?.stop();
     try { if(!this.dead)await this.call("close"); }
-    finally {this.dead=true;this.armWatchdog();this.detach();await this.lease.release();}
+    finally {this.dead=true;this.armWatchdog();for(const id of [...this.copyDeadlines.keys()])this.clearCopyDeadline(id);this.detach();await this.lease.release();}
   }
 }

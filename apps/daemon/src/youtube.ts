@@ -16,7 +16,10 @@ export const YOUTUBE_LIVE_DISCOVERY_MS=5*60_000;
 /** Chat pacing: 60 s while messages arrive, 120 s while quiet, never faster than a 90 s long-run average (small burst allowance). */
 export const YOUTUBE_CHAT_PACE={activeMs:60_000,quietMs:120_000,averageMs:90_000,burst:4,toleranceMs:5_000} as const;
 type ChatPace={at:number;credits:number;quiet:boolean;floor:number};
-const stillLive=(video:Record<string,any>|undefined)=>!!video&&!!video.liveStreamingDetails&&typeof video.liveStreamingDetails==='object'&&!video.liveStreamingDetails.actualEndTime;
+// A reused broadcast list stays valid only while the per-minute video read still says live:
+// snippet.liveBroadcastContent leaves 'live' and actualEndTime appears when a stream ends,
+// and either signal alone triggers rediscovery (whichever YouTube updates first).
+const stillLive=(video:Record<string,any>|undefined)=>!!video&&!!video.liveStreamingDetails&&typeof video.liveStreamingDetails==='object'&&!video.liveStreamingDetails.actualEndTime&&video.snippet?.liveBroadcastContent==='live';
 export class YouTubeConnection {
   status:{state:string;account:string;detail:string;lastSyncAt?:number;lastFollowersAt?:number} = { state: "disconnected", account: "", detail: "" };
   private pending: { state: string; verifier: string; expires: number; clientId: string; secret: string } | undefined;

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Read-only DA transport and attribution diagnostics; never print provider data or secrets."""
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -9,6 +10,15 @@ from urllib.error import HTTPError
 
 root = Path('/var/lib/stream-panel')
 db = sqlite3.connect(f'file:{root / "data.sqlite"}?mode=ro', uri=True)
+# The reported donor/viewer pair is matched by SHA-256 of the stored match key, so the
+# repository and the logs carry no nicknames. Output stays counts only.
+REPORTED_DONOR_DIGESTS = (
+    '180ad8a0b0a2f11628a25b38e885bdf93447122c6c5011a2fb8e270029c321a4',
+    '387fb3d5098bcccb10b15aaa46f969d90a142fcbf9b2faffc7a462acf3799adb',
+    '6e3499ee04a1bf7d3b3cc044ebeced2ebe519095c078a2f02cc2e8be7cf5f825',
+)
+REPORTED_VIEWER_DIGEST = '33f5638a6cb2ae27aeafa7742ff6011df600778203fbc0a096f2306ecb2d0401'
+db.create_function('sp_digest', 1, lambda value: None if value is None else hashlib.sha256(str(value).encode()).hexdigest())
 for profile in ('ruslan', 'gulnaz'):
     path = root / 'profiles' / profile / 'secrets.json'
     config = json.loads(path.read_text()) if path.exists() else {}
@@ -34,10 +44,10 @@ for profile in ('ruslan', 'gulnaz'):
         rule_table=f'p_{profile}_donor_bindings'
         if db.execute('SELECT 1 FROM sqlite_master WHERE name=?',(rule_table,)).fetchone():
             broken=db.execute(f'SELECT count(*) FROM {rule_table} b LEFT JOIN p_{profile}_persons p ON p.id=b.person_id LEFT JOIN p_{profile}_identities i ON i.id=b.identity_id WHERE p.id IS NULL OR (b.identity_id IS NOT NULL AND i.id IS NULL)').fetchone()[0]
-            keys=('егор4ик','egor4ik','егор4ик','egor4ик')
-            viewers=db.execute(f"SELECT DISTINCT person_id FROM p_{profile}_identities WHERE source='twitch' AND match_key='chikist007'").fetchall()
-            rules=db.execute(f'SELECT count(*) FROM {rule_table} WHERE name_key IN(?,?,?,?)',keys).fetchone()[0]
-            donor_rows=db.execute(f"SELECT coalesce(c.identity_id,e.identity_id) FROM {table} e LEFT JOIN p_{profile}_donation_corrections c ON c.event_id=e.id JOIN p_{profile}_identities original ON original.id=e.identity_id WHERE e.type='donation' AND original.match_key IN(?,?,?,?) AND coalesce(c.deleted,0)=0",keys).fetchall()
+            keys=REPORTED_DONOR_DIGESTS
+            viewers=db.execute(f"SELECT DISTINCT person_id FROM p_{profile}_identities WHERE source='twitch' AND sp_digest(match_key)=?",(REPORTED_VIEWER_DIGEST,)).fetchall()
+            rules=db.execute(f'SELECT count(*) FROM {rule_table} WHERE sp_digest(name_key) IN(?,?,?)',keys).fetchone()[0]
+            donor_rows=db.execute(f"SELECT coalesce(c.identity_id,e.identity_id) FROM {table} e LEFT JOIN p_{profile}_donation_corrections c ON c.event_id=e.id JOIN p_{profile}_identities original ON original.id=e.identity_id WHERE e.type='donation' AND sp_digest(original.match_key) IN(?,?,?) AND coalesce(c.deleted,0)=0",keys).fetchall()
             owners=[db.execute(f'SELECT person_id FROM p_{profile}_identities WHERE id=?',(row[0],)).fetchone() for row in donor_rows]
             requested={'orphanRules':broken,'reportedNicknameRules':rules,'reportedViewerMatches':len(viewers),'reportedNicknameDonations':len(donor_rows),'reportedViewerDonations':sum(owner is not None and owner in viewers for owner in owners)}
             print('da binding_facts='+json.dumps(requested,sort_keys=True))

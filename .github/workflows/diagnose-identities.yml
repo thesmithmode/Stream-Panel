@@ -19,18 +19,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Read-only reported identity diagnostics
+        # The names input is deliberately NOT mapped into env: (step env values are printed
+        # in the log header before any command runs). It is read from the event payload
+        # and masked before anything else can print it.
         env:
           BOOTSTRAP_KEY: ${{ secrets.STREAM_PANEL_BOOTSTRAP_KEY }}
           DEPLOY_HOST: ${{ secrets.STREAM_PANEL_DEPLOY_HOST }}
           DEPLOY_PORT: ${{ secrets.STREAM_PANEL_DEPLOY_PORT }}
           KNOWN_HOSTS: ${{ secrets.STREAM_PANEL_DEPLOY_KNOWN_HOSTS }}
-          NAMES: ${{ inputs.names }}
         run: |
           set -euo pipefail
           umask 077
-          IFS=',' read -ra parts <<< "$NAMES"
-          for name in "${parts[@]}"; do name="${name#"${name%%[![:space:]]*}"}"; name="${name%"${name##*[![:space:]]}"}"; [[ -n "$name" ]] && echo "::add-mask::$name"; done
-          terms=$(printf '%s' "$NAMES" | base64 -w0)
+          names=$(jq -r '.inputs.names // ""' "$GITHUB_EVENT_PATH")
+          IFS=',' read -ra parts <<< "$(printf '%s' "$names" | tr '\n' ',')"
+          for name in "${parts[@]}"; do name="${name#"${name%%[![:space:]]*}"}"; name="${name%"${name##*[![:space:]]}"}"; if [[ -n "$name" ]]; then echo "::add-mask::$name"; fi; done
+          terms=$(printf '%s' "$names" | base64 -w0)
+          echo "::add-mask::$terms"
+          unset names parts
           task_dir=$(mktemp -d)
           trap 'rm -rf "$task_dir"' EXIT
           printf '%s\n' "$BOOTSTRAP_KEY" > "$task_dir/key"

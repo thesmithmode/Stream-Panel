@@ -42,3 +42,37 @@ test('requests queued behind a running database copy get the copy deadline, not 
  const [copy,queued]=await Promise.all([(db as any).call('backup'),(db as any).call('streamSample')]);
  assert.equal(copy,'backup');assert.equal(queued,'streamSample');assert.equal(fatal,0);assert.equal(worker.terminated,0);
 });
+import {mock} from 'node:test';
+// An asynchronous copy: the worker keeps answering other requests while the copy runs.
+function copyingWorker(finishCopy:boolean){
+ const worker=Object.assign(new EventEmitter(),{terminated:0,
+  postMessage(message:{clientId:string;id:number;method:string}){
+   worker.emit('message',{clientId:message.clientId,id:message.id,started:true,method:message.method});
+   if(message.method!=='backup'||finishCopy)queueMicrotask(()=>worker.emit('message',{clientId:message.clientId,id:message.id,result:message.method,executionMs:1}));
+  },
+  async terminate(){worker.terminated++;worker.emit('exit',1);return 1;}});
+ const acquire=(()=>{setImmediate(()=>worker.emit('message',{clientId:'fake',ready:true}));return {worker:worker as unknown as Worker,clientId:'fake',first:true,async release(){}};}) as unknown as ConstructorParameters<typeof StoreClient>[4];
+ return {worker,acquire};
+}
+test('a database copy that never finishes is failed after its own 10-minute deadline even while other requests keep completing',async()=>{
+ const {worker,acquire}=copyingWorker(false);
+ const db=new StoreClient(':memory:',undefined,60000,'facts',acquire);await db.ready;const errors:string[]=[];db.setFatalHandler(error=>errors.push(error.message));
+ mock.timers.enable({apis:['setTimeout']});
+ try{
+  const copy=(db as any).call('backup','/tmp/copy').catch((error:Error)=>error.message);
+  await new Promise(resolve=>setImmediate(resolve));
+  // Steady traffic keeps the shared worker visibly alive for almost ten minutes.
+  for(let minute=0;minute<9;minute++){assert.equal(await (db as any).call('streamSample'),'streamSample');mock.timers.tick(60000);}
+  mock.timers.tick(59000);assert.deepEqual(errors,[]);assert.equal(worker.terminated,0);
+  mock.timers.tick(1001);
+  assert.deepEqual(errors,['DB_WORKER_TIMEOUT']);assert.equal(worker.terminated,1);assert.equal(await copy,'DB_WORKER_STOPPED');
+ }finally{mock.timers.reset();}
+});
+test('a finished database copy clears its deadline',async()=>{
+ const {worker,acquire}=copyingWorker(true);
+ const db=new StoreClient(':memory:',undefined,60000,'facts',acquire);await db.ready;let fatal=0;db.setFatalHandler(()=>fatal++);
+ mock.timers.enable({apis:['setTimeout']});
+ try{assert.equal(await (db as any).call('backup','/tmp/copy'),'backup');mock.timers.tick(700000);assert.equal(fatal,0);assert.equal(worker.terminated,0);}
+ finally{mock.timers.reset();}
+ await db.stop();
+});
