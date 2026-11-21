@@ -58,3 +58,15 @@ test('repair recovers unchanged dates carried through amount edits, even after r
  assert.deepEqual(s.resolveDonationTimes(0),{resolved:0,invalid:0});assert.equal(s.donation(id).occurredAtMs,null);assert.equal(s.summary(sid).donations,0);
  }finally{s.close();}
 });
+test('timezone repair compiles its statements once per call, not once per donation',()=>{
+ const count=(n:number)=>{const s=new StreamStore(':memory:');try{
+  for(let i=0;i<n;i++)s.ingest(tip('bulk-'+i));
+  assert.deepEqual(s.resolveDonationTimes(0),{resolved:n,invalid:0});
+  const db=(s as unknown as {db:{prepare:(sql:string)=>unknown}}).db;const original=db.prepare;let calls=0;
+  db.prepare=function(this:unknown,sql:string){calls++;return original.call(this,sql);};
+  try{assert.deepEqual(s.resolveDonationTimes(0),{resolved:0,invalid:0});}finally{db.prepare=original;}
+  return calls;
+ }finally{s.close();}};
+ const one=count(1),many=count(25);
+ assert.ok(one>0);assert.equal(many,one);
+});
