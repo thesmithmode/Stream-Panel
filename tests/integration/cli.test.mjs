@@ -45,8 +45,8 @@ test(
     }
   },
 );
-function start(dir, port, extra = {}) {
-  const child = spawn(process.execPath, ['dist/apps/daemon/src/index.js'], {
+function start(dir, port, extra = {}, args = []) {
+  const child = spawn(process.execPath, [...args, 'dist/apps/daemon/src/index.js'], {
     env: {
       ...process.env,
       STREAM_PANEL_DATA_DIR: dir,
@@ -195,6 +195,7 @@ test(
   { timeout: 15000 },
   async () => {
     const { AccountStore } = await import('../../dist/apps/daemon/src/auth.js');
+    const { default: Database } = await import('better-sqlite3');
     const dir = await mkdtemp(join(tmpdir(), 'sp-server-profiles-')),
       port = await freePort();
     let c;
@@ -206,8 +207,29 @@ test(
       } finally {
         accounts.close();
       }
-      c = start(dir, port);
+      const heartbeatClock = `
+        const interval = globalThis.setInterval;
+        globalThis.setInterval = (callback, delay, ...args) =>
+          interval(callback, delay === 30_000 ? 100 : delay, ...args);
+      `;
+      c = start(dir, port, {}, ['--import', `data:text/javascript,${encodeURIComponent(heartbeatClock)}`]);
       await c.ready();
+      const db = new Database(join(dir, 'data.sqlite'), { readonly: true });
+      try {
+        const readHeartbeats = () =>
+          ['ruslan', 'gulnaz'].map(
+            (profile) =>
+              db.prepare(`SELECT last_seen_ms FROM p_${profile}_collector_state WHERE running=1`).get()?.last_seen_ms,
+          );
+        const started = Date.now();
+        const deadline = started + 5000;
+        while (!readHeartbeats().every((time) => time > started)) {
+          assert.ok(Date.now() < deadline, 'both collector heartbeats must advance');
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      } finally {
+        db.close();
+      }
       assert.equal((await fetch(`http://127.0.0.1:${port}/healthz`)).status, 200);
       c.child.kill('SIGTERM');
       assert.equal((await c.exit).code, 0);

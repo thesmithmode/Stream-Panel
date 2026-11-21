@@ -3,7 +3,7 @@ import { openProfileDatabase } from '../../../packages/core/src/profile-db.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { StreamStore } from '../../../packages/core/src/store.js';
@@ -192,5 +192,16 @@ test('new observations discard nested content and direct raw chat snapshots whil
     assert.equal(JSON.stringify(store.youtubeData('yt-owner')).includes('discard'), false);
   } finally {
     store.close();
+  }
+});
+
+test('startup cleanup surfaces an invalid parent path', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'sp-invalid-cleanup-path-'));
+  try {
+    const parent = join(dir, 'not-a-directory');
+    await writeFile(parent, 'fixture');
+    await assert.rejects(prepareChatStorage(join(parent, 'data.sqlite')), { code: 'ENOTDIR' });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });

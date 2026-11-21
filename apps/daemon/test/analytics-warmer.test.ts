@@ -219,7 +219,8 @@ test('changing highlighting does not rebuild reports and the selected bot mode i
 });
 test('committed changes wake the idle warmer, coalesce bursts and detach on shutdown', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  let revision = 1,
+  let active = true,
+    revision = 1,
     calls = 0,
     listener: (() => void) | undefined,
     detached = false;
@@ -246,7 +247,7 @@ test('committed changes wake the idle warmer, coalesce bursts and detach on shut
     },
   };
   const stop = startAnalyticsWarmer(
-    () => [runtime] as any,
+    () => (active ? [runtime] : []) as any,
     () => true,
     () => {},
   );
@@ -259,10 +260,10 @@ test('committed changes wake the idle warmer, coalesce bursts and detach on shut
     t.mock.timers.tick(250);
     await settle();
     assert.equal(calls, 2);
-    stop();
-    assert.equal(detached, true);
+    active = false;
     t.mock.timers.tick(60000);
     await settle();
+    assert.equal(detached, true);
     assert.equal(calls, 2);
   } finally {
     stop();
