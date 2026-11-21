@@ -1,8 +1,8 @@
-import {analyticsSettings,type AnalyticsSettings} from "./analytics-settings.js";
-import { clampChattersPollSeconds } from "../../../packages/core/src/presence.js";
-import { normalizeBotLogin } from "../../../packages/core/src/bots.js";
-import { mkdir, readFile, rename, open, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { analyticsSettings, type AnalyticsSettings } from './analytics-settings.js';
+import { clampChattersPollSeconds } from '../../../packages/core/src/presence.js';
+import { normalizeBotLogin } from '../../../packages/core/src/bots.js';
+import { mkdir, readFile, rename, open, rm } from 'node:fs/promises';
+import { join } from 'node:path';
 export interface Tokens {
   access: string;
   refresh: string;
@@ -21,9 +21,9 @@ export interface Config {
   youtubeClientSecret?: string;
   youtube?: Tokens;
   youtubeSecondary?: Tokens;
-  youtubeSecondaryAccountId?:string;
-  youtubeSecondaryClientId?:string;
-  youtubeSecondaryClientSecret?:string;
+  youtubeSecondaryAccountId?: string;
+  youtubeSecondaryClientId?: string;
+  youtubeSecondaryClientSecret?: string;
   twitchClientId: string;
   twitch?: Tokens;
   daClientId: string;
@@ -37,15 +37,15 @@ export interface Config {
 }
 const defaults: Config = {
   version: 1,
-  coreAttendance80Applied:true,
-  twitchClientId: "",
-  daClientId: "",
-  daClientSecret: "",
-  daAccessToken: "",
-  daRefreshToken: "",
+  coreAttendance80Applied: true,
+  twitchClientId: '',
+  daClientId: '',
+  daClientSecret: '',
+  daAccessToken: '',
+  daRefreshToken: '',
   daUtcOffsetMinutes: 0,
   chattersPollSeconds: 60,
-  excludedBotLogins: ["jeetbot", "streemelements", "streamelements"],
+  excludedBotLogins: ['jeetbot', 'streemelements', 'streamelements'],
 };
 export type ConfigurationPort = Pick<Configuration, 'value' | 'save'>;
 export class Configuration {
@@ -55,39 +55,39 @@ export class Configuration {
   async load(): Promise<void> {
     await mkdir(this.dir, { recursive: true, mode: 0o700 });
     try {
-      const saved = JSON.parse(
-        await readFile(join(this.dir, "secrets.json"), "utf8"),
-      ) as Config;
-      if (saved.version !== 1) throw new Error("UNSUPPORTED_CONFIG");
+      const saved = JSON.parse(await readFile(join(this.dir, 'secrets.json'), 'utf8')) as Config;
+      if (saved.version !== 1) throw new Error('UNSUPPORTED_CONFIG');
       this.value = { ...defaults, ...saved };
-      this.value.analyticsSettings=analyticsSettings(this.value.analyticsSettings);
+      this.value.analyticsSettings = analyticsSettings(this.value.analyticsSettings);
       // One-time upgrade for both existing profile configurations; subsequent custom values persist.
-      if(!saved.coreAttendance80Applied){this.value.analyticsSettings.regularThresholdPercent=80;this.value.coreAttendance80Applied=true;await this.save();}
-      this.value.youtubeAccountId = this.value.youtube?.userId ?? this.value.youtubeAccountId ?? "";
-      this.value.chattersPollSeconds = clampChattersPollSeconds(
-        this.value.chattersPollSeconds,
-      );
+      if (!saved.coreAttendance80Applied) {
+        this.value.analyticsSettings.regularThresholdPercent = 80;
+        this.value.coreAttendance80Applied = true;
+        await this.save();
+      }
+      this.value.youtubeAccountId = this.value.youtube?.userId ?? this.value.youtubeAccountId ?? '';
+      this.value.chattersPollSeconds = clampChattersPollSeconds(this.value.chattersPollSeconds);
       this.value.excludedBotLogins = Array.isArray(this.value.excludedBotLogins)
         ? this.value.excludedBotLogins
-            .filter((v): v is string => typeof v === "string")
+            .filter((v): v is string => typeof v === 'string')
             .map((v) => v.trim())
             // Keep the legacy spelling: remove the old universal self-exclusion,
             // not the current channel login. Owners are excluded by ID per profile.
-            .filter(v=>Boolean(v)&&normalizeBotLogin(v)!=='fullrandomname_twitch')
+            .filter((v) => Boolean(v) && normalizeBotLogin(v) !== 'fullrandomname_twitch')
             .slice(0, 200)
         : [];
-      this.value.excludedBotLogins = [...new Set([...defaults.excludedBotLogins,...this.value.excludedBotLogins])];
+      this.value.excludedBotLogins = [...new Set([...defaults.excludedBotLogins, ...this.value.excludedBotLogins])];
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   }
   async save(): Promise<void> {
     const data = JSON.stringify(this.value);
-    const path = join(this.dir, "secrets.json");
+    const path = join(this.dir, 'secrets.json');
     const operation = this.saving.then(async () => {
-      const temporary = path + ".tmp";
+      const temporary = path + '.tmp';
       try {
-        const handle = await open(temporary, "w", 0o600);
+        const handle = await open(temporary, 'w', 0o600);
         try {
           await handle.writeFile(data);
           await handle.chmod(0o600);
@@ -96,8 +96,8 @@ export class Configuration {
           await handle.close();
         }
         await rename(temporary, path);
-        if (process.platform !== "win32") {
-          const directory = await open(this.dir, "r");
+        if (process.platform !== 'win32') {
+          const directory = await open(this.dir, 'r');
           try {
             await directory.sync();
           } finally {
@@ -114,9 +114,9 @@ export class Configuration {
   }
   publicView() {
     return {
-      youtubeClientId: this.value.youtubeClientId ?? "",
-      youtubeSecondaryClientId:this.value.youtubeSecondaryClientId??"",
-      hasYoutubeSecondarySecret:!!this.value.youtubeSecondaryClientSecret,
+      youtubeClientId: this.value.youtubeClientId ?? '',
+      youtubeSecondaryClientId: this.value.youtubeSecondaryClientId ?? '',
+      hasYoutubeSecondarySecret: !!this.value.youtubeSecondaryClientSecret,
       hasYoutubeSecret: !!this.value.youtubeClientSecret,
       analyticsSettings: analyticsSettings(this.value.analyticsSettings),
       twitchClientId: this.value.twitchClientId,
@@ -131,14 +131,30 @@ export class Configuration {
 }
 
 /** Expose one account through the collector contract without copying mutable tokens. */
-export function secondaryYouTubeConfiguration(config:ConfigurationPort):ConfigurationPort {
- const value=new Proxy(config.value,{
-  get(target,key){const mapped=secondaryKey(key);return Reflect.get(target,mapped);},
-  set(target,key,value){return Reflect.set(target,secondaryKey(key),value);},
-  deleteProperty(target,key){return Reflect.deleteProperty(target,secondaryKey(key));},
- });
- return {value,save:()=>config.save()};
+export function secondaryYouTubeConfiguration(config: ConfigurationPort): ConfigurationPort {
+  const value = new Proxy(config.value, {
+    get(target, key) {
+      const mapped = secondaryKey(key);
+      return Reflect.get(target, mapped);
+    },
+    set(target, key, value) {
+      return Reflect.set(target, secondaryKey(key), value);
+    },
+    deleteProperty(target, key) {
+      return Reflect.deleteProperty(target, secondaryKey(key));
+    },
+  });
+  return { value, save: () => config.save() };
 }
-function secondaryKey(key:string|symbol):string|symbol {
- return ({youtube:'youtubeSecondary',youtubeAccountId:'youtubeSecondaryAccountId',youtubeClientId:'youtubeSecondaryClientId',youtubeClientSecret:'youtubeSecondaryClientSecret'} as Record<string,string>)[String(key)]??key;
+function secondaryKey(key: string | symbol): string | symbol {
+  return (
+    (
+      {
+        youtube: 'youtubeSecondary',
+        youtubeAccountId: 'youtubeSecondaryAccountId',
+        youtubeClientId: 'youtubeSecondaryClientId',
+        youtubeClientSecret: 'youtubeSecondaryClientSecret',
+      } as Record<string, string>
+    )[String(key)] ?? key
+  );
 }

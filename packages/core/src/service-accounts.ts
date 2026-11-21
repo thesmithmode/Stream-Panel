@@ -1,9 +1,9 @@
-import {WELL_KNOWN_TWITCH_BOTS,normalizeBotLogin} from './bots.js';
+import { WELL_KNOWN_TWITCH_BOTS, normalizeBotLogin } from './bots.js';
 
 // Operational accounts are never audience, even if marked human or bot display is on.
 // Retain all original identities, messages and polls for repairs and rollback.
-const names=JSON.stringify(WELL_KNOWN_TWITCH_BOTS.map(normalizeBotLogin));
-export const serviceAccountsSchema=`
+const names = JSON.stringify(WELL_KNOWN_TWITCH_BOTS.map(normalizeBotLogin));
+export const serviceAccountsSchema = `
 CREATE VIEW IF NOT EXISTS service_people AS
  SELECT person_id FROM identities WHERE source='twitch' AND
   (external_id=account_id OR match_key IN(SELECT value FROM json_each('${names}')))

@@ -1,30 +1,28 @@
 <script lang="ts">
   let { name, size = 20 }: { name: string; size?: number } = $props();
   const paths: Record<string, string> = {
-    clock: "M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0M12 6v6l4 2",
-    more: "M5 12h.01M12 12h.01M19 12h.01",
-    close: "m6 6 12 12M18 6 6 18",
-    filters: "M4 7h16M4 17h16M9 4v6M15 14v6",
-    back: "m15 5-7 7 7 7",
-    pencil: "m16 3 5 5-12 12-6 1 1-6ZM14 5l5 5",
-    trash: "M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7",
-    donations: "M12 3v18M16 7H9a3 3 0 0 0 0 6h6a3 3 0 0 1 0 6H8",
-    refresh: "M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 7M4 12l2 7a7 7 0 0 0 12-2",
-    settings: "M4 4h16v16H4ZM8 8h8M8 12h8M8 16h8",
-    analytics: "M3 21V3m0 18h18M7 16l4-6 4 3 5-8",
-    youtube: "M3 5h18v14H3Zm7 4 6 3-6 3Z",
-    overview: "M3 10 12 3l9 7v11h-6v-7H9v7H3Z",
-    sessions: "M5 21V10m7 11V3m7 18V7",
+    clock: 'M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0M12 6v6l4 2',
+    more: 'M5 12h.01M12 12h.01M19 12h.01',
+    close: 'm6 6 12 12M18 6 6 18',
+    filters: 'M4 7h16M4 17h16M9 4v6M15 14v6',
+    back: 'm15 5-7 7 7 7',
+    pencil: 'm16 3 5 5-12 12-6 1 1-6ZM14 5l5 5',
+    trash: 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7',
+    donations: 'M12 3v18M16 7H9a3 3 0 0 0 0 6h6a3 3 0 0 1 0 6H8',
+    refresh: 'M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 7M4 12l2 7a7 7 0 0 0 12-2',
+    settings: 'M4 4h16v16H4ZM8 8h8M8 12h8M8 16h8',
+    analytics: 'M3 21V3m0 18h18M7 16l4-6 4 3 5-8',
+    youtube: 'M3 5h18v14H3Zm7 4 6 3-6 3Z',
+    overview: 'M3 10 12 3l9 7v11h-6v-7H9v7H3Z',
+    sessions: 'M5 21V10m7 11V3m7 18V7',
     people:
-      "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8m13 10v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
-    connections:
-      "M10 13a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 11a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l1.5-1.5",
-    chat: "M21 15a3 3 0 0 1-3 3H8l-5 3V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3Z",
-    heart:
-      "M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z",
-    record: "M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0M9 9h6v6H9Z",
-    arrow: "m9 5 7 7-7 7",
-    external: "M14 3h7v7M21 3 10 14M10 3H3v18h18v-7",
+      'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8m13 10v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+    connections: 'M10 13a5 5 0 0 0 7 .2l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 11a5 5 0 0 0-7-.2l-3 3a5 5 0 0 0 7 7l1.5-1.5',
+    chat: 'M21 15a3 3 0 0 1-3 3H8l-5 3V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3Z',
+    heart: 'M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z',
+    record: 'M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0M9 9h6v6H9Z',
+    arrow: 'm9 5 7 7-7 7',
+    external: 'M14 3h7v7M21 3 10 14M10 3H3v18h18v-7',
   };
 </script>
 
