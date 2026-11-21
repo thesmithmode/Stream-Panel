@@ -1,12 +1,18 @@
 name: Read-only identity diagnostics
+# Manual only. Names are a run-time input (never committed); the script prints
+# digests instead of viewer names/platform IDs, so public logs carry no personal data.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      names:
+        description: Comma-separated account names to inspect (masked in logs)
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
   diagnose:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
     environment: production
     timeout-minutes: 5
@@ -18,11 +24,16 @@ jobs:
           DEPLOY_HOST: ${{ secrets.STREAM_PANEL_DEPLOY_HOST }}
           DEPLOY_PORT: ${{ secrets.STREAM_PANEL_DEPLOY_PORT }}
           KNOWN_HOSTS: ${{ secrets.STREAM_PANEL_DEPLOY_KNOWN_HOSTS }}
+          NAMES: ${{ inputs.names }}
         run: |
           set -euo pipefail
           umask 077
+          IFS=',' read -ra parts <<< "$NAMES"
+          for name in "${parts[@]}"; do name="${name#"${name%%[![:space:]]*}"}"; name="${name%"${name##*[![:space:]]}"}"; [[ -n "$name" ]] && echo "::add-mask::$name"; done
+          terms=$(printf '%s' "$NAMES" | base64 -w0)
           task_dir=$(mktemp -d)
           trap 'rm -rf "$task_dir"' EXIT
           printf '%s\n' "$BOOTSTRAP_KEY" > "$task_dir/key"
           printf '%s\n' "$KNOWN_HOSTS" > "$task_dir/known-hosts"
-          ssh -i "$task_dir/key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$task_dir/known-hosts" -o ConnectTimeout=15 "root@$DEPLOY_HOST" 'python3 -' < ops/diagnose-identities.py
+          { printf 'DIAGNOSE_TERMS_B64 = %s\n' "'$terms'"; cat ops/diagnose-identities.py; } > "$task_dir/script.py"
+          ssh -i "$task_dir/key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$task_dir/known-hosts" -o ConnectTimeout=15 "root@$DEPLOY_HOST" 'python3 -' < "$task_dir/script.py"
