@@ -29,6 +29,8 @@ parentPort!.on('message',async({id,method,args,clientId=workerData.clientId?'':i
  try{
   if(!isStoreMethod(method))throw new Error('UNKNOWN_OPERATION');
   const entry=stores.get(clientId);if(!entry)throw new Error('DB_WORKER_STOPPED');const {store}=entry;
+  // Pickup notice: clients measure worker progress, not the wait behind other queued requests.
+  parentPort!.postMessage({clientId,id,started:true,method});
   const fn=(store as unknown as Record<string,(...args:unknown[])=>unknown>)[method]!;
   const started=performance.now();
   const stamp=invalidatesCachedReads(method,args)||method==='changes'?store.changeStamp():null;
