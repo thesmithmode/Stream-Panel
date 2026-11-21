@@ -80,3 +80,32 @@ test("authenticated requests record throttled panel activity for the server watc
     assert.equal(seen(), 61000);
   } finally { auth.close(); await rm(dir, { recursive: true, force: true }); }
 });
+
+test("the 21st login signs out the oldest session of that profile instead of refusing", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sp-auth-"));
+  let now = 1000;
+  const auth = new AccountStore(join(dir, "data.sqlite"), () => now);
+  try {
+    await auth.createUser("ruslan", "ruslan", "Руслан", "correct-long-password");
+    await auth.createUser("gulnaz", "gulnaz", "Гульназ", "another-long-password");
+    const other = await auth.login("gulnaz", "another-long-password", "ip-g");
+    const tokens: string[] = [];
+    for (let i = 0; i < 21; i++) {
+      now += 1000;
+      const login = await auth.login("ruslan", "correct-long-password", `ip-${i}`);
+      assert.ok(login, `login ${i + 1}`);
+      tokens.push(login.token);
+    }
+    assert.equal(auth.session(`sp_session=${tokens[0]}`), null);
+    for (const token of tokens.slice(1)) assert.equal(auth.session(`sp_session=${token}`)?.profile, "ruslan");
+    assert.equal(auth.session(`sp_session=${other!.token}`)?.profile, "gulnaz");
+    now += 1000;
+    const next = await auth.login("ruslan", "correct-long-password", "ip-next");
+    assert.ok(next);
+    assert.equal(auth.session(`sp_session=${tokens[1]}`), null);
+    assert.equal(auth.session(`sp_session=${tokens[2]}`)?.profile, "ruslan");
+  } finally {
+    auth.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

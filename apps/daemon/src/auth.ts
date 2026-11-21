@@ -80,7 +80,9 @@ export class AccountStore {
       this.db.transaction(() => {
         this.db.prepare("DELETE FROM sp_auth_sessions WHERE expires_at_ms<=?").run(now);
         const active = (this.db.prepare("SELECT count(*) AS n FROM sp_auth_sessions WHERE profile=?").get(user.profile) as { n: number }).n;
-        if (active >= 20) throw new Error("TOO_MANY_SESSIONS");
+        // Keep at most 20 sessions per profile: a new login signs out the oldest ones
+        // (sessions share one lifetime, so the earliest expiry is the oldest login).
+        if (active >= 20) this.db.prepare("DELETE FROM sp_auth_sessions WHERE token_hash IN (SELECT token_hash FROM sp_auth_sessions WHERE profile=? ORDER BY expires_at_ms, token_hash LIMIT ?)").run(user.profile, active - 19);
         this.db.prepare("INSERT INTO sp_auth_sessions VALUES (?, ?, ?, ?)").run(digest(token), user.profile, csrf, now + ACCOUNT_SESSION_SECONDS * 1000);
       }).immediate();
       return { token, csrf, user: { profile: user.profile, username: user.username, displayName: user.display_name } };
