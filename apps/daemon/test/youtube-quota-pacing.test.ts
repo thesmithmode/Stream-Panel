@@ -397,3 +397,42 @@ test('a video that stops being live in snippet.liveBroadcastContent is rediscove
     await f.yt.stop();
   }
 });
+
+test('the last page of an ended broadcast is read once without waiting for the quiet cadence', async () => {
+  const f = fixture();
+  try {
+    f.state.messages = 0;
+    await f.yt.collectOnce();
+    f.state.at += 60000;
+    f.state.live = [];
+    f.state.ended.add('live');
+    f.state.messages = 1;
+    assert.equal(await f.yt.collectOnce(), 300000);
+    assert.equal(f.count('messages'), 2);
+    const polls = f.calls.filter((call) => call.path === 'messages');
+    assert.equal(polls.at(-1)?.params.get('pageToken'), 'page-1');
+    assert.equal(f.messages.at(-1)?.[1].length, 1);
+    f.state.at += 300000;
+    await f.yt.collectOnce();
+    assert.equal(f.count('messages'), 2);
+  } finally {
+    await f.yt.stop();
+  }
+});
+
+test('a closed supplementary chat is not retried after the final read is rejected', async () => {
+  const f = fixture({ chatOnly: true });
+  try {
+    await f.yt.collectOnce();
+    f.state.at += YOUTUBE_LIVE_DISCOVERY_MS;
+    f.state.live = [];
+    f.state.chatError = 1;
+    assert.equal(await f.yt.collectOnce(), 300000);
+    f.state.at += 300000;
+    await f.yt.collectOnce();
+    assert.equal(f.count('messages'), 2);
+    assert.equal(f.yt.status.state, 'connected');
+  } finally {
+    await f.yt.stop();
+  }
+});

@@ -64,6 +64,7 @@ export class YouTubeConnection implements ProviderConnection {
   private initialCountChecked = false;
   private broadcastCache: { at: number; items: Record<string, any>[] } | undefined;
   private readonly chatPace = new Map<string, ChatPace>();
+  private readonly endedChatAttempts = new Set<string>();
   constructor(
     private config: ConfigurationPort,
     private db: YoutubeStore,
@@ -409,6 +410,56 @@ export class YouTubeConnection implements ProviderConnection {
       : YOUTUBE_CHAT_PACE.burst;
     this.chatPace.set(chat, { at: now, credits: credits - 1, quiet: messages === 0, floor });
   }
+  private readChat(tokens: Tokens, chat: string, cursor: string) {
+    return this.api(
+      'liveChat/messages',
+      {
+        part: 'id,snippet,authorDetails',
+        liveChatId: chat,
+        maxResults: '2000',
+        ...(cursor ? { pageToken: cursor } : {}),
+      },
+      tokens,
+    );
+  }
+  private async saveChat(
+    tokens: Tokens,
+    chat: string,
+    broadcastId: string,
+    response: Record<string, any>,
+    valid: () => boolean,
+  ) {
+    const items = Array.isArray(response.items) ? response.items : [];
+    await this.db.call('youtubeMessages', tokens.userId, chat, items, broadcastId);
+    if (!valid()) return null;
+    await this.db.call('youtubeSnapshot', tokens.userId, `cursor:${chat}`, string(response.nextPageToken), this.now());
+    return valid() ? items.length : null;
+  }
+  /** Try the saved cursor once when a previously active chat disappears. YouTube may already have closed it. */
+  private async collectEndedChats(
+    tokens: Tokens,
+    broadcasts: Record<string, any>[],
+    snapshots: Snapshots,
+    valid: () => boolean,
+  ): Promise<boolean> {
+    const previous = snapshots.broadcasts?.data;
+    if (!Array.isArray(previous)) return true;
+    const activeChats = new Set(broadcasts.map((broadcast) => string(broadcast.snippet?.liveChatId)));
+    for (const broadcast of previous) {
+      const id = string(broadcast?.id),
+        chat = string(broadcast?.snippet?.liveChatId);
+      if (!id || !chat || activeChats.has(chat)) continue;
+      activeChats.add(chat);
+      if (this.endedChatAttempts.delete(chat)) continue;
+      const cursor = string(snapshots[`cursor:${chat}`]?.data),
+        pace = this.chatPace.get(chat);
+      if (!cursor || (pace && this.now() - pace.at < pace.floor)) continue;
+      const response = await this.readChat(tokens, chat, cursor).catch(() => undefined);
+      if (!valid()) return false;
+      if (response && (await this.saveChat(tokens, chat, id, response, valid)) === null) return false;
+    }
+    return true;
+  }
   /**
    * Reads every due chat from its saved cursor (skipped polls lose nothing) and returns the
    * loop interval: 60 s while live, raised to YouTube's pollingIntervalMillis like before.
@@ -434,39 +485,22 @@ export class YouTubeConnection implements ProviderConnection {
       const cursor = string(snapshots[`cursor:${chat}`]?.data);
       let response: Record<string, any>;
       try {
-        response = await this.api(
-          'liveChat/messages',
-          {
-            part: 'id,snippet,authorDetails',
-            liveChatId: chat,
-            maxResults: '2000',
-            ...(cursor ? { pageToken: cursor } : {}),
-          },
-          tokens,
-        );
+        response = await this.readChat(tokens, chat, cursor);
       } catch (error) {
         // A reused list may name a broadcast that just ended: confirm before reporting a failure.
         if (!reused || !valid()) throw error;
         const fresh = await this.discoverBroadcasts(tokens, valid);
         if (!fresh || !valid()) return null;
         if (fresh.some((item) => string(item.snippet?.liveChatId) === chat)) throw error;
+        this.endedChatAttempts.add(chat);
         if (!fresh.length) ended = true;
         continue;
       }
       if (!valid()) return null;
-      const items = Array.isArray(response.items) ? response.items : [];
-      await this.db.call('youtubeMessages', tokens.userId, chat, items, broadcast.id);
-      if (!valid()) return null;
-      await this.db.call(
-        'youtubeSnapshot',
-        tokens.userId,
-        `cursor:${chat}`,
-        string(response.nextPageToken),
-        this.now(),
-      );
-      if (!valid()) return null;
+      const items = await this.saveChat(tokens, chat, broadcast.id, response, valid);
+      if (items === null) return null;
       const floor = Number(response.pollingIntervalMillis) || 60000;
-      this.chatPolled(chat, items.length, floor);
+      this.chatPolled(chat, items, floor);
       if (response.offlineAt) this.broadcastCache = undefined;
       interval = Math.max(interval, floor);
     }
@@ -493,6 +527,7 @@ export class YouTubeConnection implements ProviderConnection {
     const live = await this.liveState(tokens, valid);
     if (!live || !valid()) return 300000;
     const { broadcasts, reused } = live;
+    if (!(await this.collectEndedChats(tokens, broadcasts, snapshots, valid))) return 300000;
     // Legacy channel metadata is not a subscriber-history observation. Start the
     // history with a fresh API value instead of waiting on the old metadata age.
     if (
@@ -751,6 +786,7 @@ export class YouTubeConnection implements ProviderConnection {
       reused = !!cached;
     const broadcasts = cached ? cached.items : await this.discoverBroadcasts(tokens, valid);
     if (!broadcasts || !valid()) return 300000;
+    if (!(await this.collectEndedChats(tokens, broadcasts, previous.snapshots, valid))) return 300000;
     await this.db.call('youtubeSnapshot', tokens.userId, 'collectionRole', 'secondary', this.now());
     if (!valid()) return 300000;
     await this.db.call('youtubeSnapshot', tokens.userId, 'broadcasts', broadcasts, this.now());
@@ -886,6 +922,7 @@ export class YouTubeConnection implements ProviderConnection {
     this.initialCountChecked = false;
     this.broadcastCache = undefined;
     this.chatPace.clear();
+    this.endedChatAttempts.clear();
     this.status = { state: 'disconnected', account: '', detail: '' };
   }
   async disconnect() {
