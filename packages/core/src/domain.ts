@@ -15,6 +15,9 @@ export interface EventInput {
   payload: Record<string, unknown>;
 }
 
+/** Public platform profile link of a person's identity, as returned by /api/v1/persons/:id/platform-links. */
+export interface PlatformLink {identityId:string;source:'twitch'|'youtube';url:string}
+
 export function assertTimestamp(value: number): void {
   if (
     !Number.isSafeInteger(value) ||

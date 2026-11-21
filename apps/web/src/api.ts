@@ -83,7 +83,7 @@ export interface Event {
     originChannelId?: string;
   };
 }
-export type {PlatformLink} from '../../../packages/core/src/platform-links';
+export type {PlatformLink} from '../../../packages/core/src/domain';
 export interface Person {
   youtubeSecondary?:boolean;
   is_bot?: number|boolean;

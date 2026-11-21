@@ -1,4 +1,4 @@
-import {isProfileName,type ProfileName} from "../../../packages/core/src/profiles";
+import {isProfileName,type ProfileName} from "../../../packages/core/src/profiles.ts";
 export type Profile = ProfileName;
 type Storage = { getItem(key: string): string | null; setItem(key: string, value: string): void };
 

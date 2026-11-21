@@ -1,5 +1,5 @@
 export interface PlatformIdentity {id:string;source:string;external_id:string}
-import type {PlatformLink} from '../../../packages/core/src/platform-links.js';
+import type {PlatformLink} from '../../../packages/core/src/domain.js';
 export type {PlatformLink};
 type Login={id:string;login:string};
 
