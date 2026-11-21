@@ -1,1658 +1,738 @@
-import { botExclusionSet } from './bots.js';
-import { readActivityInput, type ActivityInput } from './activity-input.js';
-import { classifyCore, coreSessions } from './core-classification.js';
-import { latestFollowerSnapshotsSql } from './follower-queries.js';
-import { dateTimeFormatter } from './date-time-formatter.js';
-import { clockActivity } from './clock-activity.js';
-import { donationTiming, emptyDonationTiming } from './donation-statistics.js';
-import { timePatterns } from './time-patterns.js';
+import {botExclusionSet} from './bots.js';
+import {readActivityInput,type ActivityInput} from './activity-input.js';
+import {classifyCore,coreSessions} from './core-classification.js';
+import {latestFollowerSnapshotsSql} from './follower-queries.js';
+import {dateTimeFormatter} from './date-time-formatter.js';
+import {clockActivity} from './clock-activity.js';
+import {donationTiming,emptyDonationTiming} from './donation-statistics.js';
+import {timePatterns} from './time-patterns.js';
 import type Database from 'better-sqlite3';
-import { currencyRates } from './rates.js';
-import { streamMetrics } from './stream-metrics.js';
-import { windowsFromLinks, sessionBreaks } from './session-windows.js';
-import { PersonBots, databaseBotExclusions, manualBotPeopleSql } from './person-bots.js';
+import {currencyRates} from './rates.js';
+import {streamMetrics} from './stream-metrics.js';
+import {windowsFromLinks,sessionBreaks} from './session-windows.js';
+import {PersonBots,databaseBotExclusions,manualBotPeopleSql} from "./person-bots.js";
 export interface AnalyticsOptions {
-  /** Internal attendance roster; never accepted from an HTTP query. */
-  membershipOnly?: boolean;
-  /** Internal, server-selected rolling membership; never accepted from query input. */
-  rollingCore?: boolean | undefined;
-  coreWindowDays?: number;
-  corePeople?: string[] | undefined;
-  streamFrom?: number;
-  streamTo?: number;
-  streamOffset?: number;
-  streamLimit?: number;
-  /** Internal fact projections; public routes never accept these flags. */
-  activityInput?: ActivityInput[];
-  activityOnly?: boolean;
-  donationsOnly?: boolean;
-  fromMs: number;
-  toMs: number;
-  source?: 'all' | 'twitch' | 'youtube';
-  category?: string;
-  sessionId?: string;
-  summaryOnly?: boolean;
-  panel?: 'dynamics' | 'time' | 'audience';
-  attendanceOnly?: boolean;
-  includeInsights?: boolean;
-  insightSessionId?: string;
-  audienceOffset?: number;
-  audienceSearch?: string;
-  audienceSort?: string;
-  audienceCoreOnly?: boolean;
-  clockCompact?: boolean;
-  clockDay?: string;
-  clockMinute?: number;
-  clockResolution?: number;
-  clockOffset?: number;
-  clockBatch?: boolean;
-  minSessions?: number;
-  regularThresholdPercent?: number;
-  minMinutes?: number;
-  minMessages?: number;
-  coreRule?: 'either' | 'both' | 'frequency';
-  chatWindowMinutes?: number;
-  timezone?: string;
-  excludedLogins?: string[] | false;
-  ownerId?: string;
-  youtubeAccount?: string;
+    /** Internal attendance roster; never accepted from an HTTP query. */
+    membershipOnly?:boolean;
+    /** Internal, server-selected rolling membership; never accepted from query input. */
+    rollingCore?: boolean | undefined;
+    coreWindowDays?: number;
+    corePeople?: string[] | undefined;
+    streamFrom?:number;streamTo?:number;streamOffset?:number;streamLimit?:number;
+    /** Internal fact projections; public routes never accept these flags. */
+    activityInput?:ActivityInput[];
+    activityOnly?:boolean;
+    donationsOnly?:boolean;
+    fromMs: number;
+    toMs: number;
+    source?: 'all' | 'twitch' | 'youtube';
+    category?: string;
+    sessionId?: string;
+    summaryOnly?: boolean;
+    panel?:'dynamics'|'time'|'audience';
+    attendanceOnly?:boolean;
+    includeInsights?: boolean;
+    insightSessionId?: string;
+    audienceOffset?:number;
+    audienceSearch?:string;
+    audienceSort?:string;
+    audienceCoreOnly?:boolean;
+    clockCompact?:boolean;
+    clockDay?:string;
+    clockMinute?:number;
+    clockResolution?:number;
+    clockOffset?:number;
+    clockBatch?:boolean;
+    minSessions?: number;
+    regularThresholdPercent?: number;
+    minMinutes?: number;
+    minMessages?: number;
+    coreRule?: 'either' | 'both' | 'frequency';
+    chatWindowMinutes?: number;
+    timezone?: string;
+    excludedLogins?: string[]|false;
+    ownerId?: string;
+    youtubeAccount?: string;
 }
 type Span = {
-  from: number;
-  to: number;
-  session: string;
-  kind: 'observed' | 'chat_proxy';
+    from: number;
+    to: number;
+    session: string;
+    kind: 'observed' | 'chat_proxy';
 };
 type Entity = {
-  is_bot?: number;
-  id: string;
-  name: string;
-  source: 'twitch' | 'youtube';
-  sources: ('twitch' | 'youtube')[];
-  messages: number;
-  observedMinutes: number;
-  estimatedChatMinutes: number;
-  sessionIds: Set<string>;
-  attendanceSessionIds: Set<string>;
-  regular: boolean;
-  coreSessionIds: string[];
-  intervals: Span[];
-  donations: Record<string, string>;
-  core: boolean;
-  tags: string[];
-  manualCore: boolean | null;
-  follower: boolean | null;
-  arrivalHours: { day: string; hour: number; visits: number }[];
+    is_bot?:number;
+    id: string;
+    name: string;
+    source: 'twitch' | 'youtube';
+    sources: ('twitch' | 'youtube')[];
+    messages: number;
+    observedMinutes: number;
+    estimatedChatMinutes: number;
+    sessionIds: Set<string>;
+    attendanceSessionIds: Set<string>;
+    regular: boolean;
+    coreSessionIds: string[];
+    intervals: Span[];
+    donations: Record<string, string>;
+    core: boolean;
+    tags: string[];
+    manualCore: boolean|null;
+    follower:boolean|null;
+    arrivalHours:{day:string;hour:number;visits:number}[];
 };
 export function unionSpans(spans: Span[]): Span[] {
-  const sorted = spans
-      .filter((x) => x.to > x.from)
-      .sort(
-        (a, b) => a.session.localeCompare(b.session) || a.kind.localeCompare(b.kind) || a.from - b.from || a.to - b.to,
-      ),
-    out: Span[] = [];
-  for (const span of sorted) {
-    const last = out.at(-1);
-    if (last && last.session === span.session && last.kind === span.kind && span.from <= last.to)
-      last.to = Math.max(last.to, span.to);
-    else out.push({ ...span });
-  }
-  return out;
+    const sorted = spans.filter(x => x.to > x.from).sort((a, b) => a.session.localeCompare(b.session) || a.kind.localeCompare(b.kind) || a.from - b.from || a.to - b.to), out: Span[] = [];
+    for (const span of sorted) {
+        const last = out.at(-1);
+        if (last && last.session === span.session && last.kind === span.kind && span.from <= last.to)
+            last.to = Math.max(last.to, span.to);
+        else
+            out.push({ ...span });
+    }
+    return out;
 }
-function groupBySession<T extends { session_id: string }>(rows: T[]): Map<string, T[]> {
-  const groups = new Map<string, T[]>();
-  for (const row of rows) {
-    const group = groups.get(row.session_id);
-    if (group) group.push(row);
-    else groups.set(row.session_id, [row]);
-  }
-  return groups;
+function groupBySession<T extends {session_id:string}>(rows:T[]):Map<string,T[]> {
+    const groups=new Map<string,T[]>();
+    for(const row of rows){const group=groups.get(row.session_id);if(group)group.push(row);else groups.set(row.session_id,[row]);}
+    return groups;
 }
-export function validateAnalyticsOptions(options: AnalyticsOptions, from = options.fromMs, to = options.toMs) {
-  if (options.coreWindowDays !== undefined && ![30, 90, 180].includes(options.coreWindowDays))
-    throw Error('INVALID_ANALYTICS_FILTER');
-  if (
-    [options.audienceOffset, options.clockOffset].some((n) => n !== undefined && (!Number.isSafeInteger(n) || n < 0)) ||
-    (options.audienceSearch !== undefined &&
-      (typeof options.audienceSearch !== 'string' || options.audienceSearch.length > 256)) ||
-    (options.audienceSort !== undefined &&
-      !['core', 'sessions', 'observedMinutes', 'estimatedChatMinutes', 'messages', 'attendanceRatio'].includes(
-        options.audienceSort,
-      )) ||
-    (options.clockDay !== undefined &&
-      !['all', 'weekdays', 'weekends', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].includes(options.clockDay)) ||
-    (options.clockResolution !== undefined && ![1, 5, 15, 30, 60].includes(options.clockResolution)) ||
-    (options.clockMinute !== undefined &&
-      (!Number.isInteger(options.clockMinute) ||
-        options.clockMinute < 0 ||
-        options.clockMinute >= 1440 ||
-        options.clockMinute % (options.clockResolution ?? 60) !== 0))
-  )
-    throw new Error('INVALID_ANALYTICS_FILTER');
-  const source = options.source ?? 'all',
-    category = options.category ?? '',
-    timezone = options.timezone ?? 'Europe/Moscow';
-  const regularThresholdPercent = options.regularThresholdPercent ?? 80;
-  const minSessions = options.minSessions ?? 3,
-    minMinutes = options.minMinutes ?? 30,
-    minMessages = options.minMessages ?? 5,
-    window = options.chatWindowMinutes ?? 5,
-    rule = options.coreRule ?? 'either';
-  if (
-    !Number.isFinite(regularThresholdPercent) ||
-    regularThresholdPercent < 0 ||
-    regularThresholdPercent > 100 ||
-    !Number.isSafeInteger(from) ||
-    !Number.isSafeInteger(to) ||
-    from < 0 ||
-    to <= from ||
-    to > 8640000000000000 ||
-    !['all', 'twitch', 'youtube'].includes(source) ||
-    !['either', 'both', 'frequency'].includes(rule) ||
-    category.length > 256 ||
-    [minSessions, minMinutes, minMessages, window].some((n) => !Number.isInteger(n) || n < 0) ||
-    minSessions > 1000 ||
-    minMinutes > 129600 ||
-    minMessages > 1000000 ||
-    window < 1 ||
-    window > 30
-  )
-    throw new Error('INVALID_ANALYTICS_FILTER');
-  let clock: Intl.DateTimeFormat;
-  try {
-    clock = dateTimeFormatter('ru-RU', { timeZone: timezone, weekday: 'short', hour: '2-digit', hourCycle: 'h23' });
-  } catch {
-    throw new Error('INVALID_TIMEZONE');
-  }
-  return {
-    source,
-    category,
-    timezone,
-    regularThresholdPercent,
-    minSessions: 3,
-    minMinutes: 30,
-    minMessages: 5,
-    window,
-    rule: 'either' as const,
-    clock,
-  };
+export function validateAnalyticsOptions(options:AnalyticsOptions,from=options.fromMs,to=options.toMs){
+    if(options.coreWindowDays!==undefined&&![30,90,180].includes(options.coreWindowDays))throw Error('INVALID_ANALYTICS_FILTER');
+    if([options.audienceOffset,options.clockOffset].some(n=>n!==undefined&&(!Number.isSafeInteger(n)||n<0)) ||
+       (options.audienceSearch!==undefined&&(typeof options.audienceSearch!=='string'||options.audienceSearch.length>256)) ||
+       (options.audienceSort!==undefined&&!['core','sessions','observedMinutes','estimatedChatMinutes','messages','attendanceRatio'].includes(options.audienceSort)) ||
+       (options.clockDay!==undefined&&!['all','weekdays','weekends','пн','вт','ср','чт','пт','сб','вс'].includes(options.clockDay)) ||
+       (options.clockResolution!==undefined&&![1,5,15,30,60].includes(options.clockResolution)) ||
+       (options.clockMinute!==undefined&&(!Number.isInteger(options.clockMinute)||options.clockMinute<0||options.clockMinute>=1440||options.clockMinute%(options.clockResolution??60)!==0)))throw new Error('INVALID_ANALYTICS_FILTER');
+    const source = options.source ?? 'all', category = options.category ?? '', timezone = options.timezone ?? 'Europe/Moscow';
+    const regularThresholdPercent=options.regularThresholdPercent??80;
+    const minSessions = options.minSessions ?? 3, minMinutes = options.minMinutes ?? 30, minMessages = options.minMessages ?? 5, window = options.chatWindowMinutes ?? 5, rule = options.coreRule ?? 'either';
+    if (!Number.isFinite(regularThresholdPercent) || regularThresholdPercent<0 || regularThresholdPercent>100 || !Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to <= from || to > 8640000000000000 || !['all', 'twitch', 'youtube'].includes(source) || !['either', 'both', 'frequency'].includes(rule) || category.length > 256 || [minSessions, minMinutes, minMessages, window].some(n => !Number.isInteger(n) || n < 0) || minSessions > 1000 || minMinutes > 129600 || minMessages > 1000000 || window < 1 || window > 30)
+        throw new Error('INVALID_ANALYTICS_FILTER');
+    let clock: Intl.DateTimeFormat;
+    try {
+        clock = dateTimeFormatter('ru-RU', { timeZone: timezone, weekday: 'short', hour: '2-digit', hourCycle: 'h23' });
+    }
+    catch {
+        throw new Error('INVALID_TIMEZONE');
+    }
+    return {source,category,timezone,regularThresholdPercent,minSessions:3,minMinutes:30,minMessages:5,window,rule:'either' as const,clock};
 }
 type Platform = 'twitch' | 'youtube';
 type CategorySegment = {
-  session: string;
-  categoryId: string;
-  name: string;
-  from: number;
-  to: number;
+    session: string;
+    categoryId: string;
+    name: string;
+    from: number;
+    to: number;
 };
-type PlatformWindow = { session_id: string; platform: string; started_at_ms: number; ended_at_ms: number | null };
+type PlatformWindow = {session_id:string;platform:string;started_at_ms:number;ended_at_ms:number|null};
 type TimelinePoint = {
-  at: number;
-  messages: number;
-  twitchMessages: number;
-  youtubeMessages: number;
-  regularTwitchMessages: number;
-  regularYoutubeMessages: number;
-  followerTwitchMessages: number;
-  followerYoutubeMessages: number;
-  unknownMessages: number;
-  unknownTwitchMessages: number;
-  unknownYoutubeMessages: number;
-  observed: number;
-  estimated: number;
-  regularObserved: number;
-  regularEstimated: number;
-  regularMessages: number;
-  participants: number;
-  regularParticipants: number;
-  followerParticipants: number;
-  followerObserved: number;
-  followerEstimated: number;
-  followerMessages: number;
-  botObserved?: number;
-  botEstimated?: number;
-  botParticipants?: number;
-  botViewers?: number;
-  botTwitchViewers?: number;
-  botYoutubeViewers?: number;
-  botMessages?: number;
-  botTwitchMessages?: number;
-  botYoutubeMessages?: number;
-  viewers: number | null;
-  viewersPartial?: boolean;
-  twitchViewers: number | null;
-  youtubeViewers: number | null;
-  presenceKnown: boolean;
-  isBreak?: boolean;
+    at: number;
+    messages: number;
+    twitchMessages:number;youtubeMessages:number;regularTwitchMessages:number;regularYoutubeMessages:number;followerTwitchMessages:number;followerYoutubeMessages:number;unknownMessages:number;unknownTwitchMessages:number;unknownYoutubeMessages:number;
+    observed: number;
+    estimated: number;
+    regularObserved: number;
+    regularEstimated: number;
+    regularMessages: number;
+    participants:number; regularParticipants:number; followerParticipants:number; followerObserved:number; followerEstimated:number; followerMessages:number;
+    botObserved?:number;botEstimated?:number;botParticipants?:number;botViewers?:number;botTwitchViewers?:number;botYoutubeViewers?:number;botMessages?:number;botTwitchMessages?:number;botYoutubeMessages?:number;
+    viewers: number | null;
+    viewersPartial?: boolean;
+    twitchViewers: number | null;
+    youtubeViewers: number | null;
+    presenceKnown: boolean;
+    isBreak?: boolean;
 };
 type CategoryTotals = {
-  id: string;
-  name: string;
-  minutes: number;
-  messages: number;
-  observedMinutes: number;
-  observedKnownMinutes: number;
-  botObserved?: number;
-  botEstimated?: number;
-  botMessages?: number;
-  botViewersTotal?: number;
-  viewerTotal: number;
-  viewerKnownMinutes: number;
-  viewerPartialMinutes: number;
-  estimatedChatMinutes: number;
-  sessions: Set<string>;
-  audience: Set<string>;
-  core: Set<string>;
+    id: string;
+    name: string;
+    minutes: number;
+    messages: number;
+    observedMinutes: number;
+    observedKnownMinutes: number;
+    botObserved?:number;botEstimated?:number;botMessages?:number;botViewersTotal?:number;
+    viewerTotal: number; viewerKnownMinutes: number; viewerPartialMinutes: number;
+    estimatedChatMinutes: number;
+    sessions: Set<string>;
+    audience: Set<string>;
+    core: Set<string>;
 };
 type HourlyCell = {
-  day: string;
-  hour: number;
-  observed: number;
-  estimated: number;
-  messages: number;
-  sampleMinutes: number;
-  observedKnownMinutes: number;
-  viewersTotal: number;
-  viewerSamples: number;
-  botObserved?: number;
-  botEstimated?: number;
-  botMessages?: number;
-  botViewersTotal?: number;
-  knownViewersTotal: number;
-  knownViewerSamples: number;
-  viewerPartialMinutes: number;
-  donationTotals: Record<string, string>;
-  donationCount: number;
+    day: string;
+    hour: number;
+    observed: number;
+    estimated: number;
+    messages: number;
+    sampleMinutes: number;
+    observedKnownMinutes: number;
+    viewersTotal: number;
+    viewerSamples: number;
+    botObserved?:number;botEstimated?:number;botMessages?:number;botViewersTotal?:number;
+    knownViewersTotal:number;knownViewerSamples:number;viewerPartialMinutes:number;
+    donationTotals:Record<string,string>;donationCount:number;
 };
 const UNKNOWN_CATEGORY = 'Категория неизвестна';
 const RANGE_TOO_LARGE = 'ANALYTICS_RANGE_TOO_LARGE';
 /** Fact queries fetch one row more than this and reject the report when it is reached. */
 const MAX_FACT_ROWS = 50000;
 function limitRows<T>(rows: T[]): T[] {
-  if (rows.length > MAX_FACT_ROWS) throw new Error(RANGE_TOO_LARGE);
-  return rows;
+    if (rows.length > MAX_FACT_ROWS)
+        throw new Error(RANGE_TOO_LARGE);
+    return rows;
 }
 /** Report interval, validated filters, bot sets and the streams the report covers. */
 function analyticsScope(db: Database.Database, options: AnalyticsOptions) {
-  const recording = options.sessionId
-    ? (db
-        .prepare(
-          'SELECT started_at_ms,ended_at_ms FROM sessions WHERE id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id)',
-        )
-        .get(options.sessionId) as { started_at_ms: number; ended_at_ms: number | null } | undefined)
-    : undefined;
-  if (options.sessionId && !recording) throw new Error('SESSION_NOT_FOUND');
-  const from = recording ? Math.max(options.fromMs, recording.started_at_ms) : options.fromMs,
-    to = recording ? Math.min(options.toMs, recording.ended_at_ms ?? options.toMs) : options.toMs;
-  const settings = validateAnalyticsOptions(options, from, to);
-  const coreMembership = options.corePeople ? new Set(options.corePeople) : undefined;
-  const botPeople = new Set(
-    new PersonBots(db)
-      .decorate(
-        db
-          .prepare(
-            `SELECT DISTINCT person_id id FROM identities WHERE source='twitch' AND match_key IN(SELECT value FROM json_each(?)) UNION ${manualBotPeopleSql} UNION SELECT person_id FROM youtube_identities WHERE match_key IN('streamelements','streemelements')`,
-          )
-          .all(JSON.stringify([...botExclusionSet(options.excludedLogins || [])])) as { id: string }[],
-        (p) => p.id,
-        options.excludedLogins || [],
-      )
-      .filter((p) => p.is_bot)
-      .map((p) => p.id),
-  );
-  const excluded = databaseBotExclusions(db, options.excludedLogins ?? []),
-    botJson = JSON.stringify([...excluded]);
-  const sessions = db
-    .prepare(
-      'SELECT * FROM sessions WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id) AND started_at_ms<? AND coalesce(ended_at_ms,?)>? AND (? IS NULL OR id=?) ORDER BY started_at_ms LIMIT 1001',
-    )
-    .all(to, to, from, options.sessionId ?? null, options.sessionId ?? null) as any[];
-  if (sessions.length > 1000) throw new Error(RANGE_TOO_LARGE);
-  return {
-    ...settings,
-    from,
-    to,
-    coreMembership,
-    botPeople,
-    excluded,
-    botJson,
-    sessions,
-    sessionIds: JSON.stringify(sessions.map((s) => s.id)),
-  };
+    const recording=options.sessionId?db.prepare('SELECT started_at_ms,ended_at_ms FROM sessions WHERE id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id)').get(options.sessionId) as {started_at_ms:number;ended_at_ms:number|null}|undefined:undefined;
+    if(options.sessionId&&!recording)throw new Error('SESSION_NOT_FOUND');
+    const from=recording?Math.max(options.fromMs,recording.started_at_ms):options.fromMs,to=recording?Math.min(options.toMs,recording.ended_at_ms??options.toMs):options.toMs;
+    const settings=validateAnalyticsOptions(options,from,to);
+    const coreMembership=options.corePeople?new Set(options.corePeople):undefined;
+    const botPeople=new Set(new PersonBots(db).decorate(db.prepare(`SELECT DISTINCT person_id id FROM identities WHERE source='twitch' AND match_key IN(SELECT value FROM json_each(?)) UNION ${manualBotPeopleSql} UNION SELECT person_id FROM youtube_identities WHERE match_key IN('streamelements','streemelements')`).all(JSON.stringify([...botExclusionSet(options.excludedLogins||[])])) as {id:string}[],p=>p.id,options.excludedLogins||[]).filter(p=>p.is_bot).map(p=>p.id));
+    const excluded = databaseBotExclusions(db,options.excludedLogins ?? []), botJson = JSON.stringify([...excluded]);
+    const sessions = db.prepare('SELECT * FROM sessions WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=sessions.id) AND started_at_ms<? AND coalesce(ended_at_ms,?)>? AND (? IS NULL OR id=?) ORDER BY started_at_ms LIMIT 1001').all(to, to, from, options.sessionId??null,options.sessionId??null) as any[];
+    if (sessions.length > 1000)
+        throw new Error(RANGE_TOO_LARGE);
+    return {...settings,from,to,coreMembership,botPeople,excluded,botJson,sessions,sessionIds:JSON.stringify(sessions.map(s => s.id))};
 }
 type AnalyticsScope = ReturnType<typeof analyticsScope>;
 /** Display names of the people allowed into the report, keyed by person id. */
-function visiblePeople(
-  db: Database.Database,
-  options: AnalyticsOptions,
-  { sessionIds, from, to, window, botJson }: AnalyticsScope,
-): Map<string, string> {
-  // Classify only people whose facts can contribute to this report. Scanning the
-  // whole profile here repeats the same work for every historical stream leaf.
-  const candidates = db
-    .prepare(
-      `SELECT i.person_id FROM event_sessions es INDEXED BY event_sessions_session CROSS JOIN events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE es.session_id IN(SELECT value FROM json_each(?))
+function visiblePeople(db: Database.Database, options: AnalyticsOptions, {sessionIds,from,to,window,botJson}: AnalyticsScope): Map<string, string> {
+    // Classify only people whose facts can contribute to this report. Scanning the
+    // whole profile here repeats the same work for every historical stream leaf.
+    const candidates=db.prepare(`SELECT i.person_id FROM event_sessions es INDEXED BY event_sessions_session CROSS JOIN events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE es.session_id IN(SELECT value FROM json_each(?))
       UNION SELECT i.person_id FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id WHERE ? AND p.session_id IN(SELECT value FROM json_each(?))
       UNION SELECT y.person_id FROM youtube_messages m JOIN youtube_identities y ON y.account_id=m.account_id AND y.external_id=m.author_id WHERE m.account_id=? AND m.published_at_ms>=? AND m.published_at_ms<?
-      UNION SELECT value FROM json_each(?)`,
-    )
-    .all(
-      sessionIds,
-      Number(!options.donationsOnly && options.activityInput === undefined),
-      sessionIds,
-      options.youtubeAccount ?? '',
-      Math.max(0, from - window * 60000),
-      to,
-      JSON.stringify((options.activityInput ?? []).map((row) => row.person)),
-    ) as { person_id: string }[];
-  const candidateIds = JSON.stringify(candidates.map((row) => row.person_id));
-  const visible = `SELECT p.id,p.display_name FROM persons p WHERE p.id IN(SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM identities ib WHERE ib.person_id=p.id AND (EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||ib.person_id OR ((value=ib.match_key OR value='person:'||ib.person_id) AND ib.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) OR (ib.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people) AND EXISTS(SELECT 1 FROM identity_aliases a WHERE a.identity_id=ib.id AND ltrim(a.candidate_key,'@#') IN(SELECT value FROM json_each(?)))) OR (ib.source='twitch' AND (ib.external_id=? OR ib.external_id=ib.account_id)))) AND NOT EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||y.person_id OR ((value=y.match_key OR value='person:'||y.person_id) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) OR (y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people) AND a.match_key IN(SELECT value FROM json_each(?)))))`;
-  const people = db.prepare(visible).all(candidateIds, botJson, botJson, options.ownerId ?? '', botJson, botJson) as {
-    id: string;
-    display_name: string;
-  }[];
-  return new Map(people.map((p) => [p.id, p.display_name]));
+      UNION SELECT value FROM json_each(?)`).all(sessionIds,Number(!options.donationsOnly&&options.activityInput===undefined),sessionIds,options.youtubeAccount??'',Math.max(0,from-window*60000),to,JSON.stringify((options.activityInput??[]).map(row=>row.person))) as {person_id:string}[];
+    const candidateIds=JSON.stringify(candidates.map(row=>row.person_id));
+    const visible = `SELECT p.id,p.display_name FROM persons p WHERE p.id IN(SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM identities ib WHERE ib.person_id=p.id AND (EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||ib.person_id OR ((value=ib.match_key OR value='person:'||ib.person_id) AND ib.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) OR (ib.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people) AND EXISTS(SELECT 1 FROM identity_aliases a WHERE a.identity_id=ib.id AND ltrim(a.candidate_key,'@#') IN(SELECT value FROM json_each(?)))) OR (ib.source='twitch' AND (ib.external_id=? OR ib.external_id=ib.account_id)))) AND NOT EXISTS(SELECT 1 FROM youtube_identities y LEFT JOIN youtube_identity_aliases a ON a.identity_id=y.id WHERE y.person_id=p.id AND (y.is_owner=1 OR y.external_id=y.account_id OR EXISTS(SELECT 1 FROM json_each(?) WHERE value='owner:'||y.person_id OR ((value=y.match_key OR value='person:'||y.person_id) AND y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people))) OR (y.person_id NOT IN(SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people) AND a.match_key IN(SELECT value FROM json_each(?)))))`;
+    const people = db.prepare(visible).all(candidateIds,botJson, botJson, options.ownerId ?? '', botJson,botJson) as {
+        id: string;
+        display_name: string;
+    }[];
+    return new Map(people.map(p => [p.id, p.display_name]));
 }
 /** Splits every stream at the category changes recorded by its samples. */
-function categorySegments(
-  sessions: any[],
-  samplesBySession: Map<string, any[]>,
-  from: number,
-  to: number,
-): CategorySegment[] {
-  const segments: CategorySegment[] = [];
-  for (const s of sessions) {
-    let start = Math.max(from, s.started_at_ms),
-      end = Math.min(to, s.ended_at_ms ?? to),
-      id = '',
-      name = UNKNOWN_CATEGORY;
-    for (const sample of (samplesBySession.get(s.id) ?? []).filter(
-      (x) => x.twitch_viewers !== null || x.category_id || x.category_name,
-    )) {
-      if (sample.observed_at_ms < start) {
-        id = sample.category_id;
-        name = sample.category_name || UNKNOWN_CATEGORY;
-        continue;
-      }
-      if (sample.observed_at_ms >= end) break;
-      if (sample.category_id !== id || sample.category_name !== name) {
-        if (sample.observed_at_ms > start)
-          segments.push({ session: s.id, categoryId: id, name, from: start, to: sample.observed_at_ms });
-        start = sample.observed_at_ms;
-        id = sample.category_id;
-        name = sample.category_name || UNKNOWN_CATEGORY;
-      }
+function categorySegments(sessions: any[], samplesBySession: Map<string, any[]>, from: number, to: number): CategorySegment[] {
+    const segments: CategorySegment[] = [];
+    for (const s of sessions) {
+        let start = Math.max(from, s.started_at_ms), end = Math.min(to, s.ended_at_ms ?? to), id = '', name = UNKNOWN_CATEGORY;
+        for (const sample of (samplesBySession.get(s.id)??[]).filter(x => x.twitch_viewers !== null || x.category_id || x.category_name)) {
+            if (sample.observed_at_ms < start) {
+                id = sample.category_id;
+                name = sample.category_name || UNKNOWN_CATEGORY;
+                continue;
+            }
+            if (sample.observed_at_ms >= end)
+                break;
+            if (sample.category_id !== id || sample.category_name !== name) {
+                if (sample.observed_at_ms > start)
+                    segments.push({ session: s.id, categoryId: id, name, from: start, to: sample.observed_at_ms });
+                start = sample.observed_at_ms;
+                id = sample.category_id;
+                name = sample.category_name || UNKNOWN_CATEGORY;
+            }
+        }
+        if (end > start)
+            segments.push({ session: s.id, categoryId: id, name, from: start, to: end });
     }
-    if (end > start) segments.push({ session: s.id, categoryId: id, name, from: start, to: end });
-  }
-  return segments;
+    return segments;
 }
 /** Provider windows, stream samples and category segments of the covered streams. */
-function streamLayout(db: Database.Database, { sessions, sessionIds, from, to }: AnalyticsScope) {
-  const platformWindows = db
-    .prepare(
-      'SELECT session_id,platform,started_at_ms,ended_at_ms FROM platform_streams WHERE session_id IN(SELECT value FROM json_each(?))',
-    )
-    .all(sessionIds) as PlatformWindow[];
-  const samples = db
-    .prepare('SELECT * FROM stream_samples WHERE session_id IN(SELECT value FROM json_each(?)) ORDER BY observed_at_ms')
-    .all(sessionIds) as any[];
-  const samplesBySession = groupBySession(samples),
-    platformsBySession = groupBySession(platformWindows);
-  const windows = (id: string, start: number, end: number) =>
-    windowsFromLinks(platformsBySession.get(id) ?? [], start, end);
-  return {
-    samples,
-    samplesBySession,
-    platformsBySession,
-    windows,
-    segments: categorySegments(sessions, samplesBySession, from, to),
-  };
+function streamLayout(db: Database.Database, {sessions,sessionIds,from,to}: AnalyticsScope) {
+    const platformWindows=db.prepare('SELECT session_id,platform,started_at_ms,ended_at_ms FROM platform_streams WHERE session_id IN(SELECT value FROM json_each(?))').all(sessionIds) as PlatformWindow[];
+    const samples = db.prepare('SELECT * FROM stream_samples WHERE session_id IN(SELECT value FROM json_each(?)) ORDER BY observed_at_ms').all(sessionIds) as any[];
+    const samplesBySession=groupBySession(samples),platformsBySession=groupBySession(platformWindows);
+    const windows=(id:string,start:number,end:number)=>windowsFromLinks(platformsBySession.get(id)??[],start,end);
+    return {samples,samplesBySession,platformsBySession,windows,segments:categorySegments(sessions,samplesBySession,from,to)};
 }
 type StreamLayout = ReturnType<typeof streamLayout>;
 /** Core uses the full stream and combines activity across linked platforms. */
-function corePresenceInputs(
-  db: Database.Database,
-  options: AnalyticsOptions,
-  { sessions, to, window }: AnalyticsScope,
-  { windows }: StreamLayout,
-) {
-  const coreDurations = new Map<string, number>();
-  const fullWindows = new Map<string, { from: number; to: number }[]>();
-  for (const s of sessions) {
-    const end = s.ended_at_ms ?? to;
-    const spans = windows(s.id, s.started_at_ms, end);
-    fullWindows.set(s.id, spans);
-    coreDurations.set(
-      s.id,
-      spans.reduce((n, span) => n + span.to - span.from, 0),
-    );
-  }
-  const corePresence = new Map<string, Span[]>();
-  const activity = options.donationsOnly
-    ? []
-    : (options.activityInput ??
-      readActivityInput(
-        db,
-        sessions.map((s) => s.id),
-        sessions.length ? Math.max(...sessions.map((s) => s.ended_at_ms ?? to)) : to,
-        options.youtubeAccount,
-        window,
-      ));
-  for (const row of activity) {
-    const spans = corePresence.get(row.person) ?? [];
-    for (const w of fullWindows.get(row.session) ?? []) {
-      const start = Math.max(w.from, row.from),
-        end = Math.min(w.to, row.to);
-      if (end > start) spans.push({ from: start, to: end, session: row.session, kind: 'observed' });
+function corePresenceInputs(db: Database.Database, options: AnalyticsOptions, {sessions,to,window}: AnalyticsScope, {windows}: StreamLayout) {
+    const coreDurations = new Map<string, number>();
+    const fullWindows = new Map<string, {from:number;to:number}[]>();
+    for (const s of sessions) {
+        const end = s.ended_at_ms ?? to;
+        const spans = windows(s.id, s.started_at_ms, end);
+        fullWindows.set(s.id, spans);
+        coreDurations.set(s.id, spans.reduce((n, span) => n + span.to - span.from, 0));
     }
-    corePresence.set(row.person, spans);
-  }
-  return { coreDurations, corePresence, activity };
+    const corePresence = new Map<string, Span[]>();
+    const activity=options.donationsOnly?[]:options.activityInput??readActivityInput(db,sessions.map(s=>s.id),sessions.length?Math.max(...sessions.map(s=>s.ended_at_ms??to)):to,options.youtubeAccount,window);
+    for(const row of activity){
+        const spans=corePresence.get(row.person)??[];
+        for(const w of fullWindows.get(row.session)??[]){const start=Math.max(w.from,row.from),end=Math.min(w.to,row.to);if(end>start)spans.push({from:start,to:end,session:row.session,kind:'observed'});}
+        corePresence.set(row.person,spans);
+    }
+    return {coreDurations,corePresence,activity};
 }
 /** Live, category-filtered parts of the covered streams. */
 class Selection {
-  readonly bySession = new Map<string, CategorySegment[]>();
-  readonly streamCount: number;
-  constructor(readonly segments: CategorySegment[]) {
-    for (const segment of segments) {
-      const group = this.bySession.get(segment.session);
-      if (group) group.push(segment);
-      else this.bySession.set(segment.session, [segment]);
+    readonly bySession = new Map<string, CategorySegment[]>();
+    readonly streamCount: number;
+    constructor(readonly segments: CategorySegment[]) {
+        for(const segment of segments){const group=this.bySession.get(segment.session);if(group)group.push(segment);else this.bySession.set(segment.session,[segment]);}
+        this.streamCount=new Set(segments.map(segment=>segment.session)).size;
     }
-    this.streamCount = new Set(segments.map((segment) => segment.session)).size;
-  }
-  at(sid: string, at: number) {
-    return (this.bySession.get(sid) ?? []).find((s) => at >= s.from && at < s.to);
-  }
-  contains(sid: string, at: number) {
-    return this.at(sid, at) !== undefined;
-  }
-  clip(span: Span) {
-    return (this.bySession.get(span.session) ?? [])
-      .filter((s) => s.from < span.to && s.to > span.from)
-      .map((s) => ({ ...span, from: Math.max(span.from, s.from), to: Math.min(span.to, s.to) }));
-  }
+    at(sid: string, at: number) {return (this.bySession.get(sid)??[]).find(s=>at>=s.from&&at<s.to);}
+    contains(sid: string, at: number) {return this.at(sid,at)!==undefined;}
+    clip(span: Span) {return (this.bySession.get(span.session)??[]).filter(s => s.from < span.to && s.to > span.from).map(s => ({ ...span, from: Math.max(span.from, s.from), to: Math.min(span.to, s.to) }));}
 }
-function selectSegments({ sessions, to, category }: AnalyticsScope, { segments, windows }: StreamLayout) {
-  const breaks = sessions.flatMap((s) =>
-    sessionBreaks(windows(s.id, s.started_at_ms, Math.min(to, s.ended_at_ms ?? to))).map((span) => ({
-      ...span,
-      session: s.id,
-    })),
-  );
-  const liveSegments = segments.flatMap((segment) =>
-    windows(segment.session, segment.from, segment.to).map((span) => ({ ...segment, ...span })),
-  );
-  return { breaks, selection: new Selection(liveSegments.filter((s) => !category || s.categoryId === category)) };
+function selectSegments({sessions,to,category}: AnalyticsScope, {segments,windows}: StreamLayout) {
+    const breaks=sessions.flatMap(s=>sessionBreaks(windows(s.id,s.started_at_ms,Math.min(to,s.ended_at_ms??to))).map(span=>({...span,session:s.id})));
+    const liveSegments=segments.flatMap(segment=>windows(segment.session,segment.from,segment.to).map(span=>({...segment,...span})));
+    return {breaks,selection:new Selection(liveSegments.filter(s => !category || s.categoryId === category))};
 }
 /** Per-minute timeline and per-person rows under construction, with the shared expansion budget. */
 class AudienceFrame {
-  readonly timeline = new Map<number, TimelinePoint>();
-  readonly entities = new Map<string, Entity>();
-  private expanded = 0;
-  constructor(private readonly botPeople: ReadonlySet<string>) {}
-  minute(at: number): TimelinePoint {
-    at = Math.floor(at / 60000) * 60000;
-    let row = this.timeline.get(at);
-    if (!row) {
-      row = {
-        at,
-        messages: 0,
-        twitchMessages: 0,
-        youtubeMessages: 0,
-        regularTwitchMessages: 0,
-        regularYoutubeMessages: 0,
-        followerTwitchMessages: 0,
-        followerYoutubeMessages: 0,
-        unknownMessages: 0,
-        unknownTwitchMessages: 0,
-        unknownYoutubeMessages: 0,
-        observed: 0,
-        estimated: 0,
-        regularObserved: 0,
-        regularEstimated: 0,
-        regularMessages: 0,
-        viewers: null,
-        twitchViewers: null,
-        youtubeViewers: null,
-        presenceKnown: false,
-        participants: 0,
-        regularParticipants: 0,
-        followerParticipants: 0,
-        followerObserved: 0,
-        followerEstimated: 0,
-        followerMessages: 0,
-      };
-      this.timeline.set(at, row);
+    readonly timeline = new Map<number, TimelinePoint>();
+    readonly entities = new Map<string, Entity>();
+    private expanded = 0;
+    constructor(private readonly botPeople: ReadonlySet<string>) {}
+    minute(at: number): TimelinePoint { at = Math.floor(at / 60000) * 60000; let row = this.timeline.get(at); if (!row) {
+        row = { at, messages: 0, twitchMessages:0,youtubeMessages:0,regularTwitchMessages:0,regularYoutubeMessages:0,followerTwitchMessages:0,followerYoutubeMessages:0,unknownMessages:0,unknownTwitchMessages:0,unknownYoutubeMessages:0, observed: 0, estimated: 0, regularObserved: 0, regularEstimated: 0, regularMessages: 0, viewers: null, twitchViewers: null, youtubeViewers: null, presenceKnown: false,participants:0,regularParticipants:0,followerParticipants:0,followerObserved:0,followerEstimated:0,followerMessages:0 };
+        this.timeline.set(at, row);
+    } return row; }
+    entity(id: string, name: string, platform: Platform): Entity { let e = this.entities.get(id); if (!e) {
+        e = { is_bot:Number(this.botPeople.has(id)),id, name, source: platform, sources:[platform], messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, sessionIds: new Set(), attendanceSessionIds: new Set(), coreSessionIds: [], regular: false, intervals: [], donations: {}, core: false, tags:[], manualCore:null, follower:null,arrivalHours:[] };
+        this.entities.set(id, e);
+    } else if(!e.sources.includes(platform)) e.sources.push(platform); return e; }
+    /** Counts one expanded minute; the budget is shared by every stage of one report. */
+    expand(): void {
+        if (++this.expanded > 2000000)
+            throw new Error(RANGE_TOO_LARGE);
     }
-    return row;
-  }
-  entity(id: string, name: string, platform: Platform): Entity {
-    let e = this.entities.get(id);
-    if (!e) {
-      e = {
-        is_bot: Number(this.botPeople.has(id)),
-        id,
-        name,
-        source: platform,
-        sources: [platform],
-        messages: 0,
-        observedMinutes: 0,
-        estimatedChatMinutes: 0,
-        sessionIds: new Set(),
-        attendanceSessionIds: new Set(),
-        coreSessionIds: [],
-        regular: false,
-        intervals: [],
-        donations: {},
-        core: false,
-        tags: [],
-        manualCore: null,
-        follower: null,
-        arrivalHours: [],
-      };
-      this.entities.set(id, e);
-    } else if (!e.sources.includes(platform)) e.sources.push(platform);
-    return e;
-  }
-  /** Counts one expanded minute; the budget is shared by every stage of one report. */
-  expand(): void {
-    if (++this.expanded > 2000000) throw new Error(RANGE_TOO_LARGE);
-  }
 }
 /** Message and donation totals keyed by minute, stream and category. */
 class ActivityTally {
-  readonly platformMessageAuthors = {
-    twitch: new Map<number, Map<string, number>>(),
-    youtube: new Map<number, Map<string, number>>(),
-  };
-  readonly streamAuthors = new Map<string, Map<number, Set<string>>>();
-  readonly sessionMessages = new Map<string, number>();
-  readonly categoryAudience = new Map<string, Set<string>>();
-  readonly categoryMessages = new Map<string, number>();
-  readonly categoryDonations = new Map<string, Record<string, string>>();
-  readonly streamDonations = new Map<string, Record<string, string>>();
-  readonly categoryDonationCounts = new Map<string, number>();
-  readonly streamDonationCounts = new Map<string, number>();
-  readonly minuteDonations = new Map<number, Record<string, string>>();
-  readonly minuteDonationCounts = new Map<number, number>();
-  constructor(private readonly selection: Selection) {}
-  addMessages(sid: string, at: number, n: number, id: string, platform: Platform) {
-    const segment = this.selection.at(sid, at);
-    if (segment) {
-      if (n > 0) {
-        const atMinute = Math.floor(at / 60000) * 60000;
-        const platformAuthors = this.platformMessageAuthors[platform].get(atMinute) ?? new Map<string, number>();
-        platformAuthors.set(id, (platformAuthors.get(id) ?? 0) + n);
-        this.platformMessageAuthors[platform].set(atMinute, platformAuthors);
-        const minutes = this.streamAuthors.get(sid) ?? new Map<number, Set<string>>(),
-          ids = minutes.get(atMinute) ?? new Set<string>();
+    readonly platformMessageAuthors={twitch:new Map<number,Map<string,number>>(),youtube:new Map<number,Map<string,number>>()};
+    readonly streamAuthors=new Map<string,Map<number,Set<string>>>();
+    readonly sessionMessages = new Map<string, number>();
+    readonly categoryAudience = new Map<string, Set<string>>();
+    readonly categoryMessages = new Map<string, number>();
+    readonly categoryDonations=new Map<string,Record<string,string>>();readonly streamDonations=new Map<string,Record<string,string>>();
+    readonly categoryDonationCounts=new Map<string,number>();readonly streamDonationCounts=new Map<string,number>();
+    readonly minuteDonations=new Map<number,Record<string,string>>();readonly minuteDonationCounts=new Map<number,number>();
+    constructor(private readonly selection: Selection) {}
+    addMessages(sid: string, at: number, n: number, id: string, platform: Platform) { const segment = this.selection.at(sid,at); if (segment) {
+        if(n>0){const atMinute=Math.floor(at/60000)*60000;
+            const platformAuthors=this.platformMessageAuthors[platform].get(atMinute)??new Map<string,number>();platformAuthors.set(id,(platformAuthors.get(id)??0)+n);this.platformMessageAuthors[platform].set(atMinute,platformAuthors);
+            const minutes=this.streamAuthors.get(sid)??new Map<number,Set<string>>(),ids=minutes.get(atMinute)??new Set<string>();ids.add(id);minutes.set(atMinute,ids);this.streamAuthors.set(sid,minutes);
+        }
+        this.sessionMessages.set(sid, (this.sessionMessages.get(sid) ?? 0) + n);
+        this.categoryMessages.set(segment.categoryId, (this.categoryMessages.get(segment.categoryId) ?? 0) + n);
+        const ids = this.categoryAudience.get(segment.categoryId) ?? new Set();
         ids.add(id);
-        minutes.set(atMinute, ids);
-        this.streamAuthors.set(sid, minutes);
-      }
-      this.sessionMessages.set(sid, (this.sessionMessages.get(sid) ?? 0) + n);
-      this.categoryMessages.set(segment.categoryId, (this.categoryMessages.get(segment.categoryId) ?? 0) + n);
-      const ids = this.categoryAudience.get(segment.categoryId) ?? new Set();
-      ids.add(id);
-      this.categoryAudience.set(segment.categoryId, ids);
+        this.categoryAudience.set(segment.categoryId, ids);
+    } }
+    /** A donation inside the selection; callers have already checked `selection.contains`. */
+    addDonation(sid: string, at: number, currency: string, amount: string) {
+        const segment=this.selection.at(sid,at)!;
+        ActivityTally.add(this.categoryDonations,this.categoryDonationCounts,segment.categoryId,currency,amount);
+        ActivityTally.add(this.streamDonations,this.streamDonationCounts,sid,currency,amount);
+        const atMinute=Math.floor(at/60000)*60000,totals=this.minuteDonations.get(atMinute)??{};
+        totals[currency]=(BigInt(totals[currency]??'0')+BigInt(amount)).toString();this.minuteDonations.set(atMinute,totals);this.minuteDonationCounts.set(atMinute,(this.minuteDonationCounts.get(atMinute)??0)+1);
     }
-  }
-  /** A donation inside the selection; callers have already checked `selection.contains`. */
-  addDonation(sid: string, at: number, currency: string, amount: string) {
-    const segment = this.selection.at(sid, at)!;
-    ActivityTally.add(this.categoryDonations, this.categoryDonationCounts, segment.categoryId, currency, amount);
-    ActivityTally.add(this.streamDonations, this.streamDonationCounts, sid, currency, amount);
-    const atMinute = Math.floor(at / 60000) * 60000,
-      totals = this.minuteDonations.get(atMinute) ?? {};
-    totals[currency] = (BigInt(totals[currency] ?? '0') + BigInt(amount)).toString();
-    this.minuteDonations.set(atMinute, totals);
-    this.minuteDonationCounts.set(atMinute, (this.minuteDonationCounts.get(atMinute) ?? 0) + 1);
-  }
-  private static add(
-    totals: Map<string, Record<string, string>>,
-    counts: Map<string, number>,
-    key: string,
-    currency: string,
-    amount: string,
-  ) {
-    const values = totals.get(key) ?? {};
-    values[currency] = (BigInt(values[currency] ?? '0') + BigInt(amount)).toString();
-    totals.set(key, values);
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
+    private static add(totals:Map<string,Record<string,string>>,counts:Map<string,number>,key:string,currency:string,amount:string) {
+        const values=totals.get(key)??{};values[currency]=(BigInt(values[currency]??'0')+BigInt(amount)).toString();totals.set(key,values);counts.set(key,(counts.get(key)??0)+1);
+    }
 }
 interface AnalyticsContext {
-  db: Database.Database;
-  options: AnalyticsOptions;
-  scope: AnalyticsScope;
-  layout: StreamLayout;
-  selection: Selection;
-  frame: AudienceFrame;
-  tally: ActivityTally;
-  allowed: Map<string, string>;
-  activity: ActivityInput[];
-  coreDurations: Map<string, number>;
-  corePresence: Map<string, Span[]>;
+    db: Database.Database;
+    options: AnalyticsOptions;
+    scope: AnalyticsScope;
+    layout: StreamLayout;
+    selection: Selection;
+    frame: AudienceFrame;
+    tally: ActivityTally;
+    allowed: Map<string, string>;
+    activity: ActivityInput[];
+    coreDurations: Map<string, number>;
+    corePresence: Map<string, Span[]>;
 }
 /** With bots included they get their own series; otherwise they are taken out of viewer samples. */
-function applyBotPresence({
-  options,
-  scope: { botPeople, source },
-  layout: { samples },
-  selection,
-  frame,
-  activity,
-}: AnalyticsContext) {
-  const botPresence = new Map<string, Map<number, Set<string>>>();
-  for (const row of activity) {
-    if (!botPeople.has(row.person)) continue;
-    const minutes = botPresence.get(row.session + ':' + row.source) ?? new Map<number, Set<string>>();
-    botPresence.set(row.session + ':' + row.source, minutes);
-    for (const span of selection.clip({ ...row, kind: 'observed' }))
-      for (let at = Math.floor(span.from / 60000) * 60000; at < span.to; at += 60000) {
-        frame.expand();
-        const ids = minutes.get(at) ?? new Set<string>();
-        ids.add(row.person);
-        minutes.set(at, ids);
-      }
-  }
-  for (const sample of samples)
-    for (const platform of ['twitch', 'youtube'] as const) {
-      const count =
-        botPresence.get(sample.session_id + ':' + platform)?.get(Math.floor(sample.observed_at_ms / 60000) * 60000)
-          ?.size ?? 0;
-      const key = platform === 'twitch' ? 'twitch_viewers' : 'youtube_viewers',
-        botKey = platform === 'twitch' ? 'botTwitchViewers' : 'botYoutubeViewers';
-      if (sample[key] !== null) {
-        const bots = Math.min(sample[key], count);
-        if (options.excludedLogins === false && (source === 'all' || source === platform)) {
-          const point = frame.minute(sample.observed_at_ms);
-          point[botKey] = bots;
-          point.botViewers = (point.botTwitchViewers ?? 0) + (point.botYoutubeViewers ?? 0);
-        } else if (options.excludedLogins !== false) sample[key] = Math.max(0, sample[key] - count);
-      }
+function applyBotPresence({options,scope:{botPeople,source},layout:{samples},selection,frame,activity}: AnalyticsContext) {
+    const botPresence=new Map<string,Map<number,Set<string>>>();
+    for(const row of activity){
+        if(!botPeople.has(row.person))continue;
+        const minutes=botPresence.get(row.session+':'+row.source)??new Map<number,Set<string>>();botPresence.set(row.session+':'+row.source,minutes);
+        for(const span of selection.clip({...row,kind:'observed'}))for(let at=Math.floor(span.from/60000)*60000;at<span.to;at+=60000){
+            frame.expand();
+            const ids=minutes.get(at)??new Set<string>();ids.add(row.person);minutes.set(at,ids);
+        }
     }
-  if (options.excludedLogins === false)
-    for (const [key, minutes] of botPresence) {
-      const platform = key.endsWith(':twitch') ? 'twitch' : 'youtube';
-      if (source !== 'all' && source !== platform) continue;
-      for (const [at, ids] of minutes) {
-        const point = frame.minute(at);
-        const field = platform === 'twitch' ? 'botObserved' : 'botEstimated';
-        point[field] = (point[field] ?? 0) + ids.size;
-        point.botParticipants = (point.botParticipants ?? 0) + ids.size;
-      }
+    for(const sample of samples)for(const platform of ['twitch','youtube'] as const){
+        const count=botPresence.get(sample.session_id+':'+platform)?.get(Math.floor(sample.observed_at_ms/60000)*60000)?.size??0;
+        const key=platform==='twitch'?'twitch_viewers':'youtube_viewers',botKey=platform==='twitch'?'botTwitchViewers':'botYoutubeViewers';
+        if(sample[key]!==null){
+            const bots=Math.min(sample[key],count);
+            if(options.excludedLogins===false&&(source==='all'||source===platform)){const point=frame.minute(sample.observed_at_ms);point[botKey]=bots;point.botViewers=(point.botTwitchViewers??0)+(point.botYoutubeViewers??0);}
+            else if(options.excludedLogins!==false)sample[key]=Math.max(0,sample[key]-count);
+        }
     }
+    if(options.excludedLogins===false)for(const [key,minutes] of botPresence){const platform=key.endsWith(':twitch')?'twitch':'youtube';if(source!=='all'&&source!==platform)continue;for(const [at,ids] of minutes){const point=frame.minute(at);const field=platform==='twitch'?'botObserved':'botEstimated';point[field]=(point[field]??0)+ids.size;point.botParticipants=(point.botParticipants??0)+ids.size;}}
 }
 /** Twitch presence: poll clusters for partially covered streams, otherwise the activity projection. */
-function collectTwitchPresence({
-  db,
-  options,
-  scope: { sessions, from, to, sessionIds },
-  selection,
-  frame,
-  allowed,
-  activity,
-}: AnalyticsContext) {
-  if (sessions.some((s) => from > s.started_at_ms || to < (s.ended_at_ms ?? to))) {
-    const intervals = limitRows(
-      options.donationsOnly
-        ? []
-        : (db
-            .prepare(
-              `WITH raw AS(SELECT p.session_id,i.person_id,cast(max(p.started_at_ms,?,s.started_at_ms)/60000 AS INTEGER) AS lo,cast(min(p.completed_at_ms,?-1,coalesce(s.ended_at_ms,?)-1)/60000 AS INTEGER) AS hi FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id JOIN sessions s ON s.id=p.session_id WHERE p.status='complete' AND p.completed_at_ms>=? AND p.started_at_ms<? AND p.session_id IN(SELECT value FROM json_each(?))), prior AS(SELECT *,max(hi) OVER(PARTITION BY session_id,person_id ORDER BY lo,hi ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS previous_hi FROM raw WHERE hi>=lo),tagged AS(SELECT *,sum(CASE WHEN previous_hi IS NULL OR lo>previous_hi+1 THEN 1 ELSE 0 END) OVER(PARTITION BY session_id,person_id ORDER BY lo,hi) AS cluster FROM prior) SELECT session_id,person_id,min(lo)*60000 AS first_ms,(max(hi)+1)*60000 AS last_ms FROM tagged GROUP BY session_id,person_id,cluster LIMIT 50001`,
-            )
-            .all(from, to, to, from, to, sessionIds) as any[]),
-    );
-    for (const row of intervals) {
-      const name = allowed.get(row.person_id);
-      if (!name) continue;
-      const e = frame.entity(row.person_id, name, 'twitch');
-      e.intervals.push(
-        ...selection.clip({ from: row.first_ms, to: row.last_ms, session: row.session_id, kind: 'observed' }),
-      );
+function collectTwitchPresence({db,options,scope:{sessions,from,to,sessionIds},selection,frame,allowed,activity}: AnalyticsContext) {
+    if(sessions.some(s=>from>s.started_at_ms||to<(s.ended_at_ms??to))){
+        const intervals = limitRows(options.donationsOnly?[]:db.prepare(`WITH raw AS(SELECT p.session_id,i.person_id,cast(max(p.started_at_ms,?,s.started_at_ms)/60000 AS INTEGER) AS lo,cast(min(p.completed_at_ms,?-1,coalesce(s.ended_at_ms,?)-1)/60000 AS INTEGER) AS hi FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id JOIN sessions s ON s.id=p.session_id WHERE p.status='complete' AND p.completed_at_ms>=? AND p.started_at_ms<? AND p.session_id IN(SELECT value FROM json_each(?))), prior AS(SELECT *,max(hi) OVER(PARTITION BY session_id,person_id ORDER BY lo,hi ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS previous_hi FROM raw WHERE hi>=lo),tagged AS(SELECT *,sum(CASE WHEN previous_hi IS NULL OR lo>previous_hi+1 THEN 1 ELSE 0 END) OVER(PARTITION BY session_id,person_id ORDER BY lo,hi) AS cluster FROM prior) SELECT session_id,person_id,min(lo)*60000 AS first_ms,(max(hi)+1)*60000 AS last_ms FROM tagged GROUP BY session_id,person_id,cluster LIMIT 50001`).all(from, to, to, from, to, sessionIds) as any[]);
+        for (const row of intervals) {
+            const name = allowed.get(row.person_id);
+            if (!name)
+                continue;
+            const e = frame.entity(row.person_id, name, 'twitch');
+            e.intervals.push(...selection.clip({ from: row.first_ms, to: row.last_ms, session: row.session_id, kind: 'observed' }));
+        }
+    }else{
+        for (const row of activity.filter(r=>r.source==='twitch')) {
+            const name = allowed.get(row.person);
+            if (!name) continue;
+            const spans=selection.clip({from:row.from,to:row.to,session:row.session,kind:'observed'});
+            frame.entity(row.person,name,'twitch').intervals.push(...spans);
+        }
     }
-  } else {
-    for (const row of activity.filter((r) => r.source === 'twitch')) {
-      const name = allowed.get(row.person);
-      if (!name) continue;
-      const spans = selection.clip({ from: row.from, to: row.to, session: row.session, kind: 'observed' });
-      frame.entity(row.person, name, 'twitch').intervals.push(...spans);
-    }
-  }
 }
-function collectTwitchMessages({
-  db,
-  options,
-  scope: { from, to, sessionIds, botPeople },
-  selection,
-  frame,
-  tally,
-  allowed,
-}: AnalyticsContext) {
-  const messages = limitRows(
-    options.donationsOnly
-      ? []
-      : (db
-          .prepare(
-            `SELECT i.person_id,es.session_id,min(e.occurred_at_ms) AS at,count(*) AS n,(SELECT c.category_id FROM stream_samples c WHERE c.session_id=es.session_id AND c.observed_at_ms<=e.occurred_at_ms ORDER BY c.observed_at_ms DESC LIMIT 1) AS cat FROM event_sessions es INDEXED BY event_sessions_session CROSS JOIN events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE e.type='chat.message' AND e.occurred_at_ms>=? AND e.occurred_at_ms<? AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id) AND es.session_id IN(SELECT value FROM json_each(?)) GROUP BY i.person_id,es.session_id,cast(e.occurred_at_ms/60000 AS INTEGER),cat LIMIT 50001`,
-          )
-          .all(from, to, sessionIds) as any[]),
-  );
-  for (const row of messages) {
-    if (
-      options.excludedLogins === false &&
-      botPeople.has(row.person_id) &&
-      selection.contains(row.session_id, row.at)
-    ) {
-      const point = frame.minute(row.at);
-      point.botMessages = (point.botMessages ?? 0) + row.n;
-      point.botTwitchMessages = (point.botTwitchMessages ?? 0) + row.n;
+function collectTwitchMessages({db,options,scope:{from,to,sessionIds,botPeople},selection,frame,tally,allowed}: AnalyticsContext) {
+    const messages = limitRows(options.donationsOnly?[]:db.prepare(`SELECT i.person_id,es.session_id,min(e.occurred_at_ms) AS at,count(*) AS n,(SELECT c.category_id FROM stream_samples c WHERE c.session_id=es.session_id AND c.observed_at_ms<=e.occurred_at_ms ORDER BY c.observed_at_ms DESC LIMIT 1) AS cat FROM event_sessions es INDEXED BY event_sessions_session CROSS JOIN events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE e.type='chat.message' AND e.occurred_at_ms>=? AND e.occurred_at_ms<? AND (json_extract(e.payload_json,'$.originChannelId') IS NULL OR json_extract(e.payload_json,'$.originChannelId')=e.account_id) AND es.session_id IN(SELECT value FROM json_each(?)) GROUP BY i.person_id,es.session_id,cast(e.occurred_at_ms/60000 AS INTEGER),cat LIMIT 50001`).all(from, to, sessionIds) as any[]);
+    for (const row of messages) {
+        if(options.excludedLogins===false&&botPeople.has(row.person_id)&&selection.contains(row.session_id,row.at)){const point=frame.minute(row.at);point.botMessages=(point.botMessages??0)+row.n;point.botTwitchMessages=(point.botTwitchMessages??0)+row.n;}
+        const name = allowed.get(row.person_id);
+        if (!name || !selection.contains(row.session_id, row.at))
+            continue;
+        const e = frame.entity(row.person_id, name, 'twitch');
+        e.messages += row.n;
+        e.sessionIds.add(row.session_id);
+        e.attendanceSessionIds.add(row.session_id);
+        frame.minute(row.at).messages += row.n;
+        frame.minute(row.at).twitchMessages += row.n;
+        tally.addMessages(row.session_id, row.at, row.n, row.person_id, 'twitch');
     }
-    const name = allowed.get(row.person_id);
-    if (!name || !selection.contains(row.session_id, row.at)) continue;
-    const e = frame.entity(row.person_id, name, 'twitch');
-    e.messages += row.n;
-    e.sessionIds.add(row.session_id);
-    e.attendanceSessionIds.add(row.session_id);
-    frame.minute(row.at).messages += row.n;
-    frame.minute(row.at).twitchMessages += row.n;
-    tally.addMessages(row.session_id, row.at, row.n, row.person_id, 'twitch');
-  }
 }
-function collectTwitchDonations({
-  db,
-  options,
-  scope: { from, to, sessionIds },
-  selection,
-  frame,
-  tally,
-  allowed,
-}: AnalyticsContext) {
-  const tips = limitRows(
-    options.activityOnly
-      ? []
-      : (db
-          .prepare(
-            `SELECT i.person_id,es.session_id,e.occurred_at_ms AS at,'RUB' AS currency,e.rub_amount_minor AS amount FROM valued_events e JOIN identities i ON i.id=e.identity_id JOIN event_sessions es ON es.event_id=e.id WHERE e.type='donation' AND e.occurred_at_ms>=? AND e.occurred_at_ms<? AND es.session_id IN(SELECT value FROM json_each(?)) LIMIT 50001`,
-          )
-          .all(from, to, sessionIds) as any[]),
-  );
-  for (const tip of tips) {
-    const name = allowed.get(tip.person_id);
-    if (!name || !selection.contains(tip.session_id, tip.at) || !tip.currency || !/^\d+$/.test(tip.amount)) continue;
-    const e = frame.entity(tip.person_id, name, 'twitch');
-    e.donations[tip.currency] = (BigInt(e.donations[tip.currency] ?? '0') + BigInt(tip.amount)).toString();
-    e.sessionIds.add(tip.session_id);
-    tally.addDonation(tip.session_id, tip.at, tip.currency, tip.amount);
-  }
+function collectTwitchDonations({db,options,scope:{from,to,sessionIds},selection,frame,tally,allowed}: AnalyticsContext) {
+    const tips = limitRows(options.activityOnly?[]:db.prepare(`SELECT i.person_id,es.session_id,e.occurred_at_ms AS at,'RUB' AS currency,e.rub_amount_minor AS amount FROM valued_events e JOIN identities i ON i.id=e.identity_id JOIN event_sessions es ON es.event_id=e.id WHERE e.type='donation' AND e.occurred_at_ms>=? AND e.occurred_at_ms<? AND es.session_id IN(SELECT value FROM json_each(?)) LIMIT 50001`).all(from, to, sessionIds) as any[]);
+    for (const tip of tips) {
+        const name = allowed.get(tip.person_id);
+        if (!name || !selection.contains(tip.session_id, tip.at) || !tip.currency || !/^\d+$/.test(tip.amount))
+            continue;
+        const e = frame.entity(tip.person_id, name, 'twitch');
+        e.donations[tip.currency] = (BigInt(e.donations[tip.currency] ?? '0') + BigInt(tip.amount)).toString();
+        e.sessionIds.add(tip.session_id);
+        tally.addDonation(tip.session_id,tip.at,tip.currency,tip.amount);
+    }
 }
 /** YouTube chat: messages plus a chat-proxy presence window after each author minute. */
-function collectYoutubeChat(
-  { db, scope: { from, to, window, botPeople }, selection, frame, tally, allowed }: AnalyticsContext,
-  account: string,
-) {
-  const personLinks = new Map(
-    (
-      db.prepare('SELECT external_id,person_id FROM youtube_identities WHERE account_id=?').all(account) as {
-        external_id: string;
-        person_id: string;
-      }[]
-    ).map((row) => [row.external_id, row.person_id]),
-  );
-  const excludedAuthors = new Set(
-    (
-      db
-        .prepare(
-          `SELECT DISTINCT author_id FROM youtube_messages WHERE account_id=? AND json_extract(payload_json,'$.authorDetails.isChatOwner')=1`,
-        )
-        .all(account) as { author_id: string }[]
-    ).map((row) => row.author_id),
-  );
-  const chats = limitRows(
-    db
-      .prepare(
-        `WITH scoped AS (
+function collectYoutubeChat({db,scope:{from,to,window,botPeople},selection,frame,tally,allowed}: AnalyticsContext, account: string) {
+    const personLinks=new Map((db.prepare('SELECT external_id,person_id FROM youtube_identities WHERE account_id=?').all(account) as {external_id:string;person_id:string}[]).map(row=>[row.external_id,row.person_id]));
+    const excludedAuthors = new Set((db.prepare(`SELECT DISTINCT author_id FROM youtube_messages WHERE account_id=? AND json_extract(payload_json,'$.authorDetails.isChatOwner')=1`).all(account) as {author_id:string}[]).map(row=>row.author_id));
+    const chats = limitRows(db.prepare(`WITH scoped AS (
     SELECT *, (SELECT ps.session_id FROM platform_streams ps JOIN sessions s ON s.id=ps.session_id WHERE ps.platform='youtube' AND ps.account_id=m.account_id AND ps.started_at_ms<=m.published_at_ms AND coalesce(ps.ended_at_ms,s.ended_at_ms,?)>m.published_at_ms ORDER BY ps.started_at_ms DESC LIMIT 1) AS sid
     FROM youtube_messages m WHERE account_id=? AND author_id!=? AND author_id!='' AND published_at_ms>=? AND published_at_ms<? AND json_extract(payload_json,'$.snippet.type') IN('textMessageEvent','superChatEvent','superStickerEvent')
   ), categorized AS (
     SELECT *, (SELECT c.category_id FROM stream_samples c WHERE c.session_id=scoped.sid AND c.observed_at_ms<=scoped.published_at_ms ORDER BY c.observed_at_ms DESC LIMIT 1) AS cat FROM scoped
-  ) SELECT author_id,max(json_extract(payload_json,'$.authorDetails.displayName')) AS name,min(published_at_ms) AS at,max(published_at_ms) AS last_at,sum(CASE WHEN published_at_ms>=? THEN 1 ELSE 0 END) AS n,min(CASE WHEN published_at_ms>=? THEN published_at_ms END) AS message_at,sid,cat FROM categorized GROUP BY author_id,cast(published_at_ms/60000 AS INTEGER),sid,cat LIMIT 50001`,
-      )
-      .all(to, account, account, Math.max(0, from - window * 60000), to, from, from) as any[],
-  );
-  for (const chat of chats) {
-    if (excludedAuthors.has(chat.author_id) || !chat.sid) continue;
-    const personId = personLinks.get(chat.author_id);
-    if (!personId || !allowed.has(personId)) continue;
-    const e = frame.entity(personId, allowed.get(personId)!, 'youtube');
-    const spans = selection.clip({
-      from: chat.at,
-      to: Math.min(to, chat.last_at + window * 60000),
-      session: chat.sid,
-      kind: 'chat_proxy',
-    });
-    if (chat.n && selection.contains(chat.sid, chat.message_at)) {
-      e.messages += chat.n;
-      e.sessionIds.add(chat.sid);
-      e.attendanceSessionIds.add(chat.sid);
-      frame.minute(chat.message_at).messages += chat.n;
-      frame.minute(chat.message_at).youtubeMessages += chat.n;
-      if (botPeople.has(personId)) {
-        const point = frame.minute(chat.message_at);
-        point.botMessages = (point.botMessages ?? 0) + chat.n;
-        point.botYoutubeMessages = (point.botYoutubeMessages ?? 0) + chat.n;
-      }
-      tally.addMessages(chat.sid, chat.message_at, chat.n, e.id, 'youtube');
+  ) SELECT author_id,max(json_extract(payload_json,'$.authorDetails.displayName')) AS name,min(published_at_ms) AS at,max(published_at_ms) AS last_at,sum(CASE WHEN published_at_ms>=? THEN 1 ELSE 0 END) AS n,min(CASE WHEN published_at_ms>=? THEN published_at_ms END) AS message_at,sid,cat FROM categorized GROUP BY author_id,cast(published_at_ms/60000 AS INTEGER),sid,cat LIMIT 50001`).all(to, account, account, Math.max(0,from-window*60000), to, from, from) as any[]);
+    for (const chat of chats) {
+        if (excludedAuthors.has(chat.author_id) || !chat.sid)
+            continue;
+        const personId=personLinks.get(chat.author_id);
+        if(!personId||!allowed.has(personId))continue;
+        const e = frame.entity(personId, allowed.get(personId)!, 'youtube');
+        const spans=selection.clip({ from: chat.at, to: Math.min(to, chat.last_at + window * 60000), session: chat.sid, kind: 'chat_proxy' });
+        if (chat.n && selection.contains(chat.sid,chat.message_at)) {
+            e.messages += chat.n;
+            e.sessionIds.add(chat.sid);
+            e.attendanceSessionIds.add(chat.sid);
+            frame.minute(chat.message_at).messages += chat.n;
+            frame.minute(chat.message_at).youtubeMessages += chat.n;
+            if(botPeople.has(personId)){const point=frame.minute(chat.message_at);point.botMessages=(point.botMessages??0)+chat.n;point.botYoutubeMessages=(point.botYoutubeMessages??0)+chat.n;}
+            tally.addMessages(chat.sid, chat.message_at, chat.n, e.id, 'youtube');
+        }
+        e.intervals.push(...spans);
     }
-    e.intervals.push(...spans);
-  }
 }
 /** Materializes the selected recording interval, including empty samples and gaps; returns elapsed minutes per minute. */
-function materializeSelection({ selection, frame }: AnalyticsContext): Map<number, number> {
-  const elapsedMinutes = new Map<number, number>();
-  for (const segment of selection.segments)
-    for (let at = Math.floor(segment.from / 60000) * 60000; at < segment.to; at += 60000) {
-      frame.expand();
-      frame.minute(at);
-      elapsedMinutes.set(
-        at,
-        (elapsedMinutes.get(at) ?? 0) +
-          Math.max(0, Math.min(at + 60000, segment.to) - Math.max(at, segment.from)) / 60000,
-      );
+function materializeSelection({selection,frame}: AnalyticsContext): Map<number, number> {
+    const elapsedMinutes=new Map<number,number>();
+    for (const segment of selection.segments) for (let at = Math.floor(segment.from / 60000) * 60000; at < segment.to; at += 60000) {
+        frame.expand();
+        frame.minute(at);
+        elapsedMinutes.set(at,(elapsedMinutes.get(at)??0)+Math.max(0,Math.min(at+60000,segment.to)-Math.max(at,segment.from))/60000);
     }
-  return elapsedMinutes;
+    return elapsedMinutes;
 }
 /** Followers from the latest snapshots; a complete Twitch snapshot also proves who does not follow. */
 function followerSets(db: Database.Database) {
-  const followRows = db.prepare(latestFollowerSnapshotsSql).all() as {
-    source: string;
-    account_id: string;
-    payload_json: string;
-  }[];
-  const followerPeople = new Set<string>(),
-    negativeFollowers = new Set<string>();
-  const platformFollowers = { twitch: new Set<string>(), youtube: new Set<string>() };
-  const platformNonFollowers = { twitch: new Set<string>(), youtube: new Set<string>() };
-  for (const snapshot of followRows) {
-    const data = JSON.parse(snapshot.payload_json);
-    const ids = JSON.stringify((data.followers ?? []).map((f: any) => f.id));
-    const members =
-      snapshot.source === 'youtube'
-        ? db
-            .prepare(
-              'SELECT person_id FROM youtube_identities WHERE account_id=? AND external_id IN(SELECT value FROM json_each(?))',
-            )
-            .all(snapshot.account_id, ids)
-        : db
-            .prepare(
-              "SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id IN(SELECT value FROM json_each(?))",
-            )
-            .all(snapshot.account_id, ids);
-    for (const member of members as { person_id: string }[]) {
-      followerPeople.add(member.person_id);
-      if (snapshot.source === 'twitch' || snapshot.source === 'youtube')
-        platformFollowers[snapshot.source].add(member.person_id);
-    }
-    if (snapshot.source === 'twitch' && data.complete) {
-      const absent = db
-        .prepare(
-          "SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id NOT IN(SELECT value FROM json_each(?))",
-        )
-        .all(snapshot.account_id, ids) as { person_id: string }[];
-      for (const member of absent) {
-        negativeFollowers.add(member.person_id);
-        platformNonFollowers.twitch.add(member.person_id);
+    const followRows=db.prepare(latestFollowerSnapshotsSql).all() as {source:string;account_id:string;payload_json:string}[];
+    const followerPeople=new Set<string>(),negativeFollowers=new Set<string>();
+    const platformFollowers={twitch:new Set<string>(),youtube:new Set<string>()};
+    const platformNonFollowers={twitch:new Set<string>(),youtube:new Set<string>()};
+    for(const snapshot of followRows){
+      const data=JSON.parse(snapshot.payload_json);const ids=JSON.stringify((data.followers??[]).map((f:any)=>f.id));
+      const members=snapshot.source==='youtube'?db.prepare('SELECT person_id FROM youtube_identities WHERE account_id=? AND external_id IN(SELECT value FROM json_each(?))').all(snapshot.account_id,ids):db.prepare("SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id IN(SELECT value FROM json_each(?))").all(snapshot.account_id,ids);
+      for(const member of members as {person_id:string}[]){followerPeople.add(member.person_id);if(snapshot.source==='twitch'||snapshot.source==='youtube')platformFollowers[snapshot.source].add(member.person_id);}
+      if(snapshot.source==='twitch'&&data.complete){
+        const absent=db.prepare("SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id NOT IN(SELECT value FROM json_each(?))").all(snapshot.account_id,ids) as {person_id:string}[];
+        for(const member of absent){negativeFollowers.add(member.person_id);platformNonFollowers.twitch.add(member.person_id);}
       }
     }
-  }
-  return { followerPeople, negativeFollowers, platformFollowers, platformNonFollowers };
+    return {followerPeople,negativeFollowers,platformFollowers,platformNonFollowers};
 }
 type Followers = ReturnType<typeof followerSets>;
 /** Merges a person's spans and derives minutes, arrival hours, core membership and follower state. */
-function settleEntity(
-  e: Entity,
-  {
-    scope: { clock, regularThresholdPercent, coreMembership },
-    selection,
-    coreDurations,
-    corePresence,
-  }: AnalyticsContext,
-  { followerPeople, negativeFollowers }: Followers,
-  preferences: Map<string, number | null>,
-) {
-  e.intervals = unionSpans(e.intervals);
-  for (const span of e.intervals) e.attendanceSessionIds.add(span.session);
-  for (const span of e.intervals) {
-    const duration = (span.to - span.from) / 60000;
-    if (span.kind === 'observed') e.observedMinutes += duration;
-    else e.estimatedChatMinutes += duration;
-    e.sessionIds.add(span.session);
-  }
-  const arrivals = new Map<string, { day: string; hour: number; visits: number }>();
-  for (const span of unionSpans(e.intervals.map((span) => ({ ...span, kind: 'observed' as const })))) {
-    const parts = clock.formatToParts(span.from),
-      day = parts.find((x) => x.type === 'weekday')!.value,
-      hour = Number(parts.find((x) => x.type === 'hour')!.value),
-      key = `${day}:${hour}`;
-    const arrival = arrivals.get(key) ?? { day, hour, visits: 0 };
-    arrival.visits++;
-    arrivals.set(key, arrival);
-  }
-  e.arrivalHours = [...arrivals.values()].sort((a, b) => b.visits - a.visits || a.hour - b.hour);
-  const coreTime = new Map<string, number>();
-  for (const span of unionSpans(corePresence.get(e.id) ?? []))
-    coreTime.set(span.session, (coreTime.get(span.session) ?? 0) + span.to - span.from);
-  e.coreSessionIds = [...e.attendanceSessionIds].filter(
-    (id) => (coreDurations.get(id) ?? 0) > 0 && (coreTime.get(id) ?? 0) * 5 >= coreDurations.get(id)!,
-  );
-  const override = preferences.get(e.id);
-  e.manualCore = override == null ? null : override === 1;
-  e.core = classifyCore(
-    e.coreSessionIds.length,
-    selection.streamCount,
-    regularThresholdPercent,
-    e.manualCore,
-    coreMembership?.has(e.id),
-  );
-  e.follower = followerPeople.has(e.id)
-    ? true
-    : negativeFollowers.has(e.id) && !e.sources.includes('youtube')
-      ? false
-      : null;
-  e.regular = e.core; // Compatibility fields refer to the same audience core.
+function settleEntity(e: Entity, {scope:{clock,regularThresholdPercent,coreMembership},selection,coreDurations,corePresence}: AnalyticsContext, {followerPeople,negativeFollowers}: Followers, preferences: Map<string, number|null>) {
+    e.intervals = unionSpans(e.intervals);
+    for(const span of e.intervals)e.attendanceSessionIds.add(span.session);
+    for(const span of e.intervals){
+        const duration=(span.to-span.from)/60000;
+        if(span.kind==='observed')e.observedMinutes+=duration;else e.estimatedChatMinutes+=duration;
+        e.sessionIds.add(span.session);
+    }
+    const arrivals=new Map<string,{day:string;hour:number;visits:number}>();
+    for(const span of unionSpans(e.intervals.map(span=>({...span,kind:'observed' as const})))){
+      const parts=clock.formatToParts(span.from),day=parts.find(x=>x.type==='weekday')!.value,hour=Number(parts.find(x=>x.type==='hour')!.value),key=`${day}:${hour}`;
+      const arrival=arrivals.get(key)??{day,hour,visits:0};arrival.visits++;arrivals.set(key,arrival);
+    }
+    e.arrivalHours=[...arrivals.values()].sort((a,b)=>b.visits-a.visits||a.hour-b.hour);
+    const coreTime = new Map<string,number>();
+    for (const span of unionSpans(corePresence.get(e.id) ?? [])) coreTime.set(span.session,(coreTime.get(span.session) ?? 0)+span.to-span.from);
+    e.coreSessionIds = [...e.attendanceSessionIds].filter(id => (coreDurations.get(id) ?? 0)>0 && (coreTime.get(id) ?? 0)*5 >= coreDurations.get(id)!);
+    const override=preferences.get(e.id);
+    e.manualCore=override==null?null:override===1;
+    e.core=classifyCore(e.coreSessionIds.length,selection.streamCount,regularThresholdPercent,e.manualCore,coreMembership?.has(e.id));
+    e.follower=followerPeople.has(e.id)?true:negativeFollowers.has(e.id)&&!e.sources.includes('youtube')?false:null;
+    e.regular=e.core; // Compatibility fields refer to the same audience core.
 }
 /** Adds one settled person to the per-minute participant series. */
-function addEntityMinutes(
-  e: Entity,
-  frame: AudienceFrame,
-  botPeople: ReadonlySet<string>,
-  activityDurations: Map<number, { observed: number; estimated: number }>,
-) {
-  const signalMinutes = new Set<string>();
-  for (const span of e.intervals) {
-    for (let at = Math.floor(span.from / 60000) * 60000; at < span.to; at += 60000) {
-      frame.expand();
-      const duration = (Math.min(at + 60000, span.to) - Math.max(at, span.from)) / 60000;
-      const durations = activityDurations.get(at) ?? { observed: 0, estimated: 0 };
-      if (span.kind === 'observed') durations.observed += duration;
-      else durations.estimated += duration;
-      activityDurations.set(at, durations);
-      const signalKey = `${span.kind}:${at}`;
-      if (signalMinutes.has(signalKey)) continue;
-      signalMinutes.add(signalKey);
-      const point = frame.minute(at);
-      if (!signalMinutes.has(`all:${at}`)) {
-        signalMinutes.add(`all:${at}`);
-        point.participants++;
-        if (!botPeople.has(e.id) && e.core) point.regularParticipants++;
-        else if (!botPeople.has(e.id) && e.follower) point.followerParticipants++;
-      }
-      if (span.kind === 'observed') {
-        point.observed++;
-        if (!botPeople.has(e.id) && e.regular) point.regularObserved++;
-        else if (!botPeople.has(e.id) && e.follower) point.followerObserved++;
-      } else {
-        point.estimated++;
-        if (!botPeople.has(e.id) && e.regular) point.regularEstimated++;
-        else if (!botPeople.has(e.id) && e.follower) point.followerEstimated++;
-      }
+function addEntityMinutes(e: Entity, frame: AudienceFrame, botPeople: ReadonlySet<string>, activityDurations: Map<number, { observed: number; estimated: number }>) {
+    const signalMinutes=new Set<string>();
+    for (const span of e.intervals) {
+        for (let at = Math.floor(span.from / 60000) * 60000; at < span.to; at += 60000) {
+            frame.expand();
+            const duration = (Math.min(at + 60000, span.to) - Math.max(at, span.from)) / 60000;
+            const durations = activityDurations.get(at) ?? { observed: 0, estimated: 0 };
+            if (span.kind === 'observed') durations.observed += duration;
+            else durations.estimated += duration;
+            activityDurations.set(at, durations);
+            const signalKey=`${span.kind}:${at}`;
+            if(signalMinutes.has(signalKey))continue;
+            signalMinutes.add(signalKey);
+            const point = frame.minute(at);
+            if(!signalMinutes.has(`all:${at}`)){signalMinutes.add(`all:${at}`);point.participants++;if(!botPeople.has(e.id)&&e.core)point.regularParticipants++;else if(!botPeople.has(e.id)&&e.follower)point.followerParticipants++;}
+            if (span.kind === 'observed'){point.observed++;if(!botPeople.has(e.id)&&e.regular)point.regularObserved++;else if(!botPeople.has(e.id)&&e.follower)point.followerObserved++;}
+            else {point.estimated++;if(!botPeople.has(e.id)&&e.regular)point.regularEstimated++;else if(!botPeople.has(e.id)&&e.follower)point.followerEstimated++;}
+        }
     }
-  }
 }
 /** Applies preferences and tags, settles every person and returns activity durations per minute. */
 function finalizeEntities(ctx: AnalyticsContext, followers: Followers) {
-  const {
-      db,
-      scope: { botPeople },
-      frame,
-    } = ctx,
-    entities = frame.entities;
-  const entityIds = JSON.stringify([...entities.keys()]);
-  const preferences = new Map(
-    (
-      db
-        .prepare(
-          'SELECT person_id,manual_core FROM person_preferences WHERE person_id IN(SELECT value FROM json_each(?))',
-        )
-        .all(entityIds) as { person_id: string; manual_core: number | null }[]
-    ).map((row) => [row.person_id, row.manual_core]),
-  );
-  const tags = db
-    .prepare(
-      `WITH RECURSIVE owners(person_id,origin_id) AS (SELECT value,value FROM json_each(?) UNION SELECT o.person_id,m.source_person_id FROM owners o JOIN person_merges m ON m.target_person_id=o.origin_id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT o.person_id,t.label FROM owners o JOIN person_tags t ON t.person_id=o.origin_id ORDER BY t.label`,
-    )
-    .all(entityIds) as { person_id: string; label: string }[];
-  for (const tag of tags) entities.get(tag.person_id)!.tags.push(tag.label);
-  const activityDurations = new Map<number, { observed: number; estimated: number }>();
-  for (const e of entities.values()) {
-    settleEntity(e, ctx, followers, preferences);
-    addEntityMinutes(e, frame, botPeople, activityDurations);
-  }
-  return activityDurations;
+    const {db,scope:{botPeople},frame}=ctx,entities=frame.entities;
+    const entityIds=JSON.stringify([...entities.keys()]);
+    const preferences=new Map((db.prepare("SELECT person_id,manual_core FROM person_preferences WHERE person_id IN(SELECT value FROM json_each(?))").all(entityIds) as {person_id:string;manual_core:number|null}[]).map(row=>[row.person_id,row.manual_core]));
+    const tags=db.prepare(`WITH RECURSIVE owners(person_id,origin_id) AS (SELECT value,value FROM json_each(?) UNION SELECT o.person_id,m.source_person_id FROM owners o JOIN person_merges m ON m.target_person_id=o.origin_id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT o.person_id,t.label FROM owners o JOIN person_tags t ON t.person_id=o.origin_id ORDER BY t.label`).all(entityIds) as {person_id:string;label:string}[];
+    for(const tag of tags)entities.get(tag.person_id)!.tags.push(tag.label);
+    const activityDurations = new Map<number, { observed: number; estimated: number }>();
+    for (const e of entities.values()) {
+        settleEntity(e,ctx,followers,preferences);
+        addEntityMinutes(e,frame,botPeople,activityDurations);
+    }
+    return activityDurations;
 }
 /** Splits message minutes into core, follower and unknown audiences. */
-function splitMessageAudiences(
-  { scope: { botPeople }, frame, tally: { platformMessageAuthors } }: AnalyticsContext,
-  { platformFollowers, platformNonFollowers }: Followers,
-) {
-  for (const platform of ['twitch', 'youtube'] as const)
-    for (const [at, authors] of platformMessageAuthors[platform])
-      for (const [id, n] of authors) {
-        if (botPeople.has(id)) continue;
-        const point = frame.minute(at),
-          core = frame.entities.get(id)?.core;
-        if (core) {
-          point.regularMessages += n;
-          if (platform === 'twitch') point.regularTwitchMessages += n;
-          else point.regularYoutubeMessages += n;
-        } else if (platformFollowers[platform].has(id)) {
-          point.followerMessages += n;
-          if (platform === 'twitch') point.followerTwitchMessages += n;
-          else point.followerYoutubeMessages += n;
-        } else if (!platformNonFollowers[platform].has(id)) {
-          point.unknownMessages += n;
-          if (platform === 'twitch') point.unknownTwitchMessages += n;
-          else point.unknownYoutubeMessages += n;
+function splitMessageAudiences({scope:{botPeople},frame,tally:{platformMessageAuthors}}: AnalyticsContext, {platformFollowers,platformNonFollowers}: Followers) {
+    for(const platform of ['twitch','youtube'] as const)for(const [at,authors] of platformMessageAuthors[platform])for(const [id,n] of authors){
+        if(botPeople.has(id))continue;
+        const point=frame.minute(at),core=frame.entities.get(id)?.core;
+        if(core){point.regularMessages+=n;if(platform==='twitch')point.regularTwitchMessages+=n;else point.regularYoutubeMessages+=n;}
+        else if(platformFollowers[platform].has(id)){point.followerMessages+=n;if(platform==='twitch')point.followerTwitchMessages+=n;else point.followerYoutubeMessages+=n;}
+        else if(!platformNonFollowers[platform].has(id)){point.unknownMessages+=n;if(platform==='twitch')point.unknownTwitchMessages+=n;else point.unknownYoutubeMessages+=n;}
+    }
+}
+function categoryTotals({selection,frame:{entities},tally:{categoryAudience,categoryMessages}}: AnalyticsContext) {
+    const categories = new Map<string, CategoryTotals>();
+    for (const segment of selection.segments) {
+        let c = categories.get(segment.categoryId);
+        if (!c) {
+            c = { id: segment.categoryId, name: segment.name, minutes: 0, messages: 0, observedMinutes: 0, observedKnownMinutes: 0, viewerTotal:0, viewerKnownMinutes:0, viewerPartialMinutes:0, estimatedChatMinutes: 0, sessions: new Set(), audience: new Set(categoryAudience.get(segment.categoryId) ?? []), core: new Set([...(categoryAudience.get(segment.categoryId) ?? [])].filter(id => entities.get(id)?.core)) };
+            categories.set(segment.categoryId, c);
         }
-      }
-}
-function categoryTotals({
-  selection,
-  frame: { entities },
-  tally: { categoryAudience, categoryMessages },
-}: AnalyticsContext) {
-  const categories = new Map<string, CategoryTotals>();
-  for (const segment of selection.segments) {
-    let c = categories.get(segment.categoryId);
-    if (!c) {
-      c = {
-        id: segment.categoryId,
-        name: segment.name,
-        minutes: 0,
-        messages: 0,
-        observedMinutes: 0,
-        observedKnownMinutes: 0,
-        viewerTotal: 0,
-        viewerKnownMinutes: 0,
-        viewerPartialMinutes: 0,
-        estimatedChatMinutes: 0,
-        sessions: new Set(),
-        audience: new Set(categoryAudience.get(segment.categoryId) ?? []),
-        core: new Set([...(categoryAudience.get(segment.categoryId) ?? [])].filter((id) => entities.get(id)?.core)),
-      };
-      categories.set(segment.categoryId, c);
-    }
-    c.minutes += (segment.to - segment.from) / 60000;
-    c.sessions.add(segment.session);
-    for (const e of entities.values()) {
-      let observed = 0,
-        estimated = 0;
-      for (const span of e.intervals)
-        if (span.session === segment.session) {
-          const duration = Math.max(0, Math.min(span.to, segment.to) - Math.max(span.from, segment.from)) / 60000;
-          if (span.kind === 'observed') observed += duration;
-          else estimated += duration;
+        c.minutes += (segment.to - segment.from) / 60000;
+        c.sessions.add(segment.session);
+        for (const e of entities.values()) {
+            let observed = 0, estimated = 0;
+            for (const span of e.intervals)
+                if (span.session === segment.session) {
+                    const duration=Math.max(0, Math.min(span.to, segment.to) - Math.max(span.from, segment.from)) / 60000;
+                    if(span.kind==='observed')observed+=duration;else estimated+=duration;
+                }
+            if (observed+estimated) {
+                c.audience.add(e.id);
+                if (e.core)
+                    c.core.add(e.id);
+                c.observedMinutes += observed;
+                c.estimatedChatMinutes += estimated;
+            }
         }
-      if (observed + estimated) {
-        c.audience.add(e.id);
-        if (e.core) c.core.add(e.id);
-        c.observedMinutes += observed;
-        c.estimatedChatMinutes += estimated;
-      }
     }
-  }
-  for (const c of categories.values()) c.messages = categoryMessages.get(c.id) ?? 0;
-  return categories;
+    for (const c of categories.values())
+        c.messages = categoryMessages.get(c.id) ?? 0;
+    return categories;
 }
-function applyViewerSamples({
-  scope: { source },
-  layout: { samples, platformsBySession },
-  selection,
-  frame,
-}: AnalyticsContext) {
-  for (const sample of samples)
-    if (selection.contains(sample.session_id, sample.observed_at_ms)) {
-      const point = frame.minute(sample.observed_at_ms);
-      if (source !== 'youtube' && sample.twitch_viewers !== null) point.twitchViewers = sample.twitch_viewers;
-      if (source !== 'twitch' && sample.youtube_viewers !== null) point.youtubeViewers = sample.youtube_viewers;
-      const active = (platformsBySession.get(sample.session_id) ?? []).filter(
-        (p) => p.started_at_ms < point.at + 60000 && (p.ended_at_ms === null || p.ended_at_ms > point.at),
-      );
-      const keys = active.length
-        ? [...new Set(active.map((p) => (p.platform === 'twitch' ? 'twitchViewers' : 'youtubeViewers')))]
-        : ['twitchViewers'];
-      const known = [point.twitchViewers, point.youtubeViewers].filter((value): value is number => value !== null);
-      point.viewers =
-        source === 'twitch'
-          ? point.twitchViewers
-          : source === 'youtube'
-            ? point.youtubeViewers
-            : known.length
-              ? known.reduce((sum, value) => sum + value, 0)
-              : null;
-      point.viewersPartial =
-        source === 'all' &&
-        known.length > 0 &&
-        keys.some((key) => point[key as 'twitchViewers' | 'youtubeViewers'] === null);
+function applyViewerSamples({scope:{source},layout:{samples,platformsBySession},selection,frame}: AnalyticsContext) {
+    for (const sample of samples)
+        if (selection.contains(sample.session_id, sample.observed_at_ms)) {
+            const point = frame.minute(sample.observed_at_ms);
+            if(source!=='youtube'&&sample.twitch_viewers !== null)point.twitchViewers=sample.twitch_viewers;
+            if(source!=='twitch'&&sample.youtube_viewers !== null)point.youtubeViewers=sample.youtube_viewers;
+            const active=(platformsBySession.get(sample.session_id)??[]).filter(p=>p.started_at_ms<point.at+60000&&(p.ended_at_ms===null||p.ended_at_ms>point.at));
+            const keys=active.length?[...new Set(active.map(p=>p.platform==='twitch'?'twitchViewers':'youtubeViewers'))]:['twitchViewers'];
+            const known=[point.twitchViewers,point.youtubeViewers].filter((value):value is number=>value!==null);
+            point.viewers = source === 'twitch' ? point.twitchViewers : source === 'youtube' ? point.youtubeViewers : known.length?known.reduce((sum,value)=>sum+value,0):null;
+            point.viewersPartial = source === 'all' && known.length>0 && keys.some(key=>point[key as 'twitchViewers'|'youtubeViewers']===null);
+        }
+}
+function markPresenceCoverage({db,options,scope:{from,to,sessionIds},selection,frame}: AnalyticsContext) {
+    const coverage = options.donationsOnly?[]:db.prepare("SELECT session_id,started_at_ms AS first,completed_at_ms AS last FROM presence_polls WHERE status='complete' AND completed_at_ms>=? AND started_at_ms<? AND session_id IN(SELECT value FROM json_each(?))").all(from, to, sessionIds) as any[];
+    for (const poll of coverage)
+        for (const span of selection.clip({ from: Math.floor(poll.first / 60000) * 60000, to: (Math.floor(poll.last / 60000) + 1) * 60000, session: poll.session_id, kind: 'observed' }))
+            for (let at = Math.floor(span.from / 60000) * 60000; at < span.to; at += 60000) {
+                frame.expand();
+                frame.minute(at).presenceKnown = true;
+            }
+}
+function addCategoryTimeline({selection,frame:{timeline}}: AnalyticsContext, categories: Map<string, CategoryTotals>) {
+    for (const segment of selection.segments) {
+        const c=categories.get(segment.categoryId)!;
+        for(let at=Math.floor(segment.from/60000)*60000;at<segment.to;at+=60000){const point=timeline.get(at),minutes=Math.max(0,Math.min(at+60000,segment.to)-Math.max(at,segment.from))/60000;
+          c.botObserved=(c.botObserved??0)+(point?.botObserved??0)*minutes;
+          c.botEstimated=(c.botEstimated??0)+(point?.botEstimated??0)*minutes;
+          c.botViewersTotal=(c.botViewersTotal??0)+(point?.botViewers??0)*minutes;
+          c.botMessages=(c.botMessages??0)+(point?.botMessages??0)*minutes;
+          if(point?.presenceKnown)c.observedKnownMinutes+=minutes;
+          if(point?.viewers!=null){c.viewerTotal+=point.viewers*minutes;c.viewerKnownMinutes+=minutes;if(point.viewersPartial)c.viewerPartialMinutes+=minutes;}
+        }
     }
 }
-function markPresenceCoverage({ db, options, scope: { from, to, sessionIds }, selection, frame }: AnalyticsContext) {
-  const coverage = options.donationsOnly
-    ? []
-    : (db
-        .prepare(
-          "SELECT session_id,started_at_ms AS first,completed_at_ms AS last FROM presence_polls WHERE status='complete' AND completed_at_ms>=? AND started_at_ms<? AND session_id IN(SELECT value FROM json_each(?))",
-        )
-        .all(from, to, sessionIds) as any[]);
-  for (const poll of coverage)
-    for (const span of selection.clip({
-      from: Math.floor(poll.first / 60000) * 60000,
-      to: (Math.floor(poll.last / 60000) + 1) * 60000,
-      session: poll.session_id,
-      kind: 'observed',
-    }))
-      for (let at = Math.floor(span.from / 60000) * 60000; at < span.to; at += 60000) {
+function markBreaks({scope:{from,to},frame}: AnalyticsContext, breaks: {from:number;to:number}[]) {
+    for(const span of breaks)for(let at=Math.ceil(Math.max(from,span.from)/60000)*60000;at+60000<=Math.min(to,span.to);at+=60000){
         frame.expand();
-        frame.minute(at).presenceKnown = true;
-      }
-}
-function addCategoryTimeline(
-  { selection, frame: { timeline } }: AnalyticsContext,
-  categories: Map<string, CategoryTotals>,
-) {
-  for (const segment of selection.segments) {
-    const c = categories.get(segment.categoryId)!;
-    for (let at = Math.floor(segment.from / 60000) * 60000; at < segment.to; at += 60000) {
-      const point = timeline.get(at),
-        minutes = Math.max(0, Math.min(at + 60000, segment.to) - Math.max(at, segment.from)) / 60000;
-      c.botObserved = (c.botObserved ?? 0) + (point?.botObserved ?? 0) * minutes;
-      c.botEstimated = (c.botEstimated ?? 0) + (point?.botEstimated ?? 0) * minutes;
-      c.botViewersTotal = (c.botViewersTotal ?? 0) + (point?.botViewers ?? 0) * minutes;
-      c.botMessages = (c.botMessages ?? 0) + (point?.botMessages ?? 0) * minutes;
-      if (point?.presenceKnown) c.observedKnownMinutes += minutes;
-      if (point?.viewers != null) {
-        c.viewerTotal += point.viewers * minutes;
-        c.viewerKnownMinutes += minutes;
-        if (point.viewersPartial) c.viewerPartialMinutes += minutes;
-      }
-    }
-  }
-}
-function markBreaks({ scope: { from, to }, frame }: AnalyticsContext, breaks: { from: number; to: number }[]) {
-  for (const span of breaks)
-    for (
-      let at = Math.ceil(Math.max(from, span.from) / 60000) * 60000;
-      at + 60000 <= Math.min(to, span.to);
-      at += 60000
-    ) {
-      frame.expand();
-      frame.minute(at).isBreak = true;
+        frame.minute(at).isBreak=true;
     }
 }
-function hourlyCells(
-  { scope: { clock }, frame: { timeline }, tally: { minuteDonations, minuteDonationCounts } }: AnalyticsContext,
-  elapsedMinutes: Map<number, number>,
-  activityDurations: Map<number, { observed: number; estimated: number }>,
-) {
-  const hourly = new Map<string, HourlyCell>();
-  for (const point of timeline.values()) {
-    const parts = clock.formatToParts(point.at),
-      day = parts.find((x) => x.type === 'weekday')!.value,
-      hour = Number(parts.find((x) => x.type === 'hour')!.value),
-      key = `${day}:${hour}`;
-    let cell = hourly.get(key);
-    if (!cell) {
-      cell = {
-        day,
-        hour,
-        observed: 0,
-        estimated: 0,
-        messages: 0,
-        sampleMinutes: 0,
-        observedKnownMinutes: 0,
-        viewersTotal: 0,
-        viewerSamples: 0,
-        knownViewersTotal: 0,
-        knownViewerSamples: 0,
-        viewerPartialMinutes: 0,
-        donationTotals: {},
-        donationCount: 0,
-      };
-      hourly.set(key, cell);
+function hourlyCells({scope:{clock},frame:{timeline},tally:{minuteDonations,minuteDonationCounts}}: AnalyticsContext, elapsedMinutes: Map<number, number>, activityDurations: Map<number, { observed: number; estimated: number }>) {
+    const hourly = new Map<string, HourlyCell>();
+    for (const point of timeline.values()) {
+        const parts = clock.formatToParts(point.at), day = parts.find(x => x.type === 'weekday')!.value, hour = Number(parts.find(x => x.type === 'hour')!.value), key = `${day}:${hour}`;
+        let cell = hourly.get(key);
+        if (!cell) {
+            cell = { day, hour, observed: 0, estimated: 0, messages: 0, sampleMinutes: 0, observedKnownMinutes: 0, viewersTotal: 0, viewerSamples: 0,knownViewersTotal:0,knownViewerSamples:0,viewerPartialMinutes:0,donationTotals:{},donationCount:0 };
+            hourly.set(key, cell);
+        }
+        const elapsed=elapsedMinutes.get(point.at)??0;
+        cell.botObserved=(cell.botObserved??0)+(point.botObserved??0)*elapsed;
+        cell.botEstimated=(cell.botEstimated??0)+(point.botEstimated??0)*elapsed;
+        cell.botMessages=(cell.botMessages??0)+(point.botMessages??0);
+        cell.botViewersTotal=(cell.botViewersTotal??0)+(point.botViewers??0)*elapsed;
+        cell.observed += activityDurations.get(point.at)?.observed ?? 0;
+        cell.estimated += activityDurations.get(point.at)?.estimated ?? 0;
+        for(const [currency,total] of Object.entries(minuteDonations.get(point.at)??{}))cell.donationTotals[currency]=(BigInt(cell.donationTotals[currency]??'0')+BigInt(total)).toString();
+        cell.donationCount+=minuteDonationCounts.get(point.at)??0;
+        cell.messages += point.messages;
+        cell.sampleMinutes+=elapsed;
+        if(point.viewers!==null){cell.knownViewersTotal+=point.viewers*elapsed;cell.knownViewerSamples+=elapsed;if(point.viewersPartial)cell.viewerPartialMinutes+=elapsed;}
+        if(point.viewers !== null&&!point.viewersPartial) {cell.viewersTotal+=point.viewers*elapsed;cell.viewerSamples+=elapsed;}
+        if (point.presenceKnown)
+            cell.observedKnownMinutes+=elapsed;
     }
-    const elapsed = elapsedMinutes.get(point.at) ?? 0;
-    cell.botObserved = (cell.botObserved ?? 0) + (point.botObserved ?? 0) * elapsed;
-    cell.botEstimated = (cell.botEstimated ?? 0) + (point.botEstimated ?? 0) * elapsed;
-    cell.botMessages = (cell.botMessages ?? 0) + (point.botMessages ?? 0);
-    cell.botViewersTotal = (cell.botViewersTotal ?? 0) + (point.botViewers ?? 0) * elapsed;
-    cell.observed += activityDurations.get(point.at)?.observed ?? 0;
-    cell.estimated += activityDurations.get(point.at)?.estimated ?? 0;
-    for (const [currency, total] of Object.entries(minuteDonations.get(point.at) ?? {}))
-      cell.donationTotals[currency] = (BigInt(cell.donationTotals[currency] ?? '0') + BigInt(total)).toString();
-    cell.donationCount += minuteDonationCounts.get(point.at) ?? 0;
-    cell.messages += point.messages;
-    cell.sampleMinutes += elapsed;
-    if (point.viewers !== null) {
-      cell.knownViewersTotal += point.viewers * elapsed;
-      cell.knownViewerSamples += elapsed;
-      if (point.viewersPartial) cell.viewerPartialMinutes += elapsed;
-    }
-    if (point.viewers !== null && !point.viewersPartial) {
-      cell.viewersTotal += point.viewers * elapsed;
-      cell.viewerSamples += elapsed;
-    }
-    if (point.presenceKnown) cell.observedKnownMinutes += elapsed;
-  }
-  return hourly;
+    return hourly;
 }
-function audienceRows({
-  db,
-  selection: { streamCount: selectedStreamCount },
-  frame: { entities },
-  tally: { streamAuthors, platformMessageAuthors },
-}: AnalyticsContext) {
-  const accountsByPerson = new Map<string, { source: string; name: string }[]>();
-  for (const row of db
-    .prepare(
-      "SELECT person_id,source,display_name FROM identities WHERE source='twitch' AND person_id IN(SELECT value FROM json_each(?)) UNION ALL SELECT person_id,'youtube' AS source,display_name FROM youtube_identities y WHERE person_id IN(SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM youtube_snapshots role WHERE role.account_id=y.account_id AND role.key='collectionRole' AND role.payload_json='\"secondary\"')",
-    )
-    .all(JSON.stringify([...entities.keys()]), JSON.stringify([...entities.keys()])) as {
-    person_id: string;
-    source: string;
-    display_name: string;
-  }[]) {
-    const accounts = accountsByPerson.get(row.person_id) ?? [];
-    accounts.push({ source: row.source, name: row.display_name });
-    accountsByPerson.set(row.person_id, accounts);
-  }
-  const messageMinutesByPerson = new Map<string, { session: string; at: number }[]>();
-  for (const [session, minutes] of streamAuthors)
-    for (const [at, ids] of minutes)
-      for (const id of ids) {
-        const rows = messageMinutesByPerson.get(id) ?? [];
-        rows.push({ session, at });
-        messageMinutesByPerson.set(id, rows);
-      }
-  const messageCounts = new Map<string, { at: number; source: string; count: number }[]>();
-  for (const source of ['twitch', 'youtube'] as const)
-    for (const [at, authors] of platformMessageAuthors[source])
-      for (const [id, count] of authors) {
-        const rows = messageCounts.get(id) ?? [];
-        rows.push({ at, source, count });
-        messageCounts.set(id, rows);
-      }
-  return [...entities.values()]
-    .filter((e) => e.sessionIds.size || e.messages)
-    .sort((a, b) => Number(b.core) - Number(a.core) || b.observedMinutes - a.observedMinutes || b.messages - a.messages)
-    .map((e) => ({
-      ...e,
-      ...coreSessions(e.coreSessionIds, e.coreSessionIds.length),
-      messageCounts: messageCounts.get(e.id) ?? [],
-      messageMinutes: messageMinutesByPerson.get(e.id) ?? [],
-      accounts: (accountsByPerson.get(e.id) ?? []).filter((account) =>
-        e.sources.includes(account.source as 'twitch' | 'youtube'),
-      ),
-      sessionIds: [...e.sessionIds],
-      attendanceSessionIds: [...e.attendanceSessionIds],
-      attendanceRatio: selectedStreamCount ? e.attendanceSessionIds.size / selectedStreamCount : 0,
-      visits: e.intervals.length,
-      observedMinutesPerSession: e.attendanceSessionIds.size ? e.observedMinutes / e.attendanceSessionIds.size : 0,
-      sessionRatio: e.sessionIds.size / selectedStreamCount,
-      observedMinutes: Math.round(e.observedMinutes * 10) / 10,
-      estimatedChatMinutes: Math.round(e.estimatedChatMinutes * 10) / 10,
-    }));
+function audienceRows({db,selection:{streamCount:selectedStreamCount},frame:{entities},tally:{streamAuthors,platformMessageAuthors}}: AnalyticsContext) {
+    const accountsByPerson=new Map<string,{source:string;name:string}[]>();
+    for(const row of db.prepare("SELECT person_id,source,display_name FROM identities WHERE source='twitch' AND person_id IN(SELECT value FROM json_each(?)) UNION ALL SELECT person_id,'youtube' AS source,display_name FROM youtube_identities y WHERE person_id IN(SELECT value FROM json_each(?)) AND NOT EXISTS(SELECT 1 FROM youtube_snapshots role WHERE role.account_id=y.account_id AND role.key='collectionRole' AND role.payload_json='\"secondary\"')").all(JSON.stringify([...entities.keys()]),JSON.stringify([...entities.keys()])) as {person_id:string;source:string;display_name:string}[]){
+        const accounts=accountsByPerson.get(row.person_id)??[];accounts.push({source:row.source,name:row.display_name});accountsByPerson.set(row.person_id,accounts);
+    }
+    const messageMinutesByPerson=new Map<string,{session:string;at:number}[]>();
+    for(const [session,minutes] of streamAuthors)for(const [at,ids] of minutes)for(const id of ids){const rows=messageMinutesByPerson.get(id)??[];rows.push({session,at});messageMinutesByPerson.set(id,rows);}
+    const messageCounts=new Map<string,{at:number;source:string;count:number}[]>();
+    for(const source of ['twitch','youtube'] as const)for(const [at,authors] of platformMessageAuthors[source])for(const [id,count]of authors){const rows=messageCounts.get(id)??[];rows.push({at,source,count});messageCounts.set(id,rows);}
+    return [...entities.values()].filter(e => e.sessionIds.size || e.messages).sort((a, b) => Number(b.core) - Number(a.core) || b.observedMinutes - a.observedMinutes || b.messages - a.messages).map(e => ({ ...e,...coreSessions(e.coreSessionIds,e.coreSessionIds.length),messageCounts:messageCounts.get(e.id)??[],messageMinutes:messageMinutesByPerson.get(e.id)??[], accounts:(accountsByPerson.get(e.id)??[]).filter(account=>e.sources.includes(account.source as 'twitch'|'youtube')), sessionIds: [...e.sessionIds], attendanceSessionIds: [...e.attendanceSessionIds], attendanceRatio: selectedStreamCount?e.attendanceSessionIds.size/selectedStreamCount:0, visits: e.intervals.length, observedMinutesPerSession: e.attendanceSessionIds.size ? e.observedMinutes/e.attendanceSessionIds.size : 0, sessionRatio: e.sessionIds.size/selectedStreamCount, observedMinutes: Math.round(e.observedMinutes * 10) / 10, estimatedChatMinutes: Math.round(e.estimatedChatMinutes * 10) / 10 }));
 }
 type AudienceRow = ReturnType<typeof audienceRows>[number];
 function audienceComposition(attendees: AudienceRow[]) {
-  return {
-    ...(attendees.some((e) => e.is_bot) ? { bots: attendees.filter((e) => e.is_bot).length } : {}),
-    core: attendees.filter((e) => !e.is_bot && e.core).length,
-    followers: attendees.filter((e) => !e.is_bot && !e.core && e.follower === true).length,
-    nonFollowers: attendees.filter((e) => !e.is_bot && !e.core && e.follower === false).length,
-    unknown: attendees.filter((e) => !e.is_bot && !e.core && e.follower === null).length,
-    twitch: attendees.filter((e) => e.sources.includes('twitch')).length,
-    youtube: attendees.filter((e) => e.sources.includes('youtube')).length,
-    both: attendees.filter((e) => e.sources.length > 1).length,
-  };
+    return {...(attendees.some(e=>e.is_bot)?{bots:attendees.filter(e=>e.is_bot).length}:{}),core:attendees.filter(e=>!e.is_bot&&e.core).length,followers:attendees.filter(e=>!e.is_bot&&!e.core&&e.follower===true).length,nonFollowers:attendees.filter(e=>!e.is_bot&&!e.core&&e.follower===false).length,unknown:attendees.filter(e=>!e.is_bot&&!e.core&&e.follower===null).length,twitch:attendees.filter(e=>e.sources.includes('twitch')).length,youtube:attendees.filter(e=>e.sources.includes('youtube')).length,both:attendees.filter(e=>e.sources.length>1).length};
 }
-function compareStreams(
-  {
-    scope: { sessions, source, to, botPeople },
-    layout: { samplesBySession, platformsBySession },
-    selection,
-    frame: { timeline },
-    tally: { streamDonations, streamDonationCounts, sessionMessages, streamAuthors },
-  }: AnalyticsContext,
-  audience: AudienceRow[],
-) {
-  const selectedBySession = selection.bySession;
-  const seen = new Set<string>();
-  return sessions
-    .filter((s) => selectedBySession.has(s.id))
-    .map((s) => {
-      const visitors = audience.filter((e) => e.attendanceSessionIds.includes(s.id)),
-        newInPeriod = visitors.filter((e) => !seen.has(e.id)).length;
-      for (const e of visitors) seen.add(e.id);
-      const durationMs = (selectedBySession.get(s.id) ?? []).reduce((n, segment) => n + segment.to - segment.from, 0);
-      const donations = streamDonations.get(s.id) ?? {},
-        messages = sessionMessages.get(s.id) ?? 0;
-      const metrics = streamMetrics(
-        selectedBySession.get(s.id) ?? [],
-        samplesBySession.get(s.id) ?? [],
-        streamAuthors.get(s.id) ?? new Map(),
-      );
-      const aggregate = streamMetrics(
-        selectedBySession.get(s.id) ?? [],
-        [
-          ...new Set(
-            (selectedBySession.get(s.id) ?? []).flatMap((segment) =>
-              Array.from(
-                { length: Math.ceil(segment.to / 60000) - Math.floor(segment.from / 60000) },
-                (_, i) => (Math.floor(segment.from / 60000) + i) * 60000,
-              ),
-            ),
-          ),
-        ]
-          .map((at) => timeline.get(at)!)
-          .filter(Boolean)
-          .map((p) => ({
-            observed_at_ms: p.at,
-            twitch_viewers: p.viewersPartial ? null : p.viewers,
-            youtube_viewers: 0,
-          })),
-        new Map(),
-      );
-      metrics.viewers.all = aggregate.viewers.all;
-      metrics.viewers.known = streamMetrics(
-        selectedBySession.get(s.id) ?? [],
-        (samplesBySession.get(s.id) ?? []).map((p) => ({
-          ...p,
-          twitch_viewers: source === 'youtube' ? null : p.twitch_viewers,
-          youtube_viewers: source === 'twitch' ? null : p.youtube_viewers,
-        })),
-        new Map(),
-        (platformsBySession.get(s.id) ?? [])
-          .filter((p) => source === 'all' || p.platform === source)
-          .map((p) => ({ platform: p.platform, from: p.started_at_ms, to: p.ended_at_ms ?? to })),
-      ).viewers.known;
-      const botSamples = (samplesBySession.get(s.id) ?? []).map((p) => {
-        const point = timeline.get(Math.floor(p.observed_at_ms / 60000) * 60000);
-        return {
-          ...p,
-          twitch_viewers: p.twitch_viewers === null ? null : (point?.botTwitchViewers ?? 0),
-          youtube_viewers: p.youtube_viewers === null ? null : (point?.botYoutubeViewers ?? 0),
-        };
-      });
-      const botViewers = streamMetrics(
-        selectedBySession.get(s.id) ?? [],
-        botSamples,
-        new Map(),
-        (platformsBySession.get(s.id) ?? [])
-          .filter((p) => source === 'all' || p.platform === source)
-          .map((p) => ({ platform: p.platform, from: p.started_at_ms, to: p.ended_at_ms ?? to })),
-      ).viewers;
-      const botMessages = audience
-        .filter((p) => botPeople.has(p.id))
-        .reduce(
-          (n, p) => n + p.messageCounts.filter((m) => selection.contains(s.id, m.at)).reduce((n, m) => n + m.count, 0),
-          0,
-        );
-      let participantMs = 0,
-        peakParticipants = 0;
-      const participantsByMinute = new Map<number, Set<string>>();
-      for (const visitor of visitors)
-        for (const span of unionSpans(
-          visitor.intervals
-            .filter((span) => span.session === s.id)
-            .map((span) => ({ ...span, kind: 'observed' as const })),
-        )) {
-          participantMs += span.to - span.from;
-          for (let at = Math.floor(span.from / 60000) * 60000; at < span.to; at += 60000) {
-            const ids = participantsByMinute.get(at) ?? new Set<string>();
-            ids.add(visitor.id);
-            participantsByMinute.set(at, ids);
-            peakParticipants = Math.max(peakParticipants, ids.size);
-          }
+function compareStreams({scope:{sessions,source,to,botPeople},layout:{samplesBySession,platformsBySession},selection,frame:{timeline},tally:{streamDonations,streamDonationCounts,sessionMessages,streamAuthors}}: AnalyticsContext, audience: AudienceRow[]) {
+    const selectedBySession=selection.bySession;
+    const seen = new Set<string>();
+    return sessions.filter(s => selectedBySession.has(s.id)).map(s => {
+        const visitors = audience.filter(e => e.attendanceSessionIds.includes(s.id)), newInPeriod = visitors.filter(e => !seen.has(e.id)).length;
+        for (const e of visitors)
+            seen.add(e.id);
+        const durationMs=(selectedBySession.get(s.id)??[]).reduce((n,segment)=>n+segment.to-segment.from,0);
+        const donations=streamDonations.get(s.id)??{},messages=sessionMessages.get(s.id)??0;
+        const spans=selectedBySession.get(s.id)??[];
+        const samples=samplesBySession.get(s.id)??[];
+        const links=platformsBySession.get(s.id)??[];
+        const activePlatforms=links.filter(p=>source==='all'||p.platform===source)
+            .map(p=>({platform:p.platform,from:p.started_at_ms,to:p.ended_at_ms??to}));
+        if(!links.length)activePlatforms.push({platform:source==='youtube'?'youtube':'twitch',from:s.started_at_ms,to:s.ended_at_ms??to});
+        const metrics=streamMetrics(spans,samples,streamAuthors.get(s.id)??new Map(),activePlatforms);
+        const botSamples=(samplesBySession.get(s.id)??[]).map(p=>{const point=timeline.get(Math.floor(p.observed_at_ms/60000)*60000);return {...p,twitch_viewers:p.twitch_viewers===null?null:point?.botTwitchViewers??0,youtube_viewers:p.youtube_viewers===null?null:point?.botYoutubeViewers??0};});
+        const botViewers=streamMetrics(selectedBySession.get(s.id)??[],botSamples,new Map(),(platformsBySession.get(s.id)??[]).filter(p=>source==='all'||p.platform===source).map(p=>({platform:p.platform,from:p.started_at_ms,to:p.ended_at_ms??to}))).viewers;
+        const botMessages=audience.filter(p=>botPeople.has(p.id)).reduce((n,p)=>n+p.messageCounts.filter(m=>selection.contains(s.id,m.at)).reduce((n,m)=>n+m.count,0),0);
+        let participantMs=0,peakParticipants=0;
+        const participantsByMinute=new Map<number,Set<string>>();
+        for(const visitor of visitors)for(const span of unionSpans(visitor.intervals.filter(span=>span.session===s.id).map(span=>({...span,kind:'observed' as const})))){
+            participantMs+=span.to-span.from;
+            for(let at=Math.floor(span.from/60000)*60000;at<span.to;at+=60000){const ids=participantsByMinute.get(at)??new Set<string>();ids.add(visitor.id);participantsByMinute.set(at,ids);peakParticipants=Math.max(peakParticipants,ids.size);}
         }
-      return {
-        ...metrics,
-        botViewers,
-        botMessages,
-        meanParticipants: durationMs ? participantMs / durationMs : null,
-        peakParticipants,
-        durationMs,
-        messagesPerHour: durationMs ? (messages * 3600000) / durationMs : null,
-        donationCount: streamDonationCounts.get(s.id) ?? 0,
-        donationTotals: donations,
-        donationsPerHourMinor: currencyRates(donations, durationMs),
-        id: s.id,
-        startedAt: s.started_at_ms,
-        endedAt: s.ended_at_ms ?? to,
-        title: samplesBySession.get(s.id)?.[0]?.title ?? '',
-        audience: visitors.length,
-        core: visitors.filter((e) => e.core).length,
-        newInPeriod,
-        returning: visitors.length - newInPeriod,
-        messages: sessionMessages.get(s.id) ?? 0,
-        categories: [
-          ...new Set(
-            (selectedBySession.get(s.id) ?? [])
-              .filter((segment) => segment.categoryId && segment.name !== 'Категория неизвестна')
-              .map((segment) => segment.name),
-          ),
-        ],
-      };
+        return { ...metrics,botViewers,botMessages,meanParticipants:durationMs?participantMs/durationMs:null,peakParticipants,durationMs,messagesPerHour:durationMs?messages*3600000/durationMs:null,donationCount:streamDonationCounts.get(s.id)??0,donationTotals:donations,donationsPerHourMinor:currencyRates(donations,durationMs),id: s.id, startedAt: s.started_at_ms, endedAt: s.ended_at_ms ?? to, title: samplesBySession.get(s.id)?.[0]?.title ?? "", audience: visitors.length, core: visitors.filter(e => e.core).length, newInPeriod, returning: visitors.length - newInPeriod, messages: sessionMessages.get(s.id) ?? 0, categories: [...new Set((selectedBySession.get(s.id)??[]).filter(segment=>segment.categoryId&&segment.name!=='Категория неизвестна').map(segment => segment.name))] };
     });
 }
 export function audienceAnalytics(db: Database.Database, options: AnalyticsOptions) {
-  const scope = analyticsScope(db, options);
-  const {
-    from,
-    to,
-    source,
-    category,
-    timezone,
-    regularThresholdPercent,
-    minSessions,
-    minMinutes,
-    minMessages,
-    window,
-    rule,
-    sessions,
-    excluded,
-  } = scope;
-  const allowed = visiblePeople(db, options, scope);
-  const layout = streamLayout(db, scope);
-  const { coreDurations, corePresence, activity } = corePresenceInputs(db, options, scope, layout);
-  const { breaks, selection } = selectSegments(scope, layout);
-  const frame = new AudienceFrame(scope.botPeople),
-    tally = new ActivityTally(selection);
-  const ctx: AnalyticsContext = {
-    db,
-    options,
-    scope,
-    layout,
-    selection,
-    frame,
-    tally,
-    allowed,
-    activity,
-    coreDurations,
-    corePresence,
-  };
-  applyBotPresence(ctx);
-  if (source !== 'youtube') {
-    collectTwitchPresence(ctx);
-    collectTwitchMessages(ctx);
-    collectTwitchDonations(ctx);
-  }
-  if (!options.donationsOnly && source !== 'twitch' && options.youtubeAccount)
-    collectYoutubeChat(ctx, options.youtubeAccount);
-  const elapsedMinutes = materializeSelection(ctx);
-  const followers = followerSets(db);
-  const activityDurations = finalizeEntities(ctx, followers);
-  splitMessageAudiences(ctx, followers);
-  const categories = categoryTotals(ctx);
-  applyViewerSamples(ctx);
-  markPresenceCoverage(ctx);
-  addCategoryTimeline(ctx, categories);
-  markBreaks(ctx, breaks);
-  const hourly = hourlyCells(ctx, elapsedMinutes, activityDurations);
-  const audience = audienceRows(ctx);
-  const attendees = audience.filter((e) => e.attendanceSessionIds.length > 0),
-    regulars = audience.filter((e) => e.core).length;
-  const patterns = timePatterns([...hourly.values()]);
-  const composition = audienceComposition(attendees);
-  const streamComparison = compareStreams(ctx, audience);
-  const report =
-    source !== 'twitch' && options.youtubeAccount
-      ? (db
-          .prepare("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'")
-          .get(options.youtubeAccount) as { payload_json: string; updated_at_ms: number } | undefined)
-      : undefined;
-  const youtubeReport = report ? { data: JSON.parse(report.payload_json), updatedAt: report.updated_at_ms } : null;
-  const { timeline } = frame,
-    selected = selection.segments,
-    segments = layout.segments,
-    { minuteDonations, minuteDonationCounts, categoryDonations, categoryDonationCounts } = tally;
-  return {
-    activityClock: clockActivity(
-      [...timeline.values()].map((point) => ({
-        ...point,
-        donations: minuteDonationCounts.get(point.at) ?? 0,
-        donationAmounts: minuteDonations.get(point.at) ?? {},
-      })),
-      selected,
-      timezone,
-    ),
-    donationTiming: options.activityOnly
-      ? emptyDonationTiming(category)
-      : donationTiming(db, from, to, timezone, category),
-    activityWindows: selected,
-    patterns,
-    composition,
-    breaks,
-    youtubeReport,
-    streamComparison,
-    availableCategories: [
-      ...new Map(
-        segments
-          .filter((s) => s.categoryId && s.name !== 'Категория неизвестна')
-          .map((s) => [s.categoryId, { id: s.categoryId, name: s.name }]),
-      ).values(),
-    ],
-    filters: {
-      includeBots: options.excludedLogins === false,
-      fromMs: from,
-      toMs: to,
-      source,
-      category,
-      minSessions,
-      minMinutes,
-      minMessages,
-      regularThresholdPercent,
-      coreRule: rule,
-      chatWindowMinutes: window,
-      timezone,
-    },
-    summary: {
-      entities: audience.length,
-      attendees: attendees.length,
-      regulars,
-      regularShare: audience.length ? regulars / audience.length : null,
-      core: audience.filter((e) => e.core).length,
-      streams: new Set(selected.map((x) => x.session)).size,
-      chatters: audience.filter((e) => e.messages > 0).length,
-      messages: audience.reduce((sum, e) => sum + e.messages, 0),
-    },
-    audience,
-    categories: [...categories.values()]
-      .filter((c) => c.id && c.name !== 'Категория неизвестна')
-      .map((c) => ({
-        ...c,
-        donationCount: categoryDonationCounts.get(c.id) ?? 0,
-        donationTotals: categoryDonations.get(c.id) ?? {},
-        donationsPerHourMinor: currencyRates(categoryDonations.get(c.id) ?? {}, Math.round(c.minutes * 60000)),
-        meanOnline: c.viewerKnownMinutes ? c.viewerTotal / c.viewerKnownMinutes : null,
-        viewerCoverageRatio: c.minutes ? c.viewerKnownMinutes / c.minutes : null,
-        sessions: c.sessions.size,
-        audience: c.audience.size,
-        core: c.core.size,
-        messagesPerHour: c.minutes ? (c.messages * 60) / c.minutes : 0,
-        observedPerMinute: c.minutes ? c.observedMinutes / c.minutes : 0,
-        observedPerKnownMinute: c.observedKnownMinutes ? c.observedMinutes / c.observedKnownMinutes : null,
-        coverageRatio: c.minutes ? c.observedKnownMinutes / c.minutes : null,
-      })),
-    timeline: [...timeline.values()].sort((a, b) => a.at - b.at),
-    hours: [...hourly.values()]
-      .map((cell) => ({
-        ...cell,
-        donationsPerHourMinor: currencyRates(cell.donationTotals, Math.round(cell.sampleMinutes * 60000)),
-      }))
-      .sort(
-        (a, b) =>
-          ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(a.day) -
-            ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(b.day) || a.hour - b.hour,
-      ),
-    sessions,
-    excluded: [...excluded],
-  };
+    const scope=analyticsScope(db,options);
+    const {from,to,source,category,timezone,regularThresholdPercent,minSessions,minMinutes,minMessages,window,rule,sessions,excluded}=scope;
+    const allowed=visiblePeople(db,options,scope);
+    const layout=streamLayout(db,scope);
+    const {coreDurations,corePresence,activity}=corePresenceInputs(db,options,scope,layout);
+    const {breaks,selection}=selectSegments(scope,layout);
+    const frame=new AudienceFrame(scope.botPeople),tally=new ActivityTally(selection);
+    const ctx:AnalyticsContext={db,options,scope,layout,selection,frame,tally,allowed,activity,coreDurations,corePresence};
+    applyBotPresence(ctx);
+    if (source !== 'youtube') {
+        collectTwitchPresence(ctx);
+        collectTwitchMessages(ctx);
+        collectTwitchDonations(ctx);
+    }
+    if (!options.donationsOnly && source !== 'twitch' && options.youtubeAccount)
+        collectYoutubeChat(ctx,options.youtubeAccount);
+    const elapsedMinutes=materializeSelection(ctx);
+    const followers=followerSets(db);
+    const activityDurations=finalizeEntities(ctx,followers);
+    splitMessageAudiences(ctx,followers);
+    const categories=categoryTotals(ctx);
+    applyViewerSamples(ctx);
+    markPresenceCoverage(ctx);
+    addCategoryTimeline(ctx,categories);
+    markBreaks(ctx,breaks);
+    const hourly=hourlyCells(ctx,elapsedMinutes,activityDurations);
+    const audience=audienceRows(ctx);
+    const attendees=audience.filter(e=>e.attendanceSessionIds.length>0),regulars=audience.filter(e=>e.core).length;
+    const patterns=timePatterns([...hourly.values()]);
+    const composition=audienceComposition(attendees);
+    const streamComparison=compareStreams(ctx,audience);
+    const report=source!=='twitch'&&options.youtubeAccount ? db.prepare("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {payload_json:string;updated_at_ms:number}|undefined : undefined;
+    const youtubeReport=report ? {data:JSON.parse(report.payload_json),updatedAt:report.updated_at_ms} : null;
+    const {timeline}=frame,selected=selection.segments,segments=layout.segments,{minuteDonations,minuteDonationCounts,categoryDonations,categoryDonationCounts}=tally;
+    return { activityClock:clockActivity([...timeline.values()].map(point=>({...point,donations:minuteDonationCounts.get(point.at)??0,donationAmounts:minuteDonations.get(point.at)??{}})),selected,timezone), donationTiming:options.activityOnly?emptyDonationTiming(category):donationTiming(db,from,to,timezone,category),activityWindows:selected, patterns,composition,breaks, youtubeReport, streamComparison, availableCategories: [...new Map(segments.filter(s=>s.categoryId&&s.name!=='Категория неизвестна').map(s => [s.categoryId, { id: s.categoryId, name: s.name }])).values()], filters: { includeBots:options.excludedLogins===false, fromMs: from, toMs: to, source, category, minSessions, minMinutes, minMessages, regularThresholdPercent, coreRule: rule, chatWindowMinutes: window, timezone }, summary: { entities: audience.length, attendees: attendees.length, regulars, regularShare: audience.length?regulars/audience.length:null, core: audience.filter(e => e.core).length, streams: new Set(selected.map(x => x.session)).size, chatters:audience.filter(e=>e.messages>0).length, messages: audience.reduce((sum, e) => sum + e.messages, 0) }, audience, categories: [...categories.values()].filter(c=>c.id&&c.name!=='Категория неизвестна').map(c => ({ ...c, donationCount:categoryDonationCounts.get(c.id)??0,donationTotals:categoryDonations.get(c.id)??{},donationsPerHourMinor:currencyRates(categoryDonations.get(c.id)??{},Math.round(c.minutes*60000)),meanOnline:c.viewerKnownMinutes?c.viewerTotal/c.viewerKnownMinutes:null,viewerCoverageRatio:c.minutes?c.viewerKnownMinutes/c.minutes:null,sessions: c.sessions.size, audience: c.audience.size, core: c.core.size, messagesPerHour: c.minutes ? c.messages * 60 / c.minutes : 0, observedPerMinute: c.minutes ? c.observedMinutes / c.minutes : 0, observedPerKnownMinute: c.observedKnownMinutes ? c.observedMinutes / c.observedKnownMinutes : null, coverageRatio: c.minutes ? c.observedKnownMinutes/c.minutes : null })), timeline: [...timeline.values()].sort((a, b) => a.at - b.at), hours: [...hourly.values()].map(cell=>({...cell,donationsPerHourMinor:currencyRates(cell.donationTotals,Math.round(cell.sampleMinutes*60000))})).sort((a, b) => ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(a.day) - ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].indexOf(b.day) || a.hour - b.hour), sessions, excluded: [...excluded] };
 }
 
 /** Progress metadata is built without reading facts. */
-export function analyticsMetadata(options: AnalyticsOptions): ReturnType<typeof audienceAnalytics> {
-  const { source, category, timezone, minSessions, minMinutes, minMessages, regularThresholdPercent, rule, window } =
-    validateAnalyticsOptions(options);
-  return {
-    filters: {
-      includeBots: options.excludedLogins === false,
-      fromMs: options.fromMs,
-      toMs: options.toMs,
-      source,
-      category,
-      timezone,
-      minSessions,
-      minMinutes,
-      minMessages,
-      regularThresholdPercent,
-      coreRule: rule,
-      chatWindowMinutes: window,
-    },
-    summary: {
-      entities: 0,
-      attendees: 0,
-      regulars: 0,
-      regularShare: null,
-      core: 0,
-      streams: 0,
-      chatters: 0,
-      messages: 0,
-    },
-    composition: { core: 0, followers: 0, nonFollowers: 0, unknown: 0, twitch: 0, youtube: 0, both: 0 },
-    donationTiming: {
-      count: 0,
-      unknownCount: 0,
-      totals: {},
-      hours: [],
-      basis: category
-        ? 'Донаты во время эфиров выбранной категории; категория YouTube совпадает с Twitch.'
-        : 'Все донаты профиля с подтверждённым временем; донаты вне эфиров тоже учитываются.',
-    },
-    patterns: timePatterns([]),
-    activityClock: [],
-    activityWindows: [],
-    breaks: [],
-    youtubeReport: null,
-    streamComparison: [],
-    availableCategories: [],
-    audience: [],
-    categories: [],
-    timeline: [],
-    hours: [],
-    sessions: [],
-    excluded: [],
-  };
+export function analyticsMetadata(options:AnalyticsOptions):ReturnType<typeof audienceAnalytics>{
+ const {source,category,timezone,minSessions,minMinutes,minMessages,regularThresholdPercent,rule,window}=validateAnalyticsOptions(options);
+ return {filters:{includeBots:options.excludedLogins===false,fromMs:options.fromMs,toMs:options.toMs,source,category,timezone,minSessions,minMinutes,minMessages,regularThresholdPercent,coreRule:rule,chatWindowMinutes:window},
+ summary:{entities:0,attendees:0,regulars:0,regularShare:null,core:0,streams:0,chatters:0,messages:0},
+ composition:{core:0,followers:0,nonFollowers:0,unknown:0,twitch:0,youtube:0,both:0},
+ donationTiming:{count:0,unknownCount:0,totals:{},hours:[],basis:category?'Донаты во время эфиров выбранной категории; категория YouTube совпадает с Twitch.':'Все донаты профиля с подтверждённым временем; донаты вне эфиров тоже учитываются.'},
+ patterns:timePatterns([]),activityClock:[],activityWindows:[],breaks:[],youtubeReport:null,streamComparison:[],availableCategories:[],audience:[],categories:[],timeline:[],hours:[],sessions:[],excluded:[]};
 }
