@@ -1,55 +1,117 @@
-import {donationValuation} from './donation-fx.js';
+import { donationValuation } from './donation-fx.js';
 import type Database from 'better-sqlite3';
-import {assertTimestamp,type EventInput} from './domain.js';
+import { assertTimestamp, type EventInput } from './domain.js';
 
-export const EVENT_RETENTION_MS=7*24*60*60*1000;
-export const EVENT_CLEANUP_BATCH=500;
-type RecentInput=Omit<EventInput,'source'|'sourceTime'|'timeQuality'|'transport'>&{source:EventInput['source']|'youtube'};
-type RecentRow={youtubeSecondary:number;id:string;source:string;account_id:string;external_id:string;type:string;actor_id:string|null;actor_name:string|null;person_name?:string|null;at_ms:number;received_at_ms:number;payload_json:string};
-export type RecentFilter={session?:string;person?:string;messagesOnly?:boolean};
+export const EVENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+export const EVENT_CLEANUP_BATCH = 500;
+type RecentInput = Omit<EventInput, 'source' | 'sourceTime' | 'timeQuality' | 'transport'> & {
+  source: EventInput['source'] | 'youtube';
+};
+type RecentRow = {
+  youtubeSecondary: number;
+  id: string;
+  source: string;
+  account_id: string;
+  external_id: string;
+  type: string;
+  actor_id: string | null;
+  actor_name: string | null;
+  person_name?: string | null;
+  at_ms: number;
+  received_at_ms: number;
+  payload_json: string;
+};
+export type RecentFilter = { session?: string; person?: string; messagesOnly?: boolean };
 
 /** Disposable content only. Permanent facts, deduplication and report revisions are independent. */
 export class RecentEvents {
- constructor(private readonly db:Database.Database){}
- save(event:RecentInput,now=Date.now()):void {
-  const at=event.occurredAtMs??event.receivedAtMs;
-  // Old REST imports must never resurrect expired text.
-  if(at<=now-EVENT_RETENTION_MS||at>now)return;
-  const {raw:_raw,...payload}=event.payload;
-  const id=JSON.stringify([event.source,event.accountId,event.type,event.externalId]);
-  this.db.prepare('INSERT OR IGNORE INTO recent_events VALUES (?,?,?,?,?,?,?,?,?,?)').run(id,event.source,event.accountId,event.externalId,event.type,event.actor?.externalId??null,event.actor?.displayName??null,at,event.receivedAtMs,JSON.stringify(payload));
- }
- removeYoutube(account:string,messageId?:string,authorId?:string):void {
-  if(messageId)this.db.prepare("DELETE FROM recent_events WHERE source='youtube' AND account_id=? AND external_id=?").run(account,messageId);
-  if(authorId)this.db.prepare("DELETE FROM recent_events WHERE source='youtube' AND account_id=? AND actor_id=?").run(account,authorId);
- }
- list(offset=0,limit=100,now=Date.now(),filter:RecentFilter={}) {
-  if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(limit)||limit<1||limit>200)throw new Error('INVALID_RECENT_EVENTS_PAGE');
-  for(const id of [filter.session,filter.person])if(id!==undefined&&(typeof id!=='string'||!id||id.length>256))throw new Error('INVALID_RECENT_EVENTS_FILTER');
-  const where=['r.at_ms>?','r.at_ms<=?',"coalesce(i.person_id,y.person_id,'') NOT IN(SELECT person_id FROM service_people)"],args:unknown[]=[now-EVENT_RETENTION_MS,now];
-  if(filter.messagesOnly)where.push("r.type IN('chat.message','textMessageEvent','superChatEvent','superStickerEvent')");
-  if(filter.person){
-   where.push(`EXISTS(SELECT 1 FROM (SELECT source,account_id,external_id,person_id FROM identities UNION ALL SELECT 'youtube',account_id,external_id,person_id FROM youtube_identities) i WHERE i.source=r.source AND i.account_id=r.account_id AND i.external_id=r.actor_id AND i.person_id=?)`);args.push(filter.person);
+  constructor(private readonly db: Database.Database) {}
+  save(event: RecentInput, now = Date.now()): void {
+    const at = event.occurredAtMs ?? event.receivedAtMs;
+    // Old REST imports must never resurrect expired text.
+    if (at <= now - EVENT_RETENTION_MS || at > now) return;
+    const { raw: _raw, ...payload } = event.payload;
+    const id = JSON.stringify([event.source, event.accountId, event.type, event.externalId]);
+    this.db
+      .prepare('INSERT OR IGNORE INTO recent_events VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(
+        id,
+        event.source,
+        event.accountId,
+        event.externalId,
+        event.type,
+        event.actor?.externalId ?? null,
+        event.actor?.displayName ?? null,
+        at,
+        event.receivedAtMs,
+        JSON.stringify(payload),
+      );
   }
-  if(filter.session){
-   where.push(`((r.source='youtube' AND EXISTS(SELECT 1 FROM youtube_snapshots role WHERE role.account_id=r.account_id AND role.key='collectionRole' AND role.payload_json='"secondary"') AND EXISTS(SELECT 1 FROM logical_platform_streams ps JOIN logical_sessions s ON s.id=ps.session_id WHERE s.id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND r.at_ms>=ps.started_at_ms AND r.at_ms<coalesce(ps.ended_at_ms,?))) OR (r.source<>'youtube' AND EXISTS(SELECT 1 FROM events e JOIN logical_event_sessions es ON es.event_id=e.id WHERE e.source=r.source AND e.account_id=r.account_id AND e.type=r.type AND e.external_id=r.external_id AND es.session_id=?)) OR (r.source='youtube' AND EXISTS(SELECT 1 FROM logical_platform_streams p WHERE p.platform='youtube' AND p.session_id=? AND p.account_id=r.account_id AND r.at_ms>=p.started_at_ms AND r.at_ms<coalesce(p.ended_at_ms,?) AND (json_extract(r.payload_json,'$.videoId')=p.external_id OR (json_extract(r.payload_json,'$.videoId') IS NULL AND 1=(SELECT count(*) FROM logical_platform_streams q WHERE q.platform='youtube' AND q.account_id=r.account_id AND r.at_ms>=q.started_at_ms AND r.at_ms<coalesce(q.ended_at_ms,?)))))))`);
-   args.push(filter.session,now,filter.session,filter.session,now,now);
+  removeYoutube(account: string, messageId?: string, authorId?: string): void {
+    if (messageId)
+      this.db
+        .prepare("DELETE FROM recent_events WHERE source='youtube' AND account_id=? AND external_id=?")
+        .run(account, messageId);
+    if (authorId)
+      this.db
+        .prepare("DELETE FROM recent_events WHERE source='youtube' AND account_id=? AND actor_id=?")
+        .run(account, authorId);
   }
-  // Resolve membership and the human name at read time, including merge/split changes.
-  return (this.db.prepare(`SELECT r.*,EXISTS(SELECT 1 FROM youtube_snapshots role WHERE r.source='youtube' AND role.account_id=r.account_id AND role.key='collectionRole' AND role.payload_json='"secondary"') AS youtubeSecondary,coalesce(i.person_id,y.person_id) AS person_id,coalesce(p.display_name,r.actor_name) AS person_name
+  list(offset = 0, limit = 100, now = Date.now(), filter: RecentFilter = {}) {
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 200)
+      throw new Error('INVALID_RECENT_EVENTS_PAGE');
+    for (const id of [filter.session, filter.person])
+      if (id !== undefined && (typeof id !== 'string' || !id || id.length > 256))
+        throw new Error('INVALID_RECENT_EVENTS_FILTER');
+    const where = [
+        'r.at_ms>?',
+        'r.at_ms<=?',
+        "coalesce(i.person_id,y.person_id,'') NOT IN(SELECT person_id FROM service_people)",
+      ],
+      args: unknown[] = [now - EVENT_RETENTION_MS, now];
+    if (filter.messagesOnly)
+      where.push("r.type IN('chat.message','textMessageEvent','superChatEvent','superStickerEvent')");
+    if (filter.person) {
+      where.push(
+        `EXISTS(SELECT 1 FROM (SELECT source,account_id,external_id,person_id FROM identities UNION ALL SELECT 'youtube',account_id,external_id,person_id FROM youtube_identities) i WHERE i.source=r.source AND i.account_id=r.account_id AND i.external_id=r.actor_id AND i.person_id=?)`,
+      );
+      args.push(filter.person);
+    }
+    if (filter.session) {
+      where.push(
+        `((r.source='youtube' AND EXISTS(SELECT 1 FROM youtube_snapshots role WHERE role.account_id=r.account_id AND role.key='collectionRole' AND role.payload_json='"secondary"') AND EXISTS(SELECT 1 FROM logical_platform_streams ps JOIN logical_sessions s ON s.id=ps.session_id WHERE s.id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND r.at_ms>=ps.started_at_ms AND r.at_ms<coalesce(ps.ended_at_ms,?))) OR (r.source<>'youtube' AND EXISTS(SELECT 1 FROM events e JOIN logical_event_sessions es ON es.event_id=e.id WHERE e.source=r.source AND e.account_id=r.account_id AND e.type=r.type AND e.external_id=r.external_id AND es.session_id=?)) OR (r.source='youtube' AND EXISTS(SELECT 1 FROM logical_platform_streams p WHERE p.platform='youtube' AND p.session_id=? AND p.account_id=r.account_id AND r.at_ms>=p.started_at_ms AND r.at_ms<coalesce(p.ended_at_ms,?) AND (json_extract(r.payload_json,'$.videoId')=p.external_id OR (json_extract(r.payload_json,'$.videoId') IS NULL AND 1=(SELECT count(*) FROM logical_platform_streams q WHERE q.platform='youtube' AND q.account_id=r.account_id AND r.at_ms>=q.started_at_ms AND r.at_ms<coalesce(q.ended_at_ms,?)))))))`,
+      );
+      args.push(filter.session, now, filter.session, filter.session, now, now);
+    }
+    // Resolve membership and the human name at read time, including merge/split changes.
+    return (
+      this.db
+        .prepare(
+          `SELECT r.*,EXISTS(SELECT 1 FROM youtube_snapshots role WHERE r.source='youtube' AND role.account_id=r.account_id AND role.key='collectionRole' AND role.payload_json='"secondary"') AS youtubeSecondary,coalesce(i.person_id,y.person_id) AS person_id,coalesce(p.display_name,r.actor_name) AS person_name
    FROM recent_events r
    LEFT JOIN identities i ON r.source<>'youtube' AND i.source=r.source AND i.account_id=r.account_id AND i.external_id=r.actor_id
    LEFT JOIN youtube_identities y ON r.source='youtube' AND y.account_id=r.account_id AND y.external_id=r.actor_id
    LEFT JOIN persons p ON p.id=coalesce(i.person_id,y.person_id)
-   WHERE ${where.join(' AND ')} ORDER BY r.at_ms DESC,r.id DESC LIMIT ? OFFSET ?`).all(...args,limit,offset) as (RecentRow&{person_id:string|null})[]).map(({payload_json,...row})=>{
-    const payload=JSON.parse(payload_json) as Record<string,unknown>;
-    if(row.type!=='donation')return {...row,payload};
-    const event=this.db.prepare("SELECT occurred_at_ms FROM events WHERE source=? AND account_id=? AND external_id=? AND type='donation'").get(row.source,row.account_id,row.external_id) as {occurred_at_ms:number|null}|undefined;
-    return {...row,payload:{...payload,...donationValuation(this.db,payload,event?.occurred_at_ms??null)}};
-   });
- }
- purge(now=Date.now()):number {
-  assertTimestamp(now);
-  return this.db.prepare('DELETE FROM recent_events WHERE id IN (SELECT id FROM recent_events WHERE at_ms<=? ORDER BY at_ms,id LIMIT ?)').run(now-EVENT_RETENTION_MS,EVENT_CLEANUP_BATCH).changes;
- }
+   WHERE ${where.join(' AND ')} ORDER BY r.at_ms DESC,r.id DESC LIMIT ? OFFSET ?`,
+        )
+        .all(...args, limit, offset) as (RecentRow & { person_id: string | null })[]
+    ).map(({ payload_json, ...row }) => {
+      const payload = JSON.parse(payload_json) as Record<string, unknown>;
+      if (row.type !== 'donation') return { ...row, payload };
+      const event = this.db
+        .prepare(
+          "SELECT occurred_at_ms FROM events WHERE source=? AND account_id=? AND external_id=? AND type='donation'",
+        )
+        .get(row.source, row.account_id, row.external_id) as { occurred_at_ms: number | null } | undefined;
+      return { ...row, payload: { ...payload, ...donationValuation(this.db, payload, event?.occurred_at_ms ?? null) } };
+    });
+  }
+  purge(now = Date.now()): number {
+    assertTimestamp(now);
+    return this.db
+      .prepare(
+        'DELETE FROM recent_events WHERE id IN (SELECT id FROM recent_events WHERE at_ms<=? ORDER BY at_ms,id LIMIT ?)',
+      )
+      .run(now - EVENT_RETENTION_MS, EVENT_CLEANUP_BATCH).changes;
+  }
 }

@@ -1,24 +1,30 @@
-import {analyticsPresentationSchema} from './change-revisions.js';
-import {classifyCore,coreSessions,normalizeCoreOptions} from './core-classification.js';
-import {HistoryTree} from './history-tree.js';
-import {streamFold} from './history-fold.js';
-import {analyticsStreamCacheSchema} from './schema.js';
-import {StreamFacts} from './stream-facts.js';
-import {latestFollowerChecksSql,latestFollowerSnapshotsSql} from './follower-queries.js';
-import {dateTimeFormatter} from './date-time-formatter.js';
-import {streamInsights,InsightAccumulator,type InsightCard} from './insights.js';
-import {mergeClockActivity, type ClockActivity} from './clock-activity.js';
-import {AnalyticsWorkspace} from './analytics-workspace.js';
-import {AnalyticsReportCache} from './analytics-report-cache.js';
-import { HistoryTimeline } from "./history-timeline.js";
+import { analyticsPresentationSchema } from './change-revisions.js';
+import { classifyCore, coreSessions, normalizeCoreOptions } from './core-classification.js';
+import { HistoryTree } from './history-tree.js';
+import { streamFold } from './history-fold.js';
+import { analyticsStreamCacheSchema } from './schema.js';
+import { StreamFacts } from './stream-facts.js';
+import { latestFollowerChecksSql, latestFollowerSnapshotsSql } from './follower-queries.js';
+import { dateTimeFormatter } from './date-time-formatter.js';
+import { streamInsights, InsightAccumulator, type InsightCard } from './insights.js';
+import { mergeClockActivity, type ClockActivity } from './clock-activity.js';
+import { AnalyticsWorkspace } from './analytics-workspace.js';
+import { AnalyticsReportCache } from './analytics-report-cache.js';
+import { HistoryTimeline } from './history-timeline.js';
 import type Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
 import { gzipSync, gunzipSync } from 'node:zlib';
-import {serialize} from 'node:v8';
+import { serialize } from 'node:v8';
 import { statfsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { audienceAnalytics, analyticsMetadata, validateAnalyticsOptions, unionSpans, type AnalyticsOptions } from './analytics.js';
+import {
+  audienceAnalytics,
+  analyticsMetadata,
+  validateAnalyticsOptions,
+  unionSpans,
+  type AnalyticsOptions,
+} from './analytics.js';
 import { timeAudience, matchesActivityDay, type TimeAudienceSummary } from './time-audience.js';
 import { timePatterns } from './time-patterns.js';
 import { currencyRates } from './rates.js';
@@ -26,795 +32,1861 @@ import { donationTiming } from './donation-statistics.js';
 const days = ['all', 'weekdays', 'weekends', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 const resolutions = [1, 5, 15, 30, 60];
 type Session = {
-    id: string;
-    started_at_ms: number;
-    ended_at_ms: number | null;
-    revision: number;
-    members?:string;
+  id: string;
+  started_at_ms: number;
+  ended_at_ms: number | null;
+  revision: number;
+  members?: string;
 };
 type Report = ReturnType<typeof audienceAnalytics> & {
-    coreRoster?:string[];
-    streamRange?:{first:number;last:number;total:number};
-    insights?:InsightCard[];
-    clockBuckets?: ClockBucket[];
-    clockRevision?:string;
-    clockSelection?:{day:string;resolution:number};
-    aggregate?: boolean;
-    preparing?: boolean;
-    ready?: number;
-    total?: number;
-    stage?: string;
-    audiencePage?: {total:number;offset:number;limit:number};
-    clockVisitors?: ReturnType<AnalyticsWorkspace<Person>['clockPage']>;
+  coreRoster?: string[];
+  streamRange?: { first: number; last: number; total: number };
+  insights?: InsightCard[];
+  clockBuckets?: ClockBucket[];
+  clockRevision?: string;
+  clockSelection?: { day: string; resolution: number };
+  aggregate?: boolean;
+  preparing?: boolean;
+  ready?: number;
+  total?: number;
+  stage?: string;
+  audiencePage?: { total: number; offset: number; limit: number };
+  clockVisitors?: ReturnType<AnalyticsWorkspace<Person>['clockPage']>;
 };
-type ClockResponse={filters:Report['filters'];clockVisitors?:ReturnType<AnalyticsWorkspace<Person>['clockPage']>;clockPages?:ReturnType<AnalyticsWorkspace<Person>['clockPages']>;preparing?:boolean;ready?:number;total?:number;stage?:string};
+type ClockResponse = {
+  filters: Report['filters'];
+  clockVisitors?: ReturnType<AnalyticsWorkspace<Person>['clockPage']>;
+  clockPages?: ReturnType<AnalyticsWorkspace<Person>['clockPages']>;
+  preparing?: boolean;
+  ready?: number;
+  total?: number;
+  stage?: string;
+};
 type Person = Report['audience'][number] & {
-    sessionCount: number;
-    attendanceCount: number;
-    coreAttendanceCount: number;
-    activityMinutes: number;
-    detailAvailable?: boolean;
+  sessionCount: number;
+  attendanceCount: number;
+  coreAttendanceCount: number;
+  activityMinutes: number;
+  detailAvailable?: boolean;
 };
 type Stream = Report['streamComparison'][number];
 type Category = Report['categories'][number];
 type Hour = Report['hours'][number];
 type Progress = {
-    preparing: true;
-    ready: number;
-    total: number;
+  preparing: true;
+  ready: number;
+  total: number;
 };
 export type ClockBucket = TimeAudienceSummary;
-const sumMoney = (target: Record<string, string>, input: Record<string, string>) => { for (const [currency, amount] of Object.entries(input))
-    target[currency] = (BigInt(target[currency] ?? '0') + BigInt(amount)).toString(); };
+const sumMoney = (target: Record<string, string>, input: Record<string, string>) => {
+  for (const [currency, amount] of Object.entries(input))
+    target[currency] = (BigInt(target[currency] ?? '0') + BigInt(amount)).toString();
+};
 /** Incremental, derived closed-stream reports. Facts and public event IDs are untouched. */
 export class AnalyticsHistory {
-    private readonly reportCache:AnalyticsReportCache<Report>;
-    private readonly facts:StreamFacts;
-    private readonly tree:HistoryTree;
-    private statements = new Map<string, Database.Statement>();
-    private statement(sql: string) {
-        let statement = this.statements.get(sql);
-        if (!statement) { statement = this.db.prepare(sql); this.statements.set(sql, statement); }
-        return statement;
+  private readonly reportCache: AnalyticsReportCache<Report>;
+  private readonly facts: StreamFacts;
+  private readonly tree: HistoryTree;
+  private statements = new Map<string, Database.Statement>();
+  private statement(sql: string) {
+    let statement = this.statements.get(sql);
+    if (!statement) {
+      statement = this.db.prepare(sql);
+      this.statements.set(sql, statement);
     }
-    private readonly completed = new Map<string,{value:Report;bytes:number;workspace?:AnalyticsWorkspace<Person>;liveRevision?:string;savedKey?:string}>();
-    private completedBytes=0;
-    private remember(key:string,value:Report,workspace?:AnalyticsWorkspace<Person>,liveRevision?:string,savedKey?:string){
-        const limit=this.cachePolicy.maxCompletedBytes??16*1024*1024,bytes=serialize(value).byteLength;
-        if(bytes>limit){workspace?.dispose();return;}
-        const previous=this.completed.get(key);if(previous){previous.workspace?.dispose();this.completedBytes-=previous.bytes;this.completed.delete(key);}
-        while(this.completed.size>=16||this.completedBytes+bytes>limit){const oldest=this.completed.keys().next().value!;this.completedBytes-=this.completed.get(oldest)!.bytes;this.completed.get(oldest)!.workspace?.dispose();this.completed.delete(oldest);}
-        this.completed.set(key,{value:structuredClone(value),bytes,...(workspace?{workspace}:{}),...(liveRevision?{liveRevision}:{}),...(savedKey?{savedKey}:{})});this.completedBytes+=bytes;
+    return statement;
+  }
+  private readonly completed = new Map<
+    string,
+    { value: Report; bytes: number; workspace?: AnalyticsWorkspace<Person>; liveRevision?: string; savedKey?: string }
+  >();
+  private completedBytes = 0;
+  private remember(
+    key: string,
+    value: Report,
+    workspace?: AnalyticsWorkspace<Person>,
+    liveRevision?: string,
+    savedKey?: string,
+  ) {
+    const limit = this.cachePolicy.maxCompletedBytes ?? 16 * 1024 * 1024,
+      bytes = serialize(value).byteLength;
+    if (bytes > limit) {
+      workspace?.dispose();
+      return;
     }
-    private projections=new Map<string,{value:Report;bytes:number}>();
-    private projectionBytes=0;
-    private rememberProjection(key:string,value:Report){
-        const bytes=serialize(value).byteLength;if(bytes>4*1024*1024)return;
-        this.projectionBytes-=this.projections.get(key)?.bytes??0;this.projections.delete(key);
-        while(this.projections.size>=16||this.projectionBytes+bytes>8*1024*1024){const first=this.projections.keys().next().value!;this.projectionBytes-=this.projections.get(first)!.bytes;this.projections.delete(first);}
-        this.projections.set(key,{value:structuredClone(value),bytes});this.projectionBytes+=bytes;
+    const previous = this.completed.get(key);
+    if (previous) {
+      previous.workspace?.dispose();
+      this.completedBytes -= previous.bytes;
+      this.completed.delete(key);
     }
-    private readonly jobs = new Map<string, {
-        iterator: Generator<Progress, Report, void>;
-        touchedAt: number;
-        workspace:AnalyticsWorkspace<Person>;
-        liveRevision:string;
-        validation:Report;
-    }>();
-    private pruneJobs(now=Date.now()) {
-        for (const [key, job] of this.jobs)
-            if (now-job.touchedAt>300000) {job.workspace.dispose();this.jobs.delete(key);}
+    while (this.completed.size >= 16 || this.completedBytes + bytes > limit) {
+      const oldest = this.completed.keys().next().value!;
+      this.completedBytes -= this.completed.get(oldest)!.bytes;
+      this.completed.get(oldest)!.workspace?.dispose();
+      this.completed.delete(oldest);
     }
-    constructor(private readonly db: Database.Database, private readonly cachePolicy: {
-        availableBytes?: () => number;
-        maxBytes?: number;
-        /** @deprecated Alias for maxStreamCacheBytes; excludes durable full-stream facts. */
-        maxTotalBytes?: number;
-        maxStreamCacheBytes?:number;
-        maxCompletedBytes?: number;
-        maxReportBytes?: number;
-    } = {}) {
-        db.exec(analyticsStreamCacheSchema);
-        if(!db.prepare("SELECT revision FROM ui_revisions WHERE domain='analyticsPresentation'").get())db.transaction(()=>db.exec(analyticsPresentationSchema)).immediate();
-        this.reportCache=new AnalyticsReportCache(db,cachePolicy.maxReportBytes);this.facts=new StreamFacts(db,cachePolicy);this.tree=new HistoryTree(db,cachePolicy);
-        if(db.pragma('temp_store',{simple:true})!==1)db.pragma('temp_store=FILE');
-        db.pragma('temp.cache_size=-2048');
+    this.completed.set(key, {
+      value: structuredClone(value),
+      bytes,
+      ...(workspace ? { workspace } : {}),
+      ...(liveRevision ? { liveRevision } : {}),
+      ...(savedKey ? { savedKey } : {}),
+    });
+    this.completedBytes += bytes;
+  }
+  private projections = new Map<string, { value: Report; bytes: number }>();
+  private projectionBytes = 0;
+  private rememberProjection(key: string, value: Report) {
+    const bytes = serialize(value).byteLength;
+    if (bytes > 4 * 1024 * 1024) return;
+    this.projectionBytes -= this.projections.get(key)?.bytes ?? 0;
+    this.projections.delete(key);
+    while (this.projections.size >= 16 || this.projectionBytes + bytes > 8 * 1024 * 1024) {
+      const first = this.projections.keys().next().value!;
+      this.projectionBytes -= this.projections.get(first)!.bytes;
+      this.projections.delete(first);
     }
-    close(){this.memberships.clear();this.membershipBytes=0;this.addresses.clear();this.projections.clear();this.projectionBytes=0;this.liveStreams.clear();for(const job of this.jobs.values())job.workspace.dispose();this.jobs.clear();for(const entry of this.completed.values())entry.workspace?.dispose();this.completed.clear();this.completedBytes=0;}
-    private page(value:Report,workspace:AnalyticsWorkspace<Person>|undefined,options:AnalyticsOptions):Report{
-        // Project before cloning or crossing the worker boundary. The complete cached
-        // report stays available for every day/resolution and legacy API clients.
-        if(options.clockCompact){
-            const day=options.clockDay??'all',resolution=options.clockResolution??15;
-            value={...value,clockSelection:{day,resolution},clockBuckets:(value.clockBuckets??[]).filter(b=>
-                (b.day===day&&b.resolution===resolution)||(b.resolution===60&&days.slice(3).includes(b.day)))};
-        }
-        if(options.panel&&options.panel!=='audience')return this.projection(value,options);
-        if(!workspace)return this.projection(options.attendanceOnly?{...value,audience:value.audience.filter(person=>person.attendanceSessionIds.length>0)}:value,options);
-        const page=workspace.people.page(options.audienceOffset??0,options.audienceSearch??'',options.audienceSort??'core',options.audienceCoreOnly??false,100,options.attendanceOnly??false);
-        return this.projection({...value,audience:page.items,...(workspace.people.size>100?{audiencePage:{total:page.total,offset:page.offset,limit:page.limit}}:{}),...(options.clockMinute!==undefined?{clockVisitors:workspace.clockPage(options.clockDay??'all',options.clockMinute,options.clockResolution??60,options.clockOffset??0)}:{})},options);
+    this.projections.set(key, { value: structuredClone(value), bytes });
+    this.projectionBytes += bytes;
+  }
+  private readonly jobs = new Map<
+    string,
+    {
+      iterator: Generator<Progress, Report, void>;
+      touchedAt: number;
+      workspace: AnalyticsWorkspace<Person>;
+      liveRevision: string;
+      validation: Report;
     }
-    private clockResult(value:Report,workspace:AnalyticsWorkspace<Person>|undefined,options:AnalyticsOptions):ClockResponse{
-        const day=options.clockDay??'all',minute=options.clockMinute??0,resolution=options.clockResolution??60;
-        return {filters:value.filters,...(options.clockBatch?{clockPages:workspace?.clockPages(day,minute,resolution)??[]}:{clockVisitors:workspace?.clockPage(day,minute,resolution,options.clockOffset??0)??{items:[],total:0,offset:options.clockOffset??0,limit:100}})};
+  >();
+  private pruneJobs(now = Date.now()) {
+    for (const [key, job] of this.jobs)
+      if (now - job.touchedAt > 300000) {
+        job.workspace.dispose();
+        this.jobs.delete(key);
+      }
+  }
+  constructor(
+    private readonly db: Database.Database,
+    private readonly cachePolicy: {
+      availableBytes?: () => number;
+      maxBytes?: number;
+      /** @deprecated Alias for maxStreamCacheBytes; excludes durable full-stream facts. */
+      maxTotalBytes?: number;
+      maxStreamCacheBytes?: number;
+      maxCompletedBytes?: number;
+      maxReportBytes?: number;
+    } = {},
+  ) {
+    db.exec(analyticsStreamCacheSchema);
+    if (!db.prepare("SELECT revision FROM ui_revisions WHERE domain='analyticsPresentation'").get())
+      db.transaction(() => db.exec(analyticsPresentationSchema)).immediate();
+    this.reportCache = new AnalyticsReportCache(db, cachePolicy.maxReportBytes);
+    this.facts = new StreamFacts(db, cachePolicy);
+    this.tree = new HistoryTree(db, cachePolicy);
+    if (db.pragma('temp_store', { simple: true }) !== 1) db.pragma('temp_store=FILE');
+    db.pragma('temp.cache_size=-2048');
+  }
+  close() {
+    this.memberships.clear();
+    this.membershipBytes = 0;
+    this.addresses.clear();
+    this.projections.clear();
+    this.projectionBytes = 0;
+    this.liveStreams.clear();
+    for (const job of this.jobs.values()) job.workspace.dispose();
+    this.jobs.clear();
+    for (const entry of this.completed.values()) entry.workspace?.dispose();
+    this.completed.clear();
+    this.completedBytes = 0;
+  }
+  private page(value: Report, workspace: AnalyticsWorkspace<Person> | undefined, options: AnalyticsOptions): Report {
+    // Project before cloning or crossing the worker boundary. The complete cached
+    // report stays available for every day/resolution and legacy API clients.
+    if (options.clockCompact) {
+      const day = options.clockDay ?? 'all',
+        resolution = options.clockResolution ?? 15;
+      value = {
+        ...value,
+        clockSelection: { day, resolution },
+        clockBuckets: (value.clockBuckets ?? []).filter(
+          (b) =>
+            (b.day === day && b.resolution === resolution) || (b.resolution === 60 && days.slice(3).includes(b.day)),
+        ),
+      };
     }
-    clockAudience(options:AnalyticsOptions):ClockResponse{
-        const core=this.rollingMembership(options);
-        return core.preparing?core:this.resolve(core.options,true,true);
-    }
-    private checkWorkspace(workspace:AnalyticsWorkspace<Person>){
-        for(;;){
-            try{workspace.checkBudget();return;}catch(error){
-                if(!(error instanceof Error)||error.message!=='ANALYTICS_WORKSPACE_LIMIT')throw error;
-                const retained=[...this.completed].find(([,entry])=>entry.workspace);
-                if(retained){const [key,entry]=retained;entry.workspace!.dispose();this.completedBytes-=entry.bytes;this.completed.delete(key);continue;}
-                const pending=[...this.jobs].find(([,job])=>job.workspace!==workspace);
-                if(pending){pending[1].workspace.dispose();this.jobs.delete(pending[0]);continue;}
-                throw error;
+    if (options.panel && options.panel !== 'audience') return this.projection(value, options);
+    if (!workspace)
+      return this.projection(
+        options.attendanceOnly
+          ? { ...value, audience: value.audience.filter((person) => person.attendanceSessionIds.length > 0) }
+          : value,
+        options,
+      );
+    const page = workspace.people.page(
+      options.audienceOffset ?? 0,
+      options.audienceSearch ?? '',
+      options.audienceSort ?? 'core',
+      options.audienceCoreOnly ?? false,
+      100,
+      options.attendanceOnly ?? false,
+    );
+    return this.projection(
+      {
+        ...value,
+        audience: page.items,
+        ...(workspace.people.size > 100
+          ? { audiencePage: { total: page.total, offset: page.offset, limit: page.limit } }
+          : {}),
+        ...(options.clockMinute !== undefined
+          ? {
+              clockVisitors: workspace.clockPage(
+                options.clockDay ?? 'all',
+                options.clockMinute,
+                options.clockResolution ?? 60,
+                options.clockOffset ?? 0,
+              ),
             }
+          : {}),
+      },
+      options,
+    );
+  }
+  private clockResult(
+    value: Report,
+    workspace: AnalyticsWorkspace<Person> | undefined,
+    options: AnalyticsOptions,
+  ): ClockResponse {
+    const day = options.clockDay ?? 'all',
+      minute = options.clockMinute ?? 0,
+      resolution = options.clockResolution ?? 60;
+    return {
+      filters: value.filters,
+      ...(options.clockBatch
+        ? { clockPages: workspace?.clockPages(day, minute, resolution) ?? [] }
+        : {
+            clockVisitors: workspace?.clockPage(day, minute, resolution, options.clockOffset ?? 0) ?? {
+              items: [],
+              total: 0,
+              offset: options.clockOffset ?? 0,
+              limit: 100,
+            },
+          }),
+    };
+  }
+  clockAudience(options: AnalyticsOptions): ClockResponse {
+    const core = this.rollingMembership(options);
+    return core.preparing ? core : this.resolve(core.options, true, true);
+  }
+  private checkWorkspace(workspace: AnalyticsWorkspace<Person>) {
+    for (;;) {
+      try {
+        workspace.checkBudget();
+        return;
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== 'ANALYTICS_WORKSPACE_LIMIT') throw error;
+        const retained = [...this.completed].find(([, entry]) => entry.workspace);
+        if (retained) {
+          const [key, entry] = retained;
+          entry.workspace!.dispose();
+          this.completedBytes -= entry.bytes;
+          this.completed.delete(key);
+          continue;
+        }
+        const pending = [...this.jobs].find(([, job]) => job.workspace !== workspace);
+        if (pending) {
+          pending[1].workspace.dispose();
+          this.jobs.delete(pending[0]);
+          continue;
+        }
+        throw error;
+      }
+    }
+  }
+  private budgetChecked = false;
+  private checkCacheBudget() {
+    if (this.budgetChecked) return;
+    this.db.transaction(() => this.trimCache('', '')).immediate();
+    this.budgetChecked = true;
+  }
+  private sessions(options: AnalyticsOptions): Session[] {
+    return this.statement(
+      `SELECT s.id,s.started_at_ms,s.ended_at_ms,coalesce((SELECT sum(v.activity+v.money) FROM analytics_fact_versions v WHERE v.session_id=s.id OR v.session_id IN(SELECT member_id FROM session_groups WHERE group_id=s.id)),0) AS revision,(SELECT json_group_array(member_id) FROM session_groups WHERE group_id=s.id) members FROM sessions s
+   WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND s.started_at_ms<? AND coalesce(s.ended_at_ms,?)>? ${options.sessionId ? 'AND s.id=?' : ''} ORDER BY s.started_at_ms,s.id`,
+    ).all(options.toMs, options.toMs, options.fromMs, ...(options.sessionId ? [options.sessionId] : [])) as Session[];
+  }
+  private key(options: AnalyticsOptions, session: Session): string {
+    const fields = {
+      ...(session.ended_at_ms === null
+        ? { liveScope: options.toMs % 60000 === 0 ? 'minute-boundary' : 'partial-minute' }
+        : {}),
+      format: 13,
+      ...(options.membershipOnly ? { membershipOnly: true } : {}),
+      members: session.members ?? null,
+      from: Math.max(options.fromMs, session.started_at_ms),
+      to:
+        session.ended_at_ms === null && options.toMs >= Date.now() - 120000
+          ? 'live'
+          : Math.min(options.toMs, session.ended_at_ms ?? options.toMs),
+      source: options.source ?? 'all',
+      category: options.category ?? '',
+      timezone: options.timezone ?? 'Europe/Moscow',
+      chatWindowMinutes: options.chatWindowMinutes ?? 5,
+      excluded: options.excludedLogins === false ? false : [...(options.excludedLogins ?? [])].sort(),
+      owner: options.ownerId ?? '',
+      youtube: options.youtubeAccount ?? '',
+    };
+    return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
+  }
+  private followerRevision() {
+    // A repeated check of the same payload must not rebuild unchanged history.
+    // Seek the latest check for each distinct payload instead of scanning all checks.
+    return this.statement(
+      `SELECT source,account_id,snapshot_id AS id FROM (${latestFollowerChecksSql}) ORDER BY source,account_id`,
+    ).all();
+  }
+  private build(options: AnalyticsOptions, session: Session): Report {
+    const report = this.facts.read(options, session.id, session.started_at_ms, session.ended_at_ms);
+    if (options.membershipOnly) return report;
+    const clockBuckets = this.facts.details(
+      options,
+      session.id,
+      session.started_at_ms,
+      session.ended_at_ms,
+      () => this.clockBuckets(report, options),
+      report,
+    );
+    return { ...report, clockBuckets, insights: streamInsights(report, options.timezone) };
+  }
+  private clockBuckets(report: ReturnType<typeof audienceAnalytics>, options: AnalyticsOptions) {
+    // Each cached report represents one logical stream; attendance is deduplicated
+    // within that report before counts from different streams are added.
+    const clockBuckets: ClockBucket[] = [];
+    const clock = dateTimeFormatter('ru-RU', { timeZone: options.timezone ?? 'Europe/Moscow', weekday: 'short' }),
+      presentDays = new Set<string>();
+    for (const span of report.activityWindows) {
+      presentDays.add(clock.format(span.to - 1));
+      for (let at = span.from; at < span.to; at = Math.min(span.to, (Math.floor(at / 3600000) + 1) * 3600000))
+        presentDays.add(clock.format(at));
+    }
+    const common =
+      presentDays.size === 1
+        ? new Map(
+            resolutions.map((resolution) => [
+              resolution,
+              timeAudience(
+                report.activityWindows,
+                report.audience,
+                options.timezone ?? 'Europe/Moscow',
+                resolution,
+                'all',
+              ),
+            ]),
+          )
+        : null;
+    for (const day of days) {
+      if (![...presentDays].some((d) => matchesActivityDay(day, d))) continue;
+      for (const resolution of resolutions)
+        for (const bucket of common?.get(resolution) ??
+          timeAudience(report.activityWindows, report.audience, options.timezone ?? 'Europe/Moscow', resolution, day)) {
+          if (!bucket.streams.size) continue;
+          clockBuckets.push({
+            day,
+            resolution,
+            minute: bucket.minute,
+            streams: bucket.streams.size,
+            airtimeMs: bucket.airtimeMs,
+            personTimeMs: bucket.personTimeMs,
+            averageAudience: bucket.averageAudience,
+            people: [...bucket.people].map(([id, streams]) => ({ id, visits: streams.size })),
+          });
         }
     }
-    private budgetChecked = false;
-    private checkCacheBudget() {
-        if (this.budgetChecked) return;
-        this.db.transaction(() => this.trimCache('', '')).immediate();
-        this.budgetChecked = true;
-    }
-    private sessions(options: AnalyticsOptions): Session[] {
-        return this.statement(`SELECT s.id,s.started_at_ms,s.ended_at_ms,coalesce((SELECT sum(v.activity+v.money) FROM analytics_fact_versions v WHERE v.session_id=s.id OR v.session_id IN(SELECT member_id FROM session_groups WHERE group_id=s.id)),0) AS revision,(SELECT json_group_array(member_id) FROM session_groups WHERE group_id=s.id) members FROM sessions s
-   WHERE NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) AND s.started_at_ms<? AND coalesce(s.ended_at_ms,?)>? ${options.sessionId?'AND s.id=?':''} ORDER BY s.started_at_ms,s.id`).all(options.toMs, options.toMs, options.fromMs,...(options.sessionId?[options.sessionId]:[])) as Session[];
-    }
-    private key(options: AnalyticsOptions, session: Session): string {
-        const fields = { ...(session.ended_at_ms===null?{liveScope:options.toMs%60000===0?'minute-boundary':'partial-minute'}:{}),format: 13,...(options.membershipOnly?{membershipOnly:true}:{}),members:session.members??null, from: Math.max(options.fromMs, session.started_at_ms), to: session.ended_at_ms===null&&options.toMs>=Date.now()-120000?'live':Math.min(options.toMs, session.ended_at_ms??options.toMs), source: options.source ?? 'all', category: options.category ?? '', timezone: options.timezone ?? 'Europe/Moscow', chatWindowMinutes: options.chatWindowMinutes ?? 5, excluded: options.excludedLogins===false?false:[...(options.excludedLogins??[])].sort(), owner: options.ownerId ?? '', youtube: options.youtubeAccount ?? '' };
-        return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
-    }
-    private followerRevision(){
-        // A repeated check of the same payload must not rebuild unchanged history.
-        // Seek the latest check for each distinct payload instead of scanning all checks.
-        return this.statement(`SELECT source,account_id,snapshot_id AS id FROM (${latestFollowerChecksSql}) ORDER BY source,account_id`).all();
-    }
-    private build(options: AnalyticsOptions, session: Session): Report {
-        const report = this.facts.read(options,session.id,session.started_at_ms,session.ended_at_ms);
-        if(options.membershipOnly)return report;
-        const clockBuckets=this.facts.details(options,session.id,session.started_at_ms,session.ended_at_ms,()=>this.clockBuckets(report,options),report);
-        return {...report,clockBuckets,insights:streamInsights(report,options.timezone)};
-    }
-    private clockBuckets(report:ReturnType<typeof audienceAnalytics>,options:AnalyticsOptions){
-        // Each cached report represents one logical stream; attendance is deduplicated
-        // within that report before counts from different streams are added.
-        const clockBuckets: ClockBucket[] = [];
-        const clock = dateTimeFormatter('ru-RU', { timeZone: options.timezone ?? 'Europe/Moscow', weekday: 'short' }), presentDays = new Set<string>();
-        for (const span of report.activityWindows) {
-            presentDays.add(clock.format(span.to - 1));
-            for (let at = span.from; at < span.to; at = Math.min(span.to, (Math.floor(at / 3600000) + 1) * 3600000))
-                presentDays.add(clock.format(at));
+    return clockBuckets;
+  }
+  private cached(options: AnalyticsOptions, session: Session, global: number): Report | undefined {
+    if (session.ended_at_ms === null) return undefined;
+    const row = this.statement(
+      'SELECT payload FROM analytics_stream_cache WHERE session_id=? AND cache_key=? AND revision=? AND global_revision=?',
+    ).get(session.id, this.key(options, session), session.revision, global) as
+      | {
+          payload: Buffer;
         }
-        const common = presentDays.size === 1 ? new Map(resolutions.map(resolution => [resolution, timeAudience(report.activityWindows, report.audience, options.timezone ?? 'Europe/Moscow', resolution, 'all')])) : null;
-        for (const day of days) {
-            if (![...presentDays].some(d => matchesActivityDay(day, d)))
-                continue;
-            for (const resolution of resolutions)
-                for (const bucket of common?.get(resolution) ?? timeAudience(report.activityWindows, report.audience, options.timezone ?? 'Europe/Moscow', resolution, day)) {
-                    if (!bucket.streams.size)
-                        continue;
-                    clockBuckets.push({ day, resolution, minute: bucket.minute, streams: bucket.streams.size, airtimeMs: bucket.airtimeMs, personTimeMs: bucket.personTimeMs, averageAudience: bucket.averageAudience, people: [...bucket.people].map(([id, streams]) => ({ id, visits: streams.size })) });
-                }
+      | undefined;
+    if (!row) return undefined;
+    try {
+      return JSON.parse(
+        gunzipSync(row.payload, { maxOutputLength: this.cachePolicy.maxBytes ?? 16 * 1024 * 1024 }).toString(),
+      ) as Report;
+    } catch {
+      this.statement('DELETE FROM analytics_stream_cache WHERE session_id=? AND cache_key=?').run(
+        session.id,
+        this.key(options, session),
+      );
+      return undefined;
+    }
+  }
+  /** Derived reports may be evicted; facts and late corrections remain authoritative. */
+  private trimCache(protectedSession: string, protectedKey: string): boolean {
+    const limit = this.cachePolicy.maxStreamCacheBytes ?? this.cachePolicy.maxTotalBytes ?? 128 * 1024 * 1024;
+    let total = (
+        this.statement('SELECT coalesce(sum(length(payload)),0) AS bytes FROM analytics_stream_cache').get() as {
+          bytes: number;
         }
-        return clockBuckets;
+      ).bytes,
+      evicted = false;
+    while (total > limit) {
+      // Bound JS allocations even when years of reports are present.
+      const rows = this.statement(
+        'SELECT session_id,cache_key,length(payload) AS bytes FROM analytics_stream_cache WHERE session_id<>? OR cache_key<>? ORDER BY updated_at_ms,session_id,cache_key LIMIT 64',
+      ).all(protectedSession, protectedKey) as { session_id: string; cache_key: string; bytes: number }[];
+      if (!rows.length) break;
+      for (const row of rows) {
+        if (total <= limit) break;
+        this.statement('DELETE FROM analytics_stream_cache WHERE session_id=? AND cache_key=?').run(
+          row.session_id,
+          row.cache_key,
+        );
+        total -= row.bytes;
+        evicted = true;
+      }
     }
-    private cached(options: AnalyticsOptions, session: Session, global: number): Report | undefined {
-        if (session.ended_at_ms === null)
-            return undefined;
-        const row = this.statement('SELECT payload FROM analytics_stream_cache WHERE session_id=? AND cache_key=? AND revision=? AND global_revision=?').get(session.id, this.key(options, session), session.revision, global) as {
-            payload: Buffer;
-        } | undefined;
-        if (!row)
-            return undefined;
-        try {
-            return JSON.parse(gunzipSync(row.payload, { maxOutputLength: this.cachePolicy.maxBytes ?? 16 * 1024 * 1024 }).toString()) as Report;
+    return evicted;
+  }
+  private save(options: AnalyticsOptions, session: Session, global: number, report: Report, allowEviction = true) {
+    if (session.ended_at_ms === null) return;
+    const serialized = JSON.stringify(report);
+    if (Buffer.byteLength(serialized) > (this.cachePolicy.maxBytes ?? 16 * 1024 * 1024)) return false;
+    let available = this.cachePolicy.availableBytes?.() ?? Infinity;
+    if (!this.cachePolicy.availableBytes && this.db.name !== ':memory:') {
+      const disk = statfsSync(dirname(this.db.name));
+      available = disk.bavail * disk.bsize;
+    }
+    if (available < 1024 * 1024 * 1024) return false;
+    const payload = gzipSync(serialized);
+    if (
+      payload.byteLength > (this.cachePolicy.maxStreamCacheBytes ?? this.cachePolicy.maxTotalBytes ?? 128 * 1024 * 1024)
+    )
+      return false;
+    if (!allowEviction) {
+      const retained = (
+        this.statement(
+          'SELECT coalesce(sum(length(payload)),0) AS bytes FROM analytics_stream_cache WHERE NOT(session_id=? AND (cache_key=? OR revision<>? OR global_revision<>?))',
+        ).get(session.id, this.key(options, session), session.revision, global) as { bytes: number }
+      ).bytes;
+      if (
+        retained + payload.byteLength >
+        (this.cachePolicy.maxStreamCacheBytes ?? this.cachePolicy.maxTotalBytes ?? 128 * 1024 * 1024)
+      )
+        return false;
+    }
+    return this.db
+      .transaction(() => {
+        this.statement(
+          'DELETE FROM analytics_stream_cache WHERE session_id=? AND (revision<>? OR global_revision<>?)',
+        ).run(session.id, session.revision, global);
+        this.statement(
+          'INSERT INTO analytics_stream_cache VALUES (?,?,?,?,?,?) ON CONFLICT(session_id,cache_key) DO UPDATE SET revision=excluded.revision,global_revision=excluded.global_revision,payload=excluded.payload,updated_at_ms=excluded.updated_at_ms',
+        ).run(session.id, this.key(options, session), session.revision, global, payload, Date.now());
+        this.statement(
+          'DELETE FROM analytics_stream_cache WHERE session_id=? AND cache_key<>? AND cache_key NOT IN(SELECT cache_key FROM analytics_stream_cache WHERE session_id=? AND cache_key<>? ORDER BY updated_at_ms DESC,cache_key DESC LIMIT 15)',
+        ).run(session.id, this.key(options, session), session.id, this.key(options, session));
+        return !this.trimCache(session.id, this.key(options, session));
+      })
+      .immediate();
+  }
+  prepare(options: AnalyticsOptions, sessions = this.sessions(options)) {
+    this.pruneJobs();
+    this.checkCacheBudget();
+    const global = 0,
+      start = performance.now();
+    let ready = 0;
+    for (const session of [...sessions].reverse()) {
+      if (session.ended_at_ms === null) {
+        ready++;
+        continue;
+      }
+      // Bake only recorded categories, with a fixed variant bound per stream.
+      const categories = options.category
+        ? [options.category]
+        : [
+            '',
+            ...(
+              this.statement(
+                "SELECT DISTINCT category_id FROM stream_samples WHERE session_id=? AND category_id<>'' AND category_name<>'' ORDER BY category_id LIMIT 7",
+              ).all(session.id) as { category_id: string }[]
+            ).map((c) => c.category_id),
+          ];
+      let complete = true;
+      for (const category of categories) {
+        const variant = { ...options, category };
+        if (
+          this.statement(
+            'SELECT 1 FROM analytics_stream_cache WHERE session_id=? AND cache_key=? AND revision=? AND global_revision=?',
+          ).get(session.id, this.key(variant, session), session.revision, global)
+        )
+          continue;
+        if (performance.now() - start >= 250) {
+          complete = false;
+          break;
         }
-        catch {
-            this.statement('DELETE FROM analytics_stream_cache WHERE session_id=? AND cache_key=?').run(session.id, this.key(options, session));
-            return undefined;
-        }
+        if (!this.save(variant, session, global, this.build(variant, session), false))
+          return { preparing: false, ready, total: sessions.length };
+      }
+      if (complete) ready++;
     }
-    /** Derived reports may be evicted; facts and late corrections remain authoritative. */
-    private trimCache(protectedSession: string, protectedKey: string): boolean {
-        const limit = this.cachePolicy.maxStreamCacheBytes ?? this.cachePolicy.maxTotalBytes ?? 128 * 1024 * 1024;
-        let total = (this.statement('SELECT coalesce(sum(length(payload)),0) AS bytes FROM analytics_stream_cache').get() as {bytes:number}).bytes, evicted = false;
-        while (total > limit) {
-            // Bound JS allocations even when years of reports are present.
-            const rows = this.statement('SELECT session_id,cache_key,length(payload) AS bytes FROM analytics_stream_cache WHERE session_id<>? OR cache_key<>? ORDER BY updated_at_ms,session_id,cache_key LIMIT 64').all(protectedSession, protectedKey) as {session_id:string;cache_key:string;bytes:number}[];
-            if (!rows.length) break;
-            for (const row of rows) {
-                if (total <= limit) break;
-                this.statement('DELETE FROM analytics_stream_cache WHERE session_id=? AND cache_key=?').run(row.session_id, row.cache_key);
-                total -= row.bytes;
-                evicted = true;
-            }
-        }
-        return evicted;
+    return { preparing: ready < sessions.length, ready, total: sessions.length };
+  }
+  private liveStreams = new Map<string, { revision: string; report: Report }>();
+  streamReport(options: AnalyticsOptions): Report {
+    const session = this.sessions(options).find((s) => s.id === options.sessionId);
+    if (!session) return audienceAnalytics(this.db, options);
+    const global = 0,
+      key = this.key(options, session),
+      revision = `${global}:${session.revision}`,
+      live = this.liveStreams.get(key),
+      cached =
+        session.ended_at_ms === null && live?.revision === revision
+          ? live.report
+          : this.cached(options, session, global);
+    if (cached) return cached;
+    const report = this.build(options, session);
+    this.save(options, session, global, report);
+    if (session.ended_at_ms === null) {
+      while (this.liveStreams.size >= 12) this.liveStreams.delete(this.liveStreams.keys().next().value!);
+      this.liveStreams.set(key, { revision, report });
     }
-    private save(options: AnalyticsOptions, session: Session, global: number, report: Report, allowEviction = true) {
-        if (session.ended_at_ms === null)
-            return;
-        const serialized = JSON.stringify(report);
-        if (Buffer.byteLength(serialized) > (this.cachePolicy.maxBytes ?? 16 * 1024 * 1024))
-            return false;
-        let available = this.cachePolicy.availableBytes?.() ?? Infinity;
-        if (!this.cachePolicy.availableBytes && this.db.name !== ':memory:') {
-            const disk = statfsSync(dirname(this.db.name));
-            available = disk.bavail * disk.bsize;
-        }
-        if (available < 1024 * 1024 * 1024)
-            return false;
-        const payload = gzipSync(serialized);
-        if (payload.byteLength > (this.cachePolicy.maxStreamCacheBytes ?? this.cachePolicy.maxTotalBytes ?? 128 * 1024 * 1024)) return false;
-        if (!allowEviction) {
-            const retained = (this.statement('SELECT coalesce(sum(length(payload)),0) AS bytes FROM analytics_stream_cache WHERE NOT(session_id=? AND (cache_key=? OR revision<>? OR global_revision<>?))').get(session.id, this.key(options, session), session.revision, global) as {bytes:number}).bytes;
-            if (retained + payload.byteLength > (this.cachePolicy.maxStreamCacheBytes ?? this.cachePolicy.maxTotalBytes ?? 128 * 1024 * 1024)) return false;
-        }
-        return this.db.transaction(() => {
-            this.statement('DELETE FROM analytics_stream_cache WHERE session_id=? AND (revision<>? OR global_revision<>?)').run(session.id, session.revision, global);
-            this.statement('INSERT INTO analytics_stream_cache VALUES (?,?,?,?,?,?) ON CONFLICT(session_id,cache_key) DO UPDATE SET revision=excluded.revision,global_revision=excluded.global_revision,payload=excluded.payload,updated_at_ms=excluded.updated_at_ms').run(session.id, this.key(options, session), session.revision, global, payload, Date.now());
-            this.statement('DELETE FROM analytics_stream_cache WHERE session_id=? AND cache_key<>? AND cache_key NOT IN(SELECT cache_key FROM analytics_stream_cache WHERE session_id=? AND cache_key<>? ORDER BY updated_at_ms DESC,cache_key DESC LIMIT 15)').run(session.id, this.key(options, session), session.id, this.key(options, session));
-            return !this.trimCache(session.id, this.key(options, session));
-        }).immediate();
+    return report;
+  }
+  recordMetrics(id: string, excludedLogins: string[] | false) {
+    const session = this.statement('SELECT account_id,started_at_ms,ended_at_ms FROM sessions WHERE id=?').get(id) as {
+      account_id: string;
+      started_at_ms: number;
+      ended_at_ms: number | null;
+    };
+    const youtube = this.statement(
+      "SELECT account_id FROM platform_streams WHERE session_id=? AND platform='youtube' ORDER BY started_at_ms,account_id LIMIT 1",
+    ).get(id) as { account_id: string } | undefined;
+    const report = this.facts.activity(
+      {
+        fromMs: 0,
+        toMs: session.ended_at_ms ?? Date.now(),
+        sessionId: id,
+        excludedLogins,
+        ownerId: session.account_id,
+        youtubeAccount: youtube?.account_id ?? '',
+      },
+      id,
+      session.started_at_ms,
+      session.ended_at_ms,
+    );
+    let peakChat: number | null = null,
+      peakChatAt = session.started_at_ms;
+    for (const p of report.timeline)
+      if (!p.isBreak && (p.presenceKnown || p.estimated > 0) && (peakChat === null || p.participants > peakChat)) {
+        peakChat = p.participants;
+        peakChatAt = Math.max(session.started_at_ms, p.at);
+      }
+    return {
+      peakChat,
+      peakChatAt,
+      viewerPeakAt: Math.max(
+        session.started_at_ms,
+        report.timeline.reduce(
+          (best, p) => (!p.isBreak && p.viewers !== null && (best === null || p.viewers > best.viewers!) ? p : best),
+          null as Report['timeline'][number] | null,
+        )?.at ?? session.started_at_ms,
+      ),
+    };
+  }
+  private warmedRevision = '';
+  /** Bounded serial batches avoid an idle delay for every historical stream. */
+  advance(options: AnalyticsOptions) {
+    const start = performance.now();
+    let result: { pending: number };
+    do {
+      result = this.advanceOne(options);
+    } while (result.pending && performance.now() - start < 200);
+    return result;
+  }
+  private advanceOne(options: AnalyticsOptions) {
+    const job = this.statement(
+      `SELECT j.session_id,j.attempts FROM analytics_jobs j WHERE retry_at_ms<=? ORDER BY priority DESC,requested_at_ms,session_id LIMIT 1`,
+    ).get(Date.now()) as { session_id: string; attempts: number } | undefined;
+    if (!job) return { pending: 0 };
+    const session = this.statement(
+      `SELECT s.id,s.started_at_ms,s.ended_at_ms,coalesce((SELECT sum(v.activity+v.money) FROM analytics_fact_versions v WHERE v.session_id=s.id OR v.session_id IN(SELECT member_id FROM session_groups WHERE group_id=s.id)),0) revision,(SELECT json_group_array(member_id) FROM session_groups WHERE group_id=s.id) members FROM sessions s WHERE s.id=coalesce((SELECT group_id FROM session_groups WHERE member_id=?),?) AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)`,
+    ).get(job.session_id, job.session_id) as Session | undefined;
+    if (!session) {
+      this.statement('DELETE FROM analytics_jobs WHERE session_id=?').run(job.session_id);
+      return { pending: 1 };
     }
-    prepare(options: AnalyticsOptions, sessions = this.sessions(options)) {
-        this.pruneJobs();
-        this.checkCacheBudget();
-        const global = 0, start = performance.now();
-        let ready=0;
-        for(const session of [...sessions].reverse()){
-            if(session.ended_at_ms===null){ready++;continue;}
-            // Bake only recorded categories, with a fixed variant bound per stream.
-            const categories=options.category?[options.category]:['',...(this.statement("SELECT DISTINCT category_id FROM stream_samples WHERE session_id=? AND category_id<>'' AND category_name<>'' ORDER BY category_id LIMIT 7").all(session.id) as {category_id:string}[]).map(c=>c.category_id)];
-            let complete=true;
-            for(const category of categories){
-                const variant={...options,category};
-                if(this.statement('SELECT 1 FROM analytics_stream_cache WHERE session_id=? AND cache_key=? AND revision=? AND global_revision=?').get(session.id,this.key(variant,session),session.revision,global))continue;
-                if(performance.now()-start>=250){complete=false;break;}
-                if(!this.save(variant,session,global,this.build(variant,session),false))return {preparing:false,ready,total:sessions.length};
-            }
-            if(complete)ready++;
-        }
-        return {preparing:ready<sessions.length,ready,total:sessions.length};
+    const before = this.facts.versions(session.id);
+    try {
+      this.streamReport({ ...options, fromMs: 0, sessionId: session.id });
+      const after = this.facts.versions(session.id);
+      if (before.activity === after.activity && before.money === after.money)
+        this.statement(
+          'DELETE FROM analytics_jobs WHERE session_id=? OR session_id IN(SELECT member_id FROM session_groups WHERE group_id=?)',
+        ).run(session.id, session.id);
+    } catch (error) {
+      const attempts = job.attempts + 1;
+      this.statement('UPDATE analytics_jobs SET attempts=?,retry_at_ms=?,error=? WHERE session_id=?').run(
+        attempts,
+        Date.now() + Math.min(300000, 1000 * 2 ** Math.min(attempts, 8)),
+        error instanceof Error ? error.message : 'ANALYTICS_JOB_FAILED',
+        job.session_id,
+      );
+      throw error;
     }
-    private liveStreams=new Map<string,{revision:string;report:Report}>();
-    streamReport(options:AnalyticsOptions):Report {
-        const session=this.sessions(options).find(s=>s.id===options.sessionId);
-        if(!session)return audienceAnalytics(this.db,options);
-        const global=0,key=this.key(options,session),revision=`${global}:${session.revision}`,live=this.liveStreams.get(key),cached=session.ended_at_ms===null&&live?.revision===revision?live.report:this.cached(options,session,global);
-        if(cached)return cached;
-        const report=this.build(options,session);this.save(options,session,global,report);
-        if(session.ended_at_ms===null){while(this.liveStreams.size>=12)this.liveStreams.delete(this.liveStreams.keys().next().value!);this.liveStreams.set(key,{revision,report});}return report;
+    return { pending: (this.statement('SELECT count(*) n FROM analytics_jobs').get() as { n: number }).n };
+  }
+  private warming: { revision: string; categories: string[]; index: number; targetRevision: string } | undefined;
+  private background = false;
+  private warmReport(options: AnalyticsOptions) {
+    this.background = true;
+    try {
+      return this.report(options);
+    } finally {
+      this.background = false;
     }
-    recordMetrics(id:string,excludedLogins:string[]|false){
-        const session=this.statement('SELECT account_id,started_at_ms,ended_at_ms FROM sessions WHERE id=?').get(id) as {account_id:string;started_at_ms:number;ended_at_ms:number|null};
-        const youtube=this.statement("SELECT account_id FROM platform_streams WHERE session_id=? AND platform='youtube' ORDER BY started_at_ms,account_id LIMIT 1").get(id) as {account_id:string}|undefined;
-        const report=this.facts.activity({fromMs:0,toMs:session.ended_at_ms??Date.now(),sessionId:id,excludedLogins,ownerId:session.account_id,youtubeAccount:youtube?.account_id??''},id,session.started_at_ms,session.ended_at_ms);
-        let peakChat:number|null=null,peakChatAt=session.started_at_ms;
-        for(const p of report.timeline)if(!p.isBreak&&(p.presenceKnown||p.estimated>0)&&(peakChat===null||p.participants>peakChat)){peakChat=p.participants;peakChatAt=Math.max(session.started_at_ms,p.at);}
-        return {peakChat,peakChatAt,viewerPeakAt:Math.max(session.started_at_ms,report.timeline.reduce((best,p)=>!p.isBreak&&p.viewers!==null&&(best===null||p.viewers>best.viewers!)?p:best,null as Report['timeline'][number]|null)?.at??session.started_at_ms)};
+  }
+  warm(options: AnalyticsOptions, bakeCategories = false) {
+    if (options.rollingCore) {
+      const core = this.rollingMembership(options);
+      if (core.preparing) return core;
+      options = core.options;
     }
-    private warmedRevision='';
-    /** Bounded serial batches avoid an idle delay for every historical stream. */
-    advance(options:AnalyticsOptions){
-        const start=performance.now();let result:{pending:number};
-        do{result=this.advanceOne(options);}while(result.pending&&performance.now()-start<200);
-        return result;
+    // Bake the landing report, not a Cartesian product of moving windows.
+    // Freeze an unfinished snapshot so moving time and live polls cannot restart it.
+    const current: AnalyticsOptions = {
+      ...options,
+      source: 'all',
+      category: '',
+      fromMs: 0,
+      toMs: options.toMs,
+      summaryOnly: true,
+      includeInsights: true,
+    };
+    const sessions = this.sessions(current);
+    const { fromMs, toMs, ...settings } = current;
+    void fromMs;
+    void toMs;
+    const structure = JSON.stringify([
+      settings,
+      bakeCategories,
+      sessions.map((s) => ({ ...s, revision: s.ended_at_ms === null ? 0 : s.revision })),
+      this.annotationsRevision(),
+      this.followerRevision(),
+    ]);
+    const revision = JSON.stringify([
+      structure,
+      sessions.filter((s) => s.ended_at_ms === null).map((s) => [s.id, s.revision]),
+    ]);
+    if (revision === this.warmedRevision) return { preparing: false, ready: 1, total: 1 };
+    if (this.warming?.revision !== structure) {
+      const categories = bakeCategories
+        ? (this.statement(
+            "SELECT category_id AS id FROM stream_samples WHERE category_id<>'' AND category_name<>'' GROUP BY category_id ORDER BY count(*) DESC,category_id LIMIT 6",
+          ).all() as { id: string }[])
+        : [];
+      this.warming = {
+        revision: structure,
+        categories: ['', ...categories.map((c) => c.id)],
+        index: 0,
+        targetRevision: revision,
+      };
     }
-    private advanceOne(options:AnalyticsOptions){
-        const job=this.statement(`SELECT j.session_id,j.attempts FROM analytics_jobs j WHERE retry_at_ms<=? ORDER BY priority DESC,requested_at_ms,session_id LIMIT 1`).get(Date.now()) as {session_id:string;attempts:number}|undefined;
-        if(!job)return {pending:0};
-        const session=this.statement(`SELECT s.id,s.started_at_ms,s.ended_at_ms,coalesce((SELECT sum(v.activity+v.money) FROM analytics_fact_versions v WHERE v.session_id=s.id OR v.session_id IN(SELECT member_id FROM session_groups WHERE group_id=s.id)),0) revision,(SELECT json_group_array(member_id) FROM session_groups WHERE group_id=s.id) members FROM sessions s WHERE s.id=coalesce((SELECT group_id FROM session_groups WHERE member_id=?),?) AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)`).get(job.session_id,job.session_id) as Session|undefined;
-        if(!session){this.statement('DELETE FROM analytics_jobs WHERE session_id=?').run(job.session_id);return {pending:1};}
-        const before=this.facts.versions(session.id);
-        try{
-            this.streamReport({...options,fromMs:0,sessionId:session.id});
-            const after=this.facts.versions(session.id);
-            if(before.activity===after.activity&&before.money===after.money)this.statement('DELETE FROM analytics_jobs WHERE session_id=? OR session_id IN(SELECT member_id FROM session_groups WHERE group_id=?)').run(session.id,session.id);
-        }catch(error){
-            const attempts=job.attempts+1;
-            this.statement('UPDATE analytics_jobs SET attempts=?,retry_at_ms=?,error=? WHERE session_id=?').run(attempts,Date.now()+Math.min(300000,1000*2**Math.min(attempts,8)),error instanceof Error?error.message:'ANALYTICS_JOB_FAILED',job.session_id);
-            throw error;
-        }
-        return {pending:(this.statement('SELECT count(*) n FROM analytics_jobs').get() as {n:number}).n};
+    const job = this.warming,
+      report = this.warmReport({ ...current, category: job.categories[job.index]! });
+    if (report.preparing) return { preparing: true, ready: report.ready ?? 0, total: report.total ?? 1 };
+    // Advance only the unfinished report; do not reread/clone all completed
+    // categories on every background slice. Yield between ready reports too.
+    job.index++;
+    if (job.index < job.categories.length) return { preparing: true, ready: job.index, total: job.categories.length };
+    this.warmedRevision = job.targetRevision;
+    this.warming = undefined;
+    return { preparing: this.warmedRevision !== revision, ready: 1, total: 1 };
+  }
+  private annotationsRevision() {
+    return this.statement("SELECT revision FROM ui_revisions WHERE domain='analyticsPresentation'").get();
+  }
+  private projection(report: Report, options: AnalyticsOptions): Report {
+    if (!options.panel || report.preparing) return report;
+    const panel = options.panel,
+      all = report.streamComparison;
+    const streamRange = {
+      first: all[0]?.startedAt ?? options.fromMs,
+      last: all.at(-1)?.startedAt ?? options.toMs,
+      total: all.length,
+    };
+    let streams = all;
+    if (options.streamOffset !== undefined)
+      streams = all
+        .slice()
+        .reverse()
+        .slice(options.streamOffset, options.streamOffset + (options.streamLimit ?? 7));
+    else if (panel === 'dynamics')
+      streams = all.filter(
+        (s) =>
+          s.startedAt >= (options.streamFrom ?? options.toMs - 31 * 86400000) &&
+          s.startedAt < (options.streamTo ?? options.toMs),
+      );
+    return {
+      ...report,
+      streamRange,
+      timeline: [],
+      sessions: [],
+      youtubeReport: null,
+      audience: panel === 'audience' ? report.audience : [],
+      streamComparison: panel === 'dynamics' ? streams : [],
+      insights: panel === 'dynamics' ? (report.insights ?? []) : [],
+      activityClock: panel === 'time' ? report.activityClock : [],
+      activityWindows: [],
+      clockBuckets: panel === 'time' ? (report.clockBuckets ?? []) : [],
+      hours: panel === 'time' ? report.hours : [],
+      categories: panel === 'dynamics' ? report.categories : [],
+    };
+  }
+  query(options: AnalyticsOptions): Report {
+    const core = this.rollingMembership(options);
+    if (core.preparing) return core;
+    options = core.options;
+    return options.sessionId
+      ? this.projection(this.sessionReport(options), options)
+      : this.resolve(options, options.summaryOnly ?? false);
+  }
+  private memberships = new Map<string, { people: string[]; bytes: number }>();
+  private membershipBytes = 0;
+  private rollingMembership(
+    options: AnalyticsOptions,
+  ): { preparing: false; options: AnalyticsOptions } | (Report & { preparing: true }) {
+    if (!options.rollingCore) return { preparing: false, options };
+    validateAnalyticsOptions(options);
+    // A minute-stable clock shares the existing incremental report cache across
+    // panels and periods. The roster always uses both platforms and all categories.
+    const toMs = Math.floor(Date.now() / 60000) * 60000;
+    const basis: AnalyticsOptions = {
+      fromMs: toMs - (options.coreWindowDays ?? 90) * 86400000,
+      toMs,
+      source: 'all',
+      category: '',
+      summaryOnly: true,
+      membershipOnly: true,
+      panel: 'audience',
+      audienceCoreOnly: true,
+      regularThresholdPercent: options.regularThresholdPercent ?? 80,
+      chatWindowMinutes: options.chatWindowMinutes ?? 5,
+      timezone: options.timezone ?? 'Europe/Moscow',
+      excludedLogins: options.excludedLogins ?? [],
+      ownerId: options.ownerId ?? '',
+      youtubeAccount: options.youtubeAccount ?? '',
+    };
+    const membershipKey = JSON.stringify([
+      basis,
+      this.statement(
+        "SELECT domain,revision FROM ui_revisions WHERE domain IN('analyticsActivity','people','donations','follows','analyticsPresentation') ORDER BY domain",
+      ).all(),
+      this.statement('SELECT revision FROM analytics_global_revision').get(),
+    ]);
+    const retained = this.memberships.get(membershipKey);
+    if (retained)
+      return { preparing: false, options: { ...options, rollingCore: undefined, corePeople: retained.people } };
+    const corePeople: string[] = [];
+    for (let offset = 0; ; offset += 100) {
+      const report = this.resolve({ ...basis, audienceOffset: offset }, true);
+      if (report.preparing) return { ...report, preparing: true };
+      if (report.coreRoster) {
+        corePeople.push(...report.coreRoster);
+        break;
+      }
+      for (const person of report.audience) {
+        if (person.manualCore ?? (person.core && report.summary.streams >= 12)) corePeople.push(person.id);
+      }
+      if (!report.audiencePage || offset + 100 >= report.audiencePage.total) break;
     }
-    private warming:{revision:string;categories:string[];index:number;targetRevision:string}|undefined;
-    private background=false;
-    private warmReport(options:AnalyticsOptions){this.background=true;try{return this.report(options);}finally{this.background=false;}}
-    warm(options:AnalyticsOptions,bakeCategories=false){
-        if(options.rollingCore){const core=this.rollingMembership(options);if(core.preparing)return core;options=core.options;}
-        // Bake the landing report, not a Cartesian product of moving windows.
-        // Freeze an unfinished snapshot so moving time and live polls cannot restart it.
-        const current:AnalyticsOptions={...options,source:'all',category:'',fromMs:0,toMs:options.toMs,summaryOnly:true,includeInsights:true};
-        const sessions=this.sessions(current);
-        const {fromMs,toMs,...settings}=current;void fromMs;void toMs;
-        const structure=JSON.stringify([settings,bakeCategories,sessions.map(s=>({...s,revision:s.ended_at_ms===null?0:s.revision})),this.annotationsRevision(),this.followerRevision()]);
-        const revision=JSON.stringify([structure,sessions.filter(s=>s.ended_at_ms===null).map(s=>[s.id,s.revision])]);
-        if(revision===this.warmedRevision)return {preparing:false,ready:1,total:1};
-        if(this.warming?.revision!==structure){
-            const categories=bakeCategories?this.statement("SELECT category_id AS id FROM stream_samples WHERE category_id<>'' AND category_name<>'' GROUP BY category_id ORDER BY count(*) DESC,category_id LIMIT 6").all() as {id:string}[]:[];
-            this.warming={revision:structure,categories:['',...categories.map(c=>c.id)],index:0,targetRevision:revision};
-        }
-        const job=this.warming,report=this.warmReport({...current,category:job.categories[job.index]!});
-        if(report.preparing)return {preparing:true,ready:report.ready??0,total:report.total??1};
-        // Advance only the unfinished report; do not reread/clone all completed
-        // categories on every background slice. Yield between ready reports too.
-        job.index++;
-        if(job.index<job.categories.length)return {preparing:true,ready:job.index,total:job.categories.length};
-        this.warmedRevision=job.targetRevision;
-        this.warming=undefined;
-        return {preparing:this.warmedRevision!==revision,ready:1,total:1};
+    corePeople.sort();
+    const bytes = serialize(corePeople).byteLength;
+    if (bytes <= 4 * 1024 * 1024) {
+      while (this.memberships.size >= 8 || this.membershipBytes + bytes > 4 * 1024 * 1024) {
+        const key = this.memberships.keys().next().value!;
+        this.membershipBytes -= this.memberships.get(key)!.bytes;
+        this.memberships.delete(key);
+      }
+      this.memberships.set(membershipKey, { people: corePeople, bytes });
+      this.membershipBytes += bytes;
     }
-    private annotationsRevision(){return this.statement("SELECT revision FROM ui_revisions WHERE domain='analyticsPresentation'").get();}
-    private projection(report:Report,options:AnalyticsOptions):Report{
-        if(!options.panel||report.preparing)return report;
-        const panel=options.panel,all=report.streamComparison;
-        const streamRange={first:all[0]?.startedAt??options.fromMs,last:all.at(-1)?.startedAt??options.toMs,total:all.length};
-        let streams=all;
-        if(options.streamOffset!==undefined)streams=all.slice().reverse().slice(options.streamOffset,options.streamOffset+(options.streamLimit??7));
-        else if(panel==='dynamics')streams=all.filter(s=>s.startedAt>=(options.streamFrom??options.toMs-31*86400000)&&s.startedAt<(options.streamTo??options.toMs));
-        return {...report,streamRange,timeline:[],sessions:[],youtubeReport:null,
-          audience:panel==='audience'?report.audience:[],streamComparison:panel==='dynamics'?streams:[],
-          insights:panel==='dynamics'?(report.insights??[]):[],activityClock:panel==='time'?report.activityClock:[],activityWindows:[],
-          clockBuckets:panel==='time'?(report.clockBuckets??[]):[],hours:panel==='time'?report.hours:[],categories:panel==='dynamics'?report.categories:[],
-        };
+    return { preparing: false, options: { ...options, rollingCore: undefined, corePeople } };
+  }
+  private sessionReport(options: AnalyticsOptions): Report {
+    validateAnalyticsOptions(options);
+    options = normalizeCoreOptions(options);
+    const session = this.statement(
+      `SELECT s.id,s.started_at_ms,s.ended_at_ms,coalesce((SELECT sum(v.activity+v.money) FROM analytics_fact_versions v WHERE v.session_id=s.id OR v.session_id IN(SELECT member_id FROM session_groups WHERE group_id=s.id)),0) AS revision,(SELECT json_group_array(member_id) FROM session_groups WHERE group_id=s.id) members FROM sessions s WHERE s.id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)`,
+    ).get(options.sessionId) as Session | undefined;
+    if (!session) return audienceAnalytics(this.db, options);
+    if (session.ended_at_ms === null) return this.facts.present(this.streamReport(options), options);
+    const canonical = {
+      ...options,
+      fromMs: Math.max(options.fromMs, session.started_at_ms),
+      toMs: Math.min(options.toMs, session.ended_at_ms),
+    };
+    validateAnalyticsOptions(canonical);
+    const factualKeys = [
+      'sessionId',
+      'fromMs',
+      'toMs',
+      'source',
+      'category',
+      'timezone',
+      'chatWindowMinutes',
+      'excludedLogins',
+      'ownerId',
+      'youtubeAccount',
+      'regularThresholdPercent',
+    ] as const;
+    const scope =
+      'session-v5:' +
+      createHash('sha256')
+        .update(JSON.stringify(factualKeys.map((key) => [key, canonical[key] ?? null])))
+        .digest('hex');
+    const key = createHash('sha256')
+      .update(JSON.stringify([scope, session.revision]))
+      .digest('hex');
+    const retained = this.completed.get(key);
+    if (retained) {
+      this.completed.delete(key);
+      this.completed.set(key, retained);
+      return this.facts.present(retained.value, options);
     }
-    query(options:AnalyticsOptions):Report{
-        const core=this.rollingMembership(options);
-        if(core.preparing)return core;
-        options=core.options;
-        return options.sessionId?this.projection(this.sessionReport(options),options):this.resolve(options,options.summaryOnly??false);
+    const saved = this.reportCache.get(key);
+    const value = saved ?? this.facts.read(canonical, session.id, session.started_at_ms, session.ended_at_ms);
+    if (!saved && (this.cachePolicy.availableBytes?.() ?? Infinity) >= 1024 * 1024 * 1024)
+      this.reportCache.save(key, scope, value);
+    this.remember(key, value);
+    return this.facts.present(value, options);
+  }
+  report(options: AnalyticsOptions): Report {
+    return this.resolve(options, true);
+  }
+  private addresses = new Map<
+    string,
+    { sessions: Session[]; canonical: AnalyticsOptions; fingerprint: string; liveRevision: string }
+  >();
+  private resolve(options: AnalyticsOptions, historical: boolean, clockOnly?: false): Report;
+  private resolve(options: AnalyticsOptions, historical: boolean, clockOnly: true): ClockResponse;
+  private resolve(options: AnalyticsOptions, historical: boolean, clockOnly = false): Report | ClockResponse {
+    this.checkCacheBudget();
+    // Validate filters without loading audience facts on a completed-cache hit.
+    if (
+      !Number.isSafeInteger(options.fromMs) ||
+      options.fromMs < 0 ||
+      !Number.isSafeInteger(options.toMs) ||
+      options.toMs <= options.fromMs
+    )
+      throw new Error('INVALID_ANALYTICS_FILTER');
+    validateAnalyticsOptions(options);
+    options = normalizeCoreOptions(options);
+    const {
+      panel: ap,
+      streamFrom: sf,
+      streamTo: st,
+      streamOffset: so,
+      streamLimit: sl,
+      audienceOffset: ao,
+      audienceSearch: asearch,
+      audienceSort: asort,
+      audienceCoreOnly: ac,
+      clockDay: cd,
+      clockMinute: cm,
+      clockResolution: cr,
+      clockOffset: co,
+      clockBatch: cb,
+      clockCompact: cc,
+      attendanceOnly: att,
+      ...addressOptions
+    } = options;
+    void ap;
+    void sf;
+    void st;
+    void so;
+    void sl;
+    void ao;
+    void asearch;
+    void asort;
+    void ac;
+    void cd;
+    void cm;
+    void cr;
+    void co;
+    void cb;
+    void cc;
+    void att;
+    const version = this.statement(
+      "SELECT domain,revision FROM ui_revisions WHERE domain IN('analyticsActivity','donations','follows','analyticsPresentation') ORDER BY domain",
+    ).all();
+    const addressKey = JSON.stringify([
+      historical,
+      addressOptions,
+      version,
+      this.statement('SELECT revision FROM analytics_global_revision').get(),
+    ]);
+    const address = this.addresses.get(addressKey);
+    const sessions = address?.sessions ?? this.sessions(options);
+    const live = sessions.some((session) => session.ended_at_ms === null);
+    const lastEnd = sessions.reduce(
+      (end, session) => Math.max(end, session.ended_at_ms ?? options.toMs),
+      options.fromMs,
+    );
+    const {
+      panel,
+      streamFrom,
+      streamTo,
+      streamOffset,
+      streamLimit,
+      audienceOffset,
+      audienceSearch,
+      audienceSort,
+      audienceCoreOnly,
+      clockDay,
+      clockMinute,
+      clockResolution,
+      clockOffset,
+      clockBatch,
+      clockCompact,
+      attendanceOnly,
+      ...baseOptions
+    } = options;
+    void panel;
+    void streamFrom;
+    void streamTo;
+    void streamOffset;
+    void streamLimit;
+    void audienceOffset;
+    void audienceSearch;
+    void audienceSort;
+    void audienceCoreOnly;
+    void clockDay;
+    void clockMinute;
+    void clockResolution;
+    void clockOffset;
+    void clockBatch;
+    void clockCompact;
+    void attendanceOnly;
+    const canonical = address?.canonical ?? {
+      ...baseOptions,
+      source: options.source ?? 'all',
+      category: options.category ?? '',
+      fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs),
+      toMs: live ? options.toMs : Math.min(options.toMs, lastEnd),
+    };
+    const fingerprint =
+      address?.fingerprint ??
+      createHash('sha256')
+        .update(
+          JSON.stringify([
+            9,
+            historical,
+            Object.fromEntries(
+              Object.entries({ ...canonical, toMs: live ? 'live' : canonical.toMs }).sort(([a], [b]) =>
+                a.localeCompare(b),
+              ),
+            ),
+            0,
+            sessions.map((s) => [s.id, s.members, s.ended_at_ms === null ? 0 : s.revision]),
+            this.annotationsRevision(),
+            this.followerRevision(),
+          ]),
+        )
+        .digest('hex');
+    const liveRevision =
+      address?.liveRevision ??
+      JSON.stringify(sessions.filter((s) => s.ended_at_ms === null).map((s) => [s.id, s.revision]));
+    if (!address) {
+      if (this.addresses.size >= 16) this.addresses.delete(this.addresses.keys().next().value!);
+      this.addresses.set(addressKey, { sessions, canonical, fingerprint, liveRevision });
     }
-    private memberships=new Map<string,{people:string[];bytes:number}>();
-    private membershipBytes=0;
-    private rollingMembership(options:AnalyticsOptions):{preparing:false;options:AnalyticsOptions}|(Report&{preparing:true}){
-        if(!options.rollingCore)return {preparing:false,options};
-        validateAnalyticsOptions(options);
-        // A minute-stable clock shares the existing incremental report cache across
-        // panels and periods. The roster always uses both platforms and all categories.
-        const toMs=Math.floor(Date.now()/60000)*60000;
-        const basis:AnalyticsOptions={fromMs:toMs-(options.coreWindowDays??90)*86400000,toMs,source:'all',category:'',summaryOnly:true,membershipOnly:true,panel:'audience',audienceCoreOnly:true,
-            regularThresholdPercent:options.regularThresholdPercent??80,chatWindowMinutes:options.chatWindowMinutes??5,
-            timezone:options.timezone??'Europe/Moscow',excludedLogins:options.excludedLogins??[],ownerId:options.ownerId??'',youtubeAccount:options.youtubeAccount??''};
-        const membershipKey=JSON.stringify([basis,this.statement("SELECT domain,revision FROM ui_revisions WHERE domain IN('analyticsActivity','people','donations','follows','analyticsPresentation') ORDER BY domain").all(),this.statement('SELECT revision FROM analytics_global_revision').get()]);
-        const retained=this.memberships.get(membershipKey);
-        if(retained)return {preparing:false,options:{...options,rollingCore:undefined,corePeople:retained.people}};
-        const corePeople:string[]=[];
-        for(let offset=0;;offset+=100){
-            const report=this.resolve({...basis,audienceOffset:offset},true);
-            if(report.preparing)return {...report,preparing:true};
-            if(report.coreRoster){corePeople.push(...report.coreRoster);break;}
-            for(const person of report.audience){
-                if(person.manualCore??(person.core&&report.summary.streams>=12))corePeople.push(person.id);
-            }
-            if(!report.audiencePage||offset+100>=report.audiencePage.total)break;
-        }
-        corePeople.sort();
-        const bytes=serialize(corePeople).byteLength;
-        if(bytes<=4*1024*1024){
-            while(this.memberships.size>=8||this.membershipBytes+bytes>4*1024*1024){const key=this.memberships.keys().next().value!;this.membershipBytes-=this.memberships.get(key)!.bytes;this.memberships.delete(key);}
-            this.memberships.set(membershipKey,{people:corePeople,bytes});this.membershipBytes+=bytes;
-        }
-        return {preparing:false,options:{...options,rollingCore:undefined,corePeople}};
+    const projectionKey =
+      options.panel && !clockOnly
+        ? JSON.stringify([
+            fingerprint,
+            liveRevision,
+            this.statement("SELECT revision FROM ui_revisions WHERE domain='donations'").get(),
+            options.panel,
+            options.clockDay,
+            options.clockResolution,
+            options.clockCompact,
+            options.audienceOffset,
+            options.audienceSearch,
+            options.audienceSort,
+            options.audienceCoreOnly,
+            options.attendanceOnly,
+            options.streamFrom,
+            options.streamTo,
+            options.streamOffset,
+            options.streamLimit,
+          ])
+        : '';
+    if (projectionKey) {
+      const hit = this.projections.get(projectionKey);
+      if (hit)
+        return structuredClone({
+          ...hit.value,
+          filters: { ...hit.value.filters, fromMs: options.fromMs, toMs: options.toMs },
+        });
     }
-    private sessionReport(options:AnalyticsOptions):Report{
-        validateAnalyticsOptions(options);options=normalizeCoreOptions(options);
-        const session=this.statement(`SELECT s.id,s.started_at_ms,s.ended_at_ms,coalesce((SELECT sum(v.activity+v.money) FROM analytics_fact_versions v WHERE v.session_id=s.id OR v.session_id IN(SELECT member_id FROM session_groups WHERE group_id=s.id)),0) AS revision,(SELECT json_group_array(member_id) FROM session_groups WHERE group_id=s.id) members FROM sessions s WHERE s.id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)`).get(options.sessionId) as Session|undefined;
-        if(!session)return audienceAnalytics(this.db,options);
-        if(session.ended_at_ms===null)return this.facts.present(this.streamReport(options),options);
-        const canonical={...options,fromMs:Math.max(options.fromMs,session.started_at_ms),toMs:Math.min(options.toMs,session.ended_at_ms)};
-        validateAnalyticsOptions(canonical);
-        const factualKeys=['sessionId','fromMs','toMs','source','category','timezone','chatWindowMinutes','excludedLogins','ownerId','youtubeAccount','regularThresholdPercent'] as const;
-        const scope='session-v5:'+createHash('sha256').update(JSON.stringify(factualKeys.map(key=>[key,canonical[key]??null]))).digest('hex');
-        const key=createHash('sha256').update(JSON.stringify([scope,session.revision])).digest('hex');
-        const retained=this.completed.get(key);
-        if(retained){this.completed.delete(key);this.completed.set(key,retained);return this.facts.present(retained.value,options);}
-        const saved=this.reportCache.get(key);
-        const value=saved??this.facts.read(canonical,session.id,session.started_at_ms,session.ended_at_ms);
-        if(!saved&&(this.cachePolicy.availableBytes?.()??Infinity)>=1024*1024*1024)this.reportCache.save(key,scope,value);
-        this.remember(key,value);
-        return this.facts.present(value,options);
-    }
-    report(options:AnalyticsOptions):Report{return this.resolve(options,true);}
-    private addresses=new Map<string,{sessions:Session[];canonical:AnalyticsOptions;fingerprint:string;liveRevision:string}>();
-    private resolve(options:AnalyticsOptions,historical:boolean,clockOnly?:false):Report;
-    private resolve(options:AnalyticsOptions,historical:boolean,clockOnly:true):ClockResponse;
-    private resolve(options: AnalyticsOptions,historical:boolean,clockOnly=false):Report|ClockResponse {
-        this.checkCacheBudget();
-        // Validate filters without loading audience facts on a completed-cache hit.
-        if (!Number.isSafeInteger(options.fromMs) || options.fromMs < 0 || !Number.isSafeInteger(options.toMs) || options.toMs <= options.fromMs)
-            throw new Error('INVALID_ANALYTICS_FILTER');
-        validateAnalyticsOptions(options);
-        options=normalizeCoreOptions(options);
-        const {panel:ap,streamFrom:sf,streamTo:st,streamOffset:so,streamLimit:sl,audienceOffset:ao,audienceSearch:asearch,audienceSort:asort,audienceCoreOnly:ac,clockDay:cd,clockMinute:cm,clockResolution:cr,clockOffset:co,clockBatch:cb,clockCompact:cc,attendanceOnly:att,...addressOptions}=options;
-        void ap;void sf;void st;void so;void sl;void ao;void asearch;void asort;void ac;void cd;void cm;void cr;void co;void cb;void cc;void att;
-        const version=this.statement("SELECT domain,revision FROM ui_revisions WHERE domain IN('analyticsActivity','donations','follows','analyticsPresentation') ORDER BY domain").all();
-        const addressKey=JSON.stringify([historical,addressOptions,version,this.statement('SELECT revision FROM analytics_global_revision').get()]);
-        const address=this.addresses.get(addressKey);
-        const sessions = address?.sessions??this.sessions(options);
-        const live = sessions.some(session => session.ended_at_ms === null);
-        const lastEnd = sessions.reduce((end, session) => Math.max(end, session.ended_at_ms ?? options.toMs), options.fromMs);
-        const {panel,streamFrom,streamTo,streamOffset,streamLimit,audienceOffset,audienceSearch,audienceSort,audienceCoreOnly,clockDay,clockMinute,clockResolution,clockOffset,clockBatch,clockCompact,attendanceOnly,...baseOptions}=options;
-        void panel;void streamFrom;void streamTo;void streamOffset;void streamLimit;void audienceOffset;void audienceSearch;void audienceSort;void audienceCoreOnly;void clockDay;void clockMinute;void clockResolution;void clockOffset;void clockBatch;void clockCompact;void attendanceOnly;
-        const canonical = address?.canonical??{ ...baseOptions,source:options.source??'all',category:options.category??'', fromMs: Math.max(options.fromMs, sessions[0]?.started_at_ms ?? options.fromMs), toMs: live ? options.toMs : Math.min(options.toMs, lastEnd) };
-        const fingerprint = address?.fingerprint??createHash('sha256').update(JSON.stringify([9,historical, Object.fromEntries(Object.entries({...canonical,toMs:live?'live':canonical.toMs}).sort(([a],[b])=>a.localeCompare(b))), 0, sessions.map(s => [s.id,s.members, s.ended_at_ms === null ? 0 : s.revision]), this.annotationsRevision(), this.followerRevision()])).digest('hex');
-        const liveRevision=address?.liveRevision??JSON.stringify(sessions.filter(s=>s.ended_at_ms===null).map(s=>[s.id,s.revision]));
-        if(!address){if(this.addresses.size>=16)this.addresses.delete(this.addresses.keys().next().value!);this.addresses.set(addressKey,{sessions,canonical,fingerprint,liveRevision});}
-        const projectionKey=options.panel&&!clockOnly?JSON.stringify([fingerprint,liveRevision,this.statement("SELECT revision FROM ui_revisions WHERE domain='donations'").get(),options.panel,options.clockDay,options.clockResolution,options.clockCompact,options.audienceOffset,options.audienceSearch,options.audienceSort,options.audienceCoreOnly,options.attendanceOnly,options.streamFrom,options.streamTo,options.streamOffset,options.streamLimit]):'';
-        if(projectionKey){const hit=this.projections.get(projectionKey);if(hit)return structuredClone({...hit.value,filters:{...hit.value.filters,fromMs:options.fromMs,toMs:options.toMs}});}
-        const output=(value:Report)=>{if(projectionKey&&!value.preparing)this.rememberProjection(projectionKey,value);return value;};
+    const output = (value: Report) => {
+      if (projectionKey && !value.preparing) this.rememberProjection(projectionKey, value);
+      return value;
+    };
 
-        const retained=this.completed.get(fingerprint);
-        const cached=retained&&(!live||retained.liveRevision===liveRevision)&&(!retained.savedKey||this.statement('SELECT 1 FROM analytics_reports WHERE cache_key=?').get(retained.savedKey))?retained:undefined;
-        if(cached){
-            const workspace=cached.savedKey?new AnalyticsWorkspace<Person>(this.db,cached.savedKey):cached.workspace;
-            try{
-            if(clockOnly)return this.clockResult({...cached.value,filters:{...cached.value.filters,fromMs:options.fromMs,toMs:options.toMs}},workspace,options);
-            this.completed.delete(fingerprint);this.completed.set(fingerprint,cached);
-            const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as { payload_json: string; updated_at_ms: number } | undefined : undefined;
-            return output(structuredClone(this.page({ ...cached.value, filters: { ...cached.value.filters, fromMs: options.fromMs, toMs: options.toMs }, youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, donationTiming: options.panel==='audience'?cached.value.donationTiming:donationTiming(this.db, options.fromMs, options.toMs, options.timezone ?? 'Europe/Moscow', options.category) },workspace,options)));
-            }finally{if(cached.savedKey)workspace?.dispose();}
-        }
-        const saved=!live&&historical?this.reportCache.get(fingerprint):undefined;
-        if(saved){
-            // Rolling requests with unchanged effective stream bounds reuse the
-            // decoded report after restart, too. Saved membership is checked on
-            // every hit: durable eviction must never turn a cached page empty.
-            this.remember(fingerprint,saved,undefined,undefined,fingerprint);
-            const workspace=new AnalyticsWorkspace<Person>(this.db,fingerprint);
-            try{
-                const value={...saved,filters:{...saved.filters,fromMs:options.fromMs,toMs:options.toMs}};
-                if(clockOnly)return this.clockResult(value,workspace,options);
-                const youtube=options.source!=='twitch'&&options.youtubeAccount?this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {payload_json:string;updated_at_ms:number}|undefined:undefined;
-                return output(this.page({...value,youtubeReport:youtube?{data:JSON.parse(youtube.payload_json),updatedAt:youtube.updated_at_ms}:null,donationTiming:options.panel==='audience'?saved.donationTiming:donationTiming(this.db,options.fromMs,options.toMs,options.timezone??'Europe/Moscow',options.category)},workspace,options));
-            }finally{workspace.dispose();}
-        }
-        if(!historical&&sessions.length<=200){
-            try{
-                const value=audienceAnalytics(this.db,options);
-                if(!live)this.remember(fingerprint,value);
-                return output(this.page(value,undefined,options));
-            }catch(error){if(!(error instanceof Error)||error.message!=='ANALYTICS_RANGE_TOO_LARGE')throw error;}
-        }
-        const now = Date.now();
-        this.pruneJobs(now);
-        let job = this.jobs.get(fingerprint);
-        if (!job) {
-            // Each browser/filter keeps its own progress, with a bounded LRU budget.
-            while (this.jobs.size >= 4) {const key=this.jobs.keys().next().value!;this.jobs.get(key)!.workspace.dispose();this.jobs.delete(key);}
-            const validation=analyticsMetadata(options);
-            const workspace=new AnalyticsWorkspace<Person>(this.db);
-            job = { iterator: this.aggregate(options, sessions, validation,workspace), touchedAt: now,workspace,liveRevision,validation };
-        }
-        this.jobs.delete(fingerprint);
-        this.jobs.set(fingerprint, job);
-        job.touchedAt = now;
-        const validation=job.validation;
-        let next: IteratorResult<Progress, Report>;
-        try {
-            next = job.iterator.next();
-        }
-        catch (error) {
-            this.jobs.delete(fingerprint);job.workspace.dispose();
-            throw error;
-        }
-        if (!next.done)
-            return clockOnly?{filters:validation.filters,...next.value,stage:'aggregate'}:{ ...validation, ...next.value, stage: 'aggregate' };
-        this.jobs.delete(fingerprint);
-        next.value.clockRevision=fingerprint;
-        try{
-            const value=clockOnly?this.clockResult(next.value,job.workspace,options):this.page(next.value,job.workspace,options);
-            if(!live&&historical&&(this.cachePolicy.availableBytes?.()??Infinity)>=1024*1024*1024){
-                const {fromMs,toMs,...scopeOptions}=canonical;
-                const period=options.fromMs===0?'all':[7,30].find(days=>options.toMs-options.fromMs===days*86400000)??[fromMs,toMs];
-                const scope=createHash('sha256').update(JSON.stringify([Object.fromEntries(Object.entries(scopeOptions).sort(([a],[b])=>a.localeCompare(b))),period])).digest('hex');
-                this.reportCache.save(fingerprint,scope,next.value,job.workspace,!this.background);
-            }
-            this.remember(fingerprint,next.value,job.workspace,job.liveRevision);
-            return clockOnly?value:output(value as Report);
-        }catch(error){job.workspace.dispose();throw error;}
+    const retained = this.completed.get(fingerprint);
+    const cached =
+      retained &&
+      (!live || retained.liveRevision === liveRevision) &&
+      (!retained.savedKey || this.statement('SELECT 1 FROM analytics_reports WHERE cache_key=?').get(retained.savedKey))
+        ? retained
+        : undefined;
+    if (cached) {
+      const workspace = cached.savedKey ? new AnalyticsWorkspace<Person>(this.db, cached.savedKey) : cached.workspace;
+      try {
+        if (clockOnly)
+          return this.clockResult(
+            { ...cached.value, filters: { ...cached.value.filters, fromMs: options.fromMs, toMs: options.toMs } },
+            workspace,
+            options,
+          );
+        this.completed.delete(fingerprint);
+        this.completed.set(fingerprint, cached);
+        const youtube =
+          options.source !== 'twitch' && options.youtubeAccount
+            ? (this.statement(
+                "SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'",
+              ).get(options.youtubeAccount) as { payload_json: string; updated_at_ms: number } | undefined)
+            : undefined;
+        return output(
+          structuredClone(
+            this.page(
+              {
+                ...cached.value,
+                filters: { ...cached.value.filters, fromMs: options.fromMs, toMs: options.toMs },
+                youtubeReport: youtube
+                  ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms }
+                  : null,
+                donationTiming:
+                  options.panel === 'audience'
+                    ? cached.value.donationTiming
+                    : donationTiming(
+                        this.db,
+                        options.fromMs,
+                        options.toMs,
+                        options.timezone ?? 'Europe/Moscow',
+                        options.category,
+                      ),
+              },
+              workspace,
+              options,
+            ),
+          ),
+        );
+      } finally {
+        if (cached.savedKey) workspace?.dispose();
+      }
     }
-    private *aggregate(options: AnalyticsOptions, sessions: Session[], validation: ReturnType<typeof audienceAnalytics>,workspace:AnalyticsWorkspace<Person>): Generator<Progress, Report, void> {
-        if(!sessions.length||!this.tree.allowed())return yield* this.legacyAggregate(options,sessions,validation,workspace);
-        let sliceStart=performance.now(),processed=0;
-        const timezone=options.timezone??'Europe/Moscow';
-        const {fromMs,toMs,corePeople,rollingCore,coreWindowDays,...settings}=options;
-        void corePeople;void rollingCore;void coreWindowDays;
-        const period=fromMs===0?'all':[7,30].find(days=>toMs-fromMs===days*86400000)??[fromMs,toMs];
-        const scope=createHash('sha256').update(JSON.stringify([settings,period])).digest('hex');
-        const gaps=this.statement("SELECT id,source,started_at_ms,ended_at_ms FROM collection_gaps WHERE source IN('twitch','youtube') ORDER BY id").all() as {id:string;started_at_ms:number;ended_at_ms:number|null}[];
-        const root=this.tree.root(sessions.map(session=>({id:session.id,position:session.started_at_ms.toString(36).padStart(11,'0')+':'+session.id,
-            version:JSON.stringify([this.key(options,session),session.id,session.revision,!!options.includeInsights,options.includeInsights?gaps.filter(g=>g.started_at_ms<(session.ended_at_ms??options.toMs)&&(g.ended_at_ms??options.toMs)>session.started_at_ms):[]])})),scope);
-        const byId=new Map(sessions.map(s=>[s.id,s]));
-        workspace.useFold(root.key);
-        const reduction=this.tree.reduce(root,timezone,(leaf,key)=>{
-            const session=byId.get(leaf.id)!;
-            let report=session.ended_at_ms===null?this.streamReport({...options,sessionId:session.id}):this.cached(options,session,0);
-            if(!report){report=this.build(options,session);this.save(options,session,0,report,!this.background);}
-            let prepared;
-            if(options.includeInsights){
-                const builder=new InsightAccumulator(new Map(),timezone);
-                const start=report.activityWindows[0]?.from??session.started_at_ms,end=report.activityWindows.at(-1)?.to??start;
-                const recording=this.statement('SELECT recording_started_at_ms AS start FROM sessions WHERE id=?').get(session.id) as {start:number};
-                const tips=this.statement("SELECT i.person_id AS personId,e.occurred_at_ms AS at FROM event_sessions es CROSS JOIN effective_events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE es.session_id=? AND e.type='donation' AND e.occurred_at_ms>=? AND e.occurred_at_ms<?").all(session.id,start,end) as {personId:string;at:number}[];
-                builder.add(report,recording.start<=start&&!gaps.some(g=>g.started_at_ms<end&&(g.ended_at_ms??end)>start),tips);prepared=builder.snapshot();
-            }
-            this.tree.clock(key,session.id,report.clockBuckets??[]);processed++;
-            return streamFold(report,timezone,prepared);
-        });
-        let next=reduction.next();
-        while(!next.done){yield {preparing:true,ready:processed,total:sessions.length};next=reduction.next();}
-        const fold=next.value,people=workspace.people,selectedStreams=fold.selectedStreams,sample=fold.sample;
-        if(options.membershipOnly){
-            const preferences=new Map((this.statement('SELECT person_id,manual_core FROM person_preferences').all() as {person_id:string;manual_core:number|null}[]).map(p=>[p.person_id,p.manual_core]));
-            const coreRoster=fold.people.filter(p=>{
-                const override=preferences.get(p.id);
-                return override==null?fold.selectedStreams>=12&&classifyCore(p.coreAttendanceCount,fold.selectedStreams,options.regularThresholdPercent??80,null):override===1;
-            }).map(p=>p.id).sort();
-            return {...validation,coreRoster,summary:{...validation.summary,streams:fold.selectedStreams}};
-        }
-        for(const person of fold.people)people.set(person.id,person);
-        for(const [id,people] of fold.categoryPeople)for(const person of people)workspace.categoryPerson(id,person);
-        const categoryRows=new Map(fold.categories.map(c=>[c.id,c])),categories=new Map(fold.availableCategories.map(c=>[c.id,c]));
-        const hours=new Map(fold.hours.map(c=>[`${c.day}:${c.hour}`,c])),clockRows=new Map(fold.clock.map(c=>[`${c.day}:${c.resolution}:${c.minute}`,c]));
-        const activityClock=new Map(fold.activityClock.map(c=>[`${c.day}:${c.minute}`,c]));
-        const insightBuilder=options.includeInsights?new InsightAccumulator(workspace.insightPeople,timezone,options.insightSessionId):undefined;
-        if(insightBuilder&&fold.insights)insightBuilder.append(fold.insights);
-        const {summary,composition}=yield* this.finalizePeople(options,selectedStreams,people,sessions.length);
-        const daily=new HistoryTimeline(timezone,people);daily.append(fold.daily);
-        const seen=new Set<string>();
-        const streams=fold.streams.map(({row,visitors})=>{
-            const newInPeriod=visitors.filter(id=>!seen.has(id)).length;visitors.forEach(id=>seen.add(id));
-            return {...row,core:visitors.filter(id=>people.get(id)?.core).length,newInPeriod,returning:visitors.length-newInPeriod};
-        });
-        this.checkWorkspace(workspace);this.tree.collect([...this.jobs.values()].map(j=>j.workspace.reductionRoot()).concat([...this.completed.values()].map(c=>c.workspace?.reductionRoot())).filter((key):key is string=>!!key));
-        const insights:InsightCard[]=[];
-        if(insightBuilder)for(const card of insightBuilder.find()){
-            if(card)insights.push(card);
-            if(performance.now()-sliceStart>250){yield {preparing:true,ready:processed,total:sessions.length*2};sliceStart=performance.now();}
-        }
-        insights.sort((a,b)=>b.score-a.score||(a.personName??'').localeCompare(b.personName??'','ru',{numeric:true})||a.id.localeCompare(b.id));
-        const audience=people.page().items;
-        const outputCategories=[...categoryRows.values()].map(row=>({...row,...workspace.categoryCounts(row.id),meanOnline:row.viewerKnownMinutes?row.viewerTotal/row.viewerKnownMinutes:null,viewerCoverageRatio:row.minutes?row.viewerKnownMinutes/row.minutes:null,donationsPerHourMinor:currencyRates(row.donationTotals,Math.round(row.minutes*60000)),messagesPerHour:row.minutes?row.messages*60/row.minutes:0,observedPerMinute:row.minutes?row.observedMinutes/row.minutes:0,observedPerKnownMinute:row.observedKnownMinutes?row.observedMinutes/row.observedKnownMinutes:null,coverageRatio:row.minutes?row.observedKnownMinutes/row.minutes:null}));
-        for(const row of clockRows.values()){
-            // Exact membership is retained in the workspace, not duplicated into
-            // every resolution/day bucket. Resolve only the selected interval.
-            row.peopleDeferred=true;
-            row.averageAudience=row.airtimeMs?row.personTimeMs/row.airtimeMs:null;
-        }
-        const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {
-            payload_json: string;
-            updated_at_ms: number;
-        } | undefined : undefined;
-        return { ...sample,insights:options.includeInsights?insights:[], activityClock:[...activityClock.values()], youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, aggregate: true, filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs }, activityWindows: [], timeline: daily.values(), breaks: [], sessions: [sessions[0]!], audience, categories: outputCategories, availableCategories: [...categories.values()], streamComparison: streams, clockBuckets: [...clockRows.values()], hours: [...hours.values()], patterns: timePatterns([...hours.values()]), summary,composition,donationTiming:donationTiming(this.db,options.fromMs,options.toMs,options.timezone??'Europe/Moscow',options.category)};
+    const saved = !live && historical ? this.reportCache.get(fingerprint) : undefined;
+    if (saved) {
+      // Rolling requests with unchanged effective stream bounds reuse the
+      // decoded report after restart, too. Saved membership is checked on
+      // every hit: durable eviction must never turn a cached page empty.
+      this.remember(fingerprint, saved, undefined, undefined, fingerprint);
+      const workspace = new AnalyticsWorkspace<Person>(this.db, fingerprint);
+      try {
+        const value = { ...saved, filters: { ...saved.filters, fromMs: options.fromMs, toMs: options.toMs } };
+        if (clockOnly) return this.clockResult(value, workspace, options);
+        const youtube =
+          options.source !== 'twitch' && options.youtubeAccount
+            ? (this.statement(
+                "SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'",
+              ).get(options.youtubeAccount) as { payload_json: string; updated_at_ms: number } | undefined)
+            : undefined;
+        return output(
+          this.page(
+            {
+              ...value,
+              youtubeReport: youtube
+                ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms }
+                : null,
+              donationTiming:
+                options.panel === 'audience'
+                  ? saved.donationTiming
+                  : donationTiming(
+                      this.db,
+                      options.fromMs,
+                      options.toMs,
+                      options.timezone ?? 'Europe/Moscow',
+                      options.category,
+                    ),
+            },
+            workspace,
+            options,
+          ),
+        );
+      } finally {
+        workspace.dispose();
+      }
     }
-    private *finalizePeople(options:AnalyticsOptions,selectedStreams:number,people:AnalyticsWorkspace<Person>['people'],total:number){
-        let sliceStart=performance.now();const processed=total;
-        const coreMembership=options.corePeople?new Set(options.corePeople):undefined;
-        const preferences = new Map((this.statement('SELECT person_id,manual_core FROM person_preferences').all() as {
+    if (!historical && sessions.length <= 200) {
+      try {
+        const value = audienceAnalytics(this.db, options);
+        if (!live) this.remember(fingerprint, value);
+        return output(this.page(value, undefined, options));
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== 'ANALYTICS_RANGE_TOO_LARGE') throw error;
+      }
+    }
+    const now = Date.now();
+    this.pruneJobs(now);
+    let job = this.jobs.get(fingerprint);
+    if (!job) {
+      // Each browser/filter keeps its own progress, with a bounded LRU budget.
+      while (this.jobs.size >= 4) {
+        const key = this.jobs.keys().next().value!;
+        this.jobs.get(key)!.workspace.dispose();
+        this.jobs.delete(key);
+      }
+      const validation = analyticsMetadata(options);
+      const workspace = new AnalyticsWorkspace<Person>(this.db);
+      job = {
+        iterator: this.aggregate(options, sessions, validation, workspace),
+        touchedAt: now,
+        workspace,
+        liveRevision,
+        validation,
+      };
+    }
+    this.jobs.delete(fingerprint);
+    this.jobs.set(fingerprint, job);
+    job.touchedAt = now;
+    const validation = job.validation;
+    let next: IteratorResult<Progress, Report>;
+    try {
+      next = job.iterator.next();
+    } catch (error) {
+      this.jobs.delete(fingerprint);
+      job.workspace.dispose();
+      throw error;
+    }
+    if (!next.done)
+      return clockOnly
+        ? { filters: validation.filters, ...next.value, stage: 'aggregate' }
+        : { ...validation, ...next.value, stage: 'aggregate' };
+    this.jobs.delete(fingerprint);
+    next.value.clockRevision = fingerprint;
+    try {
+      const value = clockOnly
+        ? this.clockResult(next.value, job.workspace, options)
+        : this.page(next.value, job.workspace, options);
+      if (!live && historical && (this.cachePolicy.availableBytes?.() ?? Infinity) >= 1024 * 1024 * 1024) {
+        const { fromMs, toMs, ...scopeOptions } = canonical;
+        const period =
+          options.fromMs === 0
+            ? 'all'
+            : ([7, 30].find((days) => options.toMs - options.fromMs === days * 86400000) ?? [fromMs, toMs]);
+        const scope = createHash('sha256')
+          .update(
+            JSON.stringify([
+              Object.fromEntries(Object.entries(scopeOptions).sort(([a], [b]) => a.localeCompare(b))),
+              period,
+            ]),
+          )
+          .digest('hex');
+        this.reportCache.save(fingerprint, scope, next.value, job.workspace, !this.background);
+      }
+      this.remember(fingerprint, next.value, job.workspace, job.liveRevision);
+      return clockOnly ? value : output(value as Report);
+    } catch (error) {
+      job.workspace.dispose();
+      throw error;
+    }
+  }
+  private *aggregate(
+    options: AnalyticsOptions,
+    sessions: Session[],
+    validation: ReturnType<typeof audienceAnalytics>,
+    workspace: AnalyticsWorkspace<Person>,
+  ): Generator<Progress, Report, void> {
+    if (!sessions.length || !this.tree.allowed())
+      return yield* this.legacyAggregate(options, sessions, validation, workspace);
+    let sliceStart = performance.now(),
+      processed = 0;
+    const timezone = options.timezone ?? 'Europe/Moscow';
+    const { fromMs, toMs, corePeople, rollingCore, coreWindowDays, ...settings } = options;
+    void corePeople;
+    void rollingCore;
+    void coreWindowDays;
+    const period = fromMs === 0 ? 'all' : ([7, 30].find((days) => toMs - fromMs === days * 86400000) ?? [fromMs, toMs]);
+    const scope = createHash('sha256')
+      .update(JSON.stringify([settings, period]))
+      .digest('hex');
+    const gaps = this.statement(
+      "SELECT id,source,started_at_ms,ended_at_ms FROM collection_gaps WHERE source IN('twitch','youtube') ORDER BY id",
+    ).all() as { id: string; started_at_ms: number; ended_at_ms: number | null }[];
+    const root = this.tree.root(
+      sessions.map((session) => ({
+        id: session.id,
+        position: session.started_at_ms.toString(36).padStart(11, '0') + ':' + session.id,
+        version: JSON.stringify([
+          this.key(options, session),
+          session.id,
+          session.revision,
+          !!options.includeInsights,
+          options.includeInsights
+            ? gaps.filter(
+                (g) =>
+                  g.started_at_ms < (session.ended_at_ms ?? options.toMs) &&
+                  (g.ended_at_ms ?? options.toMs) > session.started_at_ms,
+              )
+            : [],
+        ]),
+      })),
+      scope,
+    );
+    const byId = new Map(sessions.map((s) => [s.id, s]));
+    workspace.useFold(root.key);
+    const reduction = this.tree.reduce(root, timezone, (leaf, key) => {
+      const session = byId.get(leaf.id)!;
+      let report =
+        session.ended_at_ms === null
+          ? this.streamReport({ ...options, sessionId: session.id })
+          : this.cached(options, session, 0);
+      if (!report) {
+        report = this.build(options, session);
+        this.save(options, session, 0, report, !this.background);
+      }
+      let prepared;
+      if (options.includeInsights) {
+        const builder = new InsightAccumulator(new Map(), timezone);
+        const start = report.activityWindows[0]?.from ?? session.started_at_ms,
+          end = report.activityWindows.at(-1)?.to ?? start;
+        const recording = this.statement('SELECT recording_started_at_ms AS start FROM sessions WHERE id=?').get(
+          session.id,
+        ) as { start: number };
+        const tips = this.statement(
+          "SELECT i.person_id AS personId,e.occurred_at_ms AS at FROM event_sessions es CROSS JOIN effective_events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE es.session_id=? AND e.type='donation' AND e.occurred_at_ms>=? AND e.occurred_at_ms<?",
+        ).all(session.id, start, end) as { personId: string; at: number }[];
+        builder.add(
+          report,
+          recording.start <= start && !gaps.some((g) => g.started_at_ms < end && (g.ended_at_ms ?? end) > start),
+          tips,
+        );
+        prepared = builder.snapshot();
+      }
+      this.tree.clock(key, session.id, report.clockBuckets ?? []);
+      processed++;
+      return streamFold(report, timezone, prepared);
+    });
+    let next = reduction.next();
+    while (!next.done) {
+      yield { preparing: true, ready: processed, total: sessions.length };
+      next = reduction.next();
+    }
+    const fold = next.value,
+      people = workspace.people,
+      selectedStreams = fold.selectedStreams,
+      sample = fold.sample;
+    if (options.membershipOnly) {
+      const preferences = new Map(
+        (
+          this.statement('SELECT person_id,manual_core FROM person_preferences').all() as {
             person_id: string;
             manual_core: number | null;
-        }[]).map(p => [p.person_id, p.manual_core]));
-        for (const person of people.values()) {
-            person.source = person.sources.includes('twitch') ? 'twitch' : 'youtube';
-            const attendance = person.attendanceCount, ratio = selectedStreams ? attendance / selectedStreams : 0;
-            const override = preferences.get(person.id);
-            person.manualCore = override == null ? null : override === 1;
-            person.core = classifyCore(person.coreAttendanceCount,selectedStreams,options.regularThresholdPercent??80,person.manualCore,coreMembership?.has(person.id));
-            person.regular = person.core;
-            person.attendanceRatio = ratio;
-            person.sessionRatio = selectedStreams ? person.sessionCount / selectedStreams : 0;
-            person.observedMinutesPerSession = attendance ? person.observedMinutes / attendance : 0;
-            person.detailAvailable=true;people.set(person.id,person);
-            if(performance.now()-sliceStart>250){yield {preparing:true as const,ready:processed,total:total*2};sliceStart=performance.now();}
-        }
-        const current = this.statement(latestFollowerSnapshotsSql).all() as {
-            source: string;
-            account_id: string;
-            payload_json: string;
-        }[];
-        const followers = new Set<string>(), negative = new Set<string>();
-        for (const snapshot of current) {
-            const info = JSON.parse(snapshot.payload_json), ids = JSON.stringify(info.followers.map((f: {
-                id: string;
-            }) => f.id));
-            const members = snapshot.source === 'youtube' ? this.statement('SELECT person_id FROM youtube_identities WHERE account_id=? AND external_id IN(SELECT value FROM json_each(?))').all(snapshot.account_id, ids) : this.statement("SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id IN(SELECT value FROM json_each(?))").all(snapshot.account_id, ids);
-            for (const row of members as {
-                person_id: string;
-            }[])
-                followers.add(row.person_id);
-            if (snapshot.source === 'twitch' && info.complete)
-                for (const row of this.statement("SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id NOT IN(SELECT value FROM json_each(?))").all(snapshot.account_id, ids) as {
-                    person_id: string;
-                }[])
-                    negative.add(row.person_id);
-        }
-        // Resolve inherited tags once for the whole roster, rather than one recursive
-        // query per participant. The workspace already holds the exact selected IDs.
-        const tags=new Map<string,string[]>();
-        const tagRows=this.db.prepare(`WITH RECURSIVE owners(person_id,origin_id) AS(SELECT id,id FROM ${people.table} UNION SELECT o.person_id,m.source_person_id FROM owners o JOIN person_merges m ON m.target_person_id=o.origin_id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT o.person_id,t.label FROM owners o JOIN person_tags t ON t.person_id=o.origin_id ORDER BY t.label`).all() as {person_id:string;label:string}[];
-        for(const row of tagRows){const list=tags.get(row.person_id)??[];list.push(row.label);tags.set(row.person_id,list);}
-        const summary={entities:people.size,attendees:0,regulars:0,regularShare:null as number|null,core:0,streams:selectedStreams,chatters:0,messages:0};
-        const composition:{bots?:number;core:number;followers:number;nonFollowers:number;unknown:number;twitch:number;youtube:number;both:number}={core:0,followers:0,nonFollowers:0,unknown:0,twitch:0,youtube:0,both:0};
-        for (const person of people.values()) {
-            person.follower = followers.has(person.id) ? true : negative.has(person.id) && !person.sources.includes('youtube') ? false : null;
-            person.tags = tags.get(person.id)??[];
-            people.set(person.id,person);summary.core+=Number(person.core);summary.chatters+=Number(person.messages>0);summary.messages+=person.messages;
-            if(person.attendanceSessionIds.length){summary.attendees++;if(person.is_bot)composition.bots=(composition.bots??0)+1;composition.core+=Number(!person.is_bot&&person.core);composition.followers+=Number(!person.is_bot&&!person.core&&person.follower===true);composition.nonFollowers+=Number(!person.is_bot&&!person.core&&person.follower===false);composition.unknown+=Number(!person.is_bot&&!person.core&&person.follower===null);composition.twitch+=Number(person.sources.includes('twitch'));composition.youtube+=Number(person.sources.includes('youtube'));composition.both+=Number(person.sources.length>1);}
-            if(performance.now()-sliceStart>250){yield {preparing:true as const,ready:processed,total:total*2};sliceStart=performance.now();}
-        }
-        summary.regulars=summary.core;summary.regularShare=summary.entities?summary.core/summary.entities:null;
-        return {summary,composition};
+          }[]
+        ).map((p) => [p.person_id, p.manual_core]),
+      );
+      const coreRoster = fold.people
+        .filter((p) => {
+          const override = preferences.get(p.id);
+          return override == null
+            ? fold.selectedStreams >= 12 &&
+                classifyCore(p.coreAttendanceCount, fold.selectedStreams, options.regularThresholdPercent ?? 80, null)
+            : override === 1;
+        })
+        .map((p) => p.id)
+        .sort();
+      return { ...validation, coreRoster, summary: { ...validation.summary, streams: fold.selectedStreams } };
     }
-    private *legacyAggregate(options: AnalyticsOptions, sessions: Session[], validation: ReturnType<typeof audienceAnalytics>,workspace:AnalyticsWorkspace<Person>): Generator<Progress, Report, void> {
-        let sliceStart = performance.now();
-        const active = new Map<string, Report>(), read = (session: Session) => {
-            if (session.ended_at_ms === null) {
-                let report = active.get(session.id);
-                if (!report) {
-                    report = this.streamReport({...options,sessionId:session.id});
-                    active.set(session.id, report);
-                }
-                return report;
-            }
-            let report = this.cached(options, session, 0);
-            if (!report) {
-                report = this.build(options, session);
-                this.save(options, session, 0, report,!this.background);
-            }
-            return report;
-        };
-        let processed = 0;
-        const people=workspace.people,streams:Stream[]=[],categoryRows=new Map<string,Category>(),hours=new Map<string,Hour>(),clockRows=new Map<string,ClockBucket>(),categories=new Map<string,{id:string;name:string}>();
-        const activityClock = new Map<string,ClockActivity>();
-        const insightBuilder=options.includeInsights?new InsightAccumulator(workspace.insightPeople,options.timezone,options.insightSessionId):undefined;
-        let sample: Report | undefined;
-        let selectedStreams = 0;
-        for (const session of sessions) {
-            const report = read(session);
-            sample = report;
-            if(insightBuilder){
-                const start=report.activityWindows[0]?.from??session.started_at_ms,end=report.activityWindows.at(-1)?.to??start;
-                const recording=this.statement('SELECT recording_started_at_ms AS start FROM sessions WHERE id=?').get(session.id) as {start:number};
-                const gaps=this.statement("SELECT 1 FROM collection_gaps WHERE source IN('twitch','youtube') AND started_at_ms<? AND coalesce(ended_at_ms,?)>? LIMIT 1").get(end,end,start);
-                const tips=this.statement("SELECT i.person_id AS personId,e.occurred_at_ms AS at FROM event_sessions es CROSS JOIN effective_events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE es.session_id=? AND e.type='donation' AND e.occurred_at_ms>=? AND e.occurred_at_ms<?").all(session.id,start,end) as {personId:string;at:number}[];
-                insightBuilder.add(report,recording.start<=start&&!gaps,tips);
-            }
-            mergeClockActivity(report.activityClock,activityClock);
-            if (report.summary.streams)
-                selectedStreams++;
-            for (const category of report.availableCategories)
-                categories.set(category.id, category);
-            const stream = report.streamComparison[0];
-            if (stream)
-                streams.push({ ...stream });
-            for (const person of report.audience) {
-                let row = people.get(person.id);
-                if (!row) {
-                    row = { ...person, sessionCount: 0, attendanceCount: 0, coreAttendanceCount: 0, coreSessionIds: [], sessionIds: [], attendanceSessionIds: [], intervals: [], messageMinutes: [], messageCounts: [], messages: 0, observedMinutes: 0, estimatedChatMinutes: 0, donations: {}, visits: 0, activityMinutes: 0, arrivalHours: [] };
-
-                }
-                row.messages += person.messages;
-                row.visits += person.visits;
-                for (const span of person.intervals) {
-                    const minutes = (span.to - span.from) / 60000;
-                    if (span.kind === 'observed')
-                        row.observedMinutes += minutes;
-                    else
-                        row.estimatedChatMinutes += minutes;
-                }
-                row.activityMinutes += unionSpans(person.intervals.map(span => ({ ...span, kind: 'observed' as const }))).reduce((n, span) => n + (span.to - span.from) / 60000, 0);
-                row.sources = [...new Set([...row.sources, ...person.sources])];
-                row.accounts = [...new Map([...row.accounts, ...person.accounts].map((a) => [a.source + ':' + a.name, a])).values()];
-                row.sessionCount += person.sessionIds.length;
-                row.attendanceCount += person.attendanceSessionIds.length;
-                Object.assign(row,coreSessions([...row.coreSessionIds,...person.coreSessionIds],row.coreAttendanceCount+person.coreSessionIds.length));
-                row.sessionIds = [...row.sessionIds, ...person.sessionIds].slice(-100);
-                row.attendanceSessionIds = [...row.attendanceSessionIds, ...person.attendanceSessionIds].slice(-100);
-                sumMoney(row.donations, person.donations);
-                row.intervals = [...row.intervals, ...person.intervals].slice(-100);
-                row.messageMinutes = [...row.messageMinutes, ...person.messageMinutes].slice(-100);
-                for (const arrival of person.arrivalHours) {
-                    let prior = row.arrivalHours.find((a) => a.day === arrival.day && a.hour === arrival.hour);
-                    if (!prior) {
-                        prior = { ...arrival, visits: 0 };
-                        row.arrivalHours.push(prior);
-                    }
-                    prior.visits += arrival.visits;
-                }
-                people.set(person.id,row);
-            }
-            for (const category of report.categories) {
-                let row = categoryRows.get(category.id);
-                if (!row) {
-                    row = { ...category, minutes: 0, messages: 0, observedMinutes: 0, observedKnownMinutes: 0, botObserved:0,botEstimated:0,botMessages:0,botViewersTotal:0,viewerTotal:0, viewerKnownMinutes:0, viewerPartialMinutes:0, estimatedChatMinutes: 0, sessions: 0, donationCount: 0, donationTotals: {} };
-                    categoryRows.set(category.id, row);
-                }
-                for(const field of ['botObserved','botEstimated','botMessages','botViewersTotal'] as const)row[field]=(row[field]??0)+(category[field]??0);
-                for (const key of ['minutes', 'messages', 'observedMinutes', 'observedKnownMinutes', 'estimatedChatMinutes', 'viewerTotal', 'viewerKnownMinutes', 'viewerPartialMinutes', 'sessions', 'donationCount'] as const)
-                    row[key] += category[key];
-                sumMoney(row.donationTotals, category.donationTotals);
-                for (const person of report.audience)
-                    if (person.intervals.some(span => report.activityWindows.some(w => w.categoryId === category.id && w.session === span.session && w.from < span.to && w.to > span.from)) || person.messageMinutes.some(m => report.activityWindows.some(w => w.categoryId === category.id && w.session === m.session && m.at >= w.from && m.at < w.to)))
-                        workspace.categoryPerson(category.id,person.id);
-            }
-            for (const cell of report.hours) {
-                const key = cell.day + ':' + cell.hour;
-                let row = hours.get(key);
-                if (!row) {
-                    row = { ...cell, observed: 0, estimated: 0, messages: 0, sampleMinutes: 0, observedKnownMinutes: 0, viewersTotal: 0, viewerSamples: 0, botObserved:0,botEstimated:0,botMessages:0,botViewersTotal:0,knownViewersTotal:0,knownViewerSamples:0,viewerPartialMinutes:0, donationCount: 0, donationTotals: {} };
-                    hours.set(key, row);
-                }
-                for(const field of ['botObserved','botEstimated','botMessages','botViewersTotal'] as const)row[field]=(row[field]??0)+(cell[field]??0);
-                for(const field of ['knownViewersTotal','knownViewerSamples','viewerPartialMinutes'] as const)row[field]=(row[field]??0)+(cell[field]??0);
-                for (const field of ['observed', 'estimated', 'messages', 'sampleMinutes', 'observedKnownMinutes', 'viewersTotal', 'viewerSamples', 'donationCount'] as const)
-                    row[field] += cell[field];
-                sumMoney(row.donationTotals, cell.donationTotals);
-            }
-            for (const bucket of report.clockBuckets ?? []) {
-                const key = `${bucket.day}:${bucket.resolution}:${bucket.minute}`;
-                let row = clockRows.get(key);
-                if (!row) {
-                    row = { ...bucket, streams: 0, airtimeMs: 0, personTimeMs: 0, people: [] };
-                    clockRows.set(key, row);
-
-                }
-                row.streams += bucket.streams;
-                row.airtimeMs += bucket.airtimeMs;
-                row.personTimeMs += bucket.personTimeMs;
-            }
-            workspace.addClock(session.id,report.clockBuckets??[]);
-            this.checkWorkspace(workspace);
-            processed++;
-            if (performance.now() - sliceStart > 250) {
-                yield { preparing: true, ready: processed, total: sessions.length * 2 };
-                sliceStart = performance.now();
-            }
+    for (const person of fold.people) people.set(person.id, person);
+    for (const [id, people] of fold.categoryPeople) for (const person of people) workspace.categoryPerson(id, person);
+    const categoryRows = new Map(fold.categories.map((c) => [c.id, c])),
+      categories = new Map(fold.availableCategories.map((c) => [c.id, c]));
+    const hours = new Map(fold.hours.map((c) => [`${c.day}:${c.hour}`, c])),
+      clockRows = new Map(fold.clock.map((c) => [`${c.day}:${c.resolution}:${c.minute}`, c]));
+    const activityClock = new Map(fold.activityClock.map((c) => [`${c.day}:${c.minute}`, c]));
+    const insightBuilder = options.includeInsights
+      ? new InsightAccumulator(workspace.insightPeople, timezone, options.insightSessionId)
+      : undefined;
+    if (insightBuilder && fold.insights) insightBuilder.append(fold.insights);
+    const { summary, composition } = yield* this.finalizePeople(options, selectedStreams, people, sessions.length);
+    const daily = new HistoryTimeline(timezone, people);
+    daily.append(fold.daily);
+    const seen = new Set<string>();
+    const streams = fold.streams.map(({ row, visitors }) => {
+      const newInPeriod = visitors.filter((id) => !seen.has(id)).length;
+      visitors.forEach((id) => seen.add(id));
+      return {
+        ...row,
+        core: visitors.filter((id) => people.get(id)?.core).length,
+        newInPeriod,
+        returning: visitors.length - newInPeriod,
+      };
+    });
+    this.checkWorkspace(workspace);
+    this.tree.collect(
+      [...this.jobs.values()]
+        .map((j) => j.workspace.reductionRoot())
+        .concat([...this.completed.values()].map((c) => c.workspace?.reductionRoot()))
+        .filter((key): key is string => !!key),
+    );
+    const insights: InsightCard[] = [];
+    if (insightBuilder)
+      for (const card of insightBuilder.find()) {
+        if (card) insights.push(card);
+        if (performance.now() - sliceStart > 250) {
+          yield { preparing: true, ready: processed, total: sessions.length * 2 };
+          sliceStart = performance.now();
         }
-        if (!sample)
-            return {...audienceAnalytics(this.db, options),...(options.includeInsights?{insights:[]}: {})};
-        const {summary,composition}=yield* this.finalizePeople(options,selectedStreams,people,sessions.length);
-        const daily = new HistoryTimeline(options.timezone ?? 'Europe/Moscow', people);
-        const streamsById = new Map(streams.map(stream => [stream.id, stream]));
-        for (const session of sessions) {
-            const report = read(session), stream = streamsById.get(session.id);
-            daily.add(report);
-            if (stream) {
-                const visitors = report.audience.filter(person => person.attendanceSessionIds.length).map(person => person.id);
-                stream.core = visitors.filter(id => people.get(id)?.core).length;
-                stream.newInPeriod = visitors.filter(id => people.firstVisit(id)).length;
-                stream.returning = visitors.length - stream.newInPeriod;
-
-            }
-            this.checkWorkspace(workspace);
-            processed++;
-            if (performance.now() - sliceStart > 250) {
-                yield { preparing: true, ready: processed, total: sessions.length * 2 };
-                sliceStart = performance.now();
-            }
-        }
-        const insights:InsightCard[]=[];
-        if(insightBuilder)for(const card of insightBuilder.find()){
-            if(card)insights.push(card);
-            if(performance.now()-sliceStart>250){yield {preparing:true,ready:processed,total:sessions.length*2};sliceStart=performance.now();}
-        }
-        insights.sort((a,b)=>b.score-a.score||(a.personName??'').localeCompare(b.personName??'','ru',{numeric:true})||a.id.localeCompare(b.id));
-        const audience=people.page().items;
-        const outputCategories=[...categoryRows.values()].map(row=>({...row,...workspace.categoryCounts(row.id),meanOnline:row.viewerKnownMinutes?row.viewerTotal/row.viewerKnownMinutes:null,viewerCoverageRatio:row.minutes?row.viewerKnownMinutes/row.minutes:null,donationsPerHourMinor:currencyRates(row.donationTotals,Math.round(row.minutes*60000)),messagesPerHour:row.minutes?row.messages*60/row.minutes:0,observedPerMinute:row.minutes?row.observedMinutes/row.minutes:0,observedPerKnownMinute:row.observedKnownMinutes?row.observedMinutes/row.observedKnownMinutes:null,coverageRatio:row.minutes?row.observedKnownMinutes/row.minutes:null}));
-        for(const row of clockRows.values()){
-            // Exact membership is retained in the workspace, not duplicated into
-            // every resolution/day bucket. Resolve only the selected interval.
-            row.peopleDeferred=true;
-            row.averageAudience=row.airtimeMs?row.personTimeMs/row.airtimeMs:null;
-        }
-        const youtube = options.source !== 'twitch' && options.youtubeAccount ? this.statement("SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'").get(options.youtubeAccount) as {
-            payload_json: string;
-            updated_at_ms: number;
-        } | undefined : undefined;
-        return { ...sample,insights:options.includeInsights?insights:[], activityClock:[...activityClock.values()], youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null, aggregate: true, filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs }, activityWindows: [], timeline: daily.values(), breaks: [], sessions: [sessions[0]!], audience, categories: outputCategories, availableCategories: [...categories.values()], streamComparison: streams, clockBuckets: [...clockRows.values()], hours: [...hours.values()], patterns: timePatterns([...hours.values()]), summary,composition,donationTiming:donationTiming(this.db,options.fromMs,options.toMs,options.timezone??'Europe/Moscow',options.category)};
+      }
+    insights.sort(
+      (a, b) =>
+        b.score - a.score ||
+        (a.personName ?? '').localeCompare(b.personName ?? '', 'ru', { numeric: true }) ||
+        a.id.localeCompare(b.id),
+    );
+    const audience = people.page().items;
+    const outputCategories = [...categoryRows.values()].map((row) => ({
+      ...row,
+      ...workspace.categoryCounts(row.id),
+      meanOnline: row.viewerKnownMinutes ? row.viewerTotal / row.viewerKnownMinutes : null,
+      viewerCoverageRatio: row.minutes ? row.viewerKnownMinutes / row.minutes : null,
+      donationsPerHourMinor: currencyRates(row.donationTotals, Math.round(row.minutes * 60000)),
+      messagesPerHour: row.minutes ? (row.messages * 60) / row.minutes : 0,
+      observedPerMinute: row.minutes ? row.observedMinutes / row.minutes : 0,
+      observedPerKnownMinute: row.observedKnownMinutes ? row.observedMinutes / row.observedKnownMinutes : null,
+      coverageRatio: row.minutes ? row.observedKnownMinutes / row.minutes : null,
+    }));
+    for (const row of clockRows.values()) {
+      // Exact membership is retained in the workspace, not duplicated into
+      // every resolution/day bucket. Resolve only the selected interval.
+      row.peopleDeferred = true;
+      row.averageAudience = row.airtimeMs ? row.personTimeMs / row.airtimeMs : null;
     }
+    const youtube =
+      options.source !== 'twitch' && options.youtubeAccount
+        ? (this.statement(
+            "SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'",
+          ).get(options.youtubeAccount) as
+            | {
+                payload_json: string;
+                updated_at_ms: number;
+              }
+            | undefined)
+        : undefined;
+    return {
+      ...sample,
+      insights: options.includeInsights ? insights : [],
+      activityClock: [...activityClock.values()],
+      youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null,
+      aggregate: true,
+      filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs },
+      activityWindows: [],
+      timeline: daily.values(),
+      breaks: [],
+      sessions: [sessions[0]!],
+      audience,
+      categories: outputCategories,
+      availableCategories: [...categories.values()],
+      streamComparison: streams,
+      clockBuckets: [...clockRows.values()],
+      hours: [...hours.values()],
+      patterns: timePatterns([...hours.values()]),
+      summary,
+      composition,
+      donationTiming: donationTiming(
+        this.db,
+        options.fromMs,
+        options.toMs,
+        options.timezone ?? 'Europe/Moscow',
+        options.category,
+      ),
+    };
+  }
+  private *finalizePeople(
+    options: AnalyticsOptions,
+    selectedStreams: number,
+    people: AnalyticsWorkspace<Person>['people'],
+    total: number,
+  ) {
+    let sliceStart = performance.now();
+    const processed = total;
+    const coreMembership = options.corePeople ? new Set(options.corePeople) : undefined;
+    const preferences = new Map(
+      (
+        this.statement('SELECT person_id,manual_core FROM person_preferences').all() as {
+          person_id: string;
+          manual_core: number | null;
+        }[]
+      ).map((p) => [p.person_id, p.manual_core]),
+    );
+    for (const person of people.values()) {
+      person.source = person.sources.includes('twitch') ? 'twitch' : 'youtube';
+      const attendance = person.attendanceCount,
+        ratio = selectedStreams ? attendance / selectedStreams : 0;
+      const override = preferences.get(person.id);
+      person.manualCore = override == null ? null : override === 1;
+      person.core = classifyCore(
+        person.coreAttendanceCount,
+        selectedStreams,
+        options.regularThresholdPercent ?? 80,
+        person.manualCore,
+        coreMembership?.has(person.id),
+      );
+      person.regular = person.core;
+      person.attendanceRatio = ratio;
+      person.sessionRatio = selectedStreams ? person.sessionCount / selectedStreams : 0;
+      person.observedMinutesPerSession = attendance ? person.observedMinutes / attendance : 0;
+      person.detailAvailable = true;
+      people.set(person.id, person);
+      if (performance.now() - sliceStart > 250) {
+        yield { preparing: true as const, ready: processed, total: total * 2 };
+        sliceStart = performance.now();
+      }
+    }
+    const current = this.statement(latestFollowerSnapshotsSql).all() as {
+      source: string;
+      account_id: string;
+      payload_json: string;
+    }[];
+    const followers = new Set<string>(),
+      negative = new Set<string>();
+    for (const snapshot of current) {
+      const info = JSON.parse(snapshot.payload_json),
+        ids = JSON.stringify(info.followers.map((f: { id: string }) => f.id));
+      const members =
+        snapshot.source === 'youtube'
+          ? this.statement(
+              'SELECT person_id FROM youtube_identities WHERE account_id=? AND external_id IN(SELECT value FROM json_each(?))',
+            ).all(snapshot.account_id, ids)
+          : this.statement(
+              "SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id IN(SELECT value FROM json_each(?))",
+            ).all(snapshot.account_id, ids);
+      for (const row of members as {
+        person_id: string;
+      }[])
+        followers.add(row.person_id);
+      if (snapshot.source === 'twitch' && info.complete)
+        for (const row of this.statement(
+          "SELECT person_id FROM identities WHERE source='twitch' AND account_id=? AND external_id NOT IN(SELECT value FROM json_each(?))",
+        ).all(snapshot.account_id, ids) as {
+          person_id: string;
+        }[])
+          negative.add(row.person_id);
+    }
+    // Resolve inherited tags once for the whole roster, rather than one recursive
+    // query per participant. The workspace already holds the exact selected IDs.
+    const tags = new Map<string, string[]>();
+    const tagRows = this.db
+      .prepare(
+        `WITH RECURSIVE owners(person_id,origin_id) AS(SELECT id,id FROM ${people.table} UNION SELECT o.person_id,m.source_person_id FROM owners o JOIN person_merges m ON m.target_person_id=o.origin_id WHERE m.undone_at_ms IS NULL) SELECT DISTINCT o.person_id,t.label FROM owners o JOIN person_tags t ON t.person_id=o.origin_id ORDER BY t.label`,
+      )
+      .all() as { person_id: string; label: string }[];
+    for (const row of tagRows) {
+      const list = tags.get(row.person_id) ?? [];
+      list.push(row.label);
+      tags.set(row.person_id, list);
+    }
+    const summary = {
+      entities: people.size,
+      attendees: 0,
+      regulars: 0,
+      regularShare: null as number | null,
+      core: 0,
+      streams: selectedStreams,
+      chatters: 0,
+      messages: 0,
+    };
+    const composition: {
+      bots?: number;
+      core: number;
+      followers: number;
+      nonFollowers: number;
+      unknown: number;
+      twitch: number;
+      youtube: number;
+      both: number;
+    } = { core: 0, followers: 0, nonFollowers: 0, unknown: 0, twitch: 0, youtube: 0, both: 0 };
+    for (const person of people.values()) {
+      person.follower = followers.has(person.id)
+        ? true
+        : negative.has(person.id) && !person.sources.includes('youtube')
+          ? false
+          : null;
+      person.tags = tags.get(person.id) ?? [];
+      people.set(person.id, person);
+      summary.core += Number(person.core);
+      summary.chatters += Number(person.messages > 0);
+      summary.messages += person.messages;
+      if (person.attendanceSessionIds.length) {
+        summary.attendees++;
+        if (person.is_bot) composition.bots = (composition.bots ?? 0) + 1;
+        composition.core += Number(!person.is_bot && person.core);
+        composition.followers += Number(!person.is_bot && !person.core && person.follower === true);
+        composition.nonFollowers += Number(!person.is_bot && !person.core && person.follower === false);
+        composition.unknown += Number(!person.is_bot && !person.core && person.follower === null);
+        composition.twitch += Number(person.sources.includes('twitch'));
+        composition.youtube += Number(person.sources.includes('youtube'));
+        composition.both += Number(person.sources.length > 1);
+      }
+      if (performance.now() - sliceStart > 250) {
+        yield { preparing: true as const, ready: processed, total: total * 2 };
+        sliceStart = performance.now();
+      }
+    }
+    summary.regulars = summary.core;
+    summary.regularShare = summary.entities ? summary.core / summary.entities : null;
+    return { summary, composition };
+  }
+  private *legacyAggregate(
+    options: AnalyticsOptions,
+    sessions: Session[],
+    validation: ReturnType<typeof audienceAnalytics>,
+    workspace: AnalyticsWorkspace<Person>,
+  ): Generator<Progress, Report, void> {
+    let sliceStart = performance.now();
+    const active = new Map<string, Report>(),
+      read = (session: Session) => {
+        if (session.ended_at_ms === null) {
+          let report = active.get(session.id);
+          if (!report) {
+            report = this.streamReport({ ...options, sessionId: session.id });
+            active.set(session.id, report);
+          }
+          return report;
+        }
+        let report = this.cached(options, session, 0);
+        if (!report) {
+          report = this.build(options, session);
+          this.save(options, session, 0, report, !this.background);
+        }
+        return report;
+      };
+    let processed = 0;
+    const people = workspace.people,
+      streams: Stream[] = [],
+      categoryRows = new Map<string, Category>(),
+      hours = new Map<string, Hour>(),
+      clockRows = new Map<string, ClockBucket>(),
+      categories = new Map<string, { id: string; name: string }>();
+    const activityClock = new Map<string, ClockActivity>();
+    const insightBuilder = options.includeInsights
+      ? new InsightAccumulator(workspace.insightPeople, options.timezone, options.insightSessionId)
+      : undefined;
+    let sample: Report | undefined;
+    let selectedStreams = 0;
+    for (const session of sessions) {
+      const report = read(session);
+      sample = report;
+      if (insightBuilder) {
+        const start = report.activityWindows[0]?.from ?? session.started_at_ms,
+          end = report.activityWindows.at(-1)?.to ?? start;
+        const recording = this.statement('SELECT recording_started_at_ms AS start FROM sessions WHERE id=?').get(
+          session.id,
+        ) as { start: number };
+        const gaps = this.statement(
+          "SELECT 1 FROM collection_gaps WHERE source IN('twitch','youtube') AND started_at_ms<? AND coalesce(ended_at_ms,?)>? LIMIT 1",
+        ).get(end, end, start);
+        const tips = this.statement(
+          "SELECT i.person_id AS personId,e.occurred_at_ms AS at FROM event_sessions es CROSS JOIN effective_events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE es.session_id=? AND e.type='donation' AND e.occurred_at_ms>=? AND e.occurred_at_ms<?",
+        ).all(session.id, start, end) as { personId: string; at: number }[];
+        insightBuilder.add(report, recording.start <= start && !gaps, tips);
+      }
+      mergeClockActivity(report.activityClock, activityClock);
+      if (report.summary.streams) selectedStreams++;
+      for (const category of report.availableCategories) categories.set(category.id, category);
+      const stream = report.streamComparison[0];
+      if (stream) streams.push({ ...stream });
+      for (const person of report.audience) {
+        let row = people.get(person.id);
+        if (!row) {
+          row = {
+            ...person,
+            sessionCount: 0,
+            attendanceCount: 0,
+            coreAttendanceCount: 0,
+            coreSessionIds: [],
+            sessionIds: [],
+            attendanceSessionIds: [],
+            intervals: [],
+            messageMinutes: [],
+            messageCounts: [],
+            messages: 0,
+            observedMinutes: 0,
+            estimatedChatMinutes: 0,
+            donations: {},
+            visits: 0,
+            activityMinutes: 0,
+            arrivalHours: [],
+          };
+        }
+        row.messages += person.messages;
+        row.visits += person.visits;
+        for (const span of person.intervals) {
+          const minutes = (span.to - span.from) / 60000;
+          if (span.kind === 'observed') row.observedMinutes += minutes;
+          else row.estimatedChatMinutes += minutes;
+        }
+        row.activityMinutes += unionSpans(
+          person.intervals.map((span) => ({ ...span, kind: 'observed' as const })),
+        ).reduce((n, span) => n + (span.to - span.from) / 60000, 0);
+        row.sources = [...new Set([...row.sources, ...person.sources])];
+        row.accounts = [
+          ...new Map([...row.accounts, ...person.accounts].map((a) => [a.source + ':' + a.name, a])).values(),
+        ];
+        row.sessionCount += person.sessionIds.length;
+        row.attendanceCount += person.attendanceSessionIds.length;
+        Object.assign(
+          row,
+          coreSessions(
+            [...row.coreSessionIds, ...person.coreSessionIds],
+            row.coreAttendanceCount + person.coreSessionIds.length,
+          ),
+        );
+        row.sessionIds = [...row.sessionIds, ...person.sessionIds].slice(-100);
+        row.attendanceSessionIds = [...row.attendanceSessionIds, ...person.attendanceSessionIds].slice(-100);
+        sumMoney(row.donations, person.donations);
+        row.intervals = [...row.intervals, ...person.intervals].slice(-100);
+        row.messageMinutes = [...row.messageMinutes, ...person.messageMinutes].slice(-100);
+        for (const arrival of person.arrivalHours) {
+          let prior = row.arrivalHours.find((a) => a.day === arrival.day && a.hour === arrival.hour);
+          if (!prior) {
+            prior = { ...arrival, visits: 0 };
+            row.arrivalHours.push(prior);
+          }
+          prior.visits += arrival.visits;
+        }
+        people.set(person.id, row);
+      }
+      for (const category of report.categories) {
+        let row = categoryRows.get(category.id);
+        if (!row) {
+          row = {
+            ...category,
+            minutes: 0,
+            messages: 0,
+            observedMinutes: 0,
+            observedKnownMinutes: 0,
+            botObserved: 0,
+            botEstimated: 0,
+            botMessages: 0,
+            botViewersTotal: 0,
+            viewerTotal: 0,
+            viewerKnownMinutes: 0,
+            viewerPartialMinutes: 0,
+            estimatedChatMinutes: 0,
+            sessions: 0,
+            donationCount: 0,
+            donationTotals: {},
+          };
+          categoryRows.set(category.id, row);
+        }
+        for (const field of ['botObserved', 'botEstimated', 'botMessages', 'botViewersTotal'] as const)
+          row[field] = (row[field] ?? 0) + (category[field] ?? 0);
+        for (const key of [
+          'minutes',
+          'messages',
+          'observedMinutes',
+          'observedKnownMinutes',
+          'estimatedChatMinutes',
+          'viewerTotal',
+          'viewerKnownMinutes',
+          'viewerPartialMinutes',
+          'sessions',
+          'donationCount',
+        ] as const)
+          row[key] += category[key];
+        sumMoney(row.donationTotals, category.donationTotals);
+        for (const person of report.audience)
+          if (
+            person.intervals.some((span) =>
+              report.activityWindows.some(
+                (w) =>
+                  w.categoryId === category.id && w.session === span.session && w.from < span.to && w.to > span.from,
+              ),
+            ) ||
+            person.messageMinutes.some((m) =>
+              report.activityWindows.some(
+                (w) => w.categoryId === category.id && w.session === m.session && m.at >= w.from && m.at < w.to,
+              ),
+            )
+          )
+            workspace.categoryPerson(category.id, person.id);
+      }
+      for (const cell of report.hours) {
+        const key = cell.day + ':' + cell.hour;
+        let row = hours.get(key);
+        if (!row) {
+          row = {
+            ...cell,
+            observed: 0,
+            estimated: 0,
+            messages: 0,
+            sampleMinutes: 0,
+            observedKnownMinutes: 0,
+            viewersTotal: 0,
+            viewerSamples: 0,
+            botObserved: 0,
+            botEstimated: 0,
+            botMessages: 0,
+            botViewersTotal: 0,
+            knownViewersTotal: 0,
+            knownViewerSamples: 0,
+            viewerPartialMinutes: 0,
+            donationCount: 0,
+            donationTotals: {},
+          };
+          hours.set(key, row);
+        }
+        for (const field of ['botObserved', 'botEstimated', 'botMessages', 'botViewersTotal'] as const)
+          row[field] = (row[field] ?? 0) + (cell[field] ?? 0);
+        for (const field of ['knownViewersTotal', 'knownViewerSamples', 'viewerPartialMinutes'] as const)
+          row[field] = (row[field] ?? 0) + (cell[field] ?? 0);
+        for (const field of [
+          'observed',
+          'estimated',
+          'messages',
+          'sampleMinutes',
+          'observedKnownMinutes',
+          'viewersTotal',
+          'viewerSamples',
+          'donationCount',
+        ] as const)
+          row[field] += cell[field];
+        sumMoney(row.donationTotals, cell.donationTotals);
+      }
+      for (const bucket of report.clockBuckets ?? []) {
+        const key = `${bucket.day}:${bucket.resolution}:${bucket.minute}`;
+        let row = clockRows.get(key);
+        if (!row) {
+          row = { ...bucket, streams: 0, airtimeMs: 0, personTimeMs: 0, people: [] };
+          clockRows.set(key, row);
+        }
+        row.streams += bucket.streams;
+        row.airtimeMs += bucket.airtimeMs;
+        row.personTimeMs += bucket.personTimeMs;
+      }
+      workspace.addClock(session.id, report.clockBuckets ?? []);
+      this.checkWorkspace(workspace);
+      processed++;
+      if (performance.now() - sliceStart > 250) {
+        yield { preparing: true, ready: processed, total: sessions.length * 2 };
+        sliceStart = performance.now();
+      }
+    }
+    if (!sample)
+      return { ...audienceAnalytics(this.db, options), ...(options.includeInsights ? { insights: [] } : {}) };
+    const { summary, composition } = yield* this.finalizePeople(options, selectedStreams, people, sessions.length);
+    const daily = new HistoryTimeline(options.timezone ?? 'Europe/Moscow', people);
+    const streamsById = new Map(streams.map((stream) => [stream.id, stream]));
+    for (const session of sessions) {
+      const report = read(session),
+        stream = streamsById.get(session.id);
+      daily.add(report);
+      if (stream) {
+        const visitors = report.audience
+          .filter((person) => person.attendanceSessionIds.length)
+          .map((person) => person.id);
+        stream.core = visitors.filter((id) => people.get(id)?.core).length;
+        stream.newInPeriod = visitors.filter((id) => people.firstVisit(id)).length;
+        stream.returning = visitors.length - stream.newInPeriod;
+      }
+      this.checkWorkspace(workspace);
+      processed++;
+      if (performance.now() - sliceStart > 250) {
+        yield { preparing: true, ready: processed, total: sessions.length * 2 };
+        sliceStart = performance.now();
+      }
+    }
+    const insights: InsightCard[] = [];
+    if (insightBuilder)
+      for (const card of insightBuilder.find()) {
+        if (card) insights.push(card);
+        if (performance.now() - sliceStart > 250) {
+          yield { preparing: true, ready: processed, total: sessions.length * 2 };
+          sliceStart = performance.now();
+        }
+      }
+    insights.sort(
+      (a, b) =>
+        b.score - a.score ||
+        (a.personName ?? '').localeCompare(b.personName ?? '', 'ru', { numeric: true }) ||
+        a.id.localeCompare(b.id),
+    );
+    const audience = people.page().items;
+    const outputCategories = [...categoryRows.values()].map((row) => ({
+      ...row,
+      ...workspace.categoryCounts(row.id),
+      meanOnline: row.viewerKnownMinutes ? row.viewerTotal / row.viewerKnownMinutes : null,
+      viewerCoverageRatio: row.minutes ? row.viewerKnownMinutes / row.minutes : null,
+      donationsPerHourMinor: currencyRates(row.donationTotals, Math.round(row.minutes * 60000)),
+      messagesPerHour: row.minutes ? (row.messages * 60) / row.minutes : 0,
+      observedPerMinute: row.minutes ? row.observedMinutes / row.minutes : 0,
+      observedPerKnownMinute: row.observedKnownMinutes ? row.observedMinutes / row.observedKnownMinutes : null,
+      coverageRatio: row.minutes ? row.observedKnownMinutes / row.minutes : null,
+    }));
+    for (const row of clockRows.values()) {
+      // Exact membership is retained in the workspace, not duplicated into
+      // every resolution/day bucket. Resolve only the selected interval.
+      row.peopleDeferred = true;
+      row.averageAudience = row.airtimeMs ? row.personTimeMs / row.airtimeMs : null;
+    }
+    const youtube =
+      options.source !== 'twitch' && options.youtubeAccount
+        ? (this.statement(
+            "SELECT payload_json,updated_at_ms FROM youtube_snapshots WHERE account_id=? AND key='report'",
+          ).get(options.youtubeAccount) as
+            | {
+                payload_json: string;
+                updated_at_ms: number;
+              }
+            | undefined)
+        : undefined;
+    return {
+      ...sample,
+      insights: options.includeInsights ? insights : [],
+      activityClock: [...activityClock.values()],
+      youtubeReport: youtube ? { data: JSON.parse(youtube.payload_json), updatedAt: youtube.updated_at_ms } : null,
+      aggregate: true,
+      filters: { ...validation.filters, fromMs: options.fromMs, toMs: options.toMs },
+      activityWindows: [],
+      timeline: daily.values(),
+      breaks: [],
+      sessions: [sessions[0]!],
+      audience,
+      categories: outputCategories,
+      availableCategories: [...categories.values()],
+      streamComparison: streams,
+      clockBuckets: [...clockRows.values()],
+      hours: [...hours.values()],
+      patterns: timePatterns([...hours.values()]),
+      summary,
+      composition,
+      donationTiming: donationTiming(
+        this.db,
+        options.fromMs,
+        options.toMs,
+        options.timezone ?? 'Europe/Moscow',
+        options.category,
+      ),
+    };
+  }
 }

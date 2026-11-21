@@ -10,3 +10,6 @@ docs/*.json
 *.md
 *.yml
 *.yaml
+
+# Temporary comparison helper (validation branch only)
+scripts/verify-formatting.mjs

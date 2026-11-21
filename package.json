@@ -21,7 +21,7 @@
     "test:integration": "pnpm build && node --test --test-concurrency=2 dist/apps/daemon/test/*.test.js tests/integration/*.test.mjs",
     "test:e2e": "pnpm build && node --test --test-concurrency=2 tests/e2e/*.test.mjs",
     "test:coverage": "pnpm build && node scripts/test-with-coverage.mjs",
-    "lint": "pnpm exec prettier --write . && git restore -- scripts/print-format-delta.mjs && node scripts/print-format-delta.mjs && eslint .",
+    "lint": "node scripts/verify-formatting.mjs && eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

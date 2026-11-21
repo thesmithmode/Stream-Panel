@@ -1,12 +1,12 @@
-import {serviceAccountsSchema} from './service-accounts.js';
-import {botExclusionSet} from './bots.js';
-import {personBotSchema} from './person-bots.js';
-import {viewerAdjustmentSchema} from './viewer-adjustment.js';
-import {donationFxSchema} from './donation-fx.js';
-import {overviewRevisionSchema} from './overview-revision.js';
-import {analyticsRevisionSchema} from './analytics-revisions.js';
-import {changeRevisionSchema} from './change-revisions.js';
-import {sharedIdentitySchema} from './shared-identity-schema.js';
+import { serviceAccountsSchema } from './service-accounts.js';
+import { botExclusionSet } from './bots.js';
+import { personBotSchema } from './person-bots.js';
+import { viewerAdjustmentSchema } from './viewer-adjustment.js';
+import { donationFxSchema } from './donation-fx.js';
+import { overviewRevisionSchema } from './overview-revision.js';
+import { analyticsRevisionSchema } from './analytics-revisions.js';
+import { changeRevisionSchema } from './change-revisions.js';
+import { sharedIdentitySchema } from './shared-identity-schema.js';
 // Migration 1. All times are UTC epoch milliseconds; names are never unique identifiers.
 
 export const schemaV1 = `
@@ -307,7 +307,7 @@ PRAGMA user_version = 16;
 `;
 
 /** Compact access indexes and share unchanged follower payloads without dropping poll times. */
-export const schemaV17=`
+export const schemaV17 = `
 CREATE INDEX IF NOT EXISTS sessions_start ON sessions(started_at_ms DESC,id DESC);
 DROP INDEX events_time;
 CREATE INDEX events_time ON events(occurred_at_ms);
@@ -329,10 +329,10 @@ CREATE VIEW IF NOT EXISTS follower_observations AS SELECT c.id,p.source,p.accoun
 PRAGMA user_version=17;
 `;
 
-export const analyticsStreamCacheSchema=`CREATE TABLE IF NOT EXISTS analytics_stream_cache(session_id TEXT NOT NULL,cache_key TEXT NOT NULL,revision INTEGER NOT NULL,global_revision INTEGER NOT NULL,payload BLOB NOT NULL,updated_at_ms INTEGER NOT NULL,PRIMARY KEY(session_id,cache_key)) STRICT;`;
+export const analyticsStreamCacheSchema = `CREATE TABLE IF NOT EXISTS analytics_stream_cache(session_id TEXT NOT NULL,cache_key TEXT NOT NULL,revision INTEGER NOT NULL,global_revision INTEGER NOT NULL,payload BLOB NOT NULL,updated_at_ms INTEGER NOT NULL,PRIMARY KEY(session_id,cache_key)) STRICT;`;
 
 /** Closed-stream reports are derived and invalidated by factual mutations. */
-export const schemaV18=`
+export const schemaV18 = `
 CREATE TABLE IF NOT EXISTS analytics_stream_revisions(session_id TEXT PRIMARY KEY,revision INTEGER NOT NULL) STRICT;
 INSERT OR IGNORE INTO analytics_stream_revisions SELECT id,0 FROM sessions;
 CREATE TABLE IF NOT EXISTS analytics_global_revision(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL) STRICT;
@@ -538,7 +538,7 @@ PRAGMA user_version=21;
 `;
 
 /** Disposable projections only; all source tables and identifiers remain untouched. */
-export const schemaV22=`
+export const schemaV22 = `
 CREATE TABLE IF NOT EXISTS analytics_reports(cache_key TEXT PRIMARY KEY,scope_key TEXT NOT NULL,payload BLOB NOT NULL,bytes INTEGER NOT NULL,updated_at_ms INTEGER NOT NULL) STRICT;
 CREATE INDEX IF NOT EXISTS analytics_reports_retention ON analytics_reports(updated_at_ms,cache_key);
 CREATE INDEX IF NOT EXISTS analytics_reports_scope ON analytics_reports(scope_key);
@@ -548,7 +548,7 @@ PRAGMA user_version=22;
 `;
 
 /** Temporary 48-hour content archive; deliberately has no analytics revision triggers. */
-export const schemaV23=`
+export const schemaV23 = `
 CREATE TABLE IF NOT EXISTS recent_events(id TEXT PRIMARY KEY,source TEXT NOT NULL,account_id TEXT NOT NULL,external_id TEXT NOT NULL,type TEXT NOT NULL,actor_id TEXT,actor_name TEXT,at_ms INTEGER NOT NULL,received_at_ms INTEGER NOT NULL,payload_json TEXT NOT NULL) STRICT;
 CREATE INDEX IF NOT EXISTS recent_events_time ON recent_events(at_ms,id);
 CREATE INDEX IF NOT EXISTS recent_events_actor ON recent_events(source,account_id,actor_id);
@@ -558,11 +558,13 @@ PRAGMA user_version=23;
 
 // Name and bot-match changes affect only streams containing that person.
 // Identity membership changes retain conservative global invalidation.
-const renameStreams=(person:string)=>`UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN (
+const renameStreams = (
+  person: string,
+) => `UPDATE analytics_stream_revisions SET revision=revision+1 WHERE session_id IN (
  SELECT es.session_id FROM event_sessions es JOIN events e ON e.id=es.event_id JOIN identities i ON i.id=e.identity_id WHERE i.person_id=${person}
  UNION SELECT p.session_id FROM presence_polls p JOIN presence_members m ON m.poll_id=p.id JOIN identities i ON i.id=m.identity_id WHERE i.person_id=${person}
  UNION SELECT p.session_id FROM platform_streams p JOIN youtube_messages m ON p.platform='youtube' AND m.account_id=p.account_id AND m.published_at_ms>=p.started_at_ms AND m.published_at_ms<coalesce(p.ended_at_ms,9223372036854775807) JOIN youtube_identities i ON i.account_id=m.account_id AND i.external_id=m.author_id WHERE i.person_id=${person});`;
-export const schemaV24=`
+export const schemaV24 = `
 DROP TRIGGER IF EXISTS analytics_persons_rename;
 CREATE TRIGGER analytics_persons_rename AFTER UPDATE ON persons WHEN OLD.display_name IS NOT NEW.display_name BEGIN ${renameStreams('NEW.id')} END;
 DROP TRIGGER IF EXISTS analytics_identities_rename;
@@ -575,14 +577,20 @@ CREATE TRIGGER analytics_youtube_identities_rename AFTER UPDATE ON youtube_ident
  UPDATE analytics_global_revision SET revision=revision+1 WHERE id=1 AND OLD.person_id IS NOT NEW.person_id;
  ${renameStreams('NEW.person_id')}
 END;
-${(['identity_aliases','youtube_identity_aliases'] as const).flatMap(table=>['insert','update','delete'].map(operation=>{
- const prefix=table==='identity_aliases'?'analytics_identity_aliases':'analytics_youtube_identity_aliases',identities=table==='identity_aliases'?'identities':'youtube_identities',row=operation==='delete'?'OLD':'NEW';
- return `DROP TRIGGER IF EXISTS ${prefix}_${operation};CREATE TRIGGER ${prefix}_${operation} AFTER ${operation.toUpperCase()} ON ${table}${operation==='update'?` WHEN OLD.${table==='identity_aliases'?'candidate_key':'match_key'} IS NOT NEW.${table==='identity_aliases'?'candidate_key':'match_key'}`:''} BEGIN ${renameStreams(`(SELECT person_id FROM ${identities} WHERE id=${row}.identity_id)`)} END;`;
-})).join('\n')}
+${(['identity_aliases', 'youtube_identity_aliases'] as const)
+  .flatMap((table) =>
+    ['insert', 'update', 'delete'].map((operation) => {
+      const prefix = table === 'identity_aliases' ? 'analytics_identity_aliases' : 'analytics_youtube_identity_aliases',
+        identities = table === 'identity_aliases' ? 'identities' : 'youtube_identities',
+        row = operation === 'delete' ? 'OLD' : 'NEW';
+      return `DROP TRIGGER IF EXISTS ${prefix}_${operation};CREATE TRIGGER ${prefix}_${operation} AFTER ${operation.toUpperCase()} ON ${table}${operation === 'update' ? ` WHEN OLD.${table === 'identity_aliases' ? 'candidate_key' : 'match_key'} IS NOT NEW.${table === 'identity_aliases' ? 'candidate_key' : 'match_key'}` : ''} BEGIN ${renameStreams(`(SELECT person_id FROM ${identities} WHERE id=${row}.identity_id)`)} END;`;
+    }),
+  )
+  .join('\n')}
 PRAGMA user_version=24;
 `;
 /** Independent, profile-scoped observations; source facts and existing tables stay intact. */
-export const schemaV25=`
+export const schemaV25 = `
 CREATE TABLE IF NOT EXISTS subscriber_counts(source TEXT NOT NULL CHECK(source IN ('twitch','youtube')),account_id TEXT NOT NULL,observed_at_ms INTEGER NOT NULL,total INTEGER NOT NULL CHECK(total>=0),PRIMARY KEY(source,account_id,observed_at_ms)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS subscriber_follows(account_id TEXT NOT NULL,external_id TEXT NOT NULL,followed_at_ms INTEGER NOT NULL,name TEXT NOT NULL,followed_second INTEGER NOT NULL,PRIMARY KEY(account_id,followed_second,external_id)) WITHOUT ROWID;
 INSERT OR IGNORE INTO subscriber_follows SELECT p.account_id,json_extract(f.value,'$.id'),json_extract(f.value,'$.followedAtMs'),coalesce(json_extract(f.value,'$.name'),json_extract(f.value,'$.id')),CAST(json_extract(f.value,'$.followedAtMs')/1000 AS INTEGER) FROM provider_snapshots p,json_each(p.payload_json,'$.followers') f WHERE p.source='twitch' AND p.key='followers' AND json_type(f.value,'$.followedAtMs')='integer' AND json_extract(f.value,'$.followedAtMs')>=0;
@@ -593,7 +601,7 @@ CREATE INDEX IF NOT EXISTS youtube_publications_time ON youtube_publications(acc
 INSERT OR IGNORE INTO subscriber_counts SELECT p.source,p.account_id,c.observed_at_ms,json_extract(p.payload_json,'$.total') FROM provider_snapshots p JOIN follower_checks c ON c.snapshot_id=p.id WHERE p.key='followers' AND p.source='twitch' AND json_type(p.payload_json,'$.total')='integer' AND json_extract(p.payload_json,'$.total')>=0;
 PRAGMA user_version=25;
 `;
-export const schemaV30=`
+export const schemaV30 = `
 CREATE TABLE IF NOT EXISTS person_names(person_id TEXT PRIMARY KEY REFERENCES persons(id)) WITHOUT ROWID;
 -- Existing combined cards already represent a human; keep their chosen label even
 -- when it happens to equal one donor alias. Provider account names still update.
@@ -604,7 +612,7 @@ DELETE FROM membership_operations WHERE kind='donation_assignment';
 PRAGMA user_version=30;
 `;
 // Service chatbots do not establish humanity simply by having a YouTube account.
-const botAnalyticsSchema=`
+const botAnalyticsSchema = `
 DROP VIEW automatic_human_people;
 CREATE VIEW automatic_human_people AS SELECT person_id FROM youtube_identities WHERE match_key NOT IN('streamelements','streemelements') UNION SELECT person_id FROM identities WHERE source='donationalerts' UNION SELECT person_id FROM donor_people UNION SELECT person_id FROM donor_bindings;
 DELETE FROM analytics_reports;
@@ -617,7 +625,7 @@ UPDATE analytics_global_revision SET revision=revision+1;
 UPDATE ui_revisions SET revision=revision+1;
 PRAGMA user_version=34;
 `;
-const averageOnlineSchema=`
+const averageOnlineSchema = `
 INSERT INTO analytics_jobs(session_id,requested_at_ms,priority)
  SELECT s.id,CAST(unixepoch('subsec')*1000 AS INTEGER),1 FROM sessions s
  WHERE s.ended_at_ms IS NOT NULL
@@ -625,7 +633,7 @@ INSERT INTO analytics_jobs(session_id,requested_at_ms,priority)
  ON CONFLICT(session_id) DO UPDATE SET attempts=0,retry_at_ms=0;
 PRAGMA user_version=36;
 `;
-const streamClipsSchema=`
+const streamClipsSchema = `
 CREATE TABLE IF NOT EXISTS stream_clips (
  id TEXT PRIMARY KEY, account_id TEXT NOT NULL, stream_id TEXT NOT NULL,
  created_at_ms INTEGER NOT NULL, position_seconds INTEGER NOT NULL CHECK(position_seconds>=0)
@@ -634,7 +642,43 @@ CREATE INDEX IF NOT EXISTS stream_clips_stream ON stream_clips(account_id,stream
 CREATE INDEX IF NOT EXISTS stream_clips_age ON stream_clips(created_at_ms);
 PRAGMA user_version=37;
 `;
-export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24,schemaV25,changeRevisionSchema,analyticsRevisionSchema,overviewRevisionSchema,sharedIdentitySchema,schemaV30,donationFxSchema,personBotSchema,viewerAdjustmentSchema,botAnalyticsSchema,serviceAccountsSchema,averageOnlineSchema,streamClipsSchema] as const;
-export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;
-
-
+export const schemaMigrations = [
+  schemaV1,
+  schemaV2,
+  schemaV3,
+  schemaV4,
+  schemaV5,
+  schemaV6,
+  schemaV7,
+  schemaV8,
+  schemaV9,
+  schemaV10,
+  schemaV11,
+  schemaV12,
+  schemaV13,
+  schemaV14,
+  schemaV15,
+  schemaV16,
+  schemaV17,
+  schemaV18,
+  schemaV19,
+  schemaV20,
+  schemaV21,
+  schemaV22,
+  schemaV23,
+  schemaV24,
+  schemaV25,
+  changeRevisionSchema,
+  analyticsRevisionSchema,
+  overviewRevisionSchema,
+  sharedIdentitySchema,
+  schemaV30,
+  donationFxSchema,
+  personBotSchema,
+  viewerAdjustmentSchema,
+  botAnalyticsSchema,
+  serviceAccountsSchema,
+  averageOnlineSchema,
+  streamClipsSchema,
+] as const;
+export const CURRENT_SCHEMA_VERSION = schemaMigrations.length;
