@@ -28,7 +28,7 @@ test('secondary OAuth has independent credentials and callback state; restarts a
   const reloaded=new Configuration(dir);await reloaded.load();assert.equal(reloaded.value.youtube?.access,'primary-access');assert.equal(reloaded.value.youtubeSecondary?.access,'second-access');
   const status=(await a.app.inject({url:'/api/v1/status',headers})).json();assert.equal(status.config.hasYoutubeSecondarySecret,true);assert.ok(!JSON.stringify(status).includes('second-secret'));
   response=await a.app.inject({method:'POST',url:'/api/v1/youtube/connect',headers,payload:{account:'unexpected',clientId:'x'}});assert.equal(response.statusCode,400);
-  mode='offline';assert.equal(await a.youtubeSecondary.collectOnce(),300000);
+  await a.youtubeSecondary.stop();mode='offline';assert.equal(await a.youtubeSecondary.collectOnce(),300000);
   response=await a.app.inject({method:'POST',url:'/api/v1/youtube/disconnect',headers,payload:{account:'secondary'}});assert.equal(response.statusCode,200);assert.equal(a.configuration.value.youtube,primary);assert.equal(a.configuration.value.youtubeSecondary,undefined);
   assert.equal(await a.youtubeSecondary.collectOnce(),300000);
  }finally{await a.app.close();await rm(dir,{recursive:true,force:true});}

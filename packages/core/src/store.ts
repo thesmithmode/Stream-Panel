@@ -421,7 +421,7 @@ export class StreamStore {
   warmAnalytics(options:AnalyticsOptions,bakeCategories=false){const result=this.history.warm(options,bakeCategories);if(!result.preparing)this.channelOverview(options.excludedLogins);return result;}
 
   youtubeQuota(day: string, profile: string, cost = 1,budget=4000): boolean {
-    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(day) || !profile || !Number.isInteger(cost) || cost < 1 || cost > 4000||!Number.isInteger(budget)||budget<1||budget>4000) throw new Error("INVALID_QUOTA");
+    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(day) || !profile || !Number.isInteger(cost) || cost < 1 || cost > 100000||!Number.isInteger(budget)||budget<1||budget>100000) throw new Error("INVALID_QUOTA");
     return this.db.transaction(() => {
       const row = this.db.prepare("SELECT used FROM sp_youtube_quota WHERE day=? AND profile=?").get(day, profile) as {used: number} | undefined;
       if ((row?.used ?? 0) + cost > budget) return false;

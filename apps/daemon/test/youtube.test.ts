@@ -51,7 +51,7 @@ test('YouTube OAuth binds state and PKCE; refresh, owner filtering, durable curs
   mode='offline';assert.equal(await yt.collectOnce(),300000);
   mode='failure';await yt.start();assert.equal(yt.status.state,'error');await yt.stop();
   const day=new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
-  while(await db.call('youtubeQuota',day,'ruslan',1)){/* exhaust the budget */};
+  while(await db.call('youtubeQuota',day,'ruslan',100,9000)){/* exhaust the 9000-unit budget */};while(await db.call('youtubeQuota',day,'ruslan',1,9000)){/* spend the remainder */};
   mode='';await assert.rejects(yt.collectOnce(),/YOUTUBE_DAILY_BUDGET/);
   await yt.disconnect();assert.equal(config.value.youtube,undefined);assert.equal(config.value.youtubeAccountId,'channel');assert.equal(yt.status.state,'disconnected');
   await assert.rejects(yt.finishAuth('code','a'.repeat(64)),/INVALID_YOUTUBE_STATE/);
