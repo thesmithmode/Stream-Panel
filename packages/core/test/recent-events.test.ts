@@ -123,8 +123,9 @@ for (const type of ['chat.message_delete', 'chat.clear_user_messages', 'chat.cle
      assert.equal(row.actor_id, 'viewer');
      assert.equal(row.at_ms, original.occurredAtMs);
      const permanent = reader.events().find(item => item.external_id === original.externalId)!;
-     assert.equal(permanent.payload.redacted, 1);
-     assert.equal(permanent.payload.text, undefined);
+     const payload = permanent.payload as Record<string, unknown>;
+     assert.equal(payload.redacted, 1);
+     assert.equal(payload.text, undefined);
     }
    } finally { reader.close(); }
   } finally { rmSync(dir, {recursive: true, force: true}); }
