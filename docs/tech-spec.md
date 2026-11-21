@@ -1,4 +1,4 @@
-> Исторический документ desktop v0.0.4. Актуальные серверная архитектура и условия выпуска: [readiness-checklist.md](readiness-checklist.md), [ops/server.md](ops/server.md), [api-contract.md](api-contract.md). Требования Windows/локального демона/sync двух БД ниже заменены серверным решением.
+> Исторический документ desktop v0.0.4, не описывает текущий код (desktop-сборки `.deb`/`.exe` и `scripts/package-release.mjs` удалены). Актуальные серверная архитектура и условия выпуска: [readiness-checklist.md](readiness-checklist.md), [ops/server.md](ops/server.md), [api-contract.md](api-contract.md). Требования Windows/локального демона/sync двух БД ниже заменены серверным решением.
 
 # Техническая спецификация: Stream Panel
 
