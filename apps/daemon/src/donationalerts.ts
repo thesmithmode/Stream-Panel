@@ -1,54 +1,62 @@
-import WebSocket from "ws";
-import { parse, stringify } from "lossless-json";
-import { randomBytes } from "node:crypto";
-import type { ConfigurationPort } from "./config.js";
-import type {StorePort} from './store-contract.js';
-type DonationalertsStore = StorePort<'activeLogicalStream' | 'donationImportStates' | 'ingest' | 'ingestLiveDonation' | 'pendingDonationImportCount' | 'pendingDonationImports' | 'removePendingDonation' | 'resolveDonationTimes' | 'saveDonationImportFailure'>;
-import {
-  moneyToMinor,
-  daDonorExternalId,
-  type EventInput,
-} from "../../../packages/core/src/domain.js";
+import WebSocket from 'ws';
+import { parse, stringify } from 'lossless-json';
+import { randomBytes } from 'node:crypto';
+import type { ConfigurationPort } from './config.js';
+import type { StorePort } from './store-contract.js';
+type DonationalertsStore = StorePort<
+  | 'activeLogicalStream'
+  | 'donationImportStates'
+  | 'ingest'
+  | 'ingestLiveDonation'
+  | 'pendingDonationImportCount'
+  | 'pendingDonationImports'
+  | 'removePendingDonation'
+  | 'resolveDonationTimes'
+  | 'saveDonationImportFailure'
+>;
+import { moneyToMinor, daDonorExternalId, type EventInput } from '../../../packages/core/src/domain.js';
 import {
   object,
   string,
   type ConnectionStatus,
   type ProviderConnection,
   type SocketFactory,
-} from "./provider-values.js";
+} from './provider-values.js';
 
-import type {ImportState} from "../../../packages/core/src/provider-storage.js";
-import {parseDonationTime,DA_API_UTC_OFFSET_MINUTES} from '../../../packages/core/src/donation-time.js';
-export {parseDonationTime} from '../../../packages/core/src/donation-time.js';
+import type { ImportState } from '../../../packages/core/src/provider-storage.js';
+import { parseDonationTime, DA_API_UTC_OFFSET_MINUTES } from '../../../packages/core/src/donation-time.js';
+export { parseDonationTime } from '../../../packages/core/src/donation-time.js';
 export function normalizeDonation(
   raw: unknown,
   accountId: string,
-  transport: "rest" | "centrifugo",
+  transport: 'rest' | 'centrifugo',
   _legacyOffsetMinutes?: number | null,
 ): EventInput {
   const data = object(raw),
-    id = String(data.id ?? "");
-  if (!/^[0-9]+$/.test(id)) throw new Error("INVALID_DONATION_ID");
-  const amount = moneyToMinor(String(data.amount ?? ""), string(data.currency));
+    id = String(data.id ?? '');
+  if (!/^[0-9]+$/.test(id)) throw new Error('INVALID_DONATION_ID');
+  const amount = moneyToMinor(String(data.amount ?? ''), string(data.currency));
   const name = string(data.username),
     sourceTime = string(data.created_at);
-  let occurredAtMs:number|null=null;
-  try{occurredAtMs=parseDonationTime(sourceTime,DA_API_UTC_OFFSET_MINUTES);}catch{/* Keep malformed provider dates as untimed facts instead of discarding money. */}
+  let occurredAtMs: number | null = null;
+  try {
+    occurredAtMs = parseDonationTime(sourceTime, DA_API_UTC_OFFSET_MINUTES);
+  } catch {
+    /* Keep malformed provider dates as untimed facts instead of discarding money. */
+  }
   return {
-    source: "donationalerts",
+    source: 'donationalerts',
     accountId,
     externalId: id,
-    type: "donation",
-    actor: name.trim()
-      ? { externalId: daDonorExternalId(name), displayName: name }
-      : null,
+    type: 'donation',
+    actor: name.trim() ? { externalId: daDonorExternalId(name), displayName: name } : null,
     occurredAtMs,
     receivedAtMs: Date.now(),
     sourceTime,
-    timeQuality: occurredAtMs === null ? "unknown" : "provider",
+    timeQuality: occurredAtMs === null ? 'unknown' : 'provider',
     transport,
     payload: {
-      raw:data,
+      raw: data,
       amountMinor: amount,
       currency: string(data.currency),
       text: string(data.message),
@@ -57,22 +65,24 @@ export function normalizeDonation(
     },
   };
 }
-function donationId(raw:unknown):string {return raw&&typeof raw==='object'&&!Array.isArray(raw)?String((raw as Record<string,unknown>).id??''):'';}
+function donationId(raw: unknown): string {
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? String((raw as Record<string, unknown>).id ?? '') : '';
+}
 // Published legacy frames wrap the resource in result/data. Ignore unrelated push types.
 export function findDonation(value: unknown, depth = 0): unknown | null {
-  if(depth>6)return null;
-  if(typeof value==='string'){try{return findDonation(parse(value),depth+1);}catch{return null;}}
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    return null;
+  if (depth > 6) return null;
+  if (typeof value === 'string') {
+    try {
+      return findDonation(parse(value), depth + 1);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
-  if (
-    row.id !== undefined &&
-    row.amount !== undefined &&
-    row.currency !== undefined &&
-    row.created_at !== undefined
-  )
+  if (row.id !== undefined && row.amount !== undefined && row.currency !== undefined && row.created_at !== undefined)
     return row;
-  for (const key of ["result", "data", "publication", "push", "pub"]) {
+  for (const key of ['result', 'data', 'publication', 'push', 'pub']) {
     const found = findDonation(row[key], depth + 1);
     if (found) return found;
   }
@@ -81,16 +91,16 @@ export function findDonation(value: unknown, depth = 0): unknown | null {
 
 export class DonationAlertsConnection implements ProviderConnection {
   status: ConnectionStatus = {
-    state: "disconnected",
-    detail: "Не подключён",
+    state: 'disconnected',
+    detail: 'Не подключён',
     capabilities: {},
   };
   private stopped = true;
   private socket: WebSocket | null = null;
   private retry: NodeJS.Timeout | null = null;
   private history: NodeJS.Timeout | null = null;
-  private scanTask:Promise<void>|null = null;
-  private recipient = "";
+  private scanTask: Promise<void> | null = null;
+  private recipient = '';
   private generation = 0;
   private httpTail = Promise.resolve();
   private lastRequest = 0;
@@ -100,61 +110,48 @@ export class DonationAlertsConnection implements ProviderConnection {
     private config: ConfigurationPort,
     private db: DonationalertsStore,
     private request: typeof fetch = fetch,
-    private socketFactory: SocketFactory = (url, options) =>
-      new WebSocket(url, options),
+    private socketFactory: SocketFactory = (url, options) => new WebSocket(url, options),
   ) {}
   authUrl(callback: string): string {
     if (!this.config.value.daClientId || !this.config.value.daClientSecret)
-      throw new Error("DA_APP_CREDENTIALS_REQUIRED");
+      throw new Error('DA_APP_CREDENTIALS_REQUIRED');
     this.oauthState = {
-      value: randomBytes(32).toString("hex"),
+      value: randomBytes(32).toString('hex'),
       expiresAt: Date.now() + 600000,
     };
     const parameters = new URLSearchParams({
       client_id: this.config.value.daClientId,
       redirect_uri: callback,
-      response_type: "code",
-      scope: "oauth-user-show oauth-donation-subscribe oauth-donation-index",
+      response_type: 'code',
+      scope: 'oauth-user-show oauth-donation-subscribe oauth-donation-index',
       state: this.oauthState.value,
     });
     return `https://www.donationalerts.com/oauth/authorize?${parameters}`;
   }
-  async finishAuth(
-    code: string,
-    state: string,
-    callback: string,
-  ): Promise<void> {
-    if (
-      !this.oauthState ||
-      this.oauthState.value !== state ||
-      this.oauthState.expiresAt < Date.now()
-    )
-      throw new Error("INVALID_OAUTH_STATE");
+  async finishAuth(code: string, state: string, callback: string): Promise<void> {
+    if (!this.oauthState || this.oauthState.value !== state || this.oauthState.expiresAt < Date.now())
+      throw new Error('INVALID_OAUTH_STATE');
     this.oauthState = null;
     const generation = this.generation;
-    const response = await this.request(
-      "https://www.donationalerts.com/oauth/token",
-      {
-        method: "POST",
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          client_id: this.config.value.daClientId,
-          client_secret: this.config.value.daClientSecret,
-          redirect_uri: callback,
-          code,
-        }),
-        signal: AbortSignal.timeout(15000),
-      },
-    );
+    const response = await this.request('https://www.donationalerts.com/oauth/token', {
+      method: 'POST',
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: this.config.value.daClientId,
+        client_secret: this.config.value.daClientSecret,
+        redirect_uri: callback,
+        code,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
     const body = object(await response.json());
-    if (generation !== this.generation) throw new Error("DA_AUTH_CANCELLED");
-    if (!response.ok || !string(body.access_token))
-      throw new Error(`DA_OAUTH_HTTP_${response.status}`);
-    if (!string(body.refresh_token)) throw new Error("DA_OAUTH_REFRESH_REQUIRED");
+    if (generation !== this.generation) throw new Error('DA_AUTH_CANCELLED');
+    if (!response.ok || !string(body.access_token)) throw new Error(`DA_OAUTH_HTTP_${response.status}`);
+    if (!string(body.refresh_token)) throw new Error('DA_OAUTH_REFRESH_REQUIRED');
     this.config.value.daAccessToken = string(body.access_token);
     this.config.value.daRefreshToken = string(body.refresh_token);
     await this.config.save();
-    if (generation !== this.generation) throw new Error("DA_AUTH_CANCELLED");
+    if (generation !== this.generation) throw new Error('DA_AUTH_CANCELLED');
     await this.start();
   }
   private async refresh(): Promise<void> {
@@ -162,32 +159,29 @@ export class DonationAlertsConnection implements ProviderConnection {
     const generation = this.generation;
     this.refreshPromise = (async () => {
       const c = this.config.value;
-      if (!c.daRefreshToken || !c.daClientId || !c.daClientSecret)
-        throw new Error("DA_LOGIN_REQUIRED");
-      const response = await this.request(
-        "https://www.donationalerts.com/oauth/token",
-        {
-          method: "POST",
-          body: new URLSearchParams({
-            grant_type: "refresh_token",
-            refresh_token: c.daRefreshToken,
-            client_id: c.daClientId,
-            client_secret: c.daClientSecret,
-            scope:
-              "oauth-user-show oauth-donation-subscribe oauth-donation-index",
-          }),
-          signal: AbortSignal.timeout(15000),
-        },
-      );
+      if (!c.daRefreshToken || !c.daClientId || !c.daClientSecret) throw new Error('DA_LOGIN_REQUIRED');
+      const response = await this.request('https://www.donationalerts.com/oauth/token', {
+        method: 'POST',
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: c.daRefreshToken,
+          client_id: c.daClientId,
+          client_secret: c.daClientSecret,
+          scope: 'oauth-user-show oauth-donation-subscribe oauth-donation-index',
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
       const body = object(await response.json());
-      if (generation !== this.generation) throw new Error("DA_AUTH_CANCELLED");
+      if (generation !== this.generation) throw new Error('DA_AUTH_CANCELLED');
       if (!response.ok)
-        throw new Error(response.status === 400 || response.status === 401
-          ? "DA_REAUTH_REQUIRED" : `DA_OAUTH_HTTP_${response.status}`);
-      if (!string(body.access_token)) throw new Error("DA_OAUTH_INVALID_TOKEN");
+        throw new Error(
+          response.status === 400 || response.status === 401
+            ? 'DA_REAUTH_REQUIRED'
+            : `DA_OAUTH_HTTP_${response.status}`,
+        );
+      if (!string(body.access_token)) throw new Error('DA_OAUTH_INVALID_TOKEN');
       c.daAccessToken = string(body.access_token);
-      if (string(body.refresh_token))
-        c.daRefreshToken = string(body.refresh_token);
+      if (string(body.refresh_token)) c.daRefreshToken = string(body.refresh_token);
       await this.config.save();
     })();
     try {
@@ -196,19 +190,15 @@ export class DonationAlertsConnection implements ProviderConnection {
       this.refreshPromise = null;
     }
   }
-  private async api(
-    path: string,
-    init: RequestInit = {},
-    retried = false,
-  ): Promise<unknown> {
-    const generation=this.generation;
+  private async api(path: string, init: RequestInit = {}, retried = false): Promise<unknown> {
+    const generation = this.generation;
     const task = this.httpTail.then(async () => {
       const wait = 1100 - (Date.now() - this.lastRequest);
       if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-      if(generation!==this.generation)throw new Error('DA_AUTH_CANCELLED');
+      if (generation !== this.generation) throw new Error('DA_AUTH_CANCELLED');
       this.lastRequest = Date.now();
       const headers = new Headers(init.headers);
-      headers.set("Authorization", `Bearer ${this.config.value.daAccessToken}`);
+      headers.set('Authorization', `Bearer ${this.config.value.daAccessToken}`);
       return this.request(`https://www.donationalerts.com/api/v1/${path}`, {
         ...init,
         headers,
@@ -220,16 +210,16 @@ export class DonationAlertsConnection implements ProviderConnection {
       () => {},
     );
     const response = await task;
-    if(generation!==this.generation)throw new Error('DA_AUTH_CANCELLED');
+    if (generation !== this.generation) throw new Error('DA_AUTH_CANCELLED');
     if (response.status === 401 && !retried) {
       await this.refresh();
-      if(generation!==this.generation)throw new Error("DA_AUTH_CANCELLED");
+      if (generation !== this.generation) throw new Error('DA_AUTH_CANCELLED');
       return this.api(path, init, true);
     }
     if (response.status === 429) {
-      const seconds = Number(response.headers.get("retry-after")) || 60;
+      const seconds = Number(response.headers.get('retry-after')) || 60;
       this.lastRequest = Date.now() + seconds * 1000;
-      throw new Error("DA_RATE_LIMIT");
+      throw new Error('DA_RATE_LIMIT');
     }
     if (!response.ok) throw new Error(`DA_HTTP_${response.status}`);
     return parse(await response.text());
@@ -238,25 +228,26 @@ export class DonationAlertsConnection implements ProviderConnection {
     await this.stop();
     if (!this.config.value.daAccessToken) {
       this.status = {
-        state: "disconnected",
-        detail: "Не подключён",
+        state: 'disconnected',
+        detail: 'Не подключён',
         capabilities: {},
       };
       return;
     }
     this.stopped = false;
     const generation = this.generation;
-    this.status.state = "connecting";
-    this.status.detail = "Подключение…";
+    this.status.state = 'connecting';
+    this.status.detail = 'Подключение…';
     try {
-      const profile = object(object(await this.api("user/oauth")).data);
+      const profile = object(object(await this.api('user/oauth')).data);
       if (this.stopped || generation !== this.generation) return;
       this.recipient = String(profile.id);
       this.status.account = string(profile.name);
-      if(!/^\d+$/.test(this.recipient))throw new Error('DA_INVALID_RECIPIENT');
+      if (!/^\d+$/.test(this.recipient)) throw new Error('DA_INVALID_RECIPIENT');
       this.connect(string(profile.socket_connection_token), generation);
-      if(this.config.value.daUtcOffsetMinutes!==null)await this.db.call('resolveDonationTimes',DA_API_UTC_OFFSET_MINUTES);
-      if(this.stopped||generation!==this.generation)return;
+      if (this.config.value.daUtcOffsetMinutes !== null)
+        await this.db.call('resolveDonationTimes', DA_API_UTC_OFFSET_MINUTES);
+      if (this.stopped || generation !== this.generation) return;
       // REST remains useful if realtime permission/protocol fails. State exposes each capability.
       void this.scanHistory(true).catch((error) => this.report(error));
       this.history = setInterval(() => {
@@ -269,13 +260,12 @@ export class DonationAlertsConnection implements ProviderConnection {
     }
   }
   private connect(token: string, generation: number): void {
-    const socket = this.socketFactory(
-      "wss://centrifugo.donationalerts.com/connection/websocket",
-      { maxPayload: 1048576 },
-    );
+    const socket = this.socketFactory('wss://centrifugo.donationalerts.com/connection/websocket', {
+      maxPayload: 1048576,
+    });
     this.socket = socket;
     const deadline = setTimeout(() => {
-      this.status.capabilities.realtime = "Таймаут рукопожатия";
+      this.status.capabilities.realtime = 'Таймаут рукопожатия';
       socket.terminate();
     }, 20000);
     let subscribed = false;
@@ -287,7 +277,7 @@ export class DonationAlertsConnection implements ProviderConnection {
     const liveness = setInterval(() => {
       if (this.stopped || generation !== this.generation) return;
       if (Date.now() - lastSeen > 45_000) {
-        this.status.capabilities.realtime = "тихо";
+        this.status.capabilities.realtime = 'тихо';
         socket.terminate();
         return;
       }
@@ -297,27 +287,22 @@ export class DonationAlertsConnection implements ProviderConnection {
         /* close handler schedules reconnect */
       }
     }, 15_000);
-    socket.on("open", () =>
-      socket.send(JSON.stringify({ params: { token }, id: 1 })),
-    );
-    socket.on("pong", touch);
-    socket.on("message", (frame) => {
+    socket.on('open', () => socket.send(JSON.stringify({ params: { token }, id: 1 })));
+    socket.on('pong', touch);
+    socket.on('message', (frame) => {
       if (this.stopped || generation !== this.generation || socket !== this.socket) return;
       touch();
       void (async () => {
-        for (const line of frame.toString().split("\n").filter(Boolean)) {
+        for (const line of frame.toString().split('\n').filter(Boolean)) {
           const message = object(parse(line));
-          if (message.error) throw new Error("DA_CENTRIFUGO_ERROR");
-          const result =
-            message.result && typeof message.result === "object"
-              ? object(message.result)
-              : {};
+          if (message.error) throw new Error('DA_CENTRIFUGO_ERROR');
+          const result = message.result && typeof message.result === 'object' ? object(message.result) : {};
           if (result.client && !subscribed) {
             const channel = `$alerts:donation_${this.recipient}`;
             const response = object(
-              await this.api("centrifuge/subscribe", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
+              await this.api('centrifuge/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   channels: [channel],
                   client: string(result.client),
@@ -325,13 +310,9 @@ export class DonationAlertsConnection implements ProviderConnection {
               }),
             );
             if (this.stopped || generation !== this.generation) return;
-            const subscriptions = Array.isArray(response.channels)
-              ? response.channels
-              : [];
-            const selected = subscriptions
-              .map(object)
-              .find((row) => row.channel === channel);
-            if (!selected) throw new Error("DA_CHANNEL_TOKEN_MISSING");
+            const subscriptions = Array.isArray(response.channels) ? response.channels : [];
+            const selected = subscriptions.map(object).find((row) => row.channel === channel);
+            if (!selected) throw new Error('DA_CHANNEL_TOKEN_MISSING');
             subscribed = true;
             socket.send(
               JSON.stringify({
@@ -342,126 +323,160 @@ export class DonationAlertsConnection implements ProviderConnection {
             );
           } else if (
             subscribed &&
-            ((result.type !== undefined && String(result.type) === "1") ||
-              String(message.id) === "2")
+            ((result.type !== undefined && String(result.type) === '1') || String(message.id) === '2')
           ) {
             clearTimeout(deadline);
-            this.status.capabilities.realtime = "подключено";
-            this.status.state = "connected";
-            this.status.detail = "Сбор донатов включён";
+            this.status.capabilities.realtime = 'подключено';
+            this.status.state = 'connected';
+            this.status.detail = 'Сбор донатов включён';
           }
           const donation = findDonation(message);
           if (donation) {
-            await this.importDonation(donation,'centrifugo',generation);
+            await this.importDonation(donation, 'centrifugo', generation);
           }
         }
-      })().catch((error) => {if(!this.stopped&&generation===this.generation)this.report(error);});
+      })().catch((error) => {
+        if (!this.stopped && generation === this.generation) this.report(error);
+      });
     });
-    socket.on("close", () => {
+    socket.on('close', () => {
       clearTimeout(deadline);
       clearInterval(liveness);
       if (!this.stopped && generation === this.generation) {
-        this.status.capabilities.realtime = "отключено";
+        this.status.capabilities.realtime = 'отключено';
         this.schedule();
       }
     });
-    socket.on("error", () => {
+    socket.on('error', () => {
       if (this.stopped || generation !== this.generation || socket !== this.socket) return;
-      this.status.capabilities.realtime = "Ошибка WebSocket";
+      this.status.capabilities.realtime = 'Ошибка WebSocket';
     });
   }
-  private async importDonation(raw:unknown,transport:"rest"|"centrifugo",generation:number,known?:ImportState|null):Promise<{inserted:boolean;known:boolean}|null> {
-    const valid=()=>!this.stopped&&generation===this.generation;
-    if(!valid())return null;
-    const id=donationId(raw);
-    if(known===undefined){
-      const states=await this.db.call('donationImportStates',this.recipient,/^\d+$/.test(id)?[id]:[]);
-      if(!valid())return null;
-      known=states.find(row=>row.id===id)??null;
+  private async importDonation(
+    raw: unknown,
+    transport: 'rest' | 'centrifugo',
+    generation: number,
+    known?: ImportState | null,
+  ): Promise<{ inserted: boolean; known: boolean } | null> {
+    const valid = () => !this.stopped && generation === this.generation;
+    if (!valid()) return null;
+    const id = donationId(raw);
+    if (known === undefined) {
+      const states = await this.db.call('donationImportStates', this.recipient, /^\d+$/.test(id) ? [id] : []);
+      if (!valid()) return null;
+      known = states.find((row) => row.id === id) ?? null;
     }
-    if(known&&!known.needsImport)return {inserted:false,known:true};
-    try{
-      const event=normalizeDonation(raw,this.recipient,transport);
-      let result:{inserted:boolean}|null;
-      if(transport==='centrifugo'){
-        const active=await this.db.call('activeLogicalStream');
-        if(!valid())return null;
-        result=active&&event.occurredAtMs===null?await this.db.call('ingestLiveDonation',event,string(active.id),true):await this.db.call('ingest',event);
-      }else result=await this.db.call('ingest',event);
-      if(!valid())return null;
-      if(result===null){result=await this.db.call('ingest',event);if(!valid())return null;}
-      if(result?.inserted)this.status.lastEventAt=Date.now();
-      return {inserted:result?.inserted??false,known:false};
-    }catch(error){
-      if(!valid())return null;
-      const serialized=stringify(raw);
-      if(serialized)await this.db.call('saveDonationImportFailure',this.recipient,serialized,(error as Error).message,Date.now());
-      if(!valid())return null;
+    if (known && !known.needsImport) return { inserted: false, known: true };
+    try {
+      const event = normalizeDonation(raw, this.recipient, transport);
+      let result: { inserted: boolean } | null;
+      if (transport === 'centrifugo') {
+        const active = await this.db.call('activeLogicalStream');
+        if (!valid()) return null;
+        result =
+          active && event.occurredAtMs === null
+            ? await this.db.call('ingestLiveDonation', event, string(active.id), true)
+            : await this.db.call('ingest', event);
+      } else result = await this.db.call('ingest', event);
+      if (!valid()) return null;
+      if (result === null) {
+        result = await this.db.call('ingest', event);
+        if (!valid()) return null;
+      }
+      if (result?.inserted) this.status.lastEventAt = Date.now();
+      return { inserted: result?.inserted ?? false, known: false };
+    } catch (error) {
+      if (!valid()) return null;
+      const serialized = stringify(raw);
+      if (serialized)
+        await this.db.call(
+          'saveDonationImportFailure',
+          this.recipient,
+          serialized,
+          (error as Error).message,
+          Date.now(),
+        );
+      if (!valid()) return null;
       throw error;
     }
   }
   async scanHistory(automatic = false): Promise<void> {
-    while(this.scanTask){if(automatic)return;await this.scanTask;}
-    if(this.stopped)return;
-    const task=this.scanHistoryNow(automatic);this.scanTask=task;
-    try{await task;}finally{if(this.scanTask===task)this.scanTask=null;}
+    while (this.scanTask) {
+      if (automatic) return;
+      await this.scanTask;
+    }
+    if (this.stopped) return;
+    const task = this.scanHistoryNow(automatic);
+    this.scanTask = task;
+    try {
+      await task;
+    } finally {
+      if (this.scanTask === task) this.scanTask = null;
+    }
   }
-  private async scanHistoryNow(automatic:boolean): Promise<void> {
+  private async scanHistoryNow(automatic: boolean): Promise<void> {
     if (this.stopped) return;
     const generation = this.generation;
-    this.status.capabilities.history = "Импорт…";
+    this.status.capabilities.history = 'Импорт…';
     try {
-      if(this.stopped||generation!==this.generation)return;
+      if (this.stopped || generation !== this.generation) return;
       let complete = false;
       let skippedRows = 0;
-      let cutoff:number|null=null,lastProviderTime=Infinity,ordered=true;
-      const pending=await this.db.call('pendingDonationImports',this.recipient);
-      if(this.stopped||generation!==this.generation)return;
-      for(const row of pending){
-        try{
-          const result=await this.importDonation(parse(row.serialized),'rest',generation);
-          if(!result)return;
-          await this.db.call('removePendingDonation',this.recipient,row.id);
-          if(this.stopped||generation!==this.generation)return;
-        }catch{if(this.stopped||generation!==this.generation)return;skippedRows++;}
+      let cutoff: number | null = null,
+        lastProviderTime = Infinity,
+        ordered = true;
+      const pending = await this.db.call('pendingDonationImports', this.recipient);
+      if (this.stopped || generation !== this.generation) return;
+      for (const row of pending) {
+        try {
+          const result = await this.importDonation(parse(row.serialized), 'rest', generation);
+          if (!result) return;
+          await this.db.call('removePendingDonation', this.recipient, row.id);
+          if (this.stopped || generation !== this.generation) return;
+        } catch {
+          if (this.stopped || generation !== this.generation) return;
+          skippedRows++;
+        }
       }
-      for (
-        let page = 1;
-        page <= 1000 && !this.stopped && generation === this.generation;
-        page++
-      ) {
-        const response = object(
-          await this.api(`alerts/donations?page=${page}`),
-        );
+      for (let page = 1; page <= 1000 && !this.stopped && generation === this.generation; page++) {
+        const response = object(await this.api(`alerts/donations?page=${page}`));
         if (this.stopped || generation !== this.generation) return;
-        if (!Array.isArray(response.data))
-          throw new Error("INVALID_DA_HISTORY");
-        const ids=[...new Set(response.data.map(donationId).filter(id=>/^\d+$/.test(id)))];
-        const states=new Map<string,ImportState>();
-        for(let offset=0;offset<ids.length;offset+=2000){
-          for(const state of await this.db.call('donationImportStates',this.recipient,ids.slice(offset,offset+2000)))states.set(state.id,state);
-          if(this.stopped||generation!==this.generation)return;
+        if (!Array.isArray(response.data)) throw new Error('INVALID_DA_HISTORY');
+        const ids = [...new Set(response.data.map(donationId).filter((id) => /^\d+$/.test(id)))];
+        const states = new Map<string, ImportState>();
+        for (let offset = 0; offset < ids.length; offset += 2000) {
+          for (const state of await this.db.call(
+            'donationImportStates',
+            this.recipient,
+            ids.slice(offset, offset + 2000),
+          ))
+            states.set(state.id, state);
+          if (this.stopped || generation !== this.generation) return;
         }
         // Early stopping is safe only while the observed provider dates descend.
-        for(const raw of response.data){
-          let at:number|null=null;
-          try{at=parseDonationTime(raw&&typeof raw==='object'?String((raw as Record<string,unknown>).created_at??''):'',DA_API_UTC_OFFSET_MINUTES);}catch{/* An unknown order requires a full scan. */}
-          if(at===null||at>lastProviderTime)ordered=false;
-          if(at!==null)lastProviderTime=at;
-          const known=states.get(donationId(raw));
-          if(automatic&&cutoff===null&&known&&!known.needsImport&&known.occurredAtMs!==null)
-            cutoff=Math.max(0,known.occurredAtMs-48*3600000);
+        for (const raw of response.data) {
+          let at: number | null = null;
+          try {
+            at = parseDonationTime(
+              raw && typeof raw === 'object' ? String((raw as Record<string, unknown>).created_at ?? '') : '',
+              DA_API_UTC_OFFSET_MINUTES,
+            );
+          } catch {
+            /* An unknown order requires a full scan. */
+          }
+          if (at === null || at > lastProviderTime) ordered = false;
+          if (at !== null) lastProviderTime = at;
+          const known = states.get(donationId(raw));
+          if (automatic && cutoff === null && known && !known.needsImport && known.occurredAtMs !== null)
+            cutoff = Math.max(0, known.occurredAtMs - 48 * 3600000);
         }
         for (const raw of response.data) {
           try {
-            const result=await this.importDonation(raw,"rest",generation,states.get(donationId(raw))??null);
+            const result = await this.importDonation(raw, 'rest', generation, states.get(donationId(raw)) ?? null);
             if (!result || this.stopped || generation !== this.generation) return;
           } catch (error) {
             skippedRows++;
-            console.error(
-              "DA history row skipped",
-              error instanceof Error ? error.message : error,
-            );
+            console.error('DA history row skipped', error instanceof Error ? error.message : error);
           }
         }
         const links = response.links ? object(response.links) : {};
@@ -469,32 +484,34 @@ export class DonationAlertsConnection implements ProviderConnection {
           complete = true;
           break;
         }
-        if (!string(links.next)) throw new Error("DA_PAGINATION_UNKNOWN");
-        if (automatic && ordered && cutoff!==null && lastProviderTime<cutoff) {
+        if (!string(links.next)) throw new Error('DA_PAGINATION_UNKNOWN');
+        if (automatic && ordered && cutoff !== null && lastProviderTime < cutoff) {
           complete = true;
           break;
         }
       }
-      skippedRows=await this.db.call('pendingDonationImportCount',this.recipient);
-      if(this.stopped||generation!==this.generation)return;
-      this.status.lastSyncAt=Date.now();
+      skippedRows = await this.db.call('pendingDonationImportCount', this.recipient);
+      if (this.stopped || generation !== this.generation) return;
+      this.status.lastSyncAt = Date.now();
       this.status.capabilities.history = complete
-        ? skippedRows ? `Импорт неполный: пропущено записей ${skippedRows}` : "Импорт доступных страниц завершён"
-        : "Импорт неполный (лимит/остановка)";
-      if (this.status.state !== "connected") {
-        this.status.state = "degraded";
-        this.status.detail = "REST работает; realtime не подтверждён";
+        ? skippedRows
+          ? `Импорт неполный: пропущено записей ${skippedRows}`
+          : 'Импорт доступных страниц завершён'
+        : 'Импорт неполный (лимит/остановка)';
+      if (this.status.state !== 'connected') {
+        this.status.state = 'degraded';
+        this.status.detail = 'REST работает; realtime не подтверждён';
       }
     } catch (error) {
-      if(this.stopped||generation!==this.generation)return;
-      this.status.capabilities.history = "Ошибка импорта";
+      if (this.stopped || generation !== this.generation) return;
+      this.status.capabilities.history = 'Ошибка импорта';
       throw error;
     }
   }
   private report(error: unknown): void {
-    this.status.detail = error instanceof Error ? error.message : "DA_ERROR";
-    const reauth = ["DA_REAUTH_REQUIRED", "DA_LOGIN_REQUIRED"].includes(this.status.detail);
-    this.status.state = reauth ? "error" : "degraded";
+    this.status.detail = error instanceof Error ? error.message : 'DA_ERROR';
+    const reauth = ['DA_REAUTH_REQUIRED', 'DA_LOGIN_REQUIRED'].includes(this.status.detail);
+    this.status.state = reauth ? 'error' : 'degraded';
     if (reauth) void this.stop();
   }
   private schedule(): void {
@@ -516,12 +533,12 @@ export class DonationAlertsConnection implements ProviderConnection {
   }
   async disconnect(): Promise<void> {
     await this.stop();
-    this.config.value.daAccessToken = "";
-    this.config.value.daRefreshToken = "";
+    this.config.value.daAccessToken = '';
+    this.config.value.daRefreshToken = '';
     await this.config.save();
     this.status = {
-      state: "disconnected",
-      detail: "Не подключён",
+      state: 'disconnected',
+      detail: 'Не подключён',
       capabilities: {},
     };
   }

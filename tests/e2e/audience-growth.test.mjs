@@ -1,33 +1,171 @@
-import {navigate,setFilter} from '../helpers/navigation.mjs';
-import test from 'node:test';import assert from 'node:assert/strict';
-import {application} from '../helpers/application.mjs';import {launchBrowser} from '../helpers/browser.mjs';import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';import {assertUiLayout} from '../helpers/ui-layout.mjs';
-test('daily dynamics defaults to the full period and navigates calendar months and Monday weeks',{timeout:60000},async()=>{
- const a=await application();let browser;
- try{
-  const minute=60000,day=86400000,base=Date.parse('2026-09-14T07:00:00Z'),ids=[];
-  for(let n=0;n<55;n++){const at=base+n*day,id=await a.db.call('startSession','owner',`growth-${n}`,at,'platform',at);ids.push(id);await a.db.call('streamSample',id,at,'game','Game','Repeated title',n===0?0:n+1);await a.db.call('ingest',{source:'twitch',accountId:'owner',externalId:`message-${n}`,type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'hello'}});await a.db.call('endSession',id,at+minute);}
-  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:390,height:844}}),errors=[];page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));await page.clock.setFixedTime(Date.parse('2026-11-13T12:00:00Z'));await goto(page,a.bootstrap());
-  await navigate(page,'Аналитика');const chart=page.locator('.audience-growth');
-  const ready=async()=>{await chart.locator('.growth-plot[aria-busy="false"]').waitFor();await chart.locator('svg g[data-missing="false"]').first().waitFor();};
-  const range=async(expected)=>{await ready();assert.match(await chart.locator('.growth-range').textContent(),expected);};
-  await setFilter(page,'Период аналитики','all');await page.waitForFunction(()=>document.querySelectorAll('.audience-growth svg g').length===61);await range(/14\.09\.2026–13\.11\.2026/);
-  assert.equal(await chart.getByRole('button',{name:'Весь период',exact:true}).getAttribute('aria-pressed'),'true');assert.equal(await chart.locator('svg g').count(),61);assert.equal(await chart.locator('.daily-bar').count(),55);assert.equal(await chart.getByRole('button',{name:'Предыдущие дни',exact:true}).count(),0);
-  await chart.getByLabel('Источник динамики').selectOption('twitch');await chart.locator('svg g[data-missing="false"]').first().click();assert.match(await chart.locator('.growth-selection').textContent(),/Средний онлайн: 0/);
-  await chart.getByLabel('Источник динамики').selectOption('youtube');assert.equal(await chart.locator('.daily-bar').count(),0);assert.match(await chart.locator('svg g').first().getAttribute('aria-label'),/нет данных/);
-  await chart.getByLabel('Показатель динамики').selectOption('active');assert.equal(await chart.locator('.daily-bar').count(),55);assert.match(await chart.locator('.growth-selection').textContent(),/Сообщения в час: 60/);assert.equal(await chart.getByLabel('Источник динамики').count(),0);
-  await chart.getByLabel('Показатель динамики').selectOption('online');await chart.getByLabel('Источник динамики').selectOption('all');
-  await chart.getByRole('button',{name:'По месяцам',exact:true}).click();await range(/01\.11\.2026–13\.11\.2026/);assert.equal(await chart.getByLabel('Следующие дни',{exact:true}).isDisabled(),true);
-  await chart.getByLabel('Предыдущие дни',{exact:true}).click();await range(/01\.10\.2026–31\.10\.2026/);assert.equal(await chart.locator('svg g').count(),31);
-  await chart.getByLabel('Предыдущие дни',{exact:true}).click();await range(/14\.09\.2026–30\.09\.2026/);assert.equal(await chart.getByLabel('Предыдущие дни',{exact:true}).isDisabled(),true);
-  await chart.getByRole('button',{name:'По неделям',exact:true}).click();await chart.locator('.growth-plot[aria-busy="false"]').waitFor();assert.match(await chart.locator('.growth-range').textContent(),/09\.11\.2026–13\.11\.2026/);
-  await chart.getByLabel('Предыдущие дни',{exact:true}).click();await range(/02\.11\.2026–08\.11\.2026/);assert.equal(await chart.locator('svg g').count(),7);
-  await chart.getByLabel('Предыдущие дни',{exact:true}).click();await range(/26\.10\.2026–01\.11\.2026/);assert.equal(await chart.locator('svg g').count(),7);
-  await setFilter(page,'Период аналитики','7');await page.waitForFunction(()=>document.querySelectorAll('.audience-growth svg g').length<=8&&document.querySelector('.audience-growth .growth-view button')?.getAttribute('aria-pressed')==='true');await ready();assert.equal(await chart.getByRole('button',{name:'Весь период',exact:true}).getAttribute('aria-pressed'),'true');assert.ok(await chart.locator('svg g').count()<=8);
-  await setFilter(page,'Период аналитики','all');await page.waitForFunction(()=>document.querySelectorAll('.audience-growth svg g').length===61);await range(/14\.09\.2026–13\.11\.2026/);assert.equal(await chart.locator('.daily-bar').count(),55);
-  await page.route('**/api/v1/analytics?*',async route=>{const response=await route.fetch({headers:{...route.request().headers(),'if-none-match':''}}),data=await response.json();if(data.streamComparison)data.streamComparison=data.streamComparison.map(s=>s.id===ids[50]?{...s,viewers:{all:{mean:null},known:{mean:null},twitch:{mean:null},youtube:{mean:null}}}:s);await route.fulfill({response,headers:{...response.headers(),etag:''},json:data});});
-  await page.evaluate(()=>window.dispatchEvent(new Event('sp:data-refresh')));await page.waitForFunction(()=>document.querySelectorAll('.audience-growth svg g')[50]?.getAttribute('data-missing')==='true');assert.equal(await chart.locator('g[data-missing="true"] .daily-bar').count(),0);await page.unrouteAll({behavior:'wait'});
-  await chart.locator('svg g[data-missing="false"]').first().focus();await page.keyboard.press('Enter');await page.keyboard.press(' ');assert.equal(await chart.locator('svg g[data-missing="false"]').first().getAttribute('aria-pressed'),'true');
-  for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:844});await page.evaluate(()=>window.scrollTo(0,0));await assertUiLayout(page);const geometry=await chart.evaluate(el=>{const title=el.querySelector('header h2').getBoundingClientRect(),toolbar=el.querySelector('.daily-chart-toolbar').getBoundingClientRect(),dates=[...el.querySelectorAll('svg > text')].filter(e=>e.textContent.includes('.')).map(e=>e.getBoundingClientRect());return {gap:toolbar.top-title.bottom,count:dates.length,overlap:dates.some((a,i)=>i>0&&dates[i-1].right+4>a.left)};});assert.ok(geometry.gap>=12,JSON.stringify(geometry));assert.ok(geometry.count<=5);assert.equal(geometry.overlap,false,JSON.stringify(geometry));await chart.screenshot({path:`/tmp/analytics-growth-${width}.png`});}
-  await chart.locator('.growth-stream').click();await page.waitForURL(url=>url.searchParams.get('stream')===ids[0]);assert.deepEqual(errors,[]);await saveCoverage(page);
- }finally{await browser?.close();await a.close();}
-});
+import { navigate, setFilter } from '../helpers/navigation.mjs';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { application } from '../helpers/application.mjs';
+import { launchBrowser } from '../helpers/browser.mjs';
+import { goto, saveCoverage } from '../helpers/browser-coverage.mjs';
+import { assertUiLayout } from '../helpers/ui-layout.mjs';
+test(
+  'daily dynamics defaults to the full period and navigates calendar months and Monday weeks',
+  { timeout: 60000 },
+  async () => {
+    const a = await application();
+    let browser;
+    try {
+      const minute = 60000,
+        day = 86400000,
+        base = Date.parse('2026-09-14T07:00:00Z'),
+        ids = [];
+      for (let n = 0; n < 55; n++) {
+        const at = base + n * day,
+          id = await a.db.call('startSession', 'owner', `growth-${n}`, at, 'platform', at);
+        ids.push(id);
+        await a.db.call('streamSample', id, at, 'game', 'Game', 'Repeated title', n === 0 ? 0 : n + 1);
+        await a.db.call('ingest', {
+          source: 'twitch',
+          accountId: 'owner',
+          externalId: `message-${n}`,
+          type: 'chat.message',
+          actor: { externalId: 'viewer', displayName: 'Viewer' },
+          occurredAtMs: at,
+          receivedAtMs: at,
+          sourceTime: null,
+          timeQuality: 'provider',
+          transport: 'eventsub',
+          payload: { text: 'hello' },
+        });
+        await a.db.call('endSession', id, at + minute);
+      }
+      browser = await launchBrowser();
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } }),
+        errors = [];
+      page.setDefaultTimeout(10000);
+      page.on('pageerror', (e) => errors.push(e.message));
+      await page.clock.setFixedTime(Date.parse('2026-11-13T12:00:00Z'));
+      await goto(page, a.bootstrap());
+      await navigate(page, 'Аналитика');
+      const chart = page.locator('.audience-growth');
+      const ready = async () => {
+        await chart.locator('.growth-plot[aria-busy="false"]').waitFor();
+        await chart.locator('svg g[data-missing="false"]').first().waitFor();
+      };
+      const range = async (expected) => {
+        await ready();
+        assert.match(await chart.locator('.growth-range').textContent(), expected);
+      };
+      await setFilter(page, 'Период аналитики', 'all');
+      await page.waitForFunction(() => document.querySelectorAll('.audience-growth svg g').length === 61);
+      await range(/14\.09\.2026–13\.11\.2026/);
+      assert.equal(
+        await chart.getByRole('button', { name: 'Весь период', exact: true }).getAttribute('aria-pressed'),
+        'true',
+      );
+      assert.equal(await chart.locator('svg g').count(), 61);
+      assert.equal(await chart.locator('.daily-bar').count(), 55);
+      assert.equal(await chart.getByRole('button', { name: 'Предыдущие дни', exact: true }).count(), 0);
+      await chart.getByLabel('Источник динамики').selectOption('twitch');
+      await chart.locator('svg g[data-missing="false"]').first().click();
+      assert.match(await chart.locator('.growth-selection').textContent(), /Средний онлайн: 0/);
+      await chart.getByLabel('Источник динамики').selectOption('youtube');
+      assert.equal(await chart.locator('.daily-bar').count(), 0);
+      assert.match(await chart.locator('svg g').first().getAttribute('aria-label'), /нет данных/);
+      await chart.getByLabel('Показатель динамики').selectOption('active');
+      assert.equal(await chart.locator('.daily-bar').count(), 55);
+      assert.match(await chart.locator('.growth-selection').textContent(), /Сообщения в час: 60/);
+      assert.equal(await chart.getByLabel('Источник динамики').count(), 0);
+      await chart.getByLabel('Показатель динамики').selectOption('online');
+      await chart.getByLabel('Источник динамики').selectOption('all');
+      await chart.getByRole('button', { name: 'По месяцам', exact: true }).click();
+      await range(/01\.11\.2026–13\.11\.2026/);
+      assert.equal(await chart.getByLabel('Следующие дни', { exact: true }).isDisabled(), true);
+      await chart.getByLabel('Предыдущие дни', { exact: true }).click();
+      await range(/01\.10\.2026–31\.10\.2026/);
+      assert.equal(await chart.locator('svg g').count(), 31);
+      await chart.getByLabel('Предыдущие дни', { exact: true }).click();
+      await range(/14\.09\.2026–30\.09\.2026/);
+      assert.equal(await chart.getByLabel('Предыдущие дни', { exact: true }).isDisabled(), true);
+      await chart.getByRole('button', { name: 'По неделям', exact: true }).click();
+      await chart.locator('.growth-plot[aria-busy="false"]').waitFor();
+      assert.match(await chart.locator('.growth-range').textContent(), /09\.11\.2026–13\.11\.2026/);
+      await chart.getByLabel('Предыдущие дни', { exact: true }).click();
+      await range(/02\.11\.2026–08\.11\.2026/);
+      assert.equal(await chart.locator('svg g').count(), 7);
+      await chart.getByLabel('Предыдущие дни', { exact: true }).click();
+      await range(/26\.10\.2026–01\.11\.2026/);
+      assert.equal(await chart.locator('svg g').count(), 7);
+      await setFilter(page, 'Период аналитики', '7');
+      await page.waitForFunction(
+        () =>
+          document.querySelectorAll('.audience-growth svg g').length <= 8 &&
+          document.querySelector('.audience-growth .growth-view button')?.getAttribute('aria-pressed') === 'true',
+      );
+      await ready();
+      assert.equal(
+        await chart.getByRole('button', { name: 'Весь период', exact: true }).getAttribute('aria-pressed'),
+        'true',
+      );
+      assert.ok((await chart.locator('svg g').count()) <= 8);
+      await setFilter(page, 'Период аналитики', 'all');
+      await page.waitForFunction(() => document.querySelectorAll('.audience-growth svg g').length === 61);
+      await range(/14\.09\.2026–13\.11\.2026/);
+      assert.equal(await chart.locator('.daily-bar').count(), 55);
+      await page.route('**/api/v1/analytics?*', async (route) => {
+        const response = await route.fetch({ headers: { ...route.request().headers(), 'if-none-match': '' } }),
+          data = await response.json();
+        if (data.streamComparison)
+          data.streamComparison = data.streamComparison.map((s) =>
+            s.id === ids[50]
+              ? {
+                  ...s,
+                  viewers: {
+                    all: { mean: null },
+                    known: { mean: null },
+                    twitch: { mean: null },
+                    youtube: { mean: null },
+                  },
+                }
+              : s,
+          );
+        await route.fulfill({ response, headers: { ...response.headers(), etag: '' }, json: data });
+      });
+      await page.evaluate(() => window.dispatchEvent(new Event('sp:data-refresh')));
+      await page.waitForFunction(
+        () => document.querySelectorAll('.audience-growth svg g')[50]?.getAttribute('data-missing') === 'true',
+      );
+      assert.equal(await chart.locator('g[data-missing="true"] .daily-bar').count(), 0);
+      await page.unrouteAll({ behavior: 'wait' });
+      await chart.locator('svg g[data-missing="false"]').first().focus();
+      await page.keyboard.press('Enter');
+      await page.keyboard.press(' ');
+      assert.equal(await chart.locator('svg g[data-missing="false"]').first().getAttribute('aria-pressed'), 'true');
+      for (const width of [320, 390, 768, 1280]) {
+        await page.setViewportSize({ width, height: 844 });
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await assertUiLayout(page);
+        const geometry = await chart.evaluate((el) => {
+          const title = el.querySelector('header h2').getBoundingClientRect(),
+            toolbar = el.querySelector('.daily-chart-toolbar').getBoundingClientRect(),
+            dates = [...el.querySelectorAll('svg > text')]
+              .filter((e) => e.textContent.includes('.'))
+              .map((e) => e.getBoundingClientRect());
+          return {
+            gap: toolbar.top - title.bottom,
+            count: dates.length,
+            overlap: dates.some((a, i) => i > 0 && dates[i - 1].right + 4 > a.left),
+          };
+        });
+        assert.ok(geometry.gap >= 12, JSON.stringify(geometry));
+        assert.ok(geometry.count <= 5);
+        assert.equal(geometry.overlap, false, JSON.stringify(geometry));
+        await chart.screenshot({ path: `/tmp/analytics-growth-${width}.png` });
+      }
+      await chart.locator('.growth-stream').click();
+      await page.waitForURL((url) => url.searchParams.get('stream') === ids[0]);
+      assert.deepEqual(errors, []);
+      await saveCoverage(page);
+    } finally {
+      await browser?.close();
+      await a.close();
+    }
+  },
+);

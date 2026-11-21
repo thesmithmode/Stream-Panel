@@ -1,59 +1,103 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {application,seed} from '../helpers/application.mjs';
-import {launchBrowser} from '../helpers/browser.mjs';
-import {startCoverage,saveCoverage,goto,reload} from '../helpers/browser-coverage.mjs';
-import {assertUiLayout} from '../helpers/ui-layout.mjs';
+import { application, seed } from '../helpers/application.mjs';
+import { launchBrowser } from '../helpers/browser.mjs';
+import { startCoverage, saveCoverage, goto, reload } from '../helpers/browser-coverage.mjs';
+import { assertUiLayout } from '../helpers/ui-layout.mjs';
 
-test('person notes support mobile CRUD and return 409 without losing a stale draft', {timeout:60000},async()=>{
- const app=await application();let browser;
- try {
-  await seed(app);browser=await launchBrowser();
-  const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(10000);
-  await startCoverage(page);await goto(page,app.bootstrap());
-  await page.getByRole('button',{name:'Люди',exact:true}).click();
-  await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();await page.getByRole('tab',{name:'Заметки',exact:true}).click();
-  const section=page.getByRole('region',{name:'Заметки о человеке'});
-  await section.getByLabel('Новая заметка').fill('Первая заметка\nВторая строка');
-  let releaseSave;const holdSave=new Promise(resolve=>releaseSave=resolve);
-  await page.route('**/api/v1/persons/*/notes',async route=>{if(route.request().method()==='POST')await holdSave;await route.continue();});
-  await section.getByRole('button',{name:'Добавить заметку',exact:true}).click();
-  assert.equal(await section.getByLabel('Новая заметка').isDisabled(),true);releaseSave();
-  await section.locator('.note-body').filter({hasText:'Первая заметка'}).waitFor();
-  await page.unroute('**/api/v1/persons/*/notes');
-  const person=(await app.db.call('persons')).find(p=>p.display_name==='Тестовый зритель');
-  const note=(await app.db.call('personNotes',person.id))[0];
-  const denied=await page.evaluate(async id=>(await fetch(`/api/v1/persons/${id}/notes`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body:'Forbidden'})})).status,person.id);
-  assert.equal(denied,403);
-  await section.getByRole('button',{name:'Редактировать заметку',exact:true}).click();
-  await section.getByLabel('Текст заметки').fill('Мой несохранённый текст');
-  await app.db.call('updatePersonNote',person.id,note.id,'Из другого окна',0);
-  const conflict=page.waitForResponse(r=>r.url().endsWith('/update')&&r.status()===409);
-  await section.getByRole('button',{name:'Сохранить заметку',exact:true}).click();await conflict;
-  await section.getByRole('alert').filter({hasText:'другом окне'}).waitFor();
-  assert.equal(await section.getByLabel('Текст заметки').inputValue(),'Мой несохранённый текст');
-  await section.getByRole('button',{name:'Отмена',exact:true}).click();
-  await section.getByRole('button',{name:'Редактировать заметку',exact:true}).click();
-  await section.getByLabel('Текст заметки').fill('Исправленная заметка');
-  await section.getByRole('button',{name:'Сохранить заметку',exact:true}).click();
-  await section.locator('.note-body').filter({hasText:'Исправленная заметка'}).waitFor();
-  for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:800});await assertUiLayout(page);}await page.setViewportSize({width:390,height:844});
-  await reload(page);await page.getByRole('button',{name:'Люди',exact:true}).click();
-  await page.locator('.person-row').filter({hasText:'Тестовый зритель'}).click();await page.getByRole('tab',{name:'Заметки',exact:true}).click();
-  await section.locator('.note-body').filter({hasText:'Исправленная заметка'}).waitFor();
-  await page.screenshot({path:'/tmp/sp-notes-mobile.png',fullPage:true});
-  assert.equal(await section.getByRole('button',{name:'Удалить заметку',exact:true}).count(),0);
-  assert.equal(await section.getByRole('button',{name:'Редактировать заметку',exact:true}).textContent(),'');
-  await section.getByRole('button',{name:'Редактировать заметку',exact:true}).click();
-  const deleting=section.getByRole('button',{name:'Удалить заметку',exact:true});assert.equal(await deleting.textContent(),'');
-  await deleting.click();const dialog=page.getByRole('dialog',{name:'Удалить заметку?'});await dialog.waitFor();await assertUiLayout(page);
-  assert.equal((await app.db.call('personNotes',person.id)).length,1,'opening confirmation must not delete');
-  assert.equal(await dialog.getByRole('button',{name:'Отмена',exact:true}).evaluate(el=>el===document.activeElement),true);
-  await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});assert.equal((await app.db.call('personNotes',person.id)).length,1);
-  await deleting.click();await dialog.getByRole('button',{name:'Отмена',exact:true}).click();await dialog.waitFor({state:'hidden'});assert.equal((await app.db.call('personNotes',person.id)).length,1);
-  await deleting.click();await dialog.getByRole('button',{name:'Удалить',exact:true}).click();await dialog.waitFor({state:'hidden'});
-  await section.locator('article').waitFor({state:'detached'});
-  assert.deepEqual(await app.db.call('personNotes',person.id),[]);
-  await saveCoverage(page);
- }finally{await browser?.close();await app.close();}
+test('person notes support mobile CRUD and return 409 without losing a stale draft', { timeout: 60000 }, async () => {
+  const app = await application();
+  let browser;
+  try {
+    await seed(app);
+    browser = await launchBrowser();
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    page.setDefaultTimeout(10000);
+    await startCoverage(page);
+    await goto(page, app.bootstrap());
+    await page.getByRole('button', { name: 'Люди', exact: true }).click();
+    await page.locator('.person-row').filter({ hasText: 'Тестовый зритель' }).click();
+    await page.getByRole('tab', { name: 'Заметки', exact: true }).click();
+    const section = page.getByRole('region', { name: 'Заметки о человеке' });
+    await section.getByLabel('Новая заметка').fill('Первая заметка\nВторая строка');
+    let releaseSave;
+    const holdSave = new Promise((resolve) => (releaseSave = resolve));
+    await page.route('**/api/v1/persons/*/notes', async (route) => {
+      if (route.request().method() === 'POST') await holdSave;
+      await route.continue();
+    });
+    await section.getByRole('button', { name: 'Добавить заметку', exact: true }).click();
+    assert.equal(await section.getByLabel('Новая заметка').isDisabled(), true);
+    releaseSave();
+    await section.locator('.note-body').filter({ hasText: 'Первая заметка' }).waitFor();
+    await page.unroute('**/api/v1/persons/*/notes');
+    const person = (await app.db.call('persons')).find((p) => p.display_name === 'Тестовый зритель');
+    const note = (await app.db.call('personNotes', person.id))[0];
+    const denied = await page.evaluate(
+      async (id) =>
+        (
+          await fetch(`/api/v1/persons/${id}/notes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ body: 'Forbidden' }),
+          })
+        ).status,
+      person.id,
+    );
+    assert.equal(denied, 403);
+    await section.getByRole('button', { name: 'Редактировать заметку', exact: true }).click();
+    await section.getByLabel('Текст заметки').fill('Мой несохранённый текст');
+    await app.db.call('updatePersonNote', person.id, note.id, 'Из другого окна', 0);
+    const conflict = page.waitForResponse((r) => r.url().endsWith('/update') && r.status() === 409);
+    await section.getByRole('button', { name: 'Сохранить заметку', exact: true }).click();
+    await conflict;
+    await section.getByRole('alert').filter({ hasText: 'другом окне' }).waitFor();
+    assert.equal(await section.getByLabel('Текст заметки').inputValue(), 'Мой несохранённый текст');
+    await section.getByRole('button', { name: 'Отмена', exact: true }).click();
+    await section.getByRole('button', { name: 'Редактировать заметку', exact: true }).click();
+    await section.getByLabel('Текст заметки').fill('Исправленная заметка');
+    await section.getByRole('button', { name: 'Сохранить заметку', exact: true }).click();
+    await section.locator('.note-body').filter({ hasText: 'Исправленная заметка' }).waitFor();
+    for (const width of [320, 390, 768, 1280]) {
+      await page.setViewportSize({ width, height: 800 });
+      await assertUiLayout(page);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await reload(page);
+    await page.getByRole('button', { name: 'Люди', exact: true }).click();
+    await page.locator('.person-row').filter({ hasText: 'Тестовый зритель' }).click();
+    await page.getByRole('tab', { name: 'Заметки', exact: true }).click();
+    await section.locator('.note-body').filter({ hasText: 'Исправленная заметка' }).waitFor();
+    await page.screenshot({ path: '/tmp/sp-notes-mobile.png', fullPage: true });
+    assert.equal(await section.getByRole('button', { name: 'Удалить заметку', exact: true }).count(), 0);
+    assert.equal(await section.getByRole('button', { name: 'Редактировать заметку', exact: true }).textContent(), '');
+    await section.getByRole('button', { name: 'Редактировать заметку', exact: true }).click();
+    const deleting = section.getByRole('button', { name: 'Удалить заметку', exact: true });
+    assert.equal(await deleting.textContent(), '');
+    await deleting.click();
+    const dialog = page.getByRole('dialog', { name: 'Удалить заметку?' });
+    await dialog.waitFor();
+    await assertUiLayout(page);
+    assert.equal((await app.db.call('personNotes', person.id)).length, 1, 'opening confirmation must not delete');
+    assert.equal(
+      await dialog.getByRole('button', { name: 'Отмена', exact: true }).evaluate((el) => el === document.activeElement),
+      true,
+    );
+    await page.keyboard.press('Escape');
+    await dialog.waitFor({ state: 'hidden' });
+    assert.equal((await app.db.call('personNotes', person.id)).length, 1);
+    await deleting.click();
+    await dialog.getByRole('button', { name: 'Отмена', exact: true }).click();
+    await dialog.waitFor({ state: 'hidden' });
+    assert.equal((await app.db.call('personNotes', person.id)).length, 1);
+    await deleting.click();
+    await dialog.getByRole('button', { name: 'Удалить', exact: true }).click();
+    await dialog.waitFor({ state: 'hidden' });
+    await section.locator('article').waitFor({ state: 'detached' });
+    assert.deepEqual(await app.db.call('personNotes', person.id), []);
+    await saveCoverage(page);
+  } finally {
+    await browser?.close();
+    await app.close();
+  }
 });

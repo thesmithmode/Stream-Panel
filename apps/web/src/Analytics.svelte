@@ -1,237 +1,1009 @@
 <script lang="ts">
- import {readAnalyticsContext,writeAnalyticsContext} from './analytics-context';
- import {analyticsReport} from './analytics-load';
- import {cachedAnalytics,loadAnalytics,summaryQuery} from "./analytics-cache";
- import CategoryComparison from "./CategoryComparison.svelte";
- import SectionTabs from "./SectionTabs.svelte";
-  import { onMount, untrack } from "svelte";
-  import { api, money, sameResponse,mergeResponseBlocks } from "./api";
-  import {analyticsView,loadAnalyticsView,saveAnalyticsView} from "./analytics-view";
-  import Insights from "./Insights.svelte";
-  import Help from "./Help.svelte";
-  import Sheet from "./Sheet.svelte";
-  import Icon from "./Icon.svelte";
-  import Following from "./Following.svelte";
-  import SubscriberGrowth from "./SubscriberGrowth.svelte";
-  import AudienceGrowth from "./AudienceGrowth.svelte";
-  import {num,pct} from './format';
-  import ActivityClock from "./ActivityClock.svelte";
+  import { readAnalyticsContext, writeAnalyticsContext } from './analytics-context';
+  import { analyticsReport } from './analytics-load';
+  import { cachedAnalytics, loadAnalytics, summaryQuery } from './analytics-cache';
+  import CategoryComparison from './CategoryComparison.svelte';
+  import SectionTabs from './SectionTabs.svelte';
+  import { onMount, untrack } from 'svelte';
+  import { api, money, sameResponse, mergeResponseBlocks } from './api';
+  import { analyticsView, loadAnalyticsView, saveAnalyticsView } from './analytics-view';
+  import Insights from './Insights.svelte';
+  import Help from './Help.svelte';
+  import Sheet from './Sheet.svelte';
+  import Icon from './Icon.svelte';
+  import Following from './Following.svelte';
+  import SubscriberGrowth from './SubscriberGrowth.svelte';
+  import AudienceGrowth from './AudienceGrowth.svelte';
+  import { num, pct } from './format';
+  import ActivityClock from './ActivityClock.svelte';
   import DonationPatterns from './DonationPatterns.svelte';
-  import {platformClass} from './period';
-  import TimePatterns from "./TimePatterns.svelte";
-  import ComparisonCharts from "./ComparisonCharts.svelte";
-  let { profile = "local", defaultTimezone="Europe/Moscow", section=$bindable('dynamics'),onSection,onPerson, onStream }: {profile?:string;defaultTimezone?:string;section?:string;onSection?:(section:string)=>void;onPerson:(id:string)=>void;onStream:(id:string)=>void} = $props();
-  let filtersOpen=$state(false),comparisonsOpen=$state(false);
-  let view=$state(analyticsView(null));
-  const localInput=(at:number)=>{const d=new Date(at);return new Date(at-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
-  let from=$state(localInput(0)),to=$state(localInput(Date.now())),source=$state("all"),category=$state("");
-  let timezone=$state(untrack(()=>defaultTimezone));
-  let search=$state(""),liveEnd=$state(true),data=$state.raw<any>(null),error=$state(""),busy=$state(false);
-  let heatCurrency=$state("RUB");
-  let heatCalculation=$state("average"),selectedHour=$state<{day:string;hour:number}|null>(null);
-  let period=$state<number|'all'|'custom'>('all');
-  const reportScope=$derived(JSON.stringify([profile,section,period,period==='custom'?from:'',period==='custom'?to:'',source,category,timezone]));
-  let loadedScope=$state(''),loadedPanel=$state('');
-  let refreshController:AbortController|undefined;
-  let requestId=0, mounted=$state(false);
-  $effect(()=>{
-    const filters=[mounted,section,period,from,to,source,category,timezone].join("|");
+  import { platformClass } from './period';
+  import TimePatterns from './TimePatterns.svelte';
+  import ComparisonCharts from './ComparisonCharts.svelte';
+  let {
+    profile = 'local',
+    defaultTimezone = 'Europe/Moscow',
+    section = $bindable('dynamics'),
+    onSection,
+    onPerson,
+    onStream,
+  }: {
+    profile?: string;
+    defaultTimezone?: string;
+    section?: string;
+    onSection?: (section: string) => void;
+    onPerson: (id: string) => void;
+    onStream: (id: string) => void;
+  } = $props();
+  let filtersOpen = $state(false),
+    comparisonsOpen = $state(false);
+  let view = $state(analyticsView(null));
+  const localInput = (at: number) => {
+    const d = new Date(at);
+    return new Date(at - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  };
+  let from = $state(localInput(0)),
+    to = $state(localInput(Date.now())),
+    source = $state('all'),
+    category = $state('');
+  let timezone = $state(untrack(() => defaultTimezone));
+  let search = $state(''),
+    liveEnd = $state(true),
+    data = $state.raw<any>(null),
+    error = $state(''),
+    busy = $state(false);
+  let heatCurrency = $state('RUB');
+  let heatCalculation = $state('average'),
+    selectedHour = $state<{ day: string; hour: number } | null>(null);
+  let period = $state<number | 'all' | 'custom'>('all');
+  const reportScope = $derived(
+    JSON.stringify([
+      profile,
+      section,
+      period,
+      period === 'custom' ? from : '',
+      period === 'custom' ? to : '',
+      source,
+      category,
+      timezone,
+    ]),
+  );
+  let loadedScope = $state(''),
+    loadedPanel = $state('');
+  let refreshController: AbortController | undefined;
+  let requestId = 0,
+    mounted = $state(false);
+  $effect(() => {
+    const filters = [mounted, section, period, from, to, source, category, timezone].join('|');
     void filters;
-    if(!mounted)return;
-    busy=true;error="";
-    const controller=new AbortController();let cancelled=false;
-    const delay=0;
-    const timer=window.setTimeout(()=>{if(!cancelled)untrack(()=>void refresh(false,controller.signal));},delay);
-    return ()=>{cancelled=true;controller.abort();refreshController?.abort();window.clearTimeout(timer);requestId++;};
+    if (!mounted) return;
+    busy = true;
+    error = '';
+    const controller = new AbortController();
+    let cancelled = false;
+    const delay = 0;
+    const timer = window.setTimeout(() => {
+      if (!cancelled) untrack(() => void refresh(false, controller.signal));
+    }, delay);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      refreshController?.abort();
+      window.clearTimeout(timer);
+      requestId++;
+    };
   });
-  $effect(()=>{if(mounted)writeAnalyticsContext({from,to,source,category,timezone,period,liveEnd,view});});
-  $effect(()=>{const saved=JSON.stringify(view);void saved;if(mounted)saveAnalyticsView(()=>localStorage,profile,view);});
-  let audienceOffset=$state(0),pagedAudience=$state<any>(null),audienceBusy=$state(false),loadedAudienceQuery=$state('');
-  $effect(()=>{void reportScope;pagedAudience=null;});
-  const visible=$derived(data?.audiencePage?(pagedAudience?.audience??data.audience):(data?.audience??[]).filter((e:any)=>(!view.coreOnly||e.core)&&e.name.toLowerCase().includes(search.toLowerCase())).sort((a:any,b:any)=>view.sort==="sessions"?(b.sessionCount??b.sessionIds.length)-(a.sessionCount??a.sessionIds.length):(b[view.sort]??0)-(a[view.sort]??0)));
-  async function reportPage(extra:Record<string,string|number>,signal?:AbortSignal,endpoint='analytics',filters=data?.filters){
-    if(!filters)throw new Error('Отчёт ещё не загружен');
-    const q=new URLSearchParams(Object.entries({...filters,from:filters.fromMs,to:filters.toMs,mode:'summary',insights:'1',attendanceOnly:'1',...(endpoint==='analytics/audience'?{panel:'audience'}:{}),...extra}).map(([key,value])=>[key,String(value)]));
-    return analyticsReport(signal=>api(`${endpoint}?${q}`,undefined,signal),signal??new AbortController().signal);
-  }
-  const streamsLoader=$derived.by(()=>{const filters=data?.filters;return (params:Record<string,string|number>,signal:AbortSignal)=>reportPage({panel:'dynamics',...params},signal,'analytics',filters);});
-  const visitorLoader=$derived.by(()=>{const filters=data?.filters;return (params:Record<string,string|number>,signal:AbortSignal)=>reportPage(params,signal,'analytics/clock',filters);});
-  const clockLoader=$derived.by(()=>{const filters=data?.filters;return (params:Record<string,string|number>,signal:AbortSignal)=>reportPage(params,signal,'analytics/clock-summary',filters);});
-  $effect(()=>{void search;void view.sort;void view.coreOnly;void reportScope;audienceOffset=0;});
-  $effect(()=>{
-    const current=data,offset=audienceOffset,term=search,sort=view.sort,core=view.coreOnly;
-    audienceBusy=false;
-    if(!current?.audiencePage||loadedScope!==reportScope)return;
-    const query=JSON.stringify([reportScope,offset,term,sort,core]);
-    if(query===loadedAudienceQuery)return;
-    const controller=new AbortController();audienceBusy=true;
-    const timer=window.setTimeout(()=>{void reportPage({audienceOffset:offset,audienceSearch:term,audienceSort:sort,audienceCoreOnly:core?1:0},controller.signal,'analytics/audience').then(result=>{if(!controller.signal.aborted){pagedAudience=result;loadedAudienceQuery=query;}}).catch(e=>{if(!controller.signal.aborted)error=e.message;}).finally(()=>{if(!controller.signal.aborted)audienceBusy=false;});},150);
-    return ()=>{controller.abort();window.clearTimeout(timer);};
+  $effect(() => {
+    if (mounted) writeAnalyticsContext({ from, to, source, category, timezone, period, liveEnd, view });
   });
-  const weekdays=["пн","вт","ср","чт","пт","сб","вс"];
-  const hourCells=$derived(new Map((data?.hours??[]).map((h:any)=>[`${h.day}:${h.hour}`,h])) as Map<string,any>);
-  const hourStreamCounts=$derived(new Map((data?.clockBuckets??[]).filter((b:any)=>b.resolution===60&&weekdays.includes(b.day)).map((b:any)=>[`${b.day}:${b.minute/60}`,b.streams])));
-  function heatValue(cell:any):number|null {
-    if(!cell)return null;
-    if(view.heatMetric==='donations')return cell.sampleMinutes?(heatCalculation==='total'?cell.donationCount:cell.donationCount*60/cell.sampleMinutes):null;
-    if(view.heatMetric==='amount')return cell.sampleMinutes?Number((heatCalculation==='total'?cell.donationTotals:cell.donationsPerHourMinor)[heatCurrency]??'0'):null;
-    if(heatCalculation==="total")return view.heatMetric==="viewers"?((cell.knownViewerSamples??cell.viewerSamples)?(cell.knownViewersTotal??cell.viewersTotal):null):view.heatMetric==="observed"?(cell.observedKnownMinutes?cell.observed:null):view.heatMetric==="estimated"?cell.estimated:cell.messages;
-    if(view.heatMetric==="viewers")return (cell.knownViewerSamples??cell.viewerSamples)?(cell.knownViewersTotal??cell.viewersTotal)/(cell.knownViewerSamples??cell.viewerSamples):null;
-    if(view.heatMetric==="messages")return cell.sampleMinutes?cell.messages*60/cell.sampleMinutes:null;
-    if(view.heatMetric==="estimated")return cell.sampleMinutes?cell.estimated/cell.sampleMinutes:null;
-    return cell.observedKnownMinutes?cell.observed/cell.observedKnownMinutes:null;
+  $effect(() => {
+    const saved = JSON.stringify(view);
+    void saved;
+    if (mounted) saveAnalyticsView(() => localStorage, profile, view);
+  });
+  let audienceOffset = $state(0),
+    pagedAudience = $state<any>(null),
+    audienceBusy = $state(false),
+    loadedAudienceQuery = $state('');
+  $effect(() => {
+    void reportScope;
+    pagedAudience = null;
+  });
+  const visible = $derived(
+    data?.audiencePage
+      ? (pagedAudience?.audience ?? data.audience)
+      : (data?.audience ?? [])
+          .filter((e: any) => (!view.coreOnly || e.core) && e.name.toLowerCase().includes(search.toLowerCase()))
+          .sort((a: any, b: any) =>
+            view.sort === 'sessions'
+              ? (b.sessionCount ?? b.sessionIds.length) - (a.sessionCount ?? a.sessionIds.length)
+              : (b[view.sort] ?? 0) - (a[view.sort] ?? 0),
+          ),
+  );
+  async function reportPage(
+    extra: Record<string, string | number>,
+    signal?: AbortSignal,
+    endpoint = 'analytics',
+    filters = data?.filters,
+  ) {
+    if (!filters) throw new Error('Отчёт ещё не загружен');
+    const q = new URLSearchParams(
+      Object.entries({
+        ...filters,
+        from: filters.fromMs,
+        to: filters.toMs,
+        mode: 'summary',
+        insights: '1',
+        attendanceOnly: '1',
+        ...(endpoint === 'analytics/audience' ? { panel: 'audience' } : {}),
+        ...extra,
+      }).map(([key, value]) => [key, String(value)]),
+    );
+    return analyticsReport(
+      (signal) => api(`${endpoint}?${q}`, undefined, signal),
+      signal ?? new AbortController().signal,
+    );
   }
-  const hourMax=$derived(Math.max(1,...(data?.hours??[]).map((h:any)=>heatValue(h)??0)));
-  function hourTitle(day:string,hour:number){
-    const cell=hourCells.get(`${day}:${hour}`),value=heatValue(cell);
-    const count=hourStreamCounts.get(`${day}:${hour}`);
-    const known=view.heatMetric==='viewers'?(cell?.knownViewerSamples??cell?.viewerSamples):view.heatMetric==='observed'?cell?.observedKnownMinutes:cell?.sampleMinutes;
-    return `${day} ${hour}:00 — ${value===null?"нет данных":view.heatMetric==='amount'?money(String(Math.round(value)),heatCurrency):`${num(value)}`}${count===undefined?'':` · эфиров: ${count}`} · ${(known??0).toLocaleString('ru-RU',{maximumFractionDigits:1})} мин с данными`;
+  const streamsLoader = $derived.by(() => {
+    const filters = data?.filters;
+    return (params: Record<string, string | number>, signal: AbortSignal) =>
+      reportPage({ panel: 'dynamics', ...params }, signal, 'analytics', filters);
+  });
+  const visitorLoader = $derived.by(() => {
+    const filters = data?.filters;
+    return (params: Record<string, string | number>, signal: AbortSignal) =>
+      reportPage(params, signal, 'analytics/clock', filters);
+  });
+  const clockLoader = $derived.by(() => {
+    const filters = data?.filters;
+    return (params: Record<string, string | number>, signal: AbortSignal) =>
+      reportPage(params, signal, 'analytics/clock-summary', filters);
+  });
+  $effect(() => {
+    void search;
+    void view.sort;
+    void view.coreOnly;
+    void reportScope;
+    audienceOffset = 0;
+  });
+  $effect(() => {
+    const current = data,
+      offset = audienceOffset,
+      term = search,
+      sort = view.sort,
+      core = view.coreOnly;
+    audienceBusy = false;
+    if (!current?.audiencePage || loadedScope !== reportScope) return;
+    const query = JSON.stringify([reportScope, offset, term, sort, core]);
+    if (query === loadedAudienceQuery) return;
+    const controller = new AbortController();
+    audienceBusy = true;
+    const timer = window.setTimeout(() => {
+      void reportPage(
+        { audienceOffset: offset, audienceSearch: term, audienceSort: sort, audienceCoreOnly: core ? 1 : 0 },
+        controller.signal,
+        'analytics/audience',
+      )
+        .then((result) => {
+          if (!controller.signal.aborted) {
+            pagedAudience = result;
+            loadedAudienceQuery = query;
+          }
+        })
+        .catch((e) => {
+          if (!controller.signal.aborted) error = e.message;
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) audienceBusy = false;
+        });
+    }, 150);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  });
+  const weekdays = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
+  const hourCells = $derived(
+    new Map((data?.hours ?? []).map((h: any) => [`${h.day}:${h.hour}`, h])) as Map<string, any>,
+  );
+  const hourStreamCounts = $derived(
+    new Map(
+      (data?.clockBuckets ?? [])
+        .filter((b: any) => b.resolution === 60 && weekdays.includes(b.day))
+        .map((b: any) => [`${b.day}:${b.minute / 60}`, b.streams]),
+    ),
+  );
+  function heatValue(cell: any): number | null {
+    if (!cell) return null;
+    if (view.heatMetric === 'donations')
+      return cell.sampleMinutes
+        ? heatCalculation === 'total'
+          ? cell.donationCount
+          : (cell.donationCount * 60) / cell.sampleMinutes
+        : null;
+    if (view.heatMetric === 'amount')
+      return cell.sampleMinutes
+        ? Number((heatCalculation === 'total' ? cell.donationTotals : cell.donationsPerHourMinor)[heatCurrency] ?? '0')
+        : null;
+    if (heatCalculation === 'total')
+      return view.heatMetric === 'viewers'
+        ? (cell.knownViewerSamples ?? cell.viewerSamples)
+          ? (cell.knownViewersTotal ?? cell.viewersTotal)
+          : null
+        : view.heatMetric === 'observed'
+          ? cell.observedKnownMinutes
+            ? cell.observed
+            : null
+          : view.heatMetric === 'estimated'
+            ? cell.estimated
+            : cell.messages;
+    if (view.heatMetric === 'viewers')
+      return (cell.knownViewerSamples ?? cell.viewerSamples)
+        ? (cell.knownViewersTotal ?? cell.viewersTotal) / (cell.knownViewerSamples ?? cell.viewerSamples)
+        : null;
+    if (view.heatMetric === 'messages') return cell.sampleMinutes ? (cell.messages * 60) / cell.sampleMinutes : null;
+    if (view.heatMetric === 'estimated') return cell.sampleMinutes ? cell.estimated / cell.sampleMinutes : null;
+    return cell.observedKnownMinutes ? cell.observed / cell.observedKnownMinutes : null;
   }
-  const categoryOptions=$derived([...(data?.availableCategories??data?.categories??[])].filter((c:any)=>c.id).sort((a:any,b:any)=>a.name.localeCompare(b.name,'ru')));
-  function preset(days:number|'all'){period=days;liveEnd=true;const now=Date.now();from=localInput(days==='all'?0:now-days*86400000);to=localInput(now);}
-  async function refresh(force=false,signal?:AbortSignal){
-    refreshController?.abort();refreshController=new AbortController();
-    signal=signal?AbortSignal.any([signal,refreshController.signal]):refreshController.signal;
-    const scope=reportScope,id=++requestId;busy=true;error="";
+  const hourMax = $derived(Math.max(1, ...(data?.hours ?? []).map((h: any) => heatValue(h) ?? 0)));
+  function hourTitle(day: string, hour: number) {
+    const cell = hourCells.get(`${day}:${hour}`),
+      value = heatValue(cell);
+    const count = hourStreamCounts.get(`${day}:${hour}`);
+    const known =
+      view.heatMetric === 'viewers'
+        ? (cell?.knownViewerSamples ?? cell?.viewerSamples)
+        : view.heatMetric === 'observed'
+          ? cell?.observedKnownMinutes
+          : cell?.sampleMinutes;
+    return `${day} ${hour}:00 — ${value === null ? 'нет данных' : view.heatMetric === 'amount' ? money(String(Math.round(value)), heatCurrency) : `${num(value)}`}${count === undefined ? '' : ` · эфиров: ${count}`} · ${(known ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} мин с данными`;
+  }
+  const categoryOptions = $derived(
+    [...(data?.availableCategories ?? data?.categories ?? [])]
+      .filter((c: any) => c.id)
+      .sort((a: any, b: any) => a.name.localeCompare(b.name, 'ru')),
+  );
+  function preset(days: number | 'all') {
+    period = days;
+    liveEnd = true;
+    const now = Date.now();
+    from = localInput(days === 'all' ? 0 : now - days * 86400000);
+    to = localInput(now);
+  }
+  async function refresh(force = false, signal?: AbortSignal) {
+    refreshController?.abort();
+    refreshController = new AbortController();
+    signal = signal ? AbortSignal.any([signal, refreshController.signal]) : refreshController.signal;
+    const scope = reportScope,
+      id = ++requestId;
+    busy = true;
+    error = '';
 
-    const fromMs=new Date(from).getTime(),toMs=new Date(to).getTime();
-    if(!Number.isFinite(fromMs)||!Number.isFinite(toMs)||fromMs<0||toMs<=fromMs||fromMs>=Date.now()){
-      error='Укажите начало периода раньше его конца и текущего времени.';busy=false;return;
+    const fromMs = new Date(from).getTime(),
+      toMs = new Date(to).getTime();
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs < 0 || toMs <= fromMs || fromMs >= Date.now()) {
+      error = 'Укажите начало периода раньше его конца и текущего времени.';
+      busy = false;
+      return;
     }
-    try{
-      try {localStorage.setItem(`sp-analytics-${profile}`,JSON.stringify({timezone}));}catch{/* optional local preferences */}
+    try {
+      try {
+        localStorage.setItem(`sp-analytics-${profile}`, JSON.stringify({ timezone }));
+      } catch {
+        /* optional local preferences */
+      }
       // Small reports are filtered locally; retain the complete first page so clearing
       // search or core-only after an auto-refresh cannot hide participants.
-      const offset=0,term='',sort=view.sort,core=false;
-      const audienceQuery=JSON.stringify([scope,offset,term,sort,core]);
-      const panel=section;const q=summaryQuery(fromMs,toMs,source,category,timezone,view.resolution,sort);q.set('panel',panel);q.set('attendanceOnly','1');if(liveEnd&&period!=='custom')q.set('_period',String(period));
-      const cached=cachedAnalytics(profile,q);
-      if(cached&&id===requestId){data=cached;loadedPanel=panel;loadedScope=scope;loadedAudienceQuery=audienceQuery;}
-      const result=await loadAnalytics(profile,q,force,signal);
-      if(id===requestId){if(result.filters&&(result.filters.category!==category||result.filters.source!==source||result.filters.timezone!==timezone))throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');loadedPanel=panel;loadedScope=scope;loadedAudienceQuery=audienceQuery;
-        if(JSON.stringify([scope,audienceOffset,search,view.sort,view.coreOnly])===audienceQuery)pagedAudience=null;
-        if(!sameResponse(data,result))data=mergeResponseBlocks(data,result);
-}
-    }catch(e){if(id===requestId&&!signal?.aborted){error=(e as Error).message;}}
-    finally{if(id===requestId)busy=false;}
+      const offset = 0,
+        term = '',
+        sort = view.sort,
+        core = false;
+      const audienceQuery = JSON.stringify([scope, offset, term, sort, core]);
+      const panel = section;
+      const q = summaryQuery(fromMs, toMs, source, category, timezone, view.resolution, sort);
+      q.set('panel', panel);
+      q.set('attendanceOnly', '1');
+      if (liveEnd && period !== 'custom') q.set('_period', String(period));
+      const cached = cachedAnalytics(profile, q);
+      if (cached && id === requestId) {
+        data = cached;
+        loadedPanel = panel;
+        loadedScope = scope;
+        loadedAudienceQuery = audienceQuery;
+      }
+      const result = await loadAnalytics(profile, q, force, signal);
+      if (id === requestId) {
+        if (
+          result.filters &&
+          (result.filters.category !== category ||
+            result.filters.source !== source ||
+            result.filters.timezone !== timezone)
+        )
+          throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');
+        loadedPanel = panel;
+        loadedScope = scope;
+        loadedAudienceQuery = audienceQuery;
+        if (JSON.stringify([scope, audienceOffset, search, view.sort, view.coreOnly]) === audienceQuery)
+          pagedAudience = null;
+        if (!sameResponse(data, result)) data = mergeResponseBlocks(data, result);
+      }
+    } catch (e) {
+      if (id === requestId && !signal?.aborted) {
+        error = (e as Error).message;
+      }
+    } finally {
+      if (id === requestId) busy = false;
+    }
   }
-  onMount(()=>{
-    try{const saved=JSON.parse(localStorage.getItem(`sp-analytics-${profile}`)??"null");if(saved?.timezone)timezone=saved.timezone;}catch{/* private browser may deny storage */}
-    view=loadAnalyticsView(()=>localStorage,profile);
-    const context=readAnalyticsContext();
-    if(context){({from,to,source,category,timezone,period,liveEnd}=context);view=analyticsView(context.view);if(liveEnd){const now=Date.now();to=localInput(now);if(typeof period==='number')from=localInput(now-period*86400000);}}
-    const lifetime=new AbortController();
-    mounted=true;const update=()=>{if(!document.hidden&&navigator.onLine&&!busy){if(liveEnd){const now=Date.now();if(typeof period==='number')from=localInput(now-period*86400000);const next=localInput(now);if(next===to)void refresh(true,lifetime.signal);else to=next;}else void refresh(true,lifetime.signal);}};const clock=()=>{if(period!=='all')update();};window.addEventListener('sp:clock-refresh',clock);window.addEventListener('sp:data-refresh',update);return ()=>{lifetime.abort();requestId++;window.removeEventListener('sp:data-refresh',update);window.removeEventListener('sp:clock-refresh',clock);};
+  onMount(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(`sp-analytics-${profile}`) ?? 'null');
+      if (saved?.timezone) timezone = saved.timezone;
+    } catch {
+      /* private browser may deny storage */
+    }
+    view = loadAnalyticsView(() => localStorage, profile);
+    const context = readAnalyticsContext();
+    if (context) {
+      ({ from, to, source, category, timezone, period, liveEnd } = context);
+      view = analyticsView(context.view);
+      if (liveEnd) {
+        const now = Date.now();
+        to = localInput(now);
+        if (typeof period === 'number') from = localInput(now - period * 86400000);
+      }
+    }
+    const lifetime = new AbortController();
+    mounted = true;
+    const update = () => {
+      if (!document.hidden && navigator.onLine && !busy) {
+        if (liveEnd) {
+          const now = Date.now();
+          if (typeof period === 'number') from = localInput(now - period * 86400000);
+          const next = localInput(now);
+          if (next === to) void refresh(true, lifetime.signal);
+          else to = next;
+        } else void refresh(true, lifetime.signal);
+      }
+    };
+    const clock = () => {
+      if (period !== 'all') update();
+    };
+    window.addEventListener('sp:clock-refresh', clock);
+    window.addEventListener('sp:data-refresh', update);
+    return () => {
+      lifetime.abort();
+      requestId++;
+      window.removeEventListener('sp:data-refresh', update);
+      window.removeEventListener('sp:clock-refresh', clock);
+    };
   });
 </script>
 
 <div class="analytics-toolbar">
- <div class="period-chips" role="group" aria-label="Быстрый выбор периода">{#each [[7,'7 дней'],[30,'30 дней'],['all','Всё время']] as [value,label]}<button class:active={period===value} aria-pressed={period===value} aria-label={String(label)} onclick={()=>preset(value as number|'all')}><span class="period-full">{label}</span><span class="period-short" aria-hidden="true">{value==='all'?'Всё':`${value} дн.`}</span></button>{/each}<button class:active={period==='custom'} aria-pressed={period==='custom'} aria-label="Свои даты" onclick={()=>{period='custom';filtersOpen=true;}}><span class="period-full">Свои даты</span><span class="period-short" aria-hidden="true">Даты</span></button></div>
- <button class="outline filters-button" aria-label="Фильтры" aria-expanded={filtersOpen} onclick={()=>filtersOpen=true}><Icon name="filters" size={18}/>Фильтры{#if category||source!=='all'||period==='custom'}<span class="filter-dot"></span>{/if}</button>
+  <div class="period-chips" role="group" aria-label="Быстрый выбор периода"
+    >{#each [[7, '7 дней'], [30, '30 дней'], ['all', 'Всё время']] as [value, label]}<button
+        class:active={period === value}
+        aria-pressed={period === value}
+        aria-label={String(label)}
+        onclick={() => preset(value as number | 'all')}
+        ><span class="period-full">{label}</span><span class="period-short" aria-hidden="true"
+          >{value === 'all' ? 'Всё' : `${value} дн.`}</span
+        ></button
+      >{/each}<button
+      class:active={period === 'custom'}
+      aria-pressed={period === 'custom'}
+      aria-label="Свои даты"
+      onclick={() => {
+        period = 'custom';
+        filtersOpen = true;
+      }}><span class="period-full">Свои даты</span><span class="period-short" aria-hidden="true">Даты</span></button
+    ></div
+  >
+  <button
+    class="outline filters-button"
+    aria-label="Фильтры"
+    aria-expanded={filtersOpen}
+    onclick={() => (filtersOpen = true)}
+    ><Icon name="filters" size={18} />Фильтры{#if category || source !== 'all' || period === 'custom'}<span
+        class="filter-dot"
+      ></span>{/if}</button
+  >
 </div>
-{#if category||source!=='all'||period==='custom'}<p class="applied-filters">{categoryOptions.find((c:any)=>c.id===category)?.name??'Все категории'} · {source==='all'?'Все площадки':source==='twitch'?'Twitch / DA':'YouTube'}{#if period==='custom'} · Свой период{/if}</p>{/if}
+{#if category || source !== 'all' || period === 'custom'}<p class="applied-filters"
+    >{categoryOptions.find((c: any) => c.id === category)?.name ?? 'Все категории'} · {source === 'all'
+      ? 'Все площадки'
+      : source === 'twitch'
+        ? 'Twitch / DA'
+        : 'YouTube'}{#if period === 'custom'}
+      · Свой период{/if}</p
+  >{/if}
 {#if data}
-  <div class="analytics-kpis"><div><strong>{data.summary?.streams??0}</strong><span>Эфиров</span></div>{#if data.donationTiming}<div><strong>{Object.entries(data.donationTiming.totals??{}).map(([c,a])=>money(String(a),c)).join(' · ')||'—'}</strong><span>Донаты</span></div>{/if}</div>
+  <div class="analytics-kpis"
+    ><div><strong>{data.summary?.streams ?? 0}</strong><span>Эфиров</span></div>{#if data.donationTiming}<div
+        ><strong
+          >{Object.entries(data.donationTiming.totals ?? {})
+            .map(([c, a]) => money(String(a), c))
+            .join(' · ') || '—'}</strong
+        ><span>Донаты</span></div
+      >{/if}</div
+  >
 {/if}
-<div class="analytics-navigation"><SectionTabs items={[["dynamics","Динамика"],["time","Время"],["audience","Аудитория"]]} bind:value={section} onchange={()=>onSection?.(section)} label="Разделы аналитики" panelId="analytics-tabpanel"/></div>
-<div class="analytics-mobile-navigation"><SectionTabs onchange={()=>{onSection?.(section);window.scrollTo({top:0});}} icons={{dynamics:'analytics',time:'clock',audience:'people'}} items={[["dynamics","Динамика"],["time","Время"],["audience","Аудитория"]]} bind:value={section} label="Разделы аналитики" panelId="analytics-tabpanel"/></div>
-<Sheet bind:open={filtersOpen} title="Фильтры аналитики"><div class="filter-fields">
- {#if period==='custom'}<label>Начало периода<input type="datetime-local" value={from===localInput(0)&&data?.sessions?.length?localInput(data.sessions[0].started_at_ms):from} oninput={e=>{from=e.currentTarget.value;}} required/></label><label>Конец периода<input type="datetime-local" bind:value={to} onchange={()=>liveEnd=false} required/></label>{/if}
- <label>Площадка<select aria-label="Площадка" bind:value={source}><option value="all">Все площадки</option><option value="twitch">Twitch / DA</option><option value="youtube">YouTube</option></select></label>
- <label>Категория Twitch<select aria-label="Категория Twitch" bind:value={category}><option value="">Все категории</option>{#each categoryOptions as c}<option value={c.id}>{c.name}</option>{/each}</select></label>
- <details class="section-disclosure"><summary>Отображение и часовой пояс</summary><div class="filter-fields">
- <label>Часовой пояс сравнения<select aria-label="Часовой пояс сравнения" bind:value={timezone}><option value="Europe/Moscow">Москва</option><option value="UTC">UTC</option><option value="Asia/Yekaterinburg">Екатеринбург</option></select></label>
- <label class="check"><input type="checkbox" bind:checked={view.trend}/>График активности</label><label class="check"><input type="checkbox" bind:checked={view.categories}/>Сравнение категорий</label><label class="check"><input type="checkbox" bind:checked={view.hours}/>Дни и часы</label><label class="check"><input type="checkbox" bind:checked={view.audience}/>Возвращаемость участников</label><button class="outline" onclick={()=>view=analyticsView(null)}>Сбросить отображение</button>
- </div></details>
- <div class="filter-actions"><button class="outline" onclick={()=>{category='';source='all';preset('all');}}>Сбросить фильтры</button><button class="primary" onclick={()=>filtersOpen=false}>Готово</button></div>
-</div></Sheet>
-{#if busy&&(!data||loadedPanel!==section)}<p class="small muted" role="status">Обновляем аналитику…</p>{/if}
+<div class="analytics-navigation"
+  ><SectionTabs
+    items={[
+      ['dynamics', 'Динамика'],
+      ['time', 'Время'],
+      ['audience', 'Аудитория'],
+    ]}
+    bind:value={section}
+    onchange={() => onSection?.(section)}
+    label="Разделы аналитики"
+    panelId="analytics-tabpanel"
+  /></div
+>
+<div class="analytics-mobile-navigation"
+  ><SectionTabs
+    onchange={() => {
+      onSection?.(section);
+      window.scrollTo({ top: 0 });
+    }}
+    icons={{ dynamics: 'analytics', time: 'clock', audience: 'people' }}
+    items={[
+      ['dynamics', 'Динамика'],
+      ['time', 'Время'],
+      ['audience', 'Аудитория'],
+    ]}
+    bind:value={section}
+    label="Разделы аналитики"
+    panelId="analytics-tabpanel"
+  /></div
+>
+<Sheet bind:open={filtersOpen} title="Фильтры аналитики"
+  ><div class="filter-fields">
+    {#if period === 'custom'}<label
+        >Начало периода<input
+          type="datetime-local"
+          value={from === localInput(0) && data?.sessions?.length ? localInput(data.sessions[0].started_at_ms) : from}
+          oninput={(e) => {
+            from = e.currentTarget.value;
+          }}
+          required
+        /></label
+      ><label
+        >Конец периода<input type="datetime-local" bind:value={to} onchange={() => (liveEnd = false)} required /></label
+      >{/if}
+    <label
+      >Площадка<select aria-label="Площадка" bind:value={source}
+        ><option value="all">Все площадки</option><option value="twitch">Twitch / DA</option><option value="youtube"
+          >YouTube</option
+        ></select
+      ></label
+    >
+    <label
+      >Категория Twitch<select aria-label="Категория Twitch" bind:value={category}
+        ><option value="">Все категории</option>{#each categoryOptions as c}<option value={c.id}>{c.name}</option
+          >{/each}</select
+      ></label
+    >
+    <details class="section-disclosure"
+      ><summary>Отображение и часовой пояс</summary><div class="filter-fields">
+        <label
+          >Часовой пояс сравнения<select aria-label="Часовой пояс сравнения" bind:value={timezone}
+            ><option value="Europe/Moscow">Москва</option><option value="UTC">UTC</option><option
+              value="Asia/Yekaterinburg">Екатеринбург</option
+            ></select
+          ></label
+        >
+        <label class="check"><input type="checkbox" bind:checked={view.trend} />График активности</label><label
+          class="check"><input type="checkbox" bind:checked={view.categories} />Сравнение категорий</label
+        ><label class="check"><input type="checkbox" bind:checked={view.hours} />Дни и часы</label><label class="check"
+          ><input type="checkbox" bind:checked={view.audience} />Возвращаемость участников</label
+        ><button class="outline" onclick={() => (view = analyticsView(null))}>Сбросить отображение</button>
+      </div></details
+    >
+    <div class="filter-actions"
+      ><button
+        class="outline"
+        onclick={() => {
+          category = '';
+          source = 'all';
+          preset('all');
+        }}>Сбросить фильтры</button
+      ><button class="primary" onclick={() => (filtersOpen = false)}>Готово</button></div
+    >
+  </div></Sheet
+>
+{#if busy && (!data || loadedPanel !== section)}<p class="small muted" role="status">Обновляем аналитику…</p>{/if}
 {#if error}<p class="notice error" role="alert">{error}</p>{/if}
-<div id="analytics-tabpanel" role="tabpanel" aria-label={section==='dynamics'?'Динамика':section==='time'?'Время':'Аудитория'}>
-{#if data&&loadedPanel===section}
- <div class="analytics-results" aria-busy={busy}>
-  {#if section==='dynamics'}
+<div
+  id="analytics-tabpanel"
+  role="tabpanel"
+  aria-label={section === 'dynamics' ? 'Динамика' : section === 'time' ? 'Время' : 'Аудитория'}
+>
+  {#if data && loadedPanel === section}
+    <div class="analytics-results" aria-busy={busy}>
+      {#if section === 'dynamics'}
+        <div class="dynamics-grid">
+          <AudienceGrowth
+            bind:platform={view.dailyPlatform}
+            bind:metric={view.dailyMetric}
+            from={data.filters?.fromMs ?? 0}
+            end={data.filters?.toMs ?? Date.now()}
+            streams={data.streamComparison ?? []}
+            range={data.streamRange}
+            loadStreams={streamsLoader}
+            {timezone}
+            {onStream}
+          />
+          <SubscriberGrowth
+            {profile}
+            {timezone}
+            liveEnd={liveEnd && period !== 'custom'}
+            from={data.filters?.fromMs ?? 0}
+            to={data.filters?.toMs ?? Date.now()}
+            {onStream}
+          />
+        </div>
+        <Insights report={data} loading={busy && !data} {onPerson} {onStream} />
+        <details class="section-disclosure retention-disclosure" bind:open={comparisonsOpen}
+          ><summary>Возвращаемость по эфирам</summary>{#if comparisonsOpen}<ComparisonCharts
+              scope={reportScope}
+              {timezone}
+              {onStream}
+              showGrowth={false}
+              streams={data.streamComparison ?? []}
+              totalCount={data.streamRange?.total}
+              loadStreams={streamsLoader}
+            />{/if}</details
+        >
+      {/if}
+      {#if section === 'time'}
+        {#if view.hours}<section class="panel"
+            ><header
+              ><h2>Активность по дням и часам</h2><Help
+                id="analytics-hours"
+                label="О карте активности"
+                text="Нажмите ячейку для точного значения. Яркость показывает активность, серый — нет данных. Часы без эфира не считаются нулями. Для зрителей показана сумма известных значений площадок; пропущенные замеры не считаются нулём."
+              /></header
+            ><details class="chart-options"
+              ><summary>Настроить карту</summary><div class="filter-fields"
+                ><label
+                  >Метрика карты<select aria-label="Метрика карты" bind:value={view.heatMetric}
+                    ><option value="viewers">Зрители (все)</option><option value="observed">Наблюдения Twitch</option
+                    ><option value="estimated">Оценка активности YouTube</option><option value="messages"
+                      >Сообщения</option
+                    ><option value="donations">Число донатов</option><option value="amount">Сумма донатов</option
+                    ></select
+                  ></label
+                >{#if view.heatMetric === 'amount'}<label
+                    >Валюта карты<select aria-label="Валюта карты" bind:value={heatCurrency}
+                      >{#each [...new Set<string>((data.hours ?? []).flatMap( (h: any) => Object.keys(h.donationTotals) ))] as c}<option
+                          value={c}>{c}</option
+                        >{:else}<option value="RUB">RUB</option>{/each}</select
+                    ></label
+                  >{/if}<label
+                  >Расчёт карты<select aria-label="Расчёт карты" bind:value={heatCalculation}
+                    ><option value="average">Среднее / на час эфира</option><option value="total"
+                      >Накопленная сумма</option
+                    ></select
+                  ></label
+                ></div
+              ></details
+            >
 
-  <div class="dynamics-grid">
-  <AudienceGrowth bind:platform={view.dailyPlatform} bind:metric={view.dailyMetric} from={data.filters?.fromMs??0} end={data.filters?.toMs??Date.now()} streams={data.streamComparison??[]} range={data.streamRange} loadStreams={streamsLoader} {timezone} {onStream}/>
-  <SubscriberGrowth {profile} {timezone} liveEnd={liveEnd&&period!=='custom'} from={data.filters?.fromMs??0} to={data.filters?.toMs??Date.now()} {onStream}/>
-  </div>
-  <Insights report={data} loading={busy&&!data} {onPerson} {onStream}/>
-  <details class="section-disclosure retention-disclosure" bind:open={comparisonsOpen}><summary>Возвращаемость по эфирам</summary>{#if comparisonsOpen}<ComparisonCharts scope={reportScope} {timezone} {onStream} showGrowth={false} streams={data.streamComparison??[]} totalCount={data.streamRange?.total} loadStreams={streamsLoader}/>{/if}</details>
+            <div class="hour-heatmap" aria-label="Карта активности по дням и часам">
+              <div class="heatmap-labels"
+                ><span></span>{#each Array.from({ length: 24 }, (_, i) => i) as hour}<span>{hour}</span>{/each}</div
+              >
+              {#each weekdays as weekday}<div class="heatmap-row"
+                  ><strong>{weekday}</strong>{#each Array.from({ length: 24 }, (_, i) => i) as hour}<button
+                      aria-label={hourTitle(weekday, hour)}
+                      title={hourTitle(weekday, hour)}
+                      onclick={() => (selectedHour = { day: weekday, hour })}
+                      style:background={heatValue(hourCells.get(`${weekday}:${hour}`)) !== null
+                        ? `rgba(95,196,170,${0.15 + (0.85 * (heatValue(hourCells.get(`${weekday}:${hour}`)) ?? 0)) / hourMax})`
+                        : '#3b4350'}
+                    ></button>{/each}</div
+                >{/each}
+            </div>{#if selectedHour}<p class="analytics-help small" role="status"
+                >{hourTitle(selectedHour.day, selectedHour.hour)}</p
+              >{/if}</section
+          >{/if}
+
+        {#if view.trend}<ActivityClock
+            scope={reportScope}
+            visitorRevision={data.clockRevision}
+            rows={data.activityClock ?? []}
+            windows={data.activityWindows ?? []}
+            people={data.audience ?? []}
+            summary={data.clockBuckets ?? []}
+            summarySelection={data.clockSelection}
+            loadSummary={clockLoader}
+            loadVisitors={visitorLoader}
+            {onPerson}
+            bind:metric={view.metric}
+            bind:resolution={view.resolution}
+            {timezone}
+          />{/if}
+
+        <div class="timing-grid">
+          {#if data.patterns && data.composition}<TimePatterns {data} section="time" />{/if}
+
+          {#if data.donationTiming}<DonationPatterns timing={data.donationTiming} />{/if}
+        </div>
+      {/if}
+      {#if section === 'audience'}{#if data.composition}<TimePatterns {data} section="audience" />{/if}
+        <Following
+          report={data.following}
+          fromMs={data.filters?.fromMs ?? 0}
+          toMs={data.filters?.toMs ?? Date.now()}
+          {onPerson}
+        />
+        {#if view.audience}<section class="panel returning-audience"
+            ><header
+              ><h2>Возвращаемость участников</h2><Help
+                id="analytics-audience"
+                label="О минутах в чате"
+                text="Наблюдаемые минуты Twitch учитывают молчавших участников и исключают неизвестные промежутки. Оценка YouTube показана отдельно. Выберите сортировку по минутам или сообщениям; нажмите имя для подробностей."
+              /><span
+                >{data.audiencePage ? (pagedAudience?.audiencePage?.total ?? data.audiencePage.total) : visible.length} участников</span
+              ></header
+            >
+            <p class="small regular-summary"
+              >Ядро аудитории: <strong
+                >{data.composition?.core ?? 0} из {data.summary.attendees ?? data.summary.entities ?? 0} ({data.summary
+                  .attendees
+                  ? pct((data.composition?.core ?? 0) / data.summary.attendees)
+                  : 'нет данных'})</strong
+              ></p
+            >
+            <div class="analytics-controls"
+              ><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label
+                >Сортировка<select aria-label="Сортировка" bind:value={view.sort}
+                  ><option value="observedMinutes">Минуты в чате</option><option value="estimatedChatMinutes"
+                    >Оценка активности YouTube</option
+                  ><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option><option
+                    value="attendanceRatio">Доля посещённых эфиров</option
+                  ></select
+                ></label
+              ><label class="check"><input type="checkbox" bind:checked={view.coreOnly} /> Только ядро</label></div
+            >
+            <div class="table-wrap compact-audience" role="region" aria-label="Таблица возвращаемости"
+              ><table class="compact-audience-table"
+                ><thead><tr><th>Участник</th><th>Эфиры</th><th>Минуты в чате</th><th>Сообщения</th></tr></thead><tbody
+                  >{#each visible.slice(0, data.audiencePage ? 100 : 200) as e (e.id)}<tr
+                      class="audience-row"
+                      class:bot-person={e.is_bot}
+                      class:human-person={e.is_human}
+                    >
+                      <td class="audience-name" data-label="Участник"
+                        ><div
+                          ><button
+                            class={`text-button ${platformClass(e.sources ?? [e.source])}`}
+                            disabled={busy}
+                            onclick={() => onPerson(e.id)}>{e.name}</button
+                          >{#if e.core}<span class="core-badge">Ядро</span>{:else if e.follower}<span
+                              class="follower-badge">Подписчик</span
+                            >{/if}{#each e.tags ?? [] as tag}<span class="person-tag">{tag}</span>{/each}</div
+                        ><small
+                          >{(e.sources ?? [e.source])
+                            .map((source: string) =>
+                              source === 'youtube' ? 'YouTube' : source === 'donationalerts' ? 'DA' : 'Twitch',
+                            )
+                            .join(' · ')}</small
+                        ></td
+                      >
+                      <td class="audience-stat" data-label="Эфиры"
+                        >{e.attendanceCount ?? e.attendanceSessionIds?.length ?? 0}/{data.summary?.streams ?? 0}</td
+                      ><td class="audience-stat" data-label={e.source === 'youtube' ? 'Мин · оценка' : 'Мин в чате'}
+                        >{num(e.source === 'youtube' ? e.estimatedChatMinutes : e.observedMinutes)}</td
+                      ><td class="audience-stat" data-label="Сообщения">{num(e.messages, 0)}</td>
+                    </tr>{/each}</tbody
+                ></table
+              ></div
+            >
+            {#if !visible.length}<p class="muted analytics-empty"
+                >Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.</p
+              >{/if}
+            {#if visible.length > 200}<p class="small muted"
+                >Показаны первые 200; используйте поиск или меньший период.</p
+              >{/if}
+            {#if data.audiencePage}<div class="audience-pagination"
+                ><button
+                  class="outline"
+                  disabled={audienceBusy || audienceOffset === 0}
+                  onclick={() => (audienceOffset = Math.max(0, audienceOffset - 100))}>Предыдущие</button
+                ><span>{audienceBusy ? 'Загрузка…' : `Страница ${Math.floor(audienceOffset / 100) + 1}`}</span><button
+                  class="outline"
+                  disabled={audienceBusy ||
+                    audienceOffset + 100 >= (pagedAudience?.audiencePage?.total ?? data.audiencePage.total)}
+                  onclick={() => (audienceOffset += 100)}>Следующие</button
+                ></div
+              >{/if}
+          </section>
+        {/if}
+      {/if}
+      {#if section === 'dynamics'}<div class="analytics-secondary">
+          {#if view.categories}<CategoryComparison
+              bind:metric={view.categoryMetric}
+              categories={data.categories ?? []}
+              from={data.filters?.fromMs ?? 0}
+              to={data.filters?.toMs ?? Date.now()}
+              {timezone}
+            />{/if}
+        </div>{/if}
+    </div>
   {/if}
-  {#if section==='time'}
-  {#if view.hours}<section class="panel"><header><h2>Активность по дням и часам</h2><Help id="analytics-hours" label="О карте активности" text="Нажмите ячейку для точного значения. Яркость показывает активность, серый — нет данных. Часы без эфира не считаются нулями. Для зрителей показана сумма известных значений площадок; пропущенные замеры не считаются нулём."/></header><details class="chart-options"><summary>Настроить карту</summary><div class="filter-fields"><label>Метрика карты<select aria-label="Метрика карты" bind:value={view.heatMetric}><option value="viewers">Зрители (все)</option><option value="observed">Наблюдения Twitch</option><option value="estimated">Оценка активности YouTube</option><option value="messages">Сообщения</option><option value="donations">Число донатов</option><option value="amount">Сумма донатов</option></select></label>{#if view.heatMetric==='amount'}<label>Валюта карты<select aria-label="Валюта карты" bind:value={heatCurrency}>{#each [...new Set<string>((data.hours??[]).flatMap((h:any)=>Object.keys(h.donationTotals)))] as c}<option value={c}>{c}</option>{:else}<option value="RUB">RUB</option>{/each}</select></label>{/if}<label>Расчёт карты<select aria-label="Расчёт карты" bind:value={heatCalculation}><option value="average">Среднее / на час эфира</option><option value="total">Накопленная сумма</option></select></label></div></details>
-
-    <div class="hour-heatmap" aria-label="Карта активности по дням и часам">
-      <div class="heatmap-labels"><span></span>{#each Array.from({length:24},(_,i)=>i) as hour}<span>{hour}</span>{/each}</div>
-      {#each weekdays as weekday}<div class="heatmap-row"><strong>{weekday}</strong>{#each Array.from({length:24},(_,i)=>i) as hour}<button aria-label={hourTitle(weekday,hour)} title={hourTitle(weekday,hour)} onclick={()=>selectedHour={day:weekday,hour}} style:background={heatValue(hourCells.get(`${weekday}:${hour}`))!==null?`rgba(95,196,170,${.15+.85*(heatValue(hourCells.get(`${weekday}:${hour}`))??0)/hourMax})`:"#3b4350"}></button>{/each}</div>{/each}
-    </div>{#if selectedHour}<p class="analytics-help small" role="status">{hourTitle(selectedHour.day,selectedHour.hour)}</p>{/if}</section>{/if}
-
-  {#if view.trend}<ActivityClock scope={reportScope} visitorRevision={data.clockRevision} rows={data.activityClock??[]} windows={data.activityWindows??[]} people={data.audience??[]} summary={data.clockBuckets??[]} summarySelection={data.clockSelection} loadSummary={clockLoader} loadVisitors={visitorLoader} {onPerson} bind:metric={view.metric} bind:resolution={view.resolution} {timezone}/>{/if}
-
-  <div class="timing-grid">
-  {#if data.patterns&&data.composition}<TimePatterns {data} section="time" />{/if}
-
-  {#if data.donationTiming}<DonationPatterns timing={data.donationTiming}/>{/if}
-  </div>
-  {/if}
-  {#if section==='audience'}{#if data.composition}<TimePatterns {data} section="audience"/>{/if}
-  <Following report={data.following} fromMs={data.filters?.fromMs??0} toMs={data.filters?.toMs??Date.now()} {onPerson}/>
-  {#if view.audience}<section class="panel returning-audience"><header><h2>Возвращаемость участников</h2><Help id="analytics-audience" label="О минутах в чате" text="Наблюдаемые минуты Twitch учитывают молчавших участников и исключают неизвестные промежутки. Оценка YouTube показана отдельно. Выберите сортировку по минутам или сообщениям; нажмите имя для подробностей."/><span>{data.audiencePage?(pagedAudience?.audiencePage?.total??data.audiencePage.total):visible.length} участников</span></header>
-    <p class="small regular-summary">Ядро аудитории: <strong>{data.composition?.core??0} из {data.summary.attendees??data.summary.entities??0} ({data.summary.attendees?pct((data.composition?.core??0)/data.summary.attendees):"нет данных"})</strong></p>
-    <div class="analytics-controls"><label>Поиск участника<input bind:value={search} placeholder="Имя" /></label><label>Сортировка<select aria-label="Сортировка" bind:value={view.sort}><option value="observedMinutes">Минуты в чате</option><option value="estimatedChatMinutes">Оценка активности YouTube</option><option value="sessions">Частота посещений</option><option value="messages">Сообщения</option><option value="attendanceRatio">Доля посещённых эфиров</option></select></label><label class="check"><input type="checkbox" bind:checked={view.coreOnly} /> Только ядро</label></div>
-    <div class="table-wrap compact-audience" role="region" aria-label="Таблица возвращаемости"><table class="compact-audience-table"><thead><tr><th>Участник</th><th>Эфиры</th><th>Минуты в чате</th><th>Сообщения</th></tr></thead><tbody>{#each visible.slice(0,data.audiencePage?100:200) as e (e.id)}<tr class="audience-row" class:bot-person={e.is_bot} class:human-person={e.is_human}>
-      <td class="audience-name" data-label="Участник"><div><button class={`text-button ${platformClass(e.sources??[e.source])}`} disabled={busy} onclick={()=>onPerson(e.id)}>{e.name}</button>{#if e.core}<span class="core-badge">Ядро</span>{:else if e.follower}<span class="follower-badge">Подписчик</span>{/if}{#each e.tags??[] as tag}<span class="person-tag">{tag}</span>{/each}</div><small>{(e.sources??[e.source]).map((source:string)=>source==='youtube'?'YouTube':source==='donationalerts'?'DA':'Twitch').join(' · ')}</small></td>
-      <td class="audience-stat" data-label="Эфиры">{e.attendanceCount??e.attendanceSessionIds?.length??0}/{data.summary?.streams??0}</td><td class="audience-stat" data-label={e.source==='youtube'?'Мин · оценка':'Мин в чате'}>{num(e.source==='youtube'?e.estimatedChatMinutes:e.observedMinutes)}</td><td class="audience-stat" data-label="Сообщения">{num(e.messages,0)}</td>
-    </tr>{/each}</tbody></table></div>
-    {#if !visible.length}<p class="muted analytics-empty">Нет активности по выбранным фильтрам. Сначала нужны собранные эфиры.</p>{/if}
-    {#if visible.length>200}<p class="small muted">Показаны первые 200; используйте поиск или меньший период.</p>{/if}
-  {#if data.audiencePage}<div class="audience-pagination"><button class="outline" disabled={audienceBusy||audienceOffset===0} onclick={()=>audienceOffset=Math.max(0,audienceOffset-100)}>Предыдущие</button><span>{audienceBusy?'Загрузка…':`Страница ${Math.floor(audienceOffset/100)+1}`}</span><button class="outline" disabled={audienceBusy||audienceOffset+100>=(pagedAudience?.audiencePage?.total??data.audiencePage.total)} onclick={()=>audienceOffset+=100}>Следующие</button></div>{/if}
-  </section>
-  {/if}
-{/if}
-  {#if section==='dynamics'}<div class="analytics-secondary">
-  {#if view.categories}<CategoryComparison bind:metric={view.categoryMetric} categories={data.categories??[]} from={data.filters?.fromMs??0} to={data.filters?.toMs??Date.now()} {timezone}/>{/if}
-  </div>{/if}
-
- </div>
-{/if}
-
 </div>
-<style>.compact-audience{max-height:min(60dvh,480px);overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}.compact-audience thead{position:sticky;top:0;background:var(--bg);z-index:1}.audience-pagination{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px}.audience-pagination button{flex:0 0 auto}.audience-pagination span{font-size:12px;color:var(--muted)}.returning-audience>header>span{font-size:12px;color:var(--muted);white-space:nowrap}.regular-summary{font-size:12px;line-height:1.5}.regular-summary strong{font-size:inherit;font-weight:500}.timing-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}.timing-grid :global(.time-patterns){grid-column:1;grid-row:1}.timing-grid :global(.donation-patterns){grid-column:2;grid-row:1}.timing-grid :global(.discovery-grid){grid-column:1/-1}
-@media(min-width:1101px){
- .timing-grid{grid-template-rows:repeat(6,auto) auto;row-gap:0;align-items:stretch}
- .timing-grid :global(.time-patterns),.timing-grid :global(.donation-patterns){display:grid;grid-template-rows:subgrid;grid-row:1/span 6;row-gap:0}
- .timing-grid :global(.time-patterns>header),.timing-grid :global(.donation-patterns>header){grid-row:1}
- .timing-grid :global(.pattern-controls),.timing-grid :global(.donation-patterns>.controls){grid-row:3;align-content:start;padding:16px 20px}
- .timing-grid :global(.pattern-note){grid-row:4;margin:0;padding:0 20px 8px}
- .timing-grid :global(.pattern-bars),.timing-grid :global(.donation-patterns>.bars){grid-row:5;grid-auto-rows:28px;align-content:start;gap:6px;padding:8px 20px 16px}
- .timing-grid :global(.pattern-row),.timing-grid :global(.bar-row){min-height:0;align-items:center}
- .timing-grid :global(.donation-patterns>.note){grid-row:6;margin:0;padding:0 20px 16px}
- .timing-grid :global(.discovery-grid){grid-row:7;margin-top:16px}
-}
-@media(max-width:1100px){.timing-grid{grid-template-columns:minmax(0,1fr)}.timing-grid :global(.time-patterns),.timing-grid :global(.donation-patterns){grid-column:auto;grid-row:auto}}.compact-audience{overflow-x:auto}.compact-audience-table{width:100%;border-collapse:collapse;min-width:620px}.compact-audience-table>tbody>tr>td,.compact-audience-table>thead>tr>th{padding:12px;text-align:right;border-bottom:1px solid var(--border);font-size:12px}.twitch{color:var(--twitch,#a970ff)!important}.youtube{color:var(--youtube,#ff5959)!important}.analytics-help{padding:0 20px 12px;}header h2{display:flex;align-items:center;gap:8px;}
 
-.compact-audience-table>tbody>tr>td:first-child,.compact-audience-table>thead>tr>th:first-child{text-align:left}
-.analytics-toolbar .period-chips{gap:2px;padding:3px;flex-wrap:nowrap;min-width:0;overflow-x:auto;scrollbar-width:none}
-.analytics-toolbar .period-chips button{border-radius:6px;font-size:13px;min-width:max-content;flex:1 0 auto}
-.analytics-toolbar .period-chips button.active{background:var(--surface);color:var(--accent);font-weight:400}
-@media(max-width:720px){
- .compact-audience-table{min-width:0}.compact-audience-table>thead{display:none}
- .compact-audience-table,.compact-audience-table>tbody{display:block}
- .compact-audience-table>tbody>.audience-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 12px;border-bottom:1px solid var(--border);padding:12px 16px}
- .compact-audience-table>tbody>.audience-row>td{display:block;text-align:left;border:0;padding:0;min-width:0}
- .compact-audience-table .audience-stat:before{content:attr(data-label);display:block;font-size:11px;color:var(--muted);margin-bottom:2px}
- .compact-audience-table .audience-name{grid-column:1/-1;grid-row:1}
- .audience-name>div{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px}.audience-name button{overflow-wrap:anywhere;text-align:left}
- .audience-name small{font-size:11px;color:var(--muted)}
- .analytics-toolbar .period-chips button{padding-inline:4px;font-size:12px}
-}
-.period-short{display:none}
-@media(max-width:380px){.period-full{display:none}.period-short{display:inline}}
-@media(max-width:600px){.analytics-toolbar .filters-button{font-size:0;width:44px;min-width:44px;min-height:44px;padding:10px;gap:0;position:relative;align-self:start}.analytics-toolbar .filters-button :global(svg){display:block;width:18px;height:18px}.analytics-toolbar .filter-dot{position:absolute;top:6px;right:6px}}
-.analytics-navigation :global(.section-tabs){margin:24px 0 12px;gap:24px;justify-content:flex-start;overflow-x:auto}
-.analytics-navigation :global(.section-tabs button){font-size:14px;min-height:44px}
+<style>
+  .compact-audience {
+    max-height: min(60dvh, 480px);
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+  .compact-audience thead {
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 1;
+  }
+  .audience-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 16px;
+  }
+  .audience-pagination button {
+    flex: 0 0 auto;
+  }
+  .audience-pagination span {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .returning-audience > header > span {
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .regular-summary {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .regular-summary strong {
+    font-size: inherit;
+    font-weight: 500;
+  }
+  .timing-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+  .timing-grid :global(.time-patterns) {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .timing-grid :global(.donation-patterns) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .timing-grid :global(.discovery-grid) {
+    grid-column: 1/-1;
+  }
+  @media (min-width: 1101px) {
+    .timing-grid {
+      grid-template-rows: repeat(6, auto) auto;
+      row-gap: 0;
+      align-items: stretch;
+    }
+    .timing-grid :global(.time-patterns),
+    .timing-grid :global(.donation-patterns) {
+      display: grid;
+      grid-template-rows: subgrid;
+      grid-row: 1 / span 6;
+      row-gap: 0;
+    }
+    .timing-grid :global(.time-patterns > header),
+    .timing-grid :global(.donation-patterns > header) {
+      grid-row: 1;
+    }
+    .timing-grid :global(.pattern-controls),
+    .timing-grid :global(.donation-patterns > .controls) {
+      grid-row: 3;
+      align-content: start;
+      padding: 16px 20px;
+    }
+    .timing-grid :global(.pattern-note) {
+      grid-row: 4;
+      margin: 0;
+      padding: 0 20px 8px;
+    }
+    .timing-grid :global(.pattern-bars),
+    .timing-grid :global(.donation-patterns > .bars) {
+      grid-row: 5;
+      grid-auto-rows: 28px;
+      align-content: start;
+      gap: 6px;
+      padding: 8px 20px 16px;
+    }
+    .timing-grid :global(.pattern-row),
+    .timing-grid :global(.bar-row) {
+      min-height: 0;
+      align-items: center;
+    }
+    .timing-grid :global(.donation-patterns > .note) {
+      grid-row: 6;
+      margin: 0;
+      padding: 0 20px 16px;
+    }
+    .timing-grid :global(.discovery-grid) {
+      grid-row: 7;
+      margin-top: 16px;
+    }
+  }
+  @media (max-width: 1100px) {
+    .timing-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .timing-grid :global(.time-patterns),
+    .timing-grid :global(.donation-patterns) {
+      grid-column: auto;
+      grid-row: auto;
+    }
+  }
+  .compact-audience {
+    overflow-x: auto;
+  }
+  .compact-audience-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 620px;
+  }
+  .compact-audience-table > tbody > tr > td,
+  .compact-audience-table > thead > tr > th {
+    padding: 12px;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .twitch {
+    color: var(--twitch, #a970ff) !important;
+  }
+  .youtube {
+    color: var(--youtube, #ff5959) !important;
+  }
+  .analytics-help {
+    padding: 0 20px 12px;
+  }
+  header h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .compact-audience-table > tbody > tr > td:first-child,
+  .compact-audience-table > thead > tr > th:first-child {
+    text-align: left;
+  }
+  .analytics-toolbar .period-chips {
+    gap: 2px;
+    padding: 3px;
+    flex-wrap: nowrap;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .analytics-toolbar .period-chips button {
+    border-radius: 6px;
+    font-size: 13px;
+    min-width: max-content;
+    flex: 1 0 auto;
+  }
+  .analytics-toolbar .period-chips button.active {
+    background: var(--surface);
+    color: var(--accent);
+    font-weight: 400;
+  }
+  @media (max-width: 720px) {
+    .compact-audience-table {
+      min-width: 0;
+    }
+    .compact-audience-table > thead {
+      display: none;
+    }
+    .compact-audience-table,
+    .compact-audience-table > tbody {
+      display: block;
+    }
+    .compact-audience-table > tbody > .audience-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      padding: 12px 16px;
+    }
+    .compact-audience-table > tbody > .audience-row > td {
+      display: block;
+      text-align: left;
+      border: 0;
+      padding: 0;
+      min-width: 0;
+    }
+    .compact-audience-table .audience-stat:before {
+      content: attr(data-label);
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 2px;
+    }
+    .compact-audience-table .audience-name {
+      grid-column: 1/-1;
+      grid-row: 1;
+    }
+    .audience-name > div {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px 8px;
+    }
+    .audience-name button {
+      overflow-wrap: anywhere;
+      text-align: left;
+    }
+    .audience-name small {
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .analytics-toolbar .period-chips button {
+      padding-inline: 4px;
+      font-size: 12px;
+    }
+  }
+  .period-short {
+    display: none;
+  }
+  @media (max-width: 380px) {
+    .period-full {
+      display: none;
+    }
+    .period-short {
+      display: inline;
+    }
+  }
+  @media (max-width: 600px) {
+    .analytics-toolbar .filters-button {
+      font-size: 0;
+      width: 44px;
+      min-width: 44px;
+      min-height: 44px;
+      padding: 10px;
+      gap: 0;
+      position: relative;
+      align-self: start;
+    }
+    .analytics-toolbar .filters-button :global(svg) {
+      display: block;
+      width: 18px;
+      height: 18px;
+    }
+    .analytics-toolbar .filter-dot {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+    }
+  }
+  .analytics-navigation :global(.section-tabs) {
+    margin: 24px 0 12px;
+    gap: 24px;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+  .analytics-navigation :global(.section-tabs button) {
+    font-size: 14px;
+    min-height: 44px;
+  }
 </style>
-

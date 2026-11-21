@@ -15,9 +15,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": [
-    "packages/**/*.ts",
-    "scripts/**/*.ts",
-    "apps/daemon/**/*.ts"
-  ]
+  "include": ["packages/**/*.ts", "scripts/**/*.ts", "apps/daemon/**/*.ts"]
 }

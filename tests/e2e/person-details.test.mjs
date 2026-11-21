@@ -1,32 +1,226 @@
-import test from 'node:test';import assert from 'node:assert/strict';
-import {application} from '../helpers/application.mjs';import {launchBrowser} from '../helpers/browser.mjs';import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';
-import {assertUiLayout} from '../helpers/ui-layout.mjs';
-test('person detail tabs retain immutable donations, paginate and recover from unavailable requests',{timeout:60000},async()=>{
- const app=await application();let browser;try{
-  const at=Date.now()-600000,sid=await app.db.call('observePlatformStream','twitch','owner','stream',at,at,null,'Stream');
-  const event={source:'twitch',accountId:'owner',externalId:'one',type:'chat.message',actor:{externalId:'viewer',displayName:'Viewer'},occurredAtMs:at,receivedAtMs:at,sourceTime:null,timeQuality:'provider',transport:'eventsub',payload:{text:'Hi'}};
-  const viewer=(await app.db.call('ingest',event)).personId;
-  await app.db.call('recordPoll',sid,'owner',{startedAtMs:at,completedAtMs:at+60000,status:'complete',userIds:['viewer']});
-  await app.db.call('ingest',{...event,externalId:'reward',type:'channel_points_custom_reward_redemption.add',payload:{reward:{title:'Music',cost:250},raw:{payload:{event:{id:'reward-id',status:'FULFILLED'}}}}});await app.db.call('ingest',{...event,externalId:'reward-unknown',type:'channel_points_custom_reward_redemption.add',payload:{reward:{title:'Reward without cost'}}});await app.db.call('endSession',sid,at+120000);
-  for(const status of ['CANCELED','UNFULFILLED'])await app.db.call('ingest',{...event,externalId:`reward-${status}`,type:'channel_points_custom_reward_redemption.add',payload:{reward:{title:`${status}${'X'.repeat(300)}`,cost:50},raw:{payload:{event:{id:status,status}}}}});
-  for(let i=0;i<12;i++)await app.db.call('ingest',{...event,source:'donationalerts',accountId:'da',externalId:`tip-${i}`,type:'donation',actor:{externalId:'name:viewer',displayName:'Viewer'},payload:{actorName:'Viewer',amountMinor:'10000',currency:'RUB',text:`Tip ${i}`}});
-  const yt=await app.db.call('observePlatformStream','youtube','yt-owner','video',at+180000,at+180000,null,'YT');await app.db.call('youtubeMessages','yt-owner','chat',[{id:'yt-message',snippet:{type:'textMessageEvent',publishedAt:new Date(at+180000).toISOString()},authorDetails:{channelId:'yt-viewer',displayName:'Viewer'}}]);await app.db.call('endSession',yt,at+360000);
-  browser=await launchBrowser();const page=await browser.newPage({viewport:{width:1280,height:800}});page.setDefaultTimeout(7000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  const reads=[];page.on('request',request=>{if(request.method()==='GET')reads.push(new URL(request.url()).pathname);});await goto(page,app.bootstrap());
-  await page.getByRole('button',{name:'Люди',exact:true}).click();await page.locator('.person-row').filter({hasText:'Viewer'}).click();await page.getByLabel('Показатели человека').waitFor();
-  assert.equal(reads.filter(path=>path===`/api/v1/persons/${viewer}/stats`).length,1,'opening a person must not fetch statistics twice');
-  assert.equal(await page.getByRole('region',{name:'Подписки на канал',exact:true}).count(),0);
-  await page.getByRole('tablist',{name:'Разделы человека'}).getByRole('tab',{name:'Активность',exact:true}).click();await page.getByText('Активность YouTube оценена по сообщениям.',{exact:true}).waitFor();assert.equal(await page.getByText('Баллы канала и награды',{exact:true}).count(),0);
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { application } from '../helpers/application.mjs';
+import { launchBrowser } from '../helpers/browser.mjs';
+import { goto, saveCoverage } from '../helpers/browser-coverage.mjs';
+import { assertUiLayout } from '../helpers/ui-layout.mjs';
+test(
+  'person detail tabs retain immutable donations, paginate and recover from unavailable requests',
+  { timeout: 60000 },
+  async () => {
+    const app = await application();
+    let browser;
+    try {
+      const at = Date.now() - 600000,
+        sid = await app.db.call('observePlatformStream', 'twitch', 'owner', 'stream', at, at, null, 'Stream');
+      const event = {
+        source: 'twitch',
+        accountId: 'owner',
+        externalId: 'one',
+        type: 'chat.message',
+        actor: { externalId: 'viewer', displayName: 'Viewer' },
+        occurredAtMs: at,
+        receivedAtMs: at,
+        sourceTime: null,
+        timeQuality: 'provider',
+        transport: 'eventsub',
+        payload: { text: 'Hi' },
+      };
+      const viewer = (await app.db.call('ingest', event)).personId;
+      await app.db.call('recordPoll', sid, 'owner', {
+        startedAtMs: at,
+        completedAtMs: at + 60000,
+        status: 'complete',
+        userIds: ['viewer'],
+      });
+      await app.db.call('ingest', {
+        ...event,
+        externalId: 'reward',
+        type: 'channel_points_custom_reward_redemption.add',
+        payload: {
+          reward: { title: 'Music', cost: 250 },
+          raw: { payload: { event: { id: 'reward-id', status: 'FULFILLED' } } },
+        },
+      });
+      await app.db.call('ingest', {
+        ...event,
+        externalId: 'reward-unknown',
+        type: 'channel_points_custom_reward_redemption.add',
+        payload: { reward: { title: 'Reward without cost' } },
+      });
+      await app.db.call('endSession', sid, at + 120000);
+      for (const status of ['CANCELED', 'UNFULFILLED'])
+        await app.db.call('ingest', {
+          ...event,
+          externalId: `reward-${status}`,
+          type: 'channel_points_custom_reward_redemption.add',
+          payload: {
+            reward: { title: `${status}${'X'.repeat(300)}`, cost: 50 },
+            raw: { payload: { event: { id: status, status } } },
+          },
+        });
+      for (let i = 0; i < 12; i++)
+        await app.db.call('ingest', {
+          ...event,
+          source: 'donationalerts',
+          accountId: 'da',
+          externalId: `tip-${i}`,
+          type: 'donation',
+          actor: { externalId: 'name:viewer', displayName: 'Viewer' },
+          payload: { actorName: 'Viewer', amountMinor: '10000', currency: 'RUB', text: `Tip ${i}` },
+        });
+      const yt = await app.db.call(
+        'observePlatformStream',
+        'youtube',
+        'yt-owner',
+        'video',
+        at + 180000,
+        at + 180000,
+        null,
+        'YT',
+      );
+      await app.db.call('youtubeMessages', 'yt-owner', 'chat', [
+        {
+          id: 'yt-message',
+          snippet: { type: 'textMessageEvent', publishedAt: new Date(at + 180000).toISOString() },
+          authorDetails: { channelId: 'yt-viewer', displayName: 'Viewer' },
+        },
+      ]);
+      await app.db.call('endSession', yt, at + 360000);
+      browser = await launchBrowser();
+      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      page.setDefaultTimeout(7000);
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(e.message));
+      const reads = [];
+      page.on('request', (request) => {
+        if (request.method() === 'GET') reads.push(new URL(request.url()).pathname);
+      });
+      await goto(page, app.bootstrap());
+      await page.getByRole('button', { name: 'Люди', exact: true }).click();
+      await page.locator('.person-row').filter({ hasText: 'Viewer' }).click();
+      await page.getByLabel('Показатели человека').waitFor();
+      assert.equal(
+        reads.filter((path) => path === `/api/v1/persons/${viewer}/stats`).length,
+        1,
+        'opening a person must not fetch statistics twice',
+      );
+      assert.equal(await page.getByRole('region', { name: 'Подписки на канал', exact: true }).count(), 0);
+      await page
+        .getByRole('tablist', { name: 'Разделы человека' })
+        .getByRole('tab', { name: 'Активность', exact: true })
+        .click();
+      await page.getByText('Активность YouTube оценена по сообщениям.', { exact: true }).waitFor();
+      assert.equal(await page.getByText('Баллы канала и награды', { exact: true }).count(), 0);
 
-  for(const width of [320,390,768,1280]){await page.setViewportSize({width,height:800});await assertUiLayout(page);}await page.setViewportSize({width:1280,height:800});await page.screenshot({path:'/tmp/sp-points-desktop.png',fullPage:true});
-  assert.equal(await page.evaluate(()=>document.documentElement.scrollHeight<=innerHeight),true);
-  const tabs=page.getByRole('tablist',{name:'Разделы человека'});await page.route('**/api/v1/donations?*',route=>route.fulfill({status:503,json:{error:'DONATIONS_UNAVAILABLE'}}));await tabs.getByRole('tab',{name:'Донаты',exact:true}).click();await page.getByRole('alert').filter({hasText:'DONATIONS_UNAVAILABLE'}).waitFor();await page.unroute('**/api/v1/donations?*');await tabs.getByRole('tab',{name:'Активность'}).click();await tabs.getByRole('tab',{name:'Донаты',exact:true}).click();const section=page.getByRole('region',{name:'Донаты человека'});await section.getByText('1–10 из 12',{exact:true}).waitFor();await section.getByRole('button',{name:'Следующие донаты'}).click();await section.getByText('11–12 из 12',{exact:true}).waitFor();assert.equal(await section.locator('article').count(),2);await section.getByRole('button',{name:'Предыдущие донаты'}).click();await section.getByText('1–10 из 12',{exact:true}).waitFor();
-  await section.getByRole('button',{name:'Следующие донаты'}).click();await section.getByText('11–12 из 12',{exact:true}).waitFor();for(let i=0;i<2;i++){const response=page.waitForResponse(r=>r.url().includes('/assign')&&r.status()===200);await section.locator('article').first().getByRole('button',{name:'Изменить привязку'}).click();await section.getByLabel('Привязать к человеку',{exact:true}).selectOption('');await section.getByRole('button',{name:'Сохранить привязку',exact:true}).click();await response;await page.waitForFunction(total=>document.querySelector('[aria-label="Донаты человека"] h3')?.textContent?.includes(String(total)),11-i);}await page.waitForFunction(()=>document.querySelectorAll('[aria-label="Донаты человека"] article').length===10);assert.equal(await section.getByRole('button',{name:'Предыдущие донаты'}).count(),0);assert.equal((await app.db.call('donations')).total,12);
-  const row=section.locator('article').first();await row.getByRole('button',{name:'Изменить привязку'}).click();await row.getByRole('button',{name:'Отмена',exact:true}).click();
-  await page.route('**/api/v1/donations/*/assign',route=>route.fulfill({status:503,json:{error:'TEMPORARILY_UNAVAILABLE'}}));await row.getByRole('button',{name:'Изменить привязку'}).click();await row.getByLabel('Привязать к человеку',{exact:true}).selectOption('');await row.getByRole('button',{name:'Сохранить привязку',exact:true}).click();await section.getByRole('alert').filter({hasText:'TEMPORARILY_UNAVAILABLE'}).waitFor();assert.equal((await app.db.call('donations',viewer)).total,10);await page.unroute('**/api/v1/donations/*/assign');
-  await page.route('**/api/v1/persons/*/metadata',route=>route.fulfill({status:503,json:{error:'METADATA_UNAVAILABLE'}}));await tabs.getByRole('tab',{name:'Заметки'}).click();const meta=page.getByRole('region',{name:'Метки человека'});await meta.getByRole('alert').filter({hasText:'METADATA_UNAVAILABLE'}).waitFor();await page.unroute('**/api/v1/persons/*/metadata');await meta.getByRole('button',{name:'Загрузить актуальные метки'}).click();await meta.getByRole('alert').waitFor({state:'detached'});await meta.getByLabel('Новый тег').fill('Regular');await meta.getByLabel('Новый тег').press('Enter');await page.route('**/api/v1/persons/*/metadata',route=>route.fulfill({status:503,json:{error:'TEMPORARILY_UNAVAILABLE'}}));await meta.getByRole('button',{name:'Сохранить метки'}).click();await meta.getByRole('alert').waitFor();await meta.getByRole('button',{name:'Загрузить актуальные метки'}).click();await meta.getByRole('alert').waitFor();await page.unroute('**/api/v1/persons/*/metadata');await meta.getByRole('button',{name:'Загрузить актуальные метки'}).click();await meta.getByRole('alert').waitFor({state:'detached'});
-  await page.route('**/api/v1/persons/*/activity',route=>route.fulfill({status:503,json:{error:'ACTIVITY_UNAVAILABLE'}}));await tabs.getByRole('tab',{name:'Активность'}).click();await page.getByRole('alert').filter({hasText:'ACTIVITY_UNAVAILABLE'}).waitFor();await page.unroute('**/api/v1/persons/*/activity');await tabs.getByRole('tab',{name:'Донаты',exact:true}).click();await tabs.getByRole('tab',{name:'Активность'}).click();await page.getByRole('heading',{name:'Обычно в чате · МСК',exact:true}).waitFor();
-  await app.db.call('ingest',{...event,source:'donationalerts',accountId:'da',externalId:'unknown-tip',type:'donation',occurredAtMs:null,receivedAtMs:at-60000,timeQuality:'unknown',actor:{externalId:'name:viewer',displayName:'Viewer'},payload:{actorName:'Viewer'}});await tabs.getByRole('tab',{name:'Донаты',exact:true}).click();await section.getByText('1–10 из 11',{exact:true}).waitFor();await section.getByRole('button',{name:'Следующие донаты'}).click();await section.getByText('Сумма неизвестна',{exact:true}).waitFor();assert.equal((await app.db.call('donation','["donationalerts","da","donation","unknown-tip"]')).occurredAtMs,null);
-  assert.deepEqual(errors,[]);await saveCoverage(page);
- }finally{await browser?.close();await app.close();}
-});
+      for (const width of [320, 390, 768, 1280]) {
+        await page.setViewportSize({ width, height: 800 });
+        await assertUiLayout(page);
+      }
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.screenshot({ path: '/tmp/sp-points-desktop.png', fullPage: true });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight), true);
+      const tabs = page.getByRole('tablist', { name: 'Разделы человека' });
+      await page.route('**/api/v1/donations?*', (route) =>
+        route.fulfill({ status: 503, json: { error: 'DONATIONS_UNAVAILABLE' } }),
+      );
+      await tabs.getByRole('tab', { name: 'Донаты', exact: true }).click();
+      await page.getByRole('alert').filter({ hasText: 'DONATIONS_UNAVAILABLE' }).waitFor();
+      await page.unroute('**/api/v1/donations?*');
+      await tabs.getByRole('tab', { name: 'Активность' }).click();
+      await tabs.getByRole('tab', { name: 'Донаты', exact: true }).click();
+      const section = page.getByRole('region', { name: 'Донаты человека' });
+      await section.getByText('1–10 из 12', { exact: true }).waitFor();
+      await section.getByRole('button', { name: 'Следующие донаты' }).click();
+      await section.getByText('11–12 из 12', { exact: true }).waitFor();
+      assert.equal(await section.locator('article').count(), 2);
+      await section.getByRole('button', { name: 'Предыдущие донаты' }).click();
+      await section.getByText('1–10 из 12', { exact: true }).waitFor();
+      await section.getByRole('button', { name: 'Следующие донаты' }).click();
+      await section.getByText('11–12 из 12', { exact: true }).waitFor();
+      for (let i = 0; i < 2; i++) {
+        const response = page.waitForResponse((r) => r.url().includes('/assign') && r.status() === 200);
+        await section.locator('article').first().getByRole('button', { name: 'Изменить привязку' }).click();
+        await section.getByLabel('Привязать к человеку', { exact: true }).selectOption('');
+        await section.getByRole('button', { name: 'Сохранить привязку', exact: true }).click();
+        await response;
+        await page.waitForFunction(
+          (total) => document.querySelector('[aria-label="Донаты человека"] h3')?.textContent?.includes(String(total)),
+          11 - i,
+        );
+      }
+      await page.waitForFunction(
+        () => document.querySelectorAll('[aria-label="Донаты человека"] article').length === 10,
+      );
+      assert.equal(await section.getByRole('button', { name: 'Предыдущие донаты' }).count(), 0);
+      assert.equal((await app.db.call('donations')).total, 12);
+      const row = section.locator('article').first();
+      await row.getByRole('button', { name: 'Изменить привязку' }).click();
+      await row.getByRole('button', { name: 'Отмена', exact: true }).click();
+      await page.route('**/api/v1/donations/*/assign', (route) =>
+        route.fulfill({ status: 503, json: { error: 'TEMPORARILY_UNAVAILABLE' } }),
+      );
+      await row.getByRole('button', { name: 'Изменить привязку' }).click();
+      await row.getByLabel('Привязать к человеку', { exact: true }).selectOption('');
+      await row.getByRole('button', { name: 'Сохранить привязку', exact: true }).click();
+      await section.getByRole('alert').filter({ hasText: 'TEMPORARILY_UNAVAILABLE' }).waitFor();
+      assert.equal((await app.db.call('donations', viewer)).total, 10);
+      await page.unroute('**/api/v1/donations/*/assign');
+      await page.route('**/api/v1/persons/*/metadata', (route) =>
+        route.fulfill({ status: 503, json: { error: 'METADATA_UNAVAILABLE' } }),
+      );
+      await tabs.getByRole('tab', { name: 'Заметки' }).click();
+      const meta = page.getByRole('region', { name: 'Метки человека' });
+      await meta.getByRole('alert').filter({ hasText: 'METADATA_UNAVAILABLE' }).waitFor();
+      await page.unroute('**/api/v1/persons/*/metadata');
+      await meta.getByRole('button', { name: 'Загрузить актуальные метки' }).click();
+      await meta.getByRole('alert').waitFor({ state: 'detached' });
+      await meta.getByLabel('Новый тег').fill('Regular');
+      await meta.getByLabel('Новый тег').press('Enter');
+      await page.route('**/api/v1/persons/*/metadata', (route) =>
+        route.fulfill({ status: 503, json: { error: 'TEMPORARILY_UNAVAILABLE' } }),
+      );
+      await meta.getByRole('button', { name: 'Сохранить метки' }).click();
+      await meta.getByRole('alert').waitFor();
+      await meta.getByRole('button', { name: 'Загрузить актуальные метки' }).click();
+      await meta.getByRole('alert').waitFor();
+      await page.unroute('**/api/v1/persons/*/metadata');
+      await meta.getByRole('button', { name: 'Загрузить актуальные метки' }).click();
+      await meta.getByRole('alert').waitFor({ state: 'detached' });
+      await page.route('**/api/v1/persons/*/activity', (route) =>
+        route.fulfill({ status: 503, json: { error: 'ACTIVITY_UNAVAILABLE' } }),
+      );
+      await tabs.getByRole('tab', { name: 'Активность' }).click();
+      await page.getByRole('alert').filter({ hasText: 'ACTIVITY_UNAVAILABLE' }).waitFor();
+      await page.unroute('**/api/v1/persons/*/activity');
+      await tabs.getByRole('tab', { name: 'Донаты', exact: true }).click();
+      await tabs.getByRole('tab', { name: 'Активность' }).click();
+      await page.getByRole('heading', { name: 'Обычно в чате · МСК', exact: true }).waitFor();
+      await app.db.call('ingest', {
+        ...event,
+        source: 'donationalerts',
+        accountId: 'da',
+        externalId: 'unknown-tip',
+        type: 'donation',
+        occurredAtMs: null,
+        receivedAtMs: at - 60000,
+        timeQuality: 'unknown',
+        actor: { externalId: 'name:viewer', displayName: 'Viewer' },
+        payload: { actorName: 'Viewer' },
+      });
+      await tabs.getByRole('tab', { name: 'Донаты', exact: true }).click();
+      await section.getByText('1–10 из 11', { exact: true }).waitFor();
+      await section.getByRole('button', { name: 'Следующие донаты' }).click();
+      await section.getByText('Сумма неизвестна', { exact: true }).waitFor();
+      assert.equal(
+        (await app.db.call('donation', '["donationalerts","da","donation","unknown-tip"]')).occurredAtMs,
+        null,
+      );
+      assert.deepEqual(errors, []);
+      await saveCoverage(page);
+    } finally {
+      await browser?.close();
+      await app.close();
+    }
+  },
+);

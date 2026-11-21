@@ -22,8 +22,8 @@
     "test:e2e": "pnpm build && node --test --test-concurrency=2 tests/e2e/*.test.mjs",
     "test:coverage": "pnpm build && node scripts/test-with-coverage.mjs",
     "lint": "eslint .",
-    "format": "prettier --write",
-    "format:check": "prettier --check"
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@fastify/cookie": "11.1.2",
@@ -47,6 +47,7 @@
     "istanbul-lib-coverage": "3.2.2",
     "playwright": "1.63.0",
     "prettier": "3.10.1",
+    "prettier-plugin-svelte": "4.2.0",
     "svelte": "5.57.2",
     "svelte-check": "4.7.6",
     "typescript": "5.9.3",

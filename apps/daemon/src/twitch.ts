@@ -1,131 +1,126 @@
-import {subscriberInterval} from './subscriber-cadence.js';
-import {ChatterHealth} from './chatter-health.js';
-import WebSocket from "ws";
-import type { ConfigurationPort, Tokens } from "./config.js";
-import type {StorePort} from './store-contract.js';
-type TwitchStore = StorePort<'activeLogicalStream' | 'ensureOwnerIdentity' | 'followingSnapshot' | 'gap' | 'ingest' | 'observePlatformStream' | 'platformMissing' | 'platformStreams' | 'recordPoll' | 'streamSample' | 'updateChatterNames'>;
-import {
-  collectChatters,
-  type ChattersPage,
-} from "../../../packages/core/src/chatters.js";
-import type { EventInput } from "../../../packages/core/src/domain.js";
+import { subscriberInterval } from './subscriber-cadence.js';
+import { ChatterHealth } from './chatter-health.js';
+import WebSocket from 'ws';
+import type { ConfigurationPort, Tokens } from './config.js';
+import type { StorePort } from './store-contract.js';
+type TwitchStore = StorePort<
+  | 'activeLogicalStream'
+  | 'ensureOwnerIdentity'
+  | 'followingSnapshot'
+  | 'gap'
+  | 'ingest'
+  | 'observePlatformStream'
+  | 'platformMissing'
+  | 'platformStreams'
+  | 'recordPoll'
+  | 'streamSample'
+  | 'updateChatterNames'
+>;
+import { collectChatters, type ChattersPage } from '../../../packages/core/src/chatters.js';
+import type { EventInput } from '../../../packages/core/src/domain.js';
 
-import {object, string, type ConnectionStatus, type ProviderConnection, type SocketFactory} from './provider-values.js';
-export {object, string, type ConnectionStatus, type SocketFactory} from './provider-values.js';
+import {
+  object,
+  string,
+  type ConnectionStatus,
+  type ProviderConnection,
+  type SocketFactory,
+} from './provider-values.js';
+export { object, string, type ConnectionStatus, type SocketFactory } from './provider-values.js';
 
 export function messageText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object" && !Array.isArray(value))
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object' && !Array.isArray(value))
     return string((value as Record<string, unknown>).text);
-  return "";
+  return '';
 }
-const baseScopes = ["user:read:chat", "moderator:read:chatters", "moderator:read:followers"];
-const optionalScopes = [
-  "channel:read:subscriptions",
-  "bits:read",
-];
+const baseScopes = ['user:read:chat', 'moderator:read:chatters', 'moderator:read:followers'];
+const optionalScopes = ['channel:read:subscriptions', 'bits:read'];
 
-export function normalizeTwitch(
-  envelope: unknown,
-  accountId: string,
-): EventInput | null {
+export function normalizeTwitch(envelope: unknown, accountId: string): EventInput | null {
   const root = object(envelope),
     metadata = object(root.metadata),
     payload = object(root.payload);
-  if (metadata.message_type !== "notification") return null;
+  if (metadata.message_type !== 'notification') return null;
   const event = object(payload.event),
     subscription = object(payload.subscription),
     type = string(subscription.type);
   const mappings: Record<string, string> = {
-    "channel.chat.message": "chat.message",
-    "channel.cheer": "bits",
-    "channel.follow": "follow",
-    "channel.update": "channel.update",
-    "channel.subscribe": "subscription",
-    "channel.subscription.gift": "subscription.gift",
-    "channel.subscription.message": "subscription.message",
-    "channel.raid": "raid",
-    "stream.online": "stream.online",
-    "stream.offline": "stream.offline",
-    "channel.chat.message_delete": "chat.message_delete",
-    "channel.chat.clear": "chat.clear",
-    "channel.chat.clear_user_messages": "chat.clear_user_messages",
+    'channel.chat.message': 'chat.message',
+    'channel.cheer': 'bits',
+    'channel.follow': 'follow',
+    'channel.update': 'channel.update',
+    'channel.subscribe': 'subscription',
+    'channel.subscription.gift': 'subscription.gift',
+    'channel.subscription.message': 'subscription.message',
+    'channel.raid': 'raid',
+    'stream.online': 'stream.online',
+    'stream.offline': 'stream.offline',
+    'channel.chat.message_delete': 'chat.message_delete',
+    'channel.chat.clear': 'chat.clear',
+    'channel.chat.clear_user_messages': 'chat.clear_user_messages',
   };
   const mapped = mappings[type];
   if (!mapped) return null;
-  const userId =
-    string(event.chatter_user_id) ||
-    string(event.user_id) ||
-    string(event.from_broadcaster_user_id);
-  const label =
-    string(event.chatter_user_name) ||
-    string(event.user_name) ||
-    string(event.from_broadcaster_user_name);
-  const time =
-    string(event.followed_at) ||
-    string(event.started_at) ||
-    string(metadata.message_timestamp);
+  const userId = string(event.chatter_user_id) || string(event.user_id) || string(event.from_broadcaster_user_id);
+  const label = string(event.chatter_user_name) || string(event.user_name) || string(event.from_broadcaster_user_name);
+  const time = string(event.followed_at) || string(event.started_at) || string(metadata.message_timestamp);
   const at = Date.parse(time);
-  if (!Number.isFinite(at)) throw new Error("INVALID_PROVIDER_TIME");
-  const chat = mapped === "chat.message";
+  if (!Number.isFinite(at)) throw new Error('INVALID_PROVIDER_TIME');
+  const chat = mapped === 'chat.message';
   const id = chat ? string(event.message_id) : string(metadata.message_id);
-  if (!id) throw new Error("MISSING_PROVIDER_EVENT_ID");
+  if (!id) throw new Error('MISSING_PROVIDER_EVENT_ID');
   return {
-    source: "twitch",
+    source: 'twitch',
     accountId,
     externalId: id,
     type: mapped,
     actor:
-      userId && !event.is_anonymous && (!mapped.startsWith("chat.") || chat)
+      userId && !event.is_anonymous && (!mapped.startsWith('chat.') || chat)
         ? { externalId: userId, displayName: label || userId }
         : null,
     occurredAtMs: at,
     receivedAtMs: Date.now(),
     sourceTime: time,
-    timeQuality: "provider",
-    transport: "eventsub",
+    timeQuality: 'provider',
+    transport: 'eventsub',
     payload: {
-      raw:root,
+      raw: root,
       text: messageText(event.message) || string(event.user_input),
-      reward:event.reward??null,
+      reward: event.reward ?? null,
       actorName: label,
       originChannelId: string(event.source_broadcaster_user_id) || accountId,
       bits: event.bits ?? null,
       subscriptionType: type,
-      ...(mapped === "channel.update" ? {categoryId:string(event.category_id),categoryName:string(event.category_name),title:string(event.title)} : {}),
+      ...(mapped === 'channel.update'
+        ? {
+            categoryId: string(event.category_id),
+            categoryName: string(event.category_name),
+            title: string(event.title),
+          }
+        : {}),
       targetMessageId: string(event.message_id),
       targetUserId: string(event.target_user_id),
-      timeBasis:
-        event.followed_at || event.started_at ? "event" : "publication",
+      timeBasis: event.followed_at || event.started_at ? 'event' : 'publication',
     },
   };
 }
 
 /** Clear tokens only on definitive OAuth failure (400/401 or invalid_grant). */
-export function isDefinitiveTwitchAuthFailure(
-  status: number,
-  body: Record<string, unknown>,
-): boolean {
+export function isDefinitiveTwitchAuthFailure(status: number, body: Record<string, unknown>): boolean {
   if (status === 400 || status === 401) return true;
   const error = string(body.error).toLowerCase();
-  if (
-    error === "invalid_grant" ||
-    error === "unauthorized" ||
-    error === "invalid_token"
-  )
-    return true;
+  if (error === 'invalid_grant' || error === 'unauthorized' || error === 'invalid_token') return true;
   const message = string(body.message).toLowerCase();
   return (
-    message.includes("invalid refresh token") ||
-    message.includes("invalid_grant") ||
-    message.includes("unauthorized")
+    message.includes('invalid refresh token') || message.includes('invalid_grant') || message.includes('unauthorized')
   );
 }
 
 export class TwitchConnection implements ProviderConnection {
   status: ConnectionStatus = {
-    state: "disconnected",
-    detail: "Не подключён",
+    state: 'disconnected',
+    detail: 'Не подключён',
     capabilities: {},
   };
   device: {
@@ -146,9 +141,9 @@ export class TwitchConnection implements ProviderConnection {
   private reconcileError: string | null = null;
   private reconnectAttempt = 0;
   private sessionId: string | null = null;
-  private lastFollowersPollAt:number|null=null;
+  private lastFollowersPollAt: number | null = null;
   private lastSuccessfulPollAt: number | null = null;
-  private chatterHealth=new ChatterHealth();
+  private chatterHealth = new ChatterHealth();
   private authGeneration = 0;
   private gapStart: number | null = null;
   private rateLimitedUntil = 0;
@@ -157,43 +152,44 @@ export class TwitchConnection implements ProviderConnection {
     private config: ConfigurationPort,
     private db: TwitchStore,
     private request: typeof fetch = fetch,
-    private socketFactory: SocketFactory = (url, options) =>
-      new WebSocket(url, options),
+    private socketFactory: SocketFactory = (url, options) => new WebSocket(url, options),
     private now: () => number = Date.now,
   ) {}
   private get token(): Tokens {
-    if (!this.config.value.twitch) throw new Error("TWITCH_LOGIN_REQUIRED");
+    if (!this.config.value.twitch) throw new Error('TWITCH_LOGIN_REQUIRED');
     return this.config.value.twitch;
   }
-  async profileLogins(ids:readonly string[]):Promise<{id:string;login:string}[]> {
-    if(!ids.length||ids.length>100||ids.some(id=>!/^\d+$/.test(id)))throw new Error('INVALID_TWITCH_USER_IDS');
-    const query=new URLSearchParams(ids.map(id=>['id',id]));
-    const body=object(await this.api(`users?${query}`,{signal:AbortSignal.timeout(5000)}));
-    if(!Array.isArray(body.data))throw new Error('INVALID_TWITCH_USERS');
-    return body.data.map(raw=>{const user=object(raw);return {id:string(user.id),login:string(user.login)};});
+  async profileLogins(ids: readonly string[]): Promise<{ id: string; login: string }[]> {
+    if (!ids.length || ids.length > 100 || ids.some((id) => !/^\d+$/.test(id)))
+      throw new Error('INVALID_TWITCH_USER_IDS');
+    const query = new URLSearchParams(ids.map((id) => ['id', id]));
+    const body = object(await this.api(`users?${query}`, { signal: AbortSignal.timeout(5000) }));
+    if (!Array.isArray(body.data)) throw new Error('INVALID_TWITCH_USERS');
+    return body.data.map((raw) => {
+      const user = object(raw);
+      return { id: string(user.id), login: string(user.login) };
+    });
   }
   async beginAuth(clientId: string, extended: boolean): Promise<unknown> {
-    if (!/^[a-zA-Z0-9]{5,100}$/.test(clientId))
-      throw new Error("INVALID_CLIENT_ID");
+    if (!/^[a-zA-Z0-9]{5,100}$/.test(clientId)) throw new Error('INVALID_CLIENT_ID');
     await this.stop();
     const generation = this.authGeneration;
     this.config.value.twitchClientId = clientId;
     await this.config.save();
     const scopes = [...new Set([...baseScopes, ...(extended ? optionalScopes : [])])];
-    const response = await this.request("https://id.twitch.tv/oauth2/device", {
-      method: "POST",
+    const response = await this.request('https://id.twitch.tv/oauth2/device', {
+      method: 'POST',
       body: new URLSearchParams({
         client_id: clientId,
-        scopes: scopes.join(" "),
+        scopes: scopes.join(' '),
       }),
       signal: AbortSignal.timeout(15000),
     });
     const body = object(await response.json());
-    if (generation !== this.authGeneration)
-      throw new Error("TWITCH_AUTH_CANCELLED");
+    if (generation !== this.authGeneration) throw new Error('TWITCH_AUTH_CANCELLED');
     if (!response.ok) throw new Error(`TWITCH_DEVICE_HTTP_${response.status}`);
     const deviceCode = string(body.device_code);
-    if (!deviceCode) throw new Error("INVALID_DEVICE_RESPONSE");
+    if (!deviceCode) throw new Error('INVALID_DEVICE_RESPONSE');
     const expiresAt = Date.now() + Number(body.expires_in) * 1000;
     const interval = Math.max(5, Number(body.interval) || 5) * 1000;
     this.device = {
@@ -202,8 +198,8 @@ export class TwitchConnection implements ProviderConnection {
       expiresAt,
     };
     this.status = {
-      state: "authorizing",
-      detail: "Подтвердите вход на Twitch",
+      state: 'authorizing',
+      detail: 'Подтвердите вход на Twitch',
       capabilities: {},
     };
     void this.pollDevice(deviceCode, scopes, interval, expiresAt, generation);
@@ -220,23 +216,20 @@ export class TwitchConnection implements ProviderConnection {
       await new Promise((resolve) => setTimeout(resolve, interval));
       if (generation !== this.authGeneration) return;
       try {
-        const response = await this.request(
-          "https://id.twitch.tv/oauth2/token",
-          {
-            method: "POST",
-            body: new URLSearchParams({
-              client_id: this.config.value.twitchClientId,
-              device_code: code,
-              scopes: scopes.join(" "),
-              grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-            }),
-            signal: AbortSignal.timeout(15000),
-          },
-        );
+        const response = await this.request('https://id.twitch.tv/oauth2/token', {
+          method: 'POST',
+          body: new URLSearchParams({
+            client_id: this.config.value.twitchClientId,
+            device_code: code,
+            scopes: scopes.join(' '),
+            grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
         const body = object(await response.json());
         if (!response.ok) {
-          if (body.message === "authorization_pending") continue;
-          if (body.message === "slow_down") {
+          if (body.message === 'authorization_pending') continue;
+          if (body.message === 'slow_down') {
             interval += 5000;
             continue;
           }
@@ -247,7 +240,7 @@ export class TwitchConnection implements ProviderConnection {
           access: string(body.access_token),
           refresh: string(body.refresh_token),
           expiresAt: Date.now() + Number(body.expires_in) * 1000,
-          userId: "",
+          userId: '',
           scopes: Array.isArray(body.scope) ? body.scope.map(string) : scopes,
         };
         await this.config.save();
@@ -255,15 +248,14 @@ export class TwitchConnection implements ProviderConnection {
         await this.start();
         return;
       } catch (error) {
-        this.status.detail =
-          error instanceof Error ? error.message : "TWITCH_AUTH_ERROR";
+        this.status.detail = error instanceof Error ? error.message : 'TWITCH_AUTH_ERROR';
         if (generation !== this.authGeneration) return;
       }
     }
     if (generation === this.authGeneration) {
       this.device = null;
-      this.status.state = "error";
-      this.status.detail = "Время входа истекло — повторите";
+      this.status.state = 'error';
+      this.status.detail = 'Время входа истекло — повторите';
     }
   }
   async refresh(): Promise<void> {
@@ -272,20 +264,18 @@ export class TwitchConnection implements ProviderConnection {
     this.refreshPromise = (async () => {
       let response: Response;
       try {
-        response = await this.request("https://id.twitch.tv/oauth2/token", {
-          method: "POST",
+        response = await this.request('https://id.twitch.tv/oauth2/token', {
+          method: 'POST',
           body: new URLSearchParams({
             client_id: this.config.value.twitchClientId,
-            grant_type: "refresh_token",
+            grant_type: 'refresh_token',
             refresh_token: this.token.refresh,
           }),
           signal: AbortSignal.timeout(15000),
         });
       } catch (error) {
         // Network/timeout: keep tokens so reconnect/backoff can retry.
-        throw error instanceof Error
-          ? error
-          : new Error("TWITCH_REFRESH_TRANSIENT");
+        throw error instanceof Error ? error : new Error('TWITCH_REFRESH_TRANSIENT');
       }
       let body: Record<string, unknown>;
       try {
@@ -295,19 +285,18 @@ export class TwitchConnection implements ProviderConnection {
         if (response.ok) throw parseError;
         body = {};
       }
-      if (generation !== this.authGeneration)
-        throw new Error("TWITCH_AUTH_CANCELLED");
+      if (generation !== this.authGeneration) throw new Error('TWITCH_AUTH_CANCELLED');
       if (!response.ok) {
         if (isDefinitiveTwitchAuthFailure(response.status, body)) {
           // Expired/revoked refresh: clear credentials so reconnect stops looping.
           delete this.config.value.twitch;
           await this.config.save();
           this.status = {
-            state: "error",
-            detail: "Требуется повторный вход в Twitch",
+            state: 'error',
+            detail: 'Требуется повторный вход в Twitch',
             capabilities: {},
           };
-          throw new Error("TWITCH_REAUTH_REQUIRED");
+          throw new Error('TWITCH_REAUTH_REQUIRED');
         }
         // 429/5xx/other: keep tokens for existing reconnect/backoff.
         throw new Error(`TWITCH_REFRESH_HTTP_${response.status}`);
@@ -328,85 +317,66 @@ export class TwitchConnection implements ProviderConnection {
       this.refreshPromise = null;
     }
   }
-  async api(
-    path: string,
-    init: RequestInit = {},
-    retried = false,
-  ): Promise<unknown> {
-    const generation=this.authGeneration;
+  async api(path: string, init: RequestInit = {}, retried = false): Promise<unknown> {
+    const generation = this.authGeneration;
     if (Date.now() < this.rateLimitedUntil)
-      throw new Error(
-        `TWITCH_RATE_LIMIT_UNTIL_${Math.ceil(this.rateLimitedUntil / 1000)}`,
-      );
+      throw new Error(`TWITCH_RATE_LIMIT_UNTIL_${Math.ceil(this.rateLimitedUntil / 1000)}`);
     if (this.token.expiresAt < Date.now() + 60_000) await this.refresh();
-    if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
+    if (generation !== this.authGeneration) throw new Error('TWITCH_AUTH_CANCELLED');
     const headers = new Headers(init.headers);
-    headers.set("Authorization", `Bearer ${this.token.access}`);
-    headers.set("Client-Id", this.config.value.twitchClientId);
+    headers.set('Authorization', `Bearer ${this.token.access}`);
+    headers.set('Client-Id', this.config.value.twitchClientId);
     const response = await this.request(`https://api.twitch.tv/helix/${path}`, {
       ...init,
       headers,
       signal: init.signal ?? AbortSignal.timeout(15000),
     });
-    if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
+    if (generation !== this.authGeneration) throw new Error('TWITCH_AUTH_CANCELLED');
     if (response.status === 401 && !retried) {
       await this.refresh();
-      if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
+      if (generation !== this.authGeneration) throw new Error('TWITCH_AUTH_CANCELLED');
       return this.api(path, init, true);
     }
     if (response.status === 429) {
-      const reset = Number(response.headers.get("ratelimit-reset"));
-      this.rateLimitedUntil =
-        Number.isFinite(reset) && reset * 1000 > Date.now()
-          ? reset * 1000
-          : Date.now() + 60000;
-      throw new Error(
-        `TWITCH_RATE_LIMIT_UNTIL_${Math.ceil(this.rateLimitedUntil / 1000)}`,
-      );
+      const reset = Number(response.headers.get('ratelimit-reset'));
+      this.rateLimitedUntil = Number.isFinite(reset) && reset * 1000 > Date.now() ? reset * 1000 : Date.now() + 60000;
+      throw new Error(`TWITCH_RATE_LIMIT_UNTIL_${Math.ceil(this.rateLimitedUntil / 1000)}`);
     }
     if (!response.ok) throw new Error(`TWITCH_HTTP_${response.status}`);
-    const data=await response.json();
-    if(generation!==this.authGeneration)throw new Error('TWITCH_AUTH_CANCELLED');
+    const data = await response.json();
+    if (generation !== this.authGeneration) throw new Error('TWITCH_AUTH_CANCELLED');
 
     return data;
   }
   private async validate(): Promise<void> {
     const generation = this.authGeneration;
     if (this.token.expiresAt < Date.now() + 60_000) await this.refresh();
-    if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
-    let response = await this.request("https://id.twitch.tv/oauth2/validate", {
+    if (generation !== this.authGeneration) throw new Error('TWITCH_AUTH_CANCELLED');
+    let response = await this.request('https://id.twitch.tv/oauth2/validate', {
       headers: { Authorization: `OAuth ${this.token.access}` },
       signal: AbortSignal.timeout(15000),
     });
-    if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
+    if (generation !== this.authGeneration) throw new Error('TWITCH_AUTH_CANCELLED');
     if (response.status === 401) {
       await this.refresh();
-      if(generation!==this.authGeneration)throw new Error("TWITCH_AUTH_CANCELLED");
-      response = await this.request("https://id.twitch.tv/oauth2/validate", {
+      if (generation !== this.authGeneration) throw new Error('TWITCH_AUTH_CANCELLED');
+      response = await this.request('https://id.twitch.tv/oauth2/validate', {
         headers: { Authorization: `OAuth ${this.token.access}` },
         signal: AbortSignal.timeout(15000),
       });
     }
     const body = object(await response.json());
-    if (generation !== this.authGeneration)
-      throw new Error("TWITCH_AUTH_CANCELLED");
-    if (
-      !response.ok ||
-      body.client_id !== this.config.value.twitchClientId ||
-      !string(body.user_id)
-    )
-      throw new Error("TWITCH_TOKEN_MISMATCH");
+    if (generation !== this.authGeneration) throw new Error('TWITCH_AUTH_CANCELLED');
+    if (!response.ok || body.client_id !== this.config.value.twitchClientId || !string(body.user_id))
+      throw new Error('TWITCH_TOKEN_MISMATCH');
     this.token.userId = string(body.user_id);
-    this.token.scopes = Array.isArray(body.scopes)
-      ? body.scopes.map(string)
-      : [];
-    if (!this.token.scopes.includes("user:read:chat"))
-      throw new Error("MISSING_CHAT_SCOPE");
+    this.token.scopes = Array.isArray(body.scopes) ? body.scopes.map(string) : [];
+    if (!this.token.scopes.includes('user:read:chat')) throw new Error('MISSING_CHAT_SCOPE');
     await this.config.save();
-    if (generation !== this.authGeneration) throw new Error("TWITCH_AUTH_CANCELLED");
+    if (generation !== this.authGeneration) throw new Error('TWITCH_AUTH_CANCELLED');
     this.status.account = string(body.login);
     await this.db.call(
-      "ensureOwnerIdentity",
+      'ensureOwnerIdentity',
       this.token.userId,
       this.token.userId,
       string(body.login) || this.token.userId,
@@ -417,8 +387,8 @@ export class TwitchConnection implements ProviderConnection {
   async start(): Promise<void> {
     if (!this.config.value.twitch) {
       this.status = {
-        state: "disconnected",
-        detail: "Не подключён",
+        state: 'disconnected',
+        detail: 'Не подключён',
         capabilities: {},
       };
       return;
@@ -426,32 +396,25 @@ export class TwitchConnection implements ProviderConnection {
     await this.stop();
     this.stopped = false;
     const generation = this.authGeneration;
-    this.status.state = "connecting";
-    this.status.detail = "Подключение…";
+    this.status.state = 'connecting';
+    this.status.detail = 'Подключение…';
     try {
       await this.validate();
       if (this.stopped || generation !== this.authGeneration) return;
       this.connect();
       this.hourly = setInterval(() => {
-        void this.validate().catch((error) => this.report(error,generation));
+        void this.validate().catch((error) => this.report(error, generation));
       }, 3_600_000);
       // Reconcile/chatters failures must not tear down a healthy EventSub.
-      void this.reconcile().catch((error) => this.report(error,generation));
+      void this.reconcile().catch((error) => this.report(error, generation));
     } catch (error) {
       if (this.stopped || generation !== this.authGeneration) return;
       this.report(error);
-      if (
-        error instanceof Error &&
-        error.message === "TWITCH_REAUTH_REQUIRED"
-      )
-        return;
+      if (error instanceof Error && error.message === 'TWITCH_REAUTH_REQUIRED') return;
       this.scheduleReconnect();
     }
   }
-  private connect(
-    url = "wss://eventsub.wss.twitch.tv/ws",
-    handoff = false,
-  ): void {
+  private connect(url = 'wss://eventsub.wss.twitch.tv/ws', handoff = false): void {
     if (this.stopped) return;
     const generation = this.authGeneration,
       old = this.socket;
@@ -465,7 +428,7 @@ export class TwitchConnection implements ProviderConnection {
       timer = setTimeout(() => socket.terminate(), keepalive + 5000);
     };
     reset();
-    socket.on("message", (data) => {
+    socket.on('message', (data) => {
       if (this.stopped || generation !== this.authGeneration || !this.sockets.has(socket)) return;
       reset();
       void (async () => {
@@ -473,7 +436,7 @@ export class TwitchConnection implements ProviderConnection {
           meta = object(body.metadata),
           payload = object(body.payload),
           kind = meta.message_type;
-        if (kind === "session_welcome") {
+        if (kind === 'session_welcome') {
           const session = object(payload.session);
           keepalive = Number(session.keepalive_timeout_seconds) * 1000 || 15000;
           reset();
@@ -481,50 +444,45 @@ export class TwitchConnection implements ProviderConnection {
             this.socket = socket;
             old?.close();
           } else await this.subscribe(string(session.id));
-          this.status.state = "connected";
-          this.status.detail = "Сбор событий включён";
+          this.status.state = 'connected';
+          this.status.detail = 'Сбор событий включён';
           this.eventSubReady = true;
           this.reconnectAttempt = 0;
           if (this.gapStart !== null) {
-            await this.db.call(
-              "gap",
-              "twitch",
-              "connection_lost_no_replay",
-              this.gapStart,
-              Date.now(),
-            );
+            await this.db.call('gap', 'twitch', 'connection_lost_no_replay', this.gapStart, Date.now());
             this.gapStart = null;
           }
-        } else if (kind === "session_reconnect") {
+        } else if (kind === 'session_reconnect') {
           const next = string(object(payload.session).reconnect_url);
           const nextUrl = new URL(next);
-          if (
-            nextUrl.protocol !== "wss:" ||
-            nextUrl.hostname !== "eventsub.wss.twitch.tv"
-          )
-            throw new Error("INVALID_RECONNECT_URL");
+          if (nextUrl.protocol !== 'wss:' || nextUrl.hostname !== 'eventsub.wss.twitch.tv')
+            throw new Error('INVALID_RECONNECT_URL');
           this.connect(next, true);
-        } else if (kind === "revocation") {
+        } else if (kind === 'revocation') {
           const sub = object(payload.subscription);
           this.status.capabilities[string(sub.type)] = string(sub.status);
-          this.status.detail = "Часть подписок отозвана";
-        } else if (kind === "notification") {
+          this.status.detail = 'Часть подписок отозвана';
+        } else if (kind === 'notification') {
           const event = normalizeTwitch(body, this.token.userId);
           if (event) {
-            await this.db.call("ingest", event);
-            if(!this.stopped&&generation===this.authGeneration&&event.type==='chat.message'&&object(event.payload).originChannelId===this.token.userId&&event.occurredAtMs!==null)
+            await this.db.call('ingest', event);
+            if (
+              !this.stopped &&
+              generation === this.authGeneration &&
+              event.type === 'chat.message' &&
+              object(event.payload).originChannelId === this.token.userId &&
+              event.occurredAtMs !== null
+            )
               this.chatterHealth.message(event.occurredAtMs);
             this.status.lastEventAt = Date.now();
-            if (
-              event.type === "stream.online" ||
-              event.type === "stream.offline"
-            )
-              await this.reconcile();
+            if (event.type === 'stream.online' || event.type === 'stream.offline') await this.reconcile();
           }
         }
-      })().catch((error) => {if(!this.stopped&&generation===this.authGeneration)this.report(error);});
+      })().catch((error) => {
+        if (!this.stopped && generation === this.authGeneration) this.report(error);
+      });
     });
-    socket.on("close", () => {
+    socket.on('close', () => {
       this.sockets.delete(socket);
       if (timer) clearTimeout(timer);
       if (
@@ -533,112 +491,130 @@ export class TwitchConnection implements ProviderConnection {
         (this.socket === socket || (handoff && this.socket === old))
       ) {
         this.eventSubReady = false;
-        this.status.state = "degraded";
-        this.status.detail = "Соединение потеряно; повторное подключение";
+        this.status.state = 'degraded';
+        this.status.detail = 'Соединение потеряно; повторное подключение';
         this.gapStart ??= Date.now();
         this.scheduleReconnect();
       }
     });
-    socket.on("error", () => {
+    socket.on('error', () => {
       if (this.stopped || generation !== this.authGeneration || !this.sockets.has(socket)) return;
-      this.status.detail = "Ошибка WebSocket";
+      this.status.detail = 'Ошибка WebSocket';
     });
   }
   private async subscribe(sessionId: string): Promise<void> {
     const id = this.token.userId;
-    const definitions: [
-      string,
-      string,
-      Record<string, string>,
-      string | null,
-    ][] = [
-      [
-        "channel.chat.message",
-        "1",
-        { broadcaster_user_id: id, user_id: id },
-        "user:read:chat",
-      ],
-      ...[
-        "channel.chat.message_delete",
-        "channel.chat.clear",
-        "channel.chat.clear_user_messages",
-      ].map(
+    const definitions: [string, string, Record<string, string>, string | null][] = [
+      ['channel.chat.message', '1', { broadcaster_user_id: id, user_id: id }, 'user:read:chat'],
+      ...['channel.chat.message_delete', 'channel.chat.clear', 'channel.chat.clear_user_messages'].map(
         (type) =>
-          [
-            type,
-            "1",
-            { broadcaster_user_id: id, user_id: id },
-            "user:read:chat",
-          ] as [string, string, Record<string, string>, string],
+          [type, '1', { broadcaster_user_id: id, user_id: id }, 'user:read:chat'] as [
+            string,
+            string,
+            Record<string, string>,
+            string,
+          ],
       ),
-      ["channel.update", "2", { broadcaster_user_id: id }, null],
-      ["stream.online", "1", { broadcaster_user_id: id }, null],
-      ["stream.offline", "1", { broadcaster_user_id: id }, null],
-      ["channel.raid", "1", { to_broadcaster_user_id: id }, null],
-      [
-        "channel.follow",
-        "2",
-        { broadcaster_user_id: id, moderator_user_id: id },
-        "moderator:read:followers",
-      ],
-      ...[
-        "channel.subscribe",
-        "channel.subscription.gift",
-        "channel.subscription.message",
-      ].map(
+      ['channel.update', '2', { broadcaster_user_id: id }, null],
+      ['stream.online', '1', { broadcaster_user_id: id }, null],
+      ['stream.offline', '1', { broadcaster_user_id: id }, null],
+      ['channel.raid', '1', { to_broadcaster_user_id: id }, null],
+      ['channel.follow', '2', { broadcaster_user_id: id, moderator_user_id: id }, 'moderator:read:followers'],
+      ...['channel.subscribe', 'channel.subscription.gift', 'channel.subscription.message'].map(
         (type) =>
-          [
-            type,
-            "1",
-            { broadcaster_user_id: id },
-            "channel:read:subscriptions",
-          ] as [string, string, Record<string, string>, string],
+          [type, '1', { broadcaster_user_id: id }, 'channel:read:subscriptions'] as [
+            string,
+            string,
+            Record<string, string>,
+            string,
+          ],
       ),
-      ["channel.cheer", "1", { broadcaster_user_id: id }, "bits:read"],
+      ['channel.cheer', '1', { broadcaster_user_id: id }, 'bits:read'],
     ];
     for (const [type, version, condition, scope] of definitions) {
       if (scope && !this.token.scopes.includes(scope)) {
-        this.status.capabilities[type] = "Нет разрешения";
+        this.status.capabilities[type] = 'Нет разрешения';
         continue;
       }
       try {
-        await this.api("eventsub/subscriptions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        await this.api('eventsub/subscriptions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             type,
             version,
             condition,
-            transport: { method: "websocket", session_id: sessionId },
+            transport: { method: 'websocket', session_id: sessionId },
           }),
         });
-        this.status.capabilities[type] = "включено";
+        this.status.capabilities[type] = 'включено';
       } catch (error) {
-        this.status.capabilities[type] =
-          error instanceof Error ? error.message : "error";
-        if (type === "channel.chat.message") throw error;
+        this.status.capabilities[type] = error instanceof Error ? error.message : 'error';
+        if (type === 'channel.chat.message') throw error;
       }
     }
   }
-  private async collectFollowers(account:string,current:()=>boolean,at:number){
-    if(!this.token?.scopes.includes('moderator:read:followers')){this.status.capabilities.followers='Для проверки подписок нужен повторный вход в Twitch с разрешением читать подписчиков';return;}
-    if(this.lastFollowersPollAt!==null&&at-this.lastFollowersPollAt<subscriberInterval(this.platformLive))return;
-    try{
-      const followers:{id:string;name:string;followedAtMs:number|null;raw:unknown}[]=[],seen=new Set<string>();let cursor='',complete=false,total:number|null=null;
-      for(let page=0;page<25;page++){
-        const result=object(await this.api(`channels/followers?${new URLSearchParams({broadcaster_id:account,first:'100',...(cursor?{after:cursor}:{})})}`));if(!current())return;
-        if(!Array.isArray(result.data))throw new Error('INVALID_FOLLOWERS');
-        if(Number.isSafeInteger(result.total)&&Number(result.total)>=0)total=Number(result.total);
-        for(const raw of result.data){const f=object(raw),id=string(f.user_id);if(!id)throw new Error('INVALID_FOLLOWERS');const date=Date.parse(string(f.followed_at));followers.push({id,name:string(f.user_name)||string(f.user_login)||id,followedAtMs:Number.isFinite(date)&&date>=0?date:null,raw});}
-        cursor=string(object(result.pagination).cursor);if(!cursor){complete=true;break;}if(seen.has(cursor))throw new Error('FOLLOWERS_PAGINATION_LOOP');seen.add(cursor);
+  private async collectFollowers(account: string, current: () => boolean, at: number) {
+    if (!this.token?.scopes.includes('moderator:read:followers')) {
+      this.status.capabilities.followers =
+        'Для проверки подписок нужен повторный вход в Twitch с разрешением читать подписчиков';
+      return;
+    }
+    if (this.lastFollowersPollAt !== null && at - this.lastFollowersPollAt < subscriberInterval(this.platformLive))
+      return;
+    try {
+      const followers: { id: string; name: string; followedAtMs: number | null; raw: unknown }[] = [],
+        seen = new Set<string>();
+      let cursor = '',
+        complete = false,
+        total: number | null = null;
+      for (let page = 0; page < 25; page++) {
+        const result = object(
+          await this.api(
+            `channels/followers?${new URLSearchParams({ broadcaster_id: account, first: '100', ...(cursor ? { after: cursor } : {}) })}`,
+          ),
+        );
+        if (!current()) return;
+        if (!Array.isArray(result.data)) throw new Error('INVALID_FOLLOWERS');
+        if (Number.isSafeInteger(result.total) && Number(result.total) >= 0) total = Number(result.total);
+        for (const raw of result.data) {
+          const f = object(raw),
+            id = string(f.user_id);
+          if (!id) throw new Error('INVALID_FOLLOWERS');
+          const date = Date.parse(string(f.followed_at));
+          followers.push({
+            id,
+            name: string(f.user_name) || string(f.user_login) || id,
+            followedAtMs: Number.isFinite(date) && date >= 0 ? date : null,
+            raw,
+          });
+        }
+        cursor = string(object(result.pagination).cursor);
+        if (!cursor) {
+          complete = true;
+          break;
+        }
+        if (seen.has(cursor)) throw new Error('FOLLOWERS_PAGINATION_LOOP');
+        seen.add(cursor);
       }
-      if(!current())return;await this.db.call('followingSnapshot','twitch',account,followers,complete,at,total);if(!current())return;
-      this.lastFollowersPollAt=at;this.status.lastFollowersAt=at;this.status.capabilities.followers=complete?'Подписки проверены':'Получена часть подписок; отсутствие не считается отпиской';
-    }catch{if(current())this.status.capabilities.followers='Не удалось проверить подписки; чат продолжает собираться';}
+      if (!current()) return;
+      await this.db.call('followingSnapshot', 'twitch', account, followers, complete, at, total);
+      if (!current()) return;
+      this.lastFollowersPollAt = at;
+      this.status.lastFollowersAt = at;
+      this.status.capabilities.followers = complete
+        ? 'Подписки проверены'
+        : 'Получена часть подписок; отсутствие не считается отпиской';
+    } catch {
+      if (current()) this.status.capabilities.followers = 'Не удалось проверить подписки; чат продолжает собираться';
+    }
   }
   private async reconcile(): Promise<void> {
     if (this.stopped) return;
-    if (this.reconcilingGeneration === this.authGeneration) { this.reconcileRequested = true; return; }
+    if (this.reconcilingGeneration === this.authGeneration) {
+      this.reconcileRequested = true;
+      return;
+    }
     if (this.tick) clearTimeout(this.tick);
     this.tick = null;
     const generation = this.authGeneration;
@@ -646,108 +622,131 @@ export class TwitchConnection implements ProviderConnection {
     const current = () => !this.stopped && generation === this.authGeneration;
     this.reconcilingGeneration = generation;
     try {
-      const body = object(
-        await this.api(`streams?user_id=${encodeURIComponent(accountId)}`),
-      );
+      const body = object(await this.api(`streams?user_id=${encodeURIComponent(accountId)}`));
       if (!current()) return;
-      if (!Array.isArray(body.data) || body.data.length > 1)
-        throw new Error("INVALID_TWITCH_STREAMS");
+      if (!Array.isArray(body.data) || body.data.length > 1) throw new Error('INVALID_TWITCH_STREAMS');
       const previousSession = this.sessionId;
       const observedAtMs = this.now();
       if (body.data.length) {
         const stream = object(body.data[0]);
         const externalId = string(stream.id);
         const startedAtMs = Date.parse(string(stream.started_at));
-        if (!externalId || !Number.isFinite(startedAtMs) ||
+        if (
+          !externalId ||
+          !Number.isFinite(startedAtMs) ||
           (stream.user_id !== undefined && stream.user_id !== accountId) ||
-          (stream.type !== undefined && stream.type !== "live"))
-          throw new Error("INVALID_TWITCH_STREAM");
+          (stream.type !== undefined && stream.type !== 'live')
+        )
+          throw new Error('INVALID_TWITCH_STREAM');
         const login = string(stream.user_login);
-        const url = /^[a-zA-Z0-9_]{1,25}$/.test(login)
-          ? `https://www.twitch.tv/${login}` : null;
+        const url = /^[a-zA-Z0-9_]{1,25}$/.test(login) ? `https://www.twitch.tv/${login}` : null;
         const sessionId = await this.db.call(
-          "observePlatformStream", "twitch", accountId, externalId,
-          startedAtMs, observedAtMs, url, string(stream.title), [externalId],
+          'observePlatformStream',
+          'twitch',
+          accountId,
+          externalId,
+          startedAtMs,
+          observedAtMs,
+          url,
+          string(stream.title),
+          [externalId],
         );
         if (!current()) return;
         this.platformLive = true;
         this.sessionId = sessionId;
-        if (sessionId) await this.db.call("streamSample", sessionId, observedAtMs,
-          string(stream.game_id), string(stream.game_name), string(stream.title),
-          Number.isSafeInteger(stream.viewer_count) ? Number(stream.viewer_count) : null);
+        if (sessionId)
+          await this.db.call(
+            'streamSample',
+            sessionId,
+            observedAtMs,
+            string(stream.game_id),
+            string(stream.game_name),
+            string(stream.title),
+            Number.isSafeInteger(stream.viewer_count) ? Number(stream.viewer_count) : null,
+          );
         if (!current()) return;
       } else {
-        await this.db.call("platformMissing", "twitch", accountId, [], observedAtMs);
+        await this.db.call('platformMissing', 'twitch', accountId, [], observedAtMs);
         if (!current()) return;
-        const active = await this.db.call("activeLogicalStream");
+        const active = await this.db.call('activeLogicalStream');
         if (!current()) return;
-        const links = active
-          ? await this.db.call("platformStreams", String(active.id))
-          : [];
+        const links = active ? await this.db.call('platformStreams', String(active.id)) : [];
         if (!current()) return;
-        this.platformLive = links.some(link => link.platform === "twitch" && link.account_id === accountId && link.ended_at_ms === null);
-        this.sessionId = links.some(link => link.platform === "twitch" &&
-          link.account_id === accountId && link.ended_at_ms === null)
-          ? String(active!.id) : null;
+        this.platformLive = links.some(
+          (link) => link.platform === 'twitch' && link.account_id === accountId && link.ended_at_ms === null,
+        );
+        this.sessionId = links.some(
+          (link) => link.platform === 'twitch' && link.account_id === accountId && link.ended_at_ms === null,
+        )
+          ? String(active!.id)
+          : null;
       }
-      if (this.sessionId !== previousSession) {this.lastSuccessfulPollAt = null;this.chatterHealth=new ChatterHealth();}
+      if (this.sessionId !== previousSession) {
+        this.lastSuccessfulPollAt = null;
+        this.chatterHealth = new ChatterHealth();
+      }
       if (!current()) return;
-      if (
-        this.platformLive && this.sessionId &&
-        this.token.scopes.includes("moderator:read:chatters")
-      ) {
+      if (this.platformLive && this.sessionId && this.token.scopes.includes('moderator:read:chatters')) {
         const attemptedAtMs = this.now();
         const unobservedFromMs = this.lastSuccessfulPollAt ?? attemptedAtMs;
         try {
           const users: { user_id: string; user_name: string }[] = [];
           const sessionId = this.sessionId;
           const abort = AbortSignal.timeout(30000);
-          const fetchPage=async (cursor:string|undefined,first=1000) => {
-            if (!current()) throw new Error("TWITCH_AUTH_CANCELLED");
+          const fetchPage = async (cursor: string | undefined, first = 1000) => {
+            if (!current()) throw new Error('TWITCH_AUTH_CANCELLED');
             const page = object(
               await this.api(
-                `chat/chatters?broadcaster_id=${accountId}&moderator_id=${accountId}&first=${first}${cursor ? `&after=${encodeURIComponent(cursor)}` : ""}`,
+                `chat/chatters?broadcaster_id=${accountId}&moderator_id=${accountId}&first=${first}${cursor ? `&after=${encodeURIComponent(cursor)}` : ''}`,
                 { signal: abort },
               ),
             ) as unknown as ChattersPage;
-            if(Array.isArray(page.data))users.push(...page.data);
+            if (Array.isArray(page.data)) users.push(...page.data);
             return page;
           };
-          let poll = await collectChatters(cursor=>fetchPage(cursor),this.now);
+          let poll = await collectChatters((cursor) => fetchPage(cursor), this.now);
           if (!current()) return;
-          if(poll.status==='complete'&&poll.userIds.length===0)this.chatterHealth.empty(poll.completedAtMs);
-          if(poll.userIds.length)this.chatterHealth.populated();
-          if(this.chatterHealth.recover(poll.completedAtMs)){
+          if (poll.status === 'complete' && poll.userIds.length === 0) this.chatterHealth.empty(poll.completedAtMs);
+          if (poll.userIds.length) this.chatterHealth.populated();
+          if (this.chatterHealth.recover(poll.completedAtMs)) {
             // A different documented page size also checks a different cached URL.
             // One additional sweep per five minutes, under the same deadline/rate limit.
-            poll=await collectChatters(cursor=>fetchPage(cursor,100),this.now);
-            if(!current())return;
-            if(poll.userIds.length)this.chatterHealth.populated();
+            poll = await collectChatters((cursor) => fetchPage(cursor, 100), this.now);
+            if (!current()) return;
+            if (poll.userIds.length) this.chatterHealth.populated();
           }
-          const suspect=poll.userIds.length===0&&this.chatterHealth.suspect(poll.completedAtMs);
-          if(suspect){poll.status='failed';console.warn('TWITCH_CHATTERS_EMPTY_WITH_CHAT');}
+          const suspect = poll.userIds.length === 0 && this.chatterHealth.suspect(poll.completedAtMs);
+          if (suspect) {
+            poll.status = 'failed';
+            console.warn('TWITCH_CHATTERS_EMPTY_WITH_CHAT');
+          }
           // Cover the interval from the previous successful poll (not one minute bucket).
           const windowed = {
             ...poll,
-            userNames:Object.fromEntries(users.map(user=>[user.user_id,user.user_name])),
+            userNames: Object.fromEntries(users.map((user) => [user.user_id, user.user_name])),
             startedAtMs:
               this.lastSuccessfulPollAt !== null && poll.startedAtMs - this.lastSuccessfulPollAt <= 120000
                 ? Math.min(this.lastSuccessfulPollAt, poll.startedAtMs)
                 : poll.startedAtMs,
           };
-          await this.db.call("recordPoll", sessionId, accountId, windowed);
+          await this.db.call('recordPoll', sessionId, accountId, windowed);
           if (!current()) return;
-          await this.db.call("updateChatterNames", accountId, users, Date.now());
+          await this.db.call('updateChatterNames', accountId, users, Date.now());
           if (!current()) return;
-          this.status.capabilities.presence = suspect?'Twitch не передаёт список участников при активном чате; время недоступно':poll.status;
-          if (poll.status === "complete")
-            this.lastSuccessfulPollAt = poll.completedAtMs;
+          this.status.capabilities.presence = suspect
+            ? 'Twitch не передаёт список участников при активном чате; время недоступно'
+            : poll.status;
+          if (poll.status === 'complete') this.lastSuccessfulPollAt = poll.completedAtMs;
           else {
             this.lastSuccessfulPollAt = null;
             await this.db.call(
-              "gap",
-              "twitch",
-              suspect?'chatters_empty_with_chat':poll.status === "failed" ? "chatters_poll_failed" : "chatters_poll_incomplete",
+              'gap',
+              'twitch',
+              suspect
+                ? 'chatters_empty_with_chat'
+                : poll.status === 'failed'
+                  ? 'chatters_poll_failed'
+                  : 'chatters_poll_incomplete',
               windowed.startedAtMs,
               poll.completedAtMs,
             );
@@ -755,23 +754,30 @@ export class TwitchConnection implements ProviderConnection {
         } catch (error) {
           if (!current()) return;
           this.lastSuccessfulPollAt = null;
-          this.status.capabilities.presence =
-            error instanceof Error ? error.message : "chatters_error";
-          await this.db.call("gap", "twitch", "chatters_poll_failed",
-            unobservedFromMs, Math.max(attemptedAtMs, this.now()));
+          this.status.capabilities.presence = error instanceof Error ? error.message : 'chatters_error';
+          await this.db.call(
+            'gap',
+            'twitch',
+            'chatters_poll_failed',
+            unobservedFromMs,
+            Math.max(attemptedAtMs, this.now()),
+          );
           // Isolate from EventSub — do not rethrow into start()/reconnect.
         }
       }
-      if(current()){this.status.lastSyncAt=this.now();await this.collectFollowers(accountId,current,this.now());}
+      if (current()) {
+        this.status.lastSyncAt = this.now();
+        await this.collectFollowers(accountId, current, this.now());
+      }
       if (current() && this.reconcileError !== null) {
         if (this.eventSubReady && this.status.detail === this.reconcileError) {
-          this.status.state = "connected";
-          this.status.detail = "Сбор событий включён";
+          this.status.state = 'connected';
+          this.status.detail = 'Сбор событий включён';
         }
         this.reconcileError = null;
       }
     } catch (error) {
-      if (current()) this.reconcileError = error instanceof Error ? error.message : "TWITCH_ERROR";
+      if (current()) this.reconcileError = error instanceof Error ? error.message : 'TWITCH_ERROR';
       throw error;
     } finally {
       // A response from an old login must not release a newer login's poll.
@@ -779,26 +785,30 @@ export class TwitchConnection implements ProviderConnection {
       if (current()) {
         const immediate = this.reconcileRequested;
         this.reconcileRequested = false;
-        this.tick = setTimeout(() => { this.tick = null; void this.reconcile().catch(error => this.report(error,generation)); }, immediate ? 0 : this.platformLive ? 60000 : 300000);
+        this.tick = setTimeout(
+          () => {
+            this.tick = null;
+            void this.reconcile().catch((error) => this.report(error, generation));
+          },
+          immediate ? 0 : this.platformLive ? 60000 : 300000,
+        );
       }
     }
   }
-  private report(error: unknown,generation=this.authGeneration): void {
-    if(this.stopped||generation!==this.authGeneration)return;
-    const message = error instanceof Error ? error.message : "TWITCH_ERROR";
-    if (message === "TWITCH_REAUTH_REQUIRED") {
-      this.status.state = "error";
-      this.status.detail = "Требуется повторный вход в Twitch";
+  private report(error: unknown, generation = this.authGeneration): void {
+    if (this.stopped || generation !== this.authGeneration) return;
+    const message = error instanceof Error ? error.message : 'TWITCH_ERROR';
+    if (message === 'TWITCH_REAUTH_REQUIRED') {
+      this.status.state = 'error';
+      this.status.detail = 'Требуется повторный вход в Twitch';
       return;
     }
-    this.status.state = "degraded";
+    this.status.state = 'degraded';
     this.status.detail = message;
   }
   private scheduleReconnect(): void {
     if (this.stopped || this.retry || !this.config.value.twitch) return;
-    const wait =
-      Math.min(60000, 1000 * 2 ** Math.min(6, this.reconnectAttempt++)) +
-      Math.random() * 1000;
+    const wait = Math.min(60000, 1000 * 2 ** Math.min(6, this.reconnectAttempt++)) + Math.random() * 1000;
     this.retry = setTimeout(() => {
       this.retry = null;
       void this.start();
@@ -809,13 +819,12 @@ export class TwitchConnection implements ProviderConnection {
     this.eventSubReady = false;
     this.reconcileError = null;
     ++this.authGeneration;
-    for (const timer of [this.retry, this.tick, this.hourly])
-      if (timer) clearTimeout(timer);
+    for (const timer of [this.retry, this.tick, this.hourly]) if (timer) clearTimeout(timer);
     this.retry = this.tick = this.hourly = null;
     this.reconcileRequested = false;
-    this.lastFollowersPollAt=null;
+    this.lastFollowersPollAt = null;
     this.lastSuccessfulPollAt = null;
-    this.chatterHealth=new ChatterHealth();
+    this.chatterHealth = new ChatterHealth();
     for (const socket of this.sockets) socket.close();
     this.sockets.clear();
     this.socket = null;
@@ -826,10 +835,9 @@ export class TwitchConnection implements ProviderConnection {
     this.device = null;
     await this.config.save();
     this.status = {
-      state: "disconnected",
-      detail: "Не подключён",
+      state: 'disconnected',
+      detail: 'Не подключён',
       capabilities: {},
     };
   }
 }
-

@@ -1,15 +1,44 @@
-import {botExclusionSet,isExcludedBot} from './bots.js';
-import {databaseBotExclusions} from './person-bots.js';
-import {streamFollowerObservationsSql} from './follower-queries.js';
-import {sessionWindows} from './session-windows.js';
+import { botExclusionSet, isExcludedBot } from './bots.js';
+import { databaseBotExclusions } from './person-bots.js';
+import { streamFollowerObservationsSql } from './follower-queries.js';
+import { sessionWindows } from './session-windows.js';
 import type Database from 'better-sqlite3';
-export interface Follower {id:string;name:string;followedAtMs:number|null;raw?:unknown}
-interface Poll {at:number;payload_json:string}
-interface Snapshot {followers:Follower[];complete:boolean;total:number|null}
-export interface FollowState {source:string;account:string;externalId:string;name:string;status:boolean|null;checkedAtMs:number|null;followedAtMs:number|null;streamStatus:boolean|null;streamCheckedAtMs:number|null;followedDuringStreamMs:number|null;history:{at:number;status:boolean|null;followedAtMs:number|null}[]}
-const state=(poll:Poll|undefined,id:string,source:string)=>{
- const data:Snapshot|undefined=poll?JSON.parse(poll.payload_json):undefined,member=data?.followers.find(f=>f.id===id);
- return {status:member?true:data?.complete&&source==='twitch'?false:null,checkedAtMs:poll?.at??null,followedAtMs:member?.followedAtMs??null};
+export interface Follower {
+  id: string;
+  name: string;
+  followedAtMs: number | null;
+  raw?: unknown;
+}
+interface Poll {
+  at: number;
+  payload_json: string;
+}
+interface Snapshot {
+  followers: Follower[];
+  complete: boolean;
+  total: number | null;
+}
+export interface FollowState {
+  source: string;
+  account: string;
+  externalId: string;
+  name: string;
+  status: boolean | null;
+  checkedAtMs: number | null;
+  followedAtMs: number | null;
+  streamStatus: boolean | null;
+  streamCheckedAtMs: number | null;
+  followedDuringStreamMs: number | null;
+  history: { at: number; status: boolean | null; followedAtMs: number | null }[];
+}
+const state = (poll: Poll | undefined, id: string, source: string) => {
+  const data: Snapshot | undefined = poll ? JSON.parse(poll.payload_json) : undefined,
+    member = data?.followers.find((f) => f.id === id);
+  return {
+    status: member ? true : data?.complete && source === 'twitch' ? false : null,
+    checkedAtMs: poll?.at ?? null,
+    followedAtMs: member?.followedAtMs ?? null,
+  };
 };
 // Parse each distinct provider payload once, then join its observation history.
 const personFollowerDatesSql = `SELECT p.id AS snapshot_id,
@@ -18,28 +47,75 @@ const personFollowerDatesSql = `SELECT p.id AS snapshot_id,
  WHERE p.source=? AND p.account_id=? AND p.key='followers'
   AND EXISTS(SELECT 1 FROM follower_checks checked WHERE checked.snapshot_id=p.id)
   AND json_extract(f.value,'$.id')=?`;
-export function personFollowing(db:Database.Database,person:string,session:string=''):FollowState[]{
- const identities=db.prepare(`SELECT source,account_id AS account,external_id AS externalId,display_name AS name FROM identities WHERE person_id=? AND source='twitch'
- UNION ALL SELECT 'youtube',account_id,external_id,display_name FROM youtube_identities WHERE person_id=?`).all(person,person) as {source:string;account:string;externalId:string;name:string}[];
- const stream=session?db.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=?').get(session) as {start:number;end:number|null}:undefined;
- const windows=stream?sessionWindows(db,session,stream.start,stream.end??Date.now()):[];
- const within=(at:number)=>windows.some(w=>at>=w.from&&at<=w.to);
- return identities.map(i=>{
-  const polls=db.prepare("SELECT observed_at_ms AS at,payload_json FROM follower_observations WHERE source=? AND account_id=? AND key='followers' ORDER BY observed_at_ms DESC,id DESC LIMIT 1").all(i.source,i.account) as Poll[];
-  let latest=state(polls[0],i.externalId,i.source);
-  const follow=db.prepare(`SELECT e.occurred_at_ms AS at,e.received_at_ms AS received FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id=? AND e.source=? AND e.account_id=? AND e.type='follow' ORDER BY e.occurred_at_ms DESC LIMIT 1`).get(person,i.source,i.account) as {at:number;received:number}|undefined;
-  if(follow&&follow.received>(latest.checkedAtMs??-1))latest={status:true,checkedAtMs:follow.received,followedAtMs:follow.at};
-  const knownDate=db.prepare(`WITH dates AS MATERIALIZED (${personFollowerDatesSql}) SELECT d.at FROM dates d JOIN follower_checks c ON c.snapshot_id=d.snapshot_id WHERE d.date_type='integer' ORDER BY c.observed_at_ms DESC,c.id DESC LIMIT 1`).get(i.source,i.account,i.externalId) as {at:number}|undefined;
-  const lastDate=Math.max(latest.followedAtMs??-1,follow?.at??-1,knownDate?.at??-1);latest.followedAtMs=lastDate<0?null:lastDate;
-  const historical=stream?db.prepare("SELECT observed_at_ms AS at,payload_json FROM follower_observations WHERE source=? AND account_id=? AND key='followers' AND observed_at_ms BETWEEN ? AND ? ORDER BY observed_at_ms DESC,id DESC LIMIT 1").all(i.source,i.account,stream.start,stream.end??Date.now()) as Poll[]:[];
-  const during=historical[0];
-  let historic=state(during,i.externalId,i.source);
-  const dates=[follow?.at,...[...polls,...historical].map(p=>state(p,i.externalId,i.source).followedAtMs)].filter((at):at is number=>at!=null);
-  const streamDates=stream?db.prepare(`WITH dates AS MATERIALIZED (${personFollowerDatesSql}) SELECT d.at FROM dates d JOIN follower_checks c ON c.snapshot_id=d.snapshot_id WHERE d.at BETWEEN ? AND ?`).all(i.source,i.account,i.externalId,stream.start,stream.end??Date.now()) as {at:number|null}[]:[];
-  const followedDuringStreamMs=stream?[...dates,...streamDates.flatMap(row=>row.at===null?[]:[row.at])].find(within)??null:null;
-  if(followedDuringStreamMs!==null&&followedDuringStreamMs>(historic.checkedAtMs??-1))historic={status:true,checkedAtMs:followedDuringStreamMs,followedAtMs:followedDuringStreamMs};
-  const liveFollows=db.prepare(`SELECT e.received_at_ms AS at,e.occurred_at_ms AS followedAtMs FROM effective_events e JOIN identities identity ON identity.id=e.identity_id WHERE identity.person_id=? AND e.source=? AND e.account_id=? AND e.type='follow' ORDER BY e.received_at_ms`).all(person,i.source,i.account) as {at:number;followedAtMs:number|null}[];
-  const changes=db.prepare(`WITH snapshots AS MATERIALIZED (
+export function personFollowing(db: Database.Database, person: string, session: string = ''): FollowState[] {
+  const identities = db
+    .prepare(
+      `SELECT source,account_id AS account,external_id AS externalId,display_name AS name FROM identities WHERE person_id=? AND source='twitch'
+ UNION ALL SELECT 'youtube',account_id,external_id,display_name FROM youtube_identities WHERE person_id=?`,
+    )
+    .all(person, person) as { source: string; account: string; externalId: string; name: string }[];
+  const stream = session
+    ? (db.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=?').get(session) as {
+        start: number;
+        end: number | null;
+      })
+    : undefined;
+  const windows = stream ? sessionWindows(db, session, stream.start, stream.end ?? Date.now()) : [];
+  const within = (at: number) => windows.some((w) => at >= w.from && at <= w.to);
+  return identities.map((i) => {
+    const polls = db
+      .prepare(
+        "SELECT observed_at_ms AS at,payload_json FROM follower_observations WHERE source=? AND account_id=? AND key='followers' ORDER BY observed_at_ms DESC,id DESC LIMIT 1",
+      )
+      .all(i.source, i.account) as Poll[];
+    let latest = state(polls[0], i.externalId, i.source);
+    const follow = db
+      .prepare(
+        `SELECT e.occurred_at_ms AS at,e.received_at_ms AS received FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE i.person_id=? AND e.source=? AND e.account_id=? AND e.type='follow' ORDER BY e.occurred_at_ms DESC LIMIT 1`,
+      )
+      .get(person, i.source, i.account) as { at: number; received: number } | undefined;
+    if (follow && follow.received > (latest.checkedAtMs ?? -1))
+      latest = { status: true, checkedAtMs: follow.received, followedAtMs: follow.at };
+    const knownDate = db
+      .prepare(
+        `WITH dates AS MATERIALIZED (${personFollowerDatesSql}) SELECT d.at FROM dates d JOIN follower_checks c ON c.snapshot_id=d.snapshot_id WHERE d.date_type='integer' ORDER BY c.observed_at_ms DESC,c.id DESC LIMIT 1`,
+      )
+      .get(i.source, i.account, i.externalId) as { at: number } | undefined;
+    const lastDate = Math.max(latest.followedAtMs ?? -1, follow?.at ?? -1, knownDate?.at ?? -1);
+    latest.followedAtMs = lastDate < 0 ? null : lastDate;
+    const historical = stream
+      ? (db
+          .prepare(
+            "SELECT observed_at_ms AS at,payload_json FROM follower_observations WHERE source=? AND account_id=? AND key='followers' AND observed_at_ms BETWEEN ? AND ? ORDER BY observed_at_ms DESC,id DESC LIMIT 1",
+          )
+          .all(i.source, i.account, stream.start, stream.end ?? Date.now()) as Poll[])
+      : [];
+    const during = historical[0];
+    let historic = state(during, i.externalId, i.source);
+    const dates = [
+      follow?.at,
+      ...[...polls, ...historical].map((p) => state(p, i.externalId, i.source).followedAtMs),
+    ].filter((at): at is number => at != null);
+    const streamDates = stream
+      ? (db
+          .prepare(
+            `WITH dates AS MATERIALIZED (${personFollowerDatesSql}) SELECT d.at FROM dates d JOIN follower_checks c ON c.snapshot_id=d.snapshot_id WHERE d.at BETWEEN ? AND ?`,
+          )
+          .all(i.source, i.account, i.externalId, stream.start, stream.end ?? Date.now()) as { at: number | null }[])
+      : [];
+    const followedDuringStreamMs = stream
+      ? ([...dates, ...streamDates.flatMap((row) => (row.at === null ? [] : [row.at]))].find(within) ?? null)
+      : null;
+    if (followedDuringStreamMs !== null && followedDuringStreamMs > (historic.checkedAtMs ?? -1))
+      historic = { status: true, checkedAtMs: followedDuringStreamMs, followedAtMs: followedDuringStreamMs };
+    const liveFollows = db
+      .prepare(
+        `SELECT e.received_at_ms AS at,e.occurred_at_ms AS followedAtMs FROM effective_events e JOIN identities identity ON identity.id=e.identity_id WHERE identity.person_id=? AND e.source=? AND e.account_id=? AND e.type='follow' ORDER BY e.received_at_ms`,
+      )
+      .all(person, i.source, i.account) as { at: number; followedAtMs: number | null }[];
+    const changes = db
+      .prepare(
+        `WITH snapshots AS MATERIALIZED (
    SELECT p.id AS snapshot_id,
     CASE WHEN f.value IS NOT NULL THEN 1 WHEN p.source='twitch' AND json_extract(p.payload_json,'$.complete')=1 THEN 0 ELSE NULL END AS status,
     json_extract(f.value,'$.followedAtMs') AS followedAtMs
@@ -50,71 +126,239 @@ export function personFollowing(db:Database.Database,person:string,session:strin
    SELECT c.id,c.observed_at_ms AS at,s.status,s.followedAtMs
    FROM snapshots s JOIN follower_checks c ON c.snapshot_id=s.snapshot_id
   ), compared AS (SELECT *,row_number() OVER(ORDER BY at,id) AS position,lag(status) OVER(ORDER BY at,id) AS priorStatus,lag(followedAtMs) OVER(ORDER BY at,id) AS priorDate FROM states)
-  SELECT at,status,followedAtMs FROM compared WHERE position=1 OR status IS NOT priorStatus OR followedAtMs IS NOT priorDate ORDER BY at,id`).all(i.externalId,i.source,i.account) as {at:number;status:number|null;followedAtMs:number|null}[];
-  const history=[...changes.map(p=>({...p,status:p.status===null?null:p.status===1})),...liveFollows.map(f=>({...f,status:true}))].filter(p=>p.status!==null).sort((a,b)=>a.at-b.at).filter((p,n,a)=>!n||p.status!==a[n-1]!.status).map(p=>({at:p.at,status:p.status,followedAtMs:p.followedAtMs}));
-  return {...i,...latest,streamStatus:historic.status,streamCheckedAtMs:historic.checkedAtMs,followedDuringStreamMs,history};
- });
+  SELECT at,status,followedAtMs FROM compared WHERE position=1 OR status IS NOT priorStatus OR followedAtMs IS NOT priorDate ORDER BY at,id`,
+      )
+      .all(i.externalId, i.source, i.account) as { at: number; status: number | null; followedAtMs: number | null }[];
+    const history = [
+      ...changes.map((p) => ({ ...p, status: p.status === null ? null : p.status === 1 })),
+      ...liveFollows.map((f) => ({ ...f, status: true })),
+    ]
+      .filter((p) => p.status !== null)
+      .sort((a, b) => a.at - b.at)
+      .filter((p, n, a) => !n || p.status !== a[n - 1]!.status)
+      .map((p) => ({ at: p.at, status: p.status, followedAtMs: p.followedAtMs }));
+    return {
+      ...i,
+      ...latest,
+      streamStatus: historic.status,
+      streamCheckedAtMs: historic.checkedAtMs,
+      followedDuringStreamMs,
+      history,
+    };
+  });
 }
-function streamUnfollowers(db:Database.Database,start:number,end:number,windows:{from:number;to:number}[]){
- const baseline=db.prepare(`WITH versions AS MATERIALIZED(
+function streamUnfollowers(db: Database.Database, start: number, end: number, windows: { from: number; to: number }[]) {
+  const baseline = db
+    .prepare(
+      `WITH versions AS MATERIALIZED(
   SELECT p.account_id,p.payload_json,c.observed_at_ms at,c.id FROM provider_snapshots p JOIN follower_checks c ON c.id=(SELECT id FROM follower_checks WHERE snapshot_id=p.id AND observed_at_ms<? ORDER BY observed_at_ms DESC,id DESC LIMIT 1)
   WHERE p.source='twitch' AND p.key='followers' AND json_extract(p.payload_json,'$.complete')=1
  ), ranked AS(SELECT *,row_number() OVER(PARTITION BY account_id ORDER BY at DESC,id DESC) position FROM versions)
- SELECT account_id,payload_json,at FROM ranked WHERE position=1`).all(start) as {account_id:string;payload_json:string;at:number}[];
- const checks=db.prepare(`WITH checks AS(
+ SELECT account_id,payload_json,at FROM ranked WHERE position=1`,
+    )
+    .all(start) as { account_id: string; payload_json: string; at: number }[];
+  const checks = db
+    .prepare(
+      `WITH checks AS(
  SELECT p.account_id,c.snapshot_id,c.observed_at_ms at,c.id,lag(c.snapshot_id) OVER(PARTITION BY p.account_id ORDER BY c.observed_at_ms,c.id) prior
  FROM follower_checks c JOIN provider_snapshots p ON p.id=c.snapshot_id WHERE p.source='twitch' AND p.key='followers' AND c.observed_at_ms>=? AND c.observed_at_ms<=?)
- SELECT c.account_id,p.payload_json,c.at FROM checks c JOIN provider_snapshots p ON p.id=c.snapshot_id WHERE c.prior IS NOT c.snapshot_id ORDER BY c.at,c.id`).all(start,end) as {account_id:string;payload_json:string;at:number}[];
- const known=new Map<string,Map<string,Follower>>(),payloads=new Map<string,Snapshot>(),changes:{source:string;account:string;externalId:string;name:string;at:number;personId:string|null}[]=[];
- for(const check of [...baseline,...checks]){
-  let data=payloads.get(check.payload_json);if(!data){data=JSON.parse(check.payload_json) as Snapshot;payloads.set(check.payload_json,data);}
-  const prior=known.get(check.account_id),current=new Map(data.followers.map(f=>[f.id,f]));
-  if(prior&&data.complete&&windows.some(w=>check.at>=w.from&&check.at<=w.to))for(const [id,f] of prior)if(!current.has(id))changes.push({source:'twitch',account:check.account_id,externalId:id,name:f.name,at:check.at,personId:null});
-  if(data.complete)known.set(check.account_id,current);else{const members=prior??new Map<string,Follower>();for(const [id,f] of current)members.set(id,f);known.set(check.account_id,members);}
- }
- return changes;
+ SELECT c.account_id,p.payload_json,c.at FROM checks c JOIN provider_snapshots p ON p.id=c.snapshot_id WHERE c.prior IS NOT c.snapshot_id ORDER BY c.at,c.id`,
+    )
+    .all(start, end) as { account_id: string; payload_json: string; at: number }[];
+  const known = new Map<string, Map<string, Follower>>(),
+    payloads = new Map<string, Snapshot>(),
+    changes: {
+      source: string;
+      account: string;
+      externalId: string;
+      name: string;
+      at: number;
+      personId: string | null;
+    }[] = [];
+  for (const check of [...baseline, ...checks]) {
+    let data = payloads.get(check.payload_json);
+    if (!data) {
+      data = JSON.parse(check.payload_json) as Snapshot;
+      payloads.set(check.payload_json, data);
+    }
+    const prior = known.get(check.account_id),
+      current = new Map(data.followers.map((f) => [f.id, f]));
+    if (prior && data.complete && windows.some((w) => check.at >= w.from && check.at <= w.to))
+      for (const [id, f] of prior)
+        if (!current.has(id))
+          changes.push({
+            source: 'twitch',
+            account: check.account_id,
+            externalId: id,
+            name: f.name,
+            at: check.at,
+            personId: null,
+          });
+    if (data.complete) known.set(check.account_id, current);
+    else {
+      const members = prior ?? new Map<string, Follower>();
+      for (const [id, f] of current) members.set(id, f);
+      known.set(check.account_id, members);
+    }
+  }
+  return changes;
 }
-export function followingAnalytics(db:Database.Database,id:string,range?:{fromMs:number;toMs:number},excluded:readonly string[]|false=[]){
- const stream=range?{start:range.fromMs,end:range.toMs}:db.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=?').get(id) as {start:number;end:number|null};const end=stream.end??Date.now(),windows=range?[{from:stream.start,to:end}]:sessionWindows(db,id,stream.start,end);
- const compact=streamFollowerObservationsSql.replace('AS at,payload_json','AS at,(SELECT snapshot_id FROM follower_checks WHERE id=p.id) AS snapshotId');
- const checks=db.prepare(compact).all(stream.start,end) as {at:number;source:string;account:string;snapshotId:string}[];
- const payloads=new Map((db.prepare('SELECT id,payload_json FROM provider_snapshots WHERE id IN(SELECT value FROM json_each(?))').all(JSON.stringify([...new Set(checks.map(c=>c.snapshotId))])) as {id:string;payload_json:string}[]).map(p=>[p.id,p.payload_json]));
- const parsed=new Map<string,Snapshot>();const snapshot=(payload:string)=>{let value=parsed.get(payload);if(!value){value=JSON.parse(payload) as Snapshot;parsed.set(payload,value);}return value;};
- const polls=checks.map(c=>({...c,payload_json:payloads.get(c.snapshotId)!}));
- const signups=new Map<string,{source:string;account:string;externalId:string;name:string;at:number;personId:string|null}>();
- const add=(source:string,account:string,f:Follower)=>{
-  if(f.followedAtMs===null||!windows.some(w=>f.followedAtMs!>=w.from&&f.followedAtMs!<=w.to))return;
-  signups.set(`${source}:${account}:${f.id}:${Math.floor(f.followedAtMs/1000)}`,{source,account,externalId:f.id,name:f.name,at:f.followedAtMs,personId:null});
- };
- for(const p of polls)for(const f of snapshot(p.payload_json).followers)add(p.source,p.account,f);
- const events=db.prepare("SELECT e.source,e.account_id AS account,i.external_id AS id,i.display_name AS name,e.occurred_at_ms AS at FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE e.type='follow' AND e.occurred_at_ms BETWEEN ? AND ?").all(stream.start,end) as {source:string;account:string;id:string;name:string;at:number}[];
- for(const e of events)add(e.source,e.account,{id:e.id,name:e.name,followedAtMs:e.at});
- // Resolve all identities in one indexed join, even when many snapshots repeat a follower.
- const unfollowers=streamUnfollowers(db,stream.start,end,windows);
- const requested=JSON.stringify([...signups.values(),...unfollowers].map(f=>({source:f.source,account:f.account,id:f.externalId})));
- const linked=db.prepare(`WITH requested AS (SELECT DISTINCT json_extract(value,'$.source') source,json_extract(value,'$.account') account,json_extract(value,'$.id') external_id FROM json_each(?))
+export function followingAnalytics(
+  db: Database.Database,
+  id: string,
+  range?: { fromMs: number; toMs: number },
+  excluded: readonly string[] | false = [],
+) {
+  const stream = range
+    ? { start: range.fromMs, end: range.toMs }
+    : (db.prepare('SELECT started_at_ms AS start,ended_at_ms AS end FROM sessions WHERE id=?').get(id) as {
+        start: number;
+        end: number | null;
+      });
+  const end = stream.end ?? Date.now(),
+    windows = range ? [{ from: stream.start, to: end }] : sessionWindows(db, id, stream.start, end);
+  const compact = streamFollowerObservationsSql.replace(
+    'AS at,payload_json',
+    'AS at,(SELECT snapshot_id FROM follower_checks WHERE id=p.id) AS snapshotId',
+  );
+  const checks = db.prepare(compact).all(stream.start, end) as {
+    at: number;
+    source: string;
+    account: string;
+    snapshotId: string;
+  }[];
+  const payloads = new Map(
+    (
+      db
+        .prepare('SELECT id,payload_json FROM provider_snapshots WHERE id IN(SELECT value FROM json_each(?))')
+        .all(JSON.stringify([...new Set(checks.map((c) => c.snapshotId))])) as { id: string; payload_json: string }[]
+    ).map((p) => [p.id, p.payload_json]),
+  );
+  const parsed = new Map<string, Snapshot>();
+  const snapshot = (payload: string) => {
+    let value = parsed.get(payload);
+    if (!value) {
+      value = JSON.parse(payload) as Snapshot;
+      parsed.set(payload, value);
+    }
+    return value;
+  };
+  const polls = checks.map((c) => ({ ...c, payload_json: payloads.get(c.snapshotId)! }));
+  const signups = new Map<
+    string,
+    { source: string; account: string; externalId: string; name: string; at: number; personId: string | null }
+  >();
+  const add = (source: string, account: string, f: Follower) => {
+    if (f.followedAtMs === null || !windows.some((w) => f.followedAtMs! >= w.from && f.followedAtMs! <= w.to)) return;
+    signups.set(`${source}:${account}:${f.id}:${Math.floor(f.followedAtMs / 1000)}`, {
+      source,
+      account,
+      externalId: f.id,
+      name: f.name,
+      at: f.followedAtMs,
+      personId: null,
+    });
+  };
+  for (const p of polls) for (const f of snapshot(p.payload_json).followers) add(p.source, p.account, f);
+  const events = db
+    .prepare(
+      "SELECT e.source,e.account_id AS account,i.external_id AS id,i.display_name AS name,e.occurred_at_ms AS at FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE e.type='follow' AND e.occurred_at_ms BETWEEN ? AND ?",
+    )
+    .all(stream.start, end) as { source: string; account: string; id: string; name: string; at: number }[];
+  for (const e of events) add(e.source, e.account, { id: e.id, name: e.name, followedAtMs: e.at });
+  // Resolve all identities in one indexed join, even when many snapshots repeat a follower.
+  const unfollowers = streamUnfollowers(db, stream.start, end, windows);
+  const requested = JSON.stringify(
+    [...signups.values(), ...unfollowers].map((f) => ({ source: f.source, account: f.account, id: f.externalId })),
+  );
+  const linked = db
+    .prepare(
+      `WITH requested AS (SELECT DISTINCT json_extract(value,'$.source') source,json_extract(value,'$.account') account,json_extract(value,'$.id') external_id FROM json_each(?))
  SELECT r.source,r.account,r.external_id AS externalId,i.person_id AS personId,(SELECT display_name FROM persons WHERE id=i.person_id) AS personName FROM requested r JOIN identities i ON i.source=r.source AND i.account_id=r.account AND i.external_id=r.external_id WHERE r.source<>'youtube'
- UNION ALL SELECT r.source,r.account,r.external_id AS externalId,i.person_id AS personId,(SELECT display_name FROM persons WHERE id=i.person_id) AS personName FROM requested r JOIN youtube_identities i ON i.account_id=r.account AND i.external_id=r.external_id WHERE r.source='youtube'`).all(requested) as {source:string;account:string;externalId:string;personId:string;personName:string}[];
- const people=new Map(linked.map(i=>[JSON.stringify([i.source,i.account,i.externalId]),i]));
- for(const f of [...signups.values(),...unfollowers]){const person=people.get(JSON.stringify([f.source,f.account,f.externalId]));f.personId=person?.personId??null;if(person?.personName)f.name=person.personName;}
- const exclusions=databaseBotExclusions(db,excluded),services=botExclusionSet(),optional=botExclusionSet(excluded);
- const humans=new Set((db.prepare('SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people').all() as {person_id:string}[]).map(p=>p.person_id));
- const visible=(f:{source:string;account:string;externalId:string;name:string;personId:string|null})=>{
-  if(f.externalId===f.account||f.personId&&exclusions.has('owner:'+f.personId))return false;
-  if(f.source==='twitch'?isExcludedBot(f.name,services):['streamelements','streemelements'].includes(f.name.toLowerCase()))return false;
-  return !(f.personId&&exclusions.has('person:'+f.personId))&&((f.personId&&humans.has(f.personId))||!isExcludedBot(f.name,optional));
- };
- const newFollowers=[...signups.values()].filter(visible).sort((a,b)=>b.at-a.at||Number(b.personId!==null)-Number(a.personId!==null)||a.externalId.localeCompare(b.externalId));
- const observations=polls.filter(p=>p.at>=stream.start&&p.at<=end).map(p=>{const data=snapshot(p.payload_json);return {at:p.at,source:p.source,account:p.account,total:p.source==='youtube'?data.total:data.total??(data.complete?data.followers.length:null),visibleCount:data.followers.length,complete:data.complete};});
- const accounts=new Map<string,{source:string;account:string}>();
- for(const p of polls)accounts.set(`${p.source}:${p.account}`,p);
- for(const f of newFollowers)accounts.set(`${f.source}:${f.account}`,f);
- const platforms=[...accounts.values()].map(({source,account})=>{
-  const checks=observations.filter(p=>p.source===source&&p.account===account&&p.total!==null),first=checks[0],last=checks.at(-1);
-  // YouTube totals currently come from the six-hour channel snapshot, not the
-  // subscriber poll. They cannot support a within-stream change calculation.
-  const comparable=source==='twitch'&&first!==undefined&&last!==undefined&&first.at<last.at;
-  return {source,account,knownNew:newFollowers.filter(f=>f.source===source&&f.account===account).length,change:comparable?last.total!-first.total!:null,fromAt:comparable?first.at:null,toAt:comparable?last.at:null,startTotal:comparable?first.total:null,endTotal:comparable?last.total:null};
- });
- return {newFollowers,unfollowers:unfollowers.filter(visible).sort((a,b)=>b.at-a.at),platforms,polls:observations};
+ UNION ALL SELECT r.source,r.account,r.external_id AS externalId,i.person_id AS personId,(SELECT display_name FROM persons WHERE id=i.person_id) AS personName FROM requested r JOIN youtube_identities i ON i.account_id=r.account AND i.external_id=r.external_id WHERE r.source='youtube'`,
+    )
+    .all(requested) as { source: string; account: string; externalId: string; personId: string; personName: string }[];
+  const people = new Map(linked.map((i) => [JSON.stringify([i.source, i.account, i.externalId]), i]));
+  for (const f of [...signups.values(), ...unfollowers]) {
+    const person = people.get(JSON.stringify([f.source, f.account, f.externalId]));
+    f.personId = person?.personId ?? null;
+    if (person?.personName) f.name = person.personName;
+  }
+  const exclusions = databaseBotExclusions(db, excluded),
+    services = botExclusionSet(),
+    optional = botExclusionSet(excluded);
+  const humans = new Set(
+    (
+      db.prepare('SELECT person_id FROM human_people UNION SELECT person_id FROM manual_neutral_people').all() as {
+        person_id: string;
+      }[]
+    ).map((p) => p.person_id),
+  );
+  const visible = (f: {
+    source: string;
+    account: string;
+    externalId: string;
+    name: string;
+    personId: string | null;
+  }) => {
+    if (f.externalId === f.account || (f.personId && exclusions.has('owner:' + f.personId))) return false;
+    if (
+      f.source === 'twitch'
+        ? isExcludedBot(f.name, services)
+        : ['streamelements', 'streemelements'].includes(f.name.toLowerCase())
+    )
+      return false;
+    return (
+      !(f.personId && exclusions.has('person:' + f.personId)) &&
+      ((f.personId && humans.has(f.personId)) || !isExcludedBot(f.name, optional))
+    );
+  };
+  const newFollowers = [...signups.values()]
+    .filter(visible)
+    .sort(
+      (a, b) =>
+        b.at - a.at ||
+        Number(b.personId !== null) - Number(a.personId !== null) ||
+        a.externalId.localeCompare(b.externalId),
+    );
+  const observations = polls
+    .filter((p) => p.at >= stream.start && p.at <= end)
+    .map((p) => {
+      const data = snapshot(p.payload_json);
+      return {
+        at: p.at,
+        source: p.source,
+        account: p.account,
+        total: p.source === 'youtube' ? data.total : (data.total ?? (data.complete ? data.followers.length : null)),
+        visibleCount: data.followers.length,
+        complete: data.complete,
+      };
+    });
+  const accounts = new Map<string, { source: string; account: string }>();
+  for (const p of polls) accounts.set(`${p.source}:${p.account}`, p);
+  for (const f of newFollowers) accounts.set(`${f.source}:${f.account}`, f);
+  const platforms = [...accounts.values()].map(({ source, account }) => {
+    const checks = observations.filter((p) => p.source === source && p.account === account && p.total !== null),
+      first = checks[0],
+      last = checks.at(-1);
+    // YouTube totals currently come from the six-hour channel snapshot, not the
+    // subscriber poll. They cannot support a within-stream change calculation.
+    const comparable = source === 'twitch' && first !== undefined && last !== undefined && first.at < last.at;
+    return {
+      source,
+      account,
+      knownNew: newFollowers.filter((f) => f.source === source && f.account === account).length,
+      change: comparable ? last.total! - first.total! : null,
+      fromAt: comparable ? first.at : null,
+      toAt: comparable ? last.at : null,
+      startTotal: comparable ? first.total : null,
+      endTotal: comparable ? last.total : null,
+    };
+  });
+  return {
+    newFollowers,
+    unfollowers: unfollowers.filter(visible).sort((a, b) => b.at - a.at),
+    platforms,
+    polls: observations,
+  };
 }

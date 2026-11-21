@@ -1,4 +1,12 @@
 dist/
 coverage/
 apps/web/dist/
+node_modules/
 pnpm-lock.yaml
+# Golden data and generated measurement results: bytes are compared or produced by scripts.
+packages/core/test/fixtures/
+docs/*.json
+# Prose and workflows are not code; their formatting is reviewed by hand.
+*.md
+*.yml
+*.yaml
