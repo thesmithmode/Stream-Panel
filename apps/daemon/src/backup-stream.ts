@@ -75,6 +75,7 @@ export async function sealBackupFile(
     let closeError: unknown;
     try { await handle.close(); } catch (error) { closeError = error; }
     if (!complete || closeError) await rm(output, { force: true }).catch(() => {});
+    // eslint-disable-next-line no-unsafe-finally -- a failed close must fail the write; the partial file is already removed.
     if (closeError) throw closeError;
   }
 }
@@ -116,6 +117,7 @@ export async function openBackupFile(
     }
     try { await source.close(); } catch (error) { closeError ??= error; }
     if (target && (!complete || closeError)) await rm(output, { force: true }).catch(() => {});
+    // eslint-disable-next-line no-unsafe-finally -- a close failure is reported only when nothing failed before it.
     if (closeError && !failure) throw invalid(closeError);
   }
 }

@@ -1,4 +1,4 @@
-import {refreshData,setRefreshInterval} from '../helpers/navigation.mjs';
+import {refreshData} from '../helpers/navigation.mjs';
 import {navigate,setFilter,openFilters,closeFilters,clockSettings} from '../helpers/navigation.mjs';
 import {clockActivitySeries,clockDonationSeries} from '../../dist/packages/core/src/clock-activity.js';
 import test from 'node:test';

@@ -557,7 +557,7 @@ test("Twitch token mismatch and repeat 401 are errors, not empty successful resp
   }
 });
 function daRequest(f, opts = {}) {
-  return async (url, init) => {
+  return async (url, _init) => {
     if (url.endsWith("/oauth/token"))
       return response(
         opts.token ?? { access_token: "new-da", refresh_token: "rotated-da" },
@@ -708,7 +708,7 @@ test("DA API retries rotated token once, reports 429/403 and requires refresh cr
   const c = new DonationAlertsConnection(
     f.config,
     f.db,
-    async (url, init) => {
+    async (url, _init) => {
       if (url.endsWith("/oauth/token"))
         return response({
           access_token: "rotated",

@@ -1,4 +1,4 @@
-import {clockSettings,setFilter} from '../helpers/navigation.mjs';
+import {clockSettings} from '../helpers/navigation.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';
 import {application} from '../helpers/application.mjs';import {launchBrowser} from '../helpers/browser.mjs';import {goto,saveCoverage} from '../helpers/browser-coverage.mjs';import {assertUiLayout} from '../helpers/ui-layout.mjs';
 test('long history prepares, paginates, averages clock activity and drills into original minute data',{timeout:120000},async()=>{

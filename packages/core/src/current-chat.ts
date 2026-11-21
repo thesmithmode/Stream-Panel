@@ -37,7 +37,7 @@ export class CurrentChatQueries {
    const args=[sessionId,twitch.account_id,twitch.started_at_ms,now];
    const where='session_id=? AND account_id=? AND completed_at_ms>=? AND completed_at_ms<=?';
    const attempt=this.db.prepare(`SELECT id,status,completed_at_ms FROM presence_polls p WHERE ${where} ORDER BY completed_at_ms DESC,(SELECT key FROM presence_poll_keys k WHERE k.poll_id=p.id) DESC LIMIT 1`).get(...args) as Poll|undefined;
-   const poll=this.db.prepare(`SELECT id,status,completed_at_ms FROM presence_polls p WHERE ${where} AND status=\'complete\' ORDER BY completed_at_ms DESC,(SELECT key FROM presence_poll_keys k WHERE k.poll_id=p.id) DESC LIMIT 1`).get(...args) as Poll|undefined;
+   const poll=this.db.prepare(`SELECT id,status,completed_at_ms FROM presence_polls p WHERE ${where} AND status='complete' ORDER BY completed_at_ms DESC,(SELECT key FROM presence_poll_keys k WHERE k.poll_id=p.id) DESC LIMIT 1`).get(...args) as Poll|undefined;
    result.observedAt=poll?.completed_at_ms??null;result.lastAttemptAt=attempt?.completed_at_ms??null;
    result.twitchState=!attempt?'waiting':!poll||attempt.status!=='complete'||now-poll.completed_at_ms>180000?'stale':'current';
    if(poll){

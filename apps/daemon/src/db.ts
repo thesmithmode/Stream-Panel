@@ -30,12 +30,21 @@ export class StoreClient {
     { resolve: (value: unknown, executionMs?:number) => void; reject: (error: Error) => void }
   >();
   readonly ready: Promise<void>;
-  constructor(private readonly path: string, private readonly profile?: string, private readonly requestTimeoutMs=60000,private readonly lane='facts') {
+  // Worker progress, shared by every client of the worker: any message proves it is alive,
+  // and pickup notices tell which requests are executing right now.
+  private lastProgress=0;
+  private readonly executing=new Map<string,string>();
+  private watchdog:ReturnType<typeof setTimeout>|undefined;
+  constructor(private readonly path: string, private readonly profile?: string, private readonly requestTimeoutMs=60000,private readonly lane='facts',acquire:typeof acquireStoreWorker=acquireStoreWorker) {
     this.storage=new StorageGuard(path);
-    this.lease=acquireStoreWorker(path,profile,lane);this.worker=this.lease.worker;
+    this.lease=acquire(path,profile,lane);this.worker=this.lease.worker;
     this.ready = new Promise((resolve, reject) => {
-      const onMessage=(message:{clientId?:string;ready?:boolean;error?:string;invalidate?:boolean;id:number;result?:unknown;executionMs?:number}) => {
-        if(message.clientId!==this.lease.clientId)return;
+      const onMessage=(message:{clientId?:string;ready?:boolean;started?:boolean;method?:string;error?:string;invalidate?:boolean;id:number;result?:unknown;executionMs?:number}) => {
+        this.lastProgress=performance.now();
+        if(message.started)this.executing.set(`${message.clientId}:${message.id}`,String(message.method));
+        else if(!message.ready&&!message.invalidate)this.executing.delete(`${message.clientId}:${message.id}`);
+        this.armWatchdog();
+        if(message.started||message.clientId!==this.lease.clientId)return;
         if(message.invalidate){this.cache.invalidate();this.analyticsClient?.cache.invalidate();for(const listener of this.changeListeners)listener();return;}
         if (message.ready) {
           if(message.error)reject(new Error(message.error));else resolve();
@@ -44,6 +53,7 @@ export class StoreClient {
         const request = this.pending.get(message.id);
         if (!request) return;
         this.pending.delete(message.id);
+        this.armWatchdog();
         if (message.error) request.reject(new Error(message.error));
         else request.resolve(message.result,message.executionMs);
       };
@@ -52,6 +62,7 @@ export class StoreClient {
         reject(error);
         for (const p of this.pending.values()) p.reject(error);
         this.pending.clear();
+        this.armWatchdog();
       };
       const onExit=() => {
         this.fatal(new Error("DB_WORKER_STOPPED"));
@@ -59,6 +70,7 @@ export class StoreClient {
         for (const p of this.pending.values())
           p.reject(new Error("DB_WORKER_STOPPED"));
         this.pending.clear();
+        this.armWatchdog();
       };
       this.worker.on('message',onMessage);this.worker.on('error',onError);this.worker.on('exit',onExit);
       this.detach=()=>{this.worker.off('message',onMessage);this.worker.off('error',onError);this.worker.off('exit',onExit);};
@@ -92,6 +104,22 @@ export class StoreClient {
     })().finally(()=>{this.analyticsRestart=undefined;});
     return this.analyticsRestart;
   }
+  /**
+   * A stuck synchronous SQLite operation cannot be cancelled individually, so a worker that
+   * makes no progress while this client waits is failed into the existing service
+   * restart/recovery path. The deadline restarts with every reply or pickup on the shared
+   * worker, so time spent queued behind other requests that do complete is never counted;
+   * a running database copy is allowed at least 10 minutes.
+   */
+  private armWatchdog(){
+    if(this.watchdog!==undefined){clearTimeout(this.watchdog);this.watchdog=undefined;}
+    if(this.dead||!this.pending.size)return;
+    const limit=[...this.executing.values()].includes('backup')?Math.max(this.requestTimeoutMs,600000):this.requestTimeoutMs;
+    const remaining=this.lastProgress+limit-performance.now();
+    if(remaining>0){this.watchdog=setTimeout(()=>this.armWatchdog(),remaining);return;}
+    this.fatal(new Error('DB_WORKER_TIMEOUT'));
+    void this.worker.terminate();
+  }
   private async execute<T = unknown>(method: string, ...args: unknown[]): Promise<T> {
     await this.ready;
     if (this.dead) throw new Error("DB_WORKER_STOPPED");
@@ -99,16 +127,10 @@ export class StoreClient {
     return new Promise((resolve, reject) => {
       const id = ++this.sequence;
       const started=performance.now();
-      // A stuck synchronous SQLite operation cannot be cancelled individually.
-      // Fail the shared worker and use the existing service restart/recovery path.
-      const timer=setTimeout(()=>{
-        const error=new Error('DB_WORKER_TIMEOUT');
-        this.fatal(error);
-        void this.worker.terminate();
-      }, method==='backup'?Math.max(this.requestTimeoutMs,600000):this.requestTimeoutMs);
+      // Waiting starts now; an idle worker must pick the request up within the deadline.
+      if(!this.pending.size)this.lastProgress=started;
       this.pending.set(id, {
         resolve:(value,executionMs=0)=>{
-          clearTimeout(timer);
           const stats=this.timings.get(method)??{calls:0,maxQueueMs:0,maxExecutionMs:0};
           stats.calls++;
           stats.maxQueueMs=Math.max(stats.maxQueueMs,Math.max(0,performance.now()-started-executionMs));
@@ -116,13 +138,15 @@ export class StoreClient {
           this.timings.set(method,stats);
           resolve(value as T);
         },
-        reject:error=>{clearTimeout(timer);reject(error);},
+        reject,
       });
+      this.armWatchdog();
       try {
         this.worker.postMessage({clientId:this.lease.clientId,id,method,args});
       } catch (error) {
         this.pending.get(id)!.reject(error instanceof Error?error:new Error(String(error)));
         this.pending.delete(id);
+        this.armWatchdog();
       }
     });
   }
@@ -133,6 +157,6 @@ export class StoreClient {
     await this.analyticsRestart?.catch(()=>{});
     await this.analyticsClient?.stop();
     try { if(!this.dead)await this.call("close"); }
-    finally {this.dead=true;this.detach();await this.lease.release();}
+    finally {this.dead=true;this.armWatchdog();this.detach();await this.lease.release();}
   }
 }

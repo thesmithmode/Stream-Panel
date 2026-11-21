@@ -10,6 +10,7 @@ test('RPC derives the result from the operation and records queue/worker timings
   assert.deepEqual(people,[]);
   const status=db.queueStatus();assert.equal(status.pending,0);assert.equal(status.operations.persons?.calls,1);assert.ok(status.operations.persons!.maxExecutionMs>=0);assert.ok(status.operations.persons!.maxQueueMs>=0);
   // Compile-only contracts: assertions cannot substitute a made-up response type.
+  // eslint-disable-next-line no-constant-condition -- compile-time only, never executed.
   if(false){
    // @ts-expect-error persons returns an array, never a number.
    const count:number=await db.call('persons');void count;
