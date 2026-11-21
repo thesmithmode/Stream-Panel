@@ -617,6 +617,14 @@ UPDATE analytics_global_revision SET revision=revision+1;
 UPDATE ui_revisions SET revision=revision+1;
 PRAGMA user_version=34;
 `;
+const averageOnlineSchema=`
+INSERT INTO analytics_jobs(session_id,requested_at_ms,priority)
+ SELECT s.id,CAST(unixepoch('subsec')*1000 AS INTEGER),1 FROM sessions s
+ WHERE s.ended_at_ms IS NOT NULL
+ AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)
+ ON CONFLICT(session_id) DO UPDATE SET attempts=0,retry_at_ms=0;
+PRAGMA user_version=36;
+`;
 const streamClipsSchema=`
 CREATE TABLE IF NOT EXISTS stream_clips (
  id TEXT PRIMARY KEY, account_id TEXT NOT NULL, stream_id TEXT NOT NULL,
@@ -624,9 +632,9 @@ CREATE TABLE IF NOT EXISTS stream_clips (
 ) STRICT;
 CREATE INDEX IF NOT EXISTS stream_clips_stream ON stream_clips(account_id,stream_id,created_at_ms);
 CREATE INDEX IF NOT EXISTS stream_clips_age ON stream_clips(created_at_ms);
-PRAGMA user_version=36;
+PRAGMA user_version=37;
 `;
-export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24,schemaV25,changeRevisionSchema,analyticsRevisionSchema,overviewRevisionSchema,sharedIdentitySchema,schemaV30,donationFxSchema,personBotSchema,viewerAdjustmentSchema,botAnalyticsSchema,serviceAccountsSchema,streamClipsSchema] as const;
+export const schemaMigrations=[schemaV1,schemaV2,schemaV3,schemaV4,schemaV5,schemaV6,schemaV7,schemaV8,schemaV9,schemaV10,schemaV11,schemaV12,schemaV13,schemaV14,schemaV15,schemaV16,schemaV17,schemaV18,schemaV19,schemaV20,schemaV21,schemaV22,schemaV23,schemaV24,schemaV25,changeRevisionSchema,analyticsRevisionSchema,overviewRevisionSchema,sharedIdentitySchema,schemaV30,donationFxSchema,personBotSchema,viewerAdjustmentSchema,botAnalyticsSchema,serviceAccountsSchema,averageOnlineSchema,streamClipsSchema] as const;
 export const CURRENT_SCHEMA_VERSION=schemaMigrations.length;
 
 

@@ -43,8 +43,8 @@
   let audienceData=$state.raw<any>(null),audienceError=$state(''),audienceBusy=$state(false);
   let audienceMetric=$state<ChartMetric>('viewers');
   const viewerMetrics=$derived(audienceData?.streamComparison?.[0]?.viewers);
-  const viewers=$derived(viewerMetrics?(viewerMetrics.known?.partialMinutes?viewerMetrics.known:viewerMetrics.all):session?{mean:session.viewerKnownMean??session.viewerMean,peak:session.viewerKnownPeak??session.viewerPeak}:undefined);
-  const viewerPartial=$derived((viewerMetrics?.known?.partialMinutes??0)>0);
+  const viewers=$derived(viewerMetrics?{mean:viewerMetrics.all.mean,peak:viewerMetrics.known?.peak??viewerMetrics.all.peak}:session?{mean:session.viewerMean,peak:session.viewerKnownPeak??session.viewerPeak}:undefined);
+  const viewerCoverage=$derived(viewerMetrics?.all?.coverageRatio??session?.viewerCoverageRatio);
   const missingPresence=$derived(missingTwitchPresence(audienceData?.timeline??[]));
   function loadResolution(){
     try{const saved=Number(localStorage.getItem(`sp-stream-resolution-${getProfile()}`));return [1,5,15].includes(saved)?saved:5;}catch{return 5;}
@@ -130,7 +130,7 @@
 </script>
 {#if session}<section class="stream-facts">
  <div class="stream-title-row"><h1>{session.primaryTitle||'Без названия'}</h1><ActionMenu variant="metadata-menu" label="История названий и категорий">{#snippet children()}
- {#if viewerPartial}<p class="small muted">Показана сумма известных зрителей площадок. Пропущенные замеры не считаются нулём.</p>{/if}
+ {#if viewerCoverage!=null&&viewerCoverage<1}<p class="small muted">Полные замеры есть за {Math.floor(viewerCoverage*100)}% эфира.</p>{/if}
  {#each session.breaks??[] as pause}<p class="small">Перерыв: {streamRange(pause.from,pause.to)} МСК</p>{/each}
  {#each [...metadata].sort((a,b)=>b.at-a.at) as row}<p class="small">{dateTime(row.at)}{row.categoryName&&row.categoryName!=="Категория неизвестна"?` · ${row.categoryName}`:''} · {row.title||'Без названия'}</p>{:else}<p class="small muted">Нет сохранённых метаданных.</p>{/each}
  {/snippet}</ActionMenu></div>

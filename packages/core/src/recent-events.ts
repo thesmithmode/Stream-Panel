@@ -1,6 +1,6 @@
 import {donationValuation} from './donation-fx.js';
 import type Database from 'better-sqlite3';
-import {assertTimestamp,type EventInput,eventKey} from './domain.js';
+import {assertTimestamp,type EventInput} from './domain.js';
 
 export const EVENT_RETENTION_MS=7*24*60*60*1000;
 export const EVENT_CLEANUP_BATCH=500;
@@ -18,16 +18,6 @@ export class RecentEvents {
   const {raw:_raw,...payload}=event.payload;
   const id=JSON.stringify([event.source,event.accountId,event.type,event.externalId]);
   this.db.prepare('INSERT OR IGNORE INTO recent_events VALUES (?,?,?,?,?,?,?,?,?,?)').run(id,event.source,event.accountId,event.externalId,event.type,event.actor?.externalId??null,event.actor?.displayName??null,at,event.receivedAtMs,JSON.stringify(payload));
- }
- saveEvent(event:EventInput):void {
-  const redacted=event.source==='twitch'&&event.type==='chat.message'&&
-   (this.db.prepare("SELECT json_extract(payload_json,'$.redacted') AS redacted FROM events WHERE id=?").get(eventKey(event)) as {redacted:number|null}|undefined)?.redacted;
-  this.save(redacted?{...event,payload:{...event.payload,text:'',redacted:1}}:event);
- }
- redact(account:string,type:string,messageId:string,userId:string,from:number,to:number):void {
-  const predicate=type==='chat.message_delete'?'external_id=?':type==='chat.clear_user_messages'?'actor_id=? AND at_ms>=? AND at_ms<=?':'at_ms>=? AND at_ms<=?';
-  const args=type==='chat.message_delete'?[messageId]:type==='chat.clear_user_messages'?[userId,from,to]:[from,to];
-  this.db.prepare(`UPDATE recent_events SET payload_json=json_set(payload_json,'$.text','','$.redacted',1) WHERE source='twitch' AND account_id=? AND type='chat.message' AND ${predicate}`).run(account,...args);
  }
  removeYoutube(account:string,messageId?:string,authorId?:string):void {
   if(messageId)this.db.prepare("DELETE FROM recent_events WHERE source='youtube' AND account_id=? AND external_id=?").run(account,messageId);

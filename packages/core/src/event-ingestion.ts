@@ -97,7 +97,7 @@ export class EventIngestion {
         .prepare("UPDATE persons SET revision = revision + 1 WHERE id = ?")
         .run(identity.person_id);
     if(event.source==='donationalerts'&&event.type==='donation')new ProviderStorage(this.db).clearImported(event.accountId,event.externalId);
-    new RecentEvents(this.db).saveEvent(event);
+    new RecentEvents(this.db).save(event);
     return {
       inserted: true,
       identityId: identity?.id ?? null,
@@ -266,7 +266,7 @@ export class EventIngestion {
     return {identity, newIdentity: true, autoLinked};
   }
 
-  /** Twitch moderation redacts the targeted recent and permanent messages. */
+  /** Record Twitch moderation on permanent message facts. */
   private applyModeration(event: EventInput): void {
     if (
       event.source === "twitch" &&
@@ -280,7 +280,6 @@ export class EventIngestion {
       const userId = String(event.payload.targetUserId ?? "");
       const atMs = event.occurredAtMs ?? event.receivedAtMs;
       const scope = this.moderationScope(event.accountId, atMs);
-      new RecentEvents(this.db).redact(event.accountId,event.type,messageId,userId,scope,atMs);
       // Flag only — never overwrite original message text.
       if (event.type === "chat.clear")
         this.db
@@ -309,7 +308,7 @@ export class EventIngestion {
     }
   }
 
-  /** A chat message that arrives after its own moderation is stored redacted. */
+  /** Mark permanent message facts when moderation was received first. */
   private redactIfModerated(event: EventInput): void {
     if (event.source === "twitch" && event.type === "chat.message") {
       const deletion = this.db
