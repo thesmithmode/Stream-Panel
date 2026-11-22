@@ -14,7 +14,7 @@ export interface StreamMetric {
   >;
 }
 export function onlineMetric(stream: StreamMetric, platform: ViewerPlatform = 'all') {
-  return platform === 'all' ? stream.viewers?.all : stream.viewers?.[platform];
+  return platform === 'all' ? (stream.viewers?.known ?? stream.viewers?.all) : stream.viewers?.[platform];
 }
 export function dailyMetrics(streams: StreamMetric[], timezone: string, platform: ViewerPlatform = 'all') {
   const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -56,11 +56,13 @@ export function dailyMetrics(streams: StreamMetric[], timezone: string, platform
       minutes = online?.knownMinutes ?? (online?.mean != null ? duration / 60000 : 0);
     if (online?.mean != null && Number.isFinite(online.mean) && minutes > 0) {
       row.botOnlineTotal +=
-        ((platform === 'all' ? stream.botViewers?.all : stream.botViewers?.[platform])?.mean ?? 0) * minutes;
+        ((platform === 'all' ? (stream.botViewers?.known ?? stream.botViewers?.all) : stream.botViewers?.[platform])
+          ?.mean ?? 0) * minutes;
       row.onlineTotal += online.mean * minutes;
       row.onlineMinutes += minutes;
     }
-    if (platform === 'all' && minutes < duration / 60000 - 1e-9) row.partial = true;
+    if (platform === 'all' && ((online?.partialMinutes ?? 0) > 0 || minutes < duration / 60000 - 1e-9))
+      row.partial = true;
     if (stream.messages != null && Number.isFinite(stream.messages) && duration > 0) {
       row.botActiveTotal += stream.botMessages ?? 0;
       row.activeTotal += stream.messages;
