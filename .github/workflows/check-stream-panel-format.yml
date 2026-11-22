@@ -1,0 +1,27 @@
+name: Format stream history and archive changes
+on:
+  push:
+    branches: [ops/check-stream-panel-format]
+permissions:
+  contents: read
+jobs:
+  format:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prettier --write apps/web/src/StreamHistory.svelte apps/web/src/Overview.svelte apps/web/src/quiet-ui.css apps/web/src/daily-metrics.ts apps/web/src/daily-metrics.test.ts packages/core/src/store.ts packages/core/src/recent-events.ts packages/core/test/recent-events.test.ts tests/e2e/partial-viewers.test.mjs
+      - name: Report exact formatter delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'FORMAT_PATCH_BEGIN\n'
+          git diff --binary | gzip -n | base64 -w 120
+          printf 'FORMAT_PATCH_END\n'
+      - run: pnpm lint

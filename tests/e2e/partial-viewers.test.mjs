@@ -61,7 +61,9 @@ test(
       await page.getByRole('button', { name: 'Стримы', exact: true }).click();
       const row = page.locator(`[data-session-id="${id}"]`),
         count = row.locator('.stream-card-metrics>div').nth(1);
-      assert.match(await count.textContent(), /—.*0% эфира/);
+      assert.match(await count.textContent(), /Средние зрители\s*6$/);
+      assert.ok(await row.evaluate((card) => card.classList.contains('short-stream')));
+      assert.doesNotMatch(await row.textContent(), /% эфира/);
       const menu = page.getByRole('dialog', { name: 'Детали эфира', exact: true }),
         trigger = row.locator('.stream-actions summary');
       await trigger.click();
@@ -89,7 +91,7 @@ test(
       await menu.waitFor({ state: 'hidden' });
       await row.locator('.stream-open').click();
       await page.locator('.stream-kpis').getByText('8', { exact: true }).waitFor();
-      await page.locator('.stream-kpis').getByText('—', { exact: true }).waitFor();
+      await page.locator('.stream-kpis .kpi-number').getByText('6', { exact: true }).waitFor();
       await page.getByRole('button', { name: 'Аналитика', exact: true }).click();
       await page.getByRole('tab', { name: 'Время', exact: true }).click();
       await page.getByText('Настроить карту', { exact: true }).click();

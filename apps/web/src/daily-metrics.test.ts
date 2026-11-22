@@ -12,7 +12,7 @@ const streams: StreamMetric[] = [
     messages: 5,
     viewers: {
       all: { mean: 4, knownMinutes: 1 },
-      known: { mean: 2, knownMinutes: 1, partialMinutes: 1 },
+      known: { mean: 2, knownMinutes: 2, partialMinutes: 1 },
       twitch: { mean: 4, knownMinutes: 1 },
     },
   },
@@ -34,7 +34,7 @@ test('daily means weight measured viewer minutes and broadcast duration, preserv
   const rows = dailyMetrics([...streams].reverse(), 'Europe/Moscow');
   assert.equal(rows.length, 2);
   assert.equal(rows[0]!.date, '2026-10-20');
-  assert.equal(rows[0]!.online, 7);
+  assert.equal(rows[0]!.online, 28 / 5);
   assert.equal(rows[0]!.active, 204);
   assert.equal(rows[0]!.partial, true);
   assert.equal(rows[1]!.online, null);

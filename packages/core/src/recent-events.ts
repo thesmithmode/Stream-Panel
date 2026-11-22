@@ -47,16 +47,6 @@ export class RecentEvents {
         JSON.stringify(payload),
       );
   }
-  removeYoutube(account: string, messageId?: string, authorId?: string): void {
-    if (messageId)
-      this.db
-        .prepare("DELETE FROM recent_events WHERE source='youtube' AND account_id=? AND external_id=?")
-        .run(account, messageId);
-    if (authorId)
-      this.db
-        .prepare("DELETE FROM recent_events WHERE source='youtube' AND account_id=? AND actor_id=?")
-        .run(account, authorId);
-  }
   list(offset = 0, limit = 100, now = Date.now(), filter: RecentFilter = {}) {
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 200)
       throw new Error('INVALID_RECENT_EVENTS_PAGE');

@@ -9,6 +9,6 @@ Cleanup is a maintenance RPC: it has no analytics revision triggers and does not
 
 In the UI, open a stream and expand **События стрима · 7 дней**. In **Люди**, select a person and open **Сообщения · 7 дней**. Both views fetch only when opened and paginate 50 rows; raw provider JSON is not rendered. Message content is escaped.
 
-Twitch moderation is recorded separately. Archived messages retain their original text in either delivery order. Older rows whose text was already erased show that the original is unavailable. YouTube delete and ban notifications remove matching archived content for that account. The existing permanent moderation behavior is preserved.
+Twitch moderation is recorded separately. Archived messages retain their original text in either delivery order. Older rows whose text was already erased show that the original is unavailable. YouTube delete and ban notifications are archived separately and leave original archived text intact. The permanent moderation behavior is preserved for both platforms.
 
 Encrypted database backups may retain archived text beyond the live 7-day window until those backups expire. Restored expired rows are invisible immediately and are cleaned in bounded passes when collection resumes. No changes are made to backup retention.
