@@ -230,7 +230,7 @@ for (const type of ['chat.message_delete', 'chat.clear_user_messages', 'chat.cle
     }
   });
 }
-test('YouTube retains compact text, deduplicates, separates accounts and honors moderation', () => {
+test('YouTube retains immutable archive text after deletion and ban', () => {
   const s = new StreamStore(':memory:');
   try {
     const at = Date.now() - 1000,
@@ -251,7 +251,8 @@ test('YouTube retains compact text, deduplicates, separates accounts and honors 
         snippet: { ...m.snippet, type: 'messageDeletedEvent', messageDeletedDetails: { deletedMessageId: 'yt' } },
       },
     ]);
-    assert.equal(s.recentEvents().filter((r) => r.external_id === 'yt').length, 0);
+    s.youtubeMessages('yt-owner', 'chat', [{ ...m, snippet: { ...m.snippet, displayMessage: 'Replay' } }]);
+    assert.equal(s.recentEvents().find((r) => r.external_id === 'yt')?.payload.text, 'YouTube text');
     assert.equal(s.recentEvents().filter((r) => r.external_id === 'yt-other').length, 1);
     s.youtubeMessages('other-owner', 'other-chat', [
       {
@@ -264,7 +265,7 @@ test('YouTube retains compact text, deduplicates, separates accounts and honors 
         },
       },
     ]);
-    assert.equal(s.recentEvents().filter((r) => r.external_id === 'yt-other').length, 0);
+    assert.equal(s.recentEvents().find((r) => r.external_id === 'yt-other')?.payload.text, 'YouTube text');
   } finally {
     s.close();
   }

@@ -46,12 +46,14 @@
   const viewerMetrics = $derived(audienceData?.streamComparison?.[0]?.viewers);
   const viewers = $derived(
     viewerMetrics
-      ? { mean: viewerMetrics.all.mean, peak: viewerMetrics.known?.peak ?? viewerMetrics.all.peak }
+      ? {
+          mean: viewerMetrics.known?.mean ?? viewerMetrics.all.mean,
+          peak: viewerMetrics.known?.peak ?? viewerMetrics.all.peak,
+        }
       : session
-        ? { mean: session.viewerMean, peak: session.viewerKnownPeak ?? session.viewerPeak }
+        ? { mean: session.viewerKnownMean ?? session.viewerMean, peak: session.viewerKnownPeak ?? session.viewerPeak }
         : undefined,
   );
-  const viewerCoverage = $derived(viewerMetrics?.all?.coverageRatio ?? session?.viewerCoverageRatio);
   const missingPresence = $derived(missingTwitchPresence(audienceData?.timeline ?? []));
   function loadResolution() {
     try {
@@ -243,9 +245,6 @@
         variant="metadata-menu"
         label="История названий и категорий"
         >{#snippet children()}
-          {#if viewerCoverage != null && viewerCoverage < 1}<p class="small muted"
-              >Полные замеры есть за {Math.floor(viewerCoverage * 100)}% эфира.</p
-            >{/if}
           {#each session.breaks ?? [] as pause}<p class="small">Перерыв: {streamRange(pause.from, pause.to)} МСК</p
             >{/each}
           {#each [...metadata].sort((a, b) => b.at - a.at) as row}<p class="small"

@@ -1056,7 +1056,6 @@ export class StreamStore {
               this.db
                 .prepare('DELETE FROM youtube_messages WHERE account_id=? AND id=?')
                 .run(account, deletedMessageId);
-              new RecentEvents(this.db).removeYoutube(account, deletedMessageId);
             }
           }
           if (m.snippet.type === 'userBannedEvent') {
@@ -1065,7 +1064,6 @@ export class StreamStore {
               this.db
                 .prepare('DELETE FROM youtube_messages WHERE account_id=? AND author_id=?')
                 .run(account, bannedChannelId);
-              new RecentEvents(this.db).removeYoutube(account, undefined, bannedChannelId);
             }
           }
           if (

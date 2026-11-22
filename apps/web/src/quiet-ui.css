@@ -385,6 +385,9 @@ main {
   padding: 16px;
   min-width: 0;
 }
+.stream-card.short-stream {
+  background: color-mix(in srgb, #f55c65 15%, var(--surface));
+}
 .stream-open {
   position: absolute;
   inset: 0;

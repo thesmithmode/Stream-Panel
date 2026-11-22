@@ -62,10 +62,15 @@
       /></div
     >{/if}
   {#each sessions as session, index (session.id)}
+    {@const durationMs = session.durationMs ?? (session.ended_at_ms ?? Date.now()) - session.started_at_ms}
     {#if index === 0 || sessionGroup(session.started_at_ms) !== sessionGroup(sessions[index - 1]!.started_at_ms)}<h2
         class="history-date">{sessionGroup(session.started_at_ms)}</h2
       >{/if}
-    <article class="stream-card" data-session-id={session.id}>
+    <article
+      class="stream-card"
+      class:short-stream={session.ended_at_ms !== null && durationMs < 15 * 60_000}
+      data-session-id={session.id}
+    >
       <a
         class="stream-open"
         aria-label={`Открыть ${session.primaryTitle || 'стрим'}`}
@@ -91,18 +96,12 @@
           >
         </div>
         <dl class="stream-card-metrics">
-          <div
-            ><dt>Длительность</dt><dd
-              >{formatDuration(
-                (session.durationMs ?? (session.ended_at_ms ?? Date.now()) - session.started_at_ms) / 60000,
-              )}</dd
-            ></div
-          >
+          <div><dt>Длительность</dt><dd>{formatDuration(durationMs / 60000)}</dd></div>
           <div
             ><dt>Средние зрители</dt><dd
-              >{session.viewerMean?.toLocaleString('ru-RU', { maximumFractionDigits: 1 }) ??
-                '—'}{#if session.viewerCoverageRatio != null && session.viewerCoverageRatio < 1}
-                <small>· {Math.floor(session.viewerCoverageRatio * 100)}% эфира</small>{/if}</dd
+              >{(session.viewerKnownMean ?? session.viewerMean)?.toLocaleString('ru-RU', {
+                maximumFractionDigits: 1,
+              }) ?? '—'}</dd
             ></div
           >
           <div
