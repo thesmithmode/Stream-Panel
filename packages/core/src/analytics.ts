@@ -16,6 +16,7 @@ export interface AnalyticsOptions {
   membershipOnly?: boolean;
   /** Internal, server-selected rolling membership; never accepted from query input. */
   rollingCore?: boolean | undefined;
+  streamPreview?: boolean;
   coreWindowDays?: number;
   corePeople?: string[] | undefined;
   streamFrom?: number;

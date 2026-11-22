@@ -62,13 +62,14 @@ test(
       const row = page.locator(`[data-session-id="${id}"]`),
         count = row.locator('.stream-card-metrics>div').nth(1);
       assert.match(await count.textContent(), /Средние зрители\s*6$/);
+      const peak = row.locator('.stream-card-metrics > div').filter({ hasText: 'Пик зрителей' });
+      assert.match(await peak.textContent(), /Пик зрителей\s*8$/);
       assert.ok(await row.evaluate((card) => card.classList.contains('short-stream')));
       assert.doesNotMatch(await row.textContent(), /% эфира/);
       const menu = page.getByRole('dialog', { name: 'Детали эфира', exact: true }),
         trigger = row.locator('.stream-actions summary');
       await trigger.click();
       await menu.waitFor();
-      assert.match(await menu.textContent(), /Пик зрителей: 8/);
       assert.equal(
         await page
           .locator('body')

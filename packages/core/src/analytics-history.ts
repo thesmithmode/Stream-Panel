@@ -40,6 +40,7 @@ type Session = {
 };
 type Report = ReturnType<typeof audienceAnalytics> & {
   coreRoster?: string[];
+  streamPreview?: true;
   streamRange?: { first: number; last: number; total: number };
   insights?: InsightCard[];
   clockBuckets?: ClockBucket[];
@@ -750,8 +751,18 @@ export class AnalyticsHistory {
     };
   }
   query(options: AnalyticsOptions): Report {
-    const core = this.rollingMembership(options);
-    if (core.preparing) return core;
+    const { streamPreview, ...query } = options;
+    const preview = streamPreview && query.sessionId && !query.panel;
+    const core = this.rollingMembership(query, Boolean(preview));
+    if (core.preparing) {
+      if (preview)
+        return {
+          ...this.sessionReport({ ...query, rollingCore: undefined, corePeople: [] }),
+          preparing: true,
+          streamPreview: true,
+        };
+      return core;
+    }
     options = core.options;
     return options.sessionId
       ? this.projection(this.sessionReport(options), options)
@@ -761,6 +772,7 @@ export class AnalyticsHistory {
   private membershipBytes = 0;
   private rollingMembership(
     options: AnalyticsOptions,
+    cachedOnly = false,
   ): { preparing: false; options: AnalyticsOptions } | (Report & { preparing: true }) {
     if (!options.rollingCore) return { preparing: false, options };
     validateAnalyticsOptions(options);
@@ -793,6 +805,7 @@ export class AnalyticsHistory {
     const retained = this.memberships.get(membershipKey);
     if (retained)
       return { preparing: false, options: { ...options, rollingCore: undefined, corePeople: retained.people } };
+    if (cachedOnly) return { ...analyticsMetadata(options), preparing: true };
     const corePeople: string[] = [];
     for (let offset = 0; ; offset += 100) {
       const report = this.resolve({ ...basis, audienceOffset: offset }, true);

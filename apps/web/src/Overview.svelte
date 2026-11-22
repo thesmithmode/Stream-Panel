@@ -167,12 +167,12 @@
   });
   const decimal = (n: number) => n.toLocaleString('ru-RU', { maximumFractionDigits: 1 });
   let metadata = $state<Array<{ at: number; title: string; categoryName: string }>>([]);
+  const needsAudience = $derived(activeTab === 'summary' || activeTab === 'people');
   let audienceRequest = 0,
     lastAudienceSession = '';
   $effect(() => {
     const current = sessionFilter,
-      needsAudience = activeTab === 'summary' || activeTab === 'people',
-      needsSupplement = activeTab === 'people';
+      loadAudience = needsAudience;
     void summary;
     return untrack(() => {
       if (current === lastAudienceSession && (document.hidden || !navigator.onLine)) return;
@@ -190,7 +190,7 @@
         audienceBusy = false;
         return;
       }
-      if (!needsAudience) {
+      if (!loadAudience) {
         audienceBusy = false;
         return;
       }
@@ -198,12 +198,17 @@
       audienceData = cachedAnalytics(getProfile(), query) ?? audienceData;
       audienceBusy = audienceData === null;
       const controller = new AbortController();
-      void loadAnalytics(getProfile(), query, false, controller.signal)
+      void loadAnalytics(getProfile(), query, false, controller.signal, (preview) => {
+        if (id === audienceRequest && audienceData === null) {
+          audienceData = preview;
+          audienceBusy = false;
+        }
+      })
         .then((result) => {
           if (id === audienceRequest) audienceData = result;
         })
         .catch((error) => {
-          if (id === audienceRequest)
+          if (id === audienceRequest && audienceData === null)
             audienceError =
               error instanceof ConnectionError
                 ? 'Не удалось загрузить участников и график. Проверьте соединение и повторите обновление.'
@@ -212,12 +217,6 @@
         .finally(() => {
           if (id === audienceRequest) audienceBusy = false;
         });
-      if (needsSupplement)
-        void api<any[]>(`sessions/${encodeURIComponent(current)}/supplementary-chat`, undefined, controller.signal)
-          .then((extra) => {
-            if (id === audienceRequest) supplemental = extra;
-          })
-          .catch(() => {});
       void api<Array<{ at: number; title: string; categoryName: string }>>(
         `sessions/${current}/metadata`,
         undefined,
@@ -236,6 +235,18 @@
         controller.abort();
       };
     });
+  });
+  $effect(() => {
+    const current = sessionFilter;
+    void summary;
+    if (!current || activeTab !== 'people' || document.hidden || !navigator.onLine) return;
+    const controller = new AbortController();
+    void api<any[]>(`sessions/${encodeURIComponent(current)}/supplementary-chat`, undefined, controller.signal)
+      .then((extra) => {
+        if (!controller.signal.aborted) supplemental = extra;
+      })
+      .catch(() => {});
+    return () => controller.abort();
   });
 </script>
 

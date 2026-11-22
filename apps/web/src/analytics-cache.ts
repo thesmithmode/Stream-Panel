@@ -105,7 +105,13 @@ export function clearAnalyticsCache() {
   overviewSnapshots.clear();
   clearSubscriberCache();
 }
-export function loadAnalytics(profile: string, q: URLSearchParams, force = false, signal?: AbortSignal) {
+export function loadAnalytics(
+  profile: string,
+  q: URLSearchParams,
+  force = false,
+  signal?: AbortSignal,
+  onStreamPreview?: (value: any) => void,
+) {
   if (signal?.aborted) return Promise.reject(signal.reason);
   const id = key(profile, q),
     prior = reports.get(id);
@@ -122,12 +128,25 @@ export function loadAnalytics(profile: string, q: URLSearchParams, force = false
   entry.task = (async () => {
     const request = new URLSearchParams(q);
     request.delete('_period');
-    const result = await analyticsReport(
-      (signal) => api(`analytics?${request}`, undefined, signal, profile),
-      entry.controller.signal,
-    );
-    if (result.filters && ['category', 'source', 'timezone'].some((field) => result.filters[field] !== q.get(field)))
-      throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');
+    const checkFilters = (value: any) => {
+      if (value.filters && ['category', 'source', 'timezone'].some((field) => value.filters[field] !== q.get(field)))
+        throw new Error('Сервер вернул данные для других фильтров. Повторите обновление.');
+    };
+    let preview = onStreamPreview && q.has('session') && !cachedAnalytics(profile, q);
+    const result = await analyticsReport(async (signal) => {
+      if (preview) request.set('streamPreview', '1');
+      const value = await api<any>(`analytics?${request}`, undefined, signal, profile);
+      if (preview) {
+        preview = false;
+        request.delete('streamPreview');
+        if (value.streamPreview === true) {
+          checkFilters(value);
+          onStreamPreview?.(value);
+        }
+      }
+      return value;
+    }, entry.controller.signal);
+    checkFilters(result);
     entry.pending = false;
     entry.value = result;
     const snapshot = snapshotKey(profile, q);

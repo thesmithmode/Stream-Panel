@@ -302,7 +302,7 @@ test(
         headers.push(await a.locator('.stream-card-metrics dt').allTextContents());
       }
       assert.deepEqual(headers[0], headers[1]);
-      assert.deepEqual(headers[0], ['Длительность', 'Средние зрители', 'Донаты', 'Сообщения']);
+      assert.deepEqual(headers[0], ['Длительность', 'Средние зрители', 'Пик зрителей', 'Донаты', 'Сообщения']);
       await a.getByLabel('Профиль', { exact: true }).selectOption('ruslan');
       await a.getByRole('button', { name: 'Аналитика', exact: true }).click();
       await a.getByRole('tab', { name: 'Аудитория', exact: true }).click();
