@@ -105,6 +105,11 @@
             ></div
           >
           <div
+            ><dt>Пик зрителей</dt><dd
+              >{(session.viewerKnownPeak ?? session.viewerPeak)?.toLocaleString('ru-RU') ?? '—'}</dd
+            ></div
+          >
+          <div
             ><dt>Донаты</dt><dd
               >{Object.entries(session.donationTotals ?? {})
                 .map(([c, a]) => money(a, c))
@@ -126,9 +131,7 @@
       <ActionMenu variant="stream-actions" label={`Действия: ${session.primaryTitle || 'стрим'}`} title="Детали эфира"
         >{#snippet children(close)}
           {#if session.viewerPartial}<span class="small muted">Неполные данные площадок: сумма известных зрителей.</span
-            >{/if}<span class="small muted"
-            >Пик зрителей: {(session.viewerPartial ? session.viewerKnownPeak : session.viewerPeak) ?? '—'}</span
-          ><span class="small muted">Донатов: {session.donationCount ?? 0}</span>
+            >{/if}<span class="small muted">Донатов: {session.donationCount ?? 0}</span>
           {#each (session.confirmedUrls ?? []).filter(validUrl) as entry, index}<a
               href={entry.url}
               target="_blank"

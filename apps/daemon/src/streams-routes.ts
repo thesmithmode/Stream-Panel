@@ -98,6 +98,7 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
           ...(q.streamOffset === undefined ? {} : { streamOffset: Number(q.streamOffset) }),
           ...(q.streamLimit === undefined ? {} : { streamLimit: Number(q.streamLimit) }),
           ...(sessionId ? { sessionId } : {}),
+          ...(sessionId && !panel && string(q.streamPreview) === '1' ? { streamPreview: true } : {}),
           ...(panel ? { panel: panel as 'dynamics' | 'time' | 'audience' } : {}),
           ...(string(q.attendanceOnly) === '1' ? { attendanceOnly: true } : {}),
           ...(string(q.mode) === 'summary' ? { summaryOnly: true } : {}),

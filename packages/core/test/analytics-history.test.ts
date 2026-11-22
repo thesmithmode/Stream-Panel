@@ -77,6 +77,44 @@ test('rolling roster retains more than a page of people and manual overrides wit
     s.close();
   }
 });
+test('stream preview returns an archived stream while the rolling roster is being prepared', (t) => {
+  const s = new StreamStore(':memory:');
+  try {
+    const selected = s.startSession('owner', 'archive', base, 'platform', base);
+    s.streamSample(selected, base, 'game', 'Game', '', 11);
+    s.recordPoll(selected, 'owner', {
+      startedAtMs: base,
+      completedAtMs: base + minute,
+      status: 'complete',
+      userIds: ['viewer'],
+    });
+    s.endSession(selected, base + 2 * minute);
+    const history = (s as any).history;
+    const resolve = history.resolve.bind(history);
+    const read = t.mock.method(history, 'resolve', (options: any, ...args: any[]) =>
+      options.membershipOnly ? { preparing: true, audience: [] } : resolve(options, ...args),
+    );
+    const q = { sessionId: selected, fromMs: 0, toMs: base + 3 * minute, rollingCore: true, timezone: 'UTC' };
+    const preview = s.analytics({ ...q, streamPreview: true });
+    assert.equal(preview.preparing, true);
+    assert.equal(preview.streamPreview, true);
+    assert.equal(read.mock.callCount(), 0);
+    assert.equal(preview.audience.length, 1);
+    assert.equal(preview.audience[0]?.core, false);
+    assert.equal(preview.streamComparison[0]?.viewers.all.peak, 10);
+    assert.deepEqual(
+      preview.streamComparison.map((stream) => stream.id),
+      [selected],
+    );
+    assert.equal(s.analytics(q).preparing, true);
+    assert.equal(read.mock.callCount(), 1);
+    const live = s.startSession('owner', 'live', base + 3 * minute, 'platform', base + 3 * minute);
+    assert.equal(s.analytics({ ...q, sessionId: live, streamPreview: true }).streamPreview, undefined);
+    assert.equal(read.mock.callCount(), 2);
+  } finally {
+    s.close();
+  }
+});
 function fixture(s: StreamStore, n = 4, youtube = false) {
   for (let i = 0; i < n; i++) {
     const at = base + i * 86400000,
