@@ -752,8 +752,13 @@ export class AnalyticsHistory {
   }
   query(options: AnalyticsOptions): Report {
     const { streamPreview, ...query } = options;
-    const preview = streamPreview && query.sessionId && !query.panel;
-    const core = this.rollingMembership(query, Boolean(preview));
+    const preview = Boolean(
+      streamPreview &&
+      query.sessionId &&
+      !query.panel &&
+      this.statement('SELECT 1 FROM sessions WHERE id=? AND ended_at_ms IS NOT NULL').get(query.sessionId),
+    );
+    const core = this.rollingMembership(query, preview);
     if (core.preparing) {
       if (preview)
         return {

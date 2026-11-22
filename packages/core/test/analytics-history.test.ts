@@ -108,6 +108,9 @@ test('stream preview returns an archived stream while the rolling roster is bein
     );
     assert.equal(s.analytics(q).preparing, true);
     assert.equal(read.mock.callCount(), 1);
+    const live = s.startSession('owner', 'live', base + 3 * minute, 'platform', base + 3 * minute);
+    assert.equal(s.analytics({ ...q, sessionId: live, streamPreview: true }).streamPreview, undefined);
+    assert.equal(read.mock.callCount(), 2);
   } finally {
     s.close();
   }
