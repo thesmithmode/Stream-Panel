@@ -16,6 +16,7 @@ import { SharedIdentities, type SyncHint } from './shared-identities.js';
 import { AudienceQueries } from './audience-queries.js';
 import { ProviderStorage } from './provider-storage.js';
 import { messageMetadata } from './message-storage.js';
+import { ChatSpam } from './chat-spam.js';
 import { registerDonationSum, donationTotals, maximumDonation } from './donation-statistics.js';
 import { parseDonationTime } from './donation-time.js';
 import { personActivity } from './person-activity.js';
@@ -34,6 +35,7 @@ import { type PresencePoll } from './presence.js';
 
 import { PersonBots } from './person-bots.js';
 export class StreamStore {
+  private readonly youtubeChatSpam = new ChatSpam();
   private readonly bots: PersonBots;
   private currentChatQueries: CurrentChatQueries;
   private history: AnalyticsHistory;
@@ -1047,9 +1049,17 @@ export class StreamStore {
     this.db
       .transaction(() => {
         const insert = this.db.prepare('INSERT OR IGNORE INTO youtube_messages VALUES (?,?,?,?,?,?)');
+        const existing = this.db.prepare('SELECT 1 FROM youtube_messages WHERE id=?');
         for (const m of messages) {
           const time = Date.parse(m.snippet?.publishedAt ?? '');
           if (!m.id || !Number.isFinite(time)) continue;
+          const text = m.snippet.displayMessage ?? m.snippet.textMessageDetails?.messageText;
+          if (
+            m.snippet.type === 'textMessageEvent' &&
+            (existing.get(m.id) ||
+              !this.youtubeChatSpam.allow([account, chat], m.authorDetails?.channelId ?? '', m.id, time, text))
+          )
+            continue;
           if (m.snippet.type === 'messageDeletedEvent') {
             const deletedMessageId = m.snippet.messageDeletedDetails?.deletedMessageId;
             if (typeof deletedMessageId === 'string' && deletedMessageId.trim()) {
@@ -1071,7 +1081,7 @@ export class StreamStore {
               .changes
           ) {
             this.ensureYoutubeIdentity(account, m.authorDetails, time);
-            const { displayMessage, textMessageDetails, ...snippet } = m.snippet;
+            const { displayMessage: _displayMessage, textMessageDetails: _textMessageDetails, ...snippet } = m.snippet;
             new RecentEvents(this.db).save({
               source: 'youtube',
               accountId: account,
@@ -1089,7 +1099,7 @@ export class StreamStore {
                 ...snippet,
                 chatId: chat,
                 ...(videoId ? { videoId } : {}),
-                text: displayMessage ?? textMessageDetails?.messageText ?? '',
+                text: text ?? '',
               },
             });
           }

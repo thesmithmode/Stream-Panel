@@ -1,4 +1,5 @@
 import { SubscriberHistory } from './subscriber-history.js';
+import { ChatSpam } from './chat-spam.js';
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { assertTimestamp, candidateKey, matchKey, daDonorExternalId, eventKey, type EventInput } from './domain.js';
@@ -23,6 +24,8 @@ export const priorModerationQuery = `SELECT 1 FROM events WHERE source='twitch' 
 
 /** Validates and atomically records deduplicated facts; collaborators share this connection. */
 export class EventIngestion {
+  private readonly chatSpam = new ChatSpam();
+
   constructor(
     private readonly db: Database.Database,
     private readonly links: Pick<IdentityLinks, 'resolveAutoLinkPerson' | 'rememberAlias'>,
@@ -80,6 +83,18 @@ export class EventIngestion {
     const previous = this.db.prepare(`SELECT identity_id AS id FROM events WHERE id = ?`).get(eventKey(event)) as
       { id: string | null } | undefined;
     if (previous) return this.repeated(event, previous.id);
+    if (
+      event.source === 'twitch' &&
+      event.type === 'chat.message' &&
+      !this.chatSpam.allow(
+        [event.accountId, String(event.payload.originChannelId ?? event.accountId)],
+        event.actor?.externalId ?? '',
+        event.externalId,
+        event.occurredAtMs ?? event.receivedAtMs,
+        event.payload.text,
+      )
+    )
+      return { inserted: false, identityId: null, personId: null };
     const duplicate = this.duplicateFollow(event);
     if (duplicate) return duplicate;
     if (
