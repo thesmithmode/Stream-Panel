@@ -7,6 +7,56 @@ import { StreamStore } from '../src/store.js';
 import { SubscriberHistory } from '../src/subscriber-history.js';
 import { openProfileDatabase } from '../src/profile-db.js';
 import { schemaMigrations } from '../src/schema.js';
+import { FOLLOW_COOLDOWN_MS } from '../src/follow-spam.js';
+
+test('Twitch follow bursts are skipped before archival and stay hidden when the report starts mid-burst', () => {
+  const db = new StreamStore(':memory:');
+  const at = Date.now() - 20 * 60_000;
+  try {
+    const follow = (time: number, id = 'viewer', accountId = 'owner') =>
+      db.ingest({
+        source: 'twitch',
+        accountId,
+        externalId: `${id}:${time}`,
+        type: 'follow',
+        actor: { externalId: id, displayName: id },
+        occurredAtMs: time,
+        receivedAtMs: time,
+        sourceTime: null,
+        timeQuality: 'provider',
+        transport: 'eventsub',
+        payload: {},
+      });
+    const snapshot = (observed: number, followedAtMs: number) =>
+      db.followingSnapshot('twitch', 'owner', [{ id: 'viewer', name: 'viewer', followedAtMs }], true, observed, 1);
+    snapshot(at + 500, at);
+    assert.equal(follow(at).inserted, true, 'a poll can precede delivery of the same follow');
+    assert.equal(follow(at + 100).inserted, false);
+    for (let minute = 1; minute <= 4; minute++) {
+      const time = at + minute * 60_000;
+      snapshot(time + 500, time);
+      assert.equal(follow(time).inserted, false);
+    }
+    db.followingSnapshot('twitch', 'owner', [], true, at + 290_000, 0);
+    assert.equal(follow(at + 60_000, 'other').inserted, true);
+    assert.equal(follow(at, 'viewer', 'other-channel').inserted, true);
+    assert.equal(follow(at + FOLLOW_COOLDOWN_MS).inserted, true);
+    assert.equal(follow(at - 1000).inserted, false, 'late delivery cannot create another entry');
+    assert.equal(db.events().length, 4);
+    assert.equal(db.recentEvents().length, 4);
+    assert.equal(
+      db.subscriberHistory({ source: 'twitch', account: 'owner', from: at - 1, to: at + 600_000 }).follows.length,
+      3,
+    );
+    const report = db.followerChanges(at - 1, at + 600_000);
+    assert.equal(report.newFollowers.filter((row) => row.account === 'owner').length, 3);
+    assert.equal(report.unfollowers.length, 1);
+    assert.equal(report.unfollowers[0]?.at, at + 290_000);
+    assert.deepEqual(db.followerChanges(at + 120_000, at + 280_000).newFollowers, []);
+  } finally {
+    db.close();
+  }
+});
 test('subscriber history preserves provider dates outside streams, reconciles totals, and isolates profiles/accounts/platforms', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'subscriber-history-')),
     path = join(dir, 'db');

@@ -2,6 +2,7 @@ import { botExclusionSet, isExcludedBot } from './bots.js';
 import { databaseBotExclusions } from './person-bots.js';
 import { streamFollowerObservationsSql } from './follower-queries.js';
 import { sessionWindows } from './session-windows.js';
+import { FOLLOW_COOLDOWN_MS, limitFollowRepeats } from './follow-spam.js';
 import type Database from 'better-sqlite3';
 export interface Follower {
   id: string;
@@ -267,7 +268,27 @@ export function followingAnalytics(
     .all(stream.start, end) as { source: string; account: string; id: string; name: string; at: number }[];
   for (const e of events) add(e.source, e.account, { id: e.id, name: e.name, followedAtMs: e.at });
   // Resolve all identities in one indexed join, even when many snapshots repeat a follower.
-  const unfollowers = streamUnfollowers(db, stream.start, end, windows);
+  const followerKey = (row: { account: string; externalId: string }) => JSON.stringify([row.account, row.externalId]);
+  // A roster poll can still report the latest provider timestamp for a suppressed refollow.
+  const twitchCandidates = [...signups.entries()]
+    .filter(([, row]) => row.source === 'twitch')
+    .map(([key, row]) => [key, row.account, row.externalId, row.at]);
+  const suppressed = db
+    .prepare(
+      `WITH candidates AS (
+        SELECT value->>0 AS key,value->>1 AS account,value->>2 AS user,value->>3 AS at FROM json_each(?)
+      )
+      SELECT key FROM candidates c WHERE NOT EXISTS(
+        SELECT 1 FROM subscriber_follows f
+        WHERE f.account_id=c.account AND f.followed_second=c.at/1000 AND f.external_id=c.user
+      ) AND EXISTS(
+        SELECT 1 FROM subscriber_follows f
+        WHERE f.account_id=c.account AND f.external_id=c.user AND f.followed_at_ms>c.at-? AND f.followed_at_ms<c.at+?
+      )`,
+    )
+    .all(JSON.stringify(twitchCandidates), FOLLOW_COOLDOWN_MS, FOLLOW_COOLDOWN_MS) as { key: string }[];
+  for (const { key } of suppressed) signups.delete(key);
+  const unfollowers = limitFollowRepeats(streamUnfollowers(db, stream.start, end, windows), followerKey);
   const requested = JSON.stringify(
     [...signups.values(), ...unfollowers].map((f) => ({ source: f.source, account: f.account, id: f.externalId })),
   );
@@ -313,7 +334,12 @@ export function followingAnalytics(
       ((f.personId && humans.has(f.personId)) || !isExcludedBot(f.name, optional))
     );
   };
-  const newFollowers = [...signups.values()]
+  const signupsByPlatform = [...signups.values()];
+  const twitchSignups = limitFollowRepeats(
+    signupsByPlatform.filter((f) => f.source === 'twitch'),
+    followerKey,
+  );
+  const newFollowers = [...twitchSignups, ...signupsByPlatform.filter((f) => f.source !== 'twitch')]
     .filter(visible)
     .sort(
       (a, b) =>

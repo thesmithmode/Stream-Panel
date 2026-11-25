@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { assertTimestamp } from './domain.js';
+import { FOLLOW_COOLDOWN_MS, limitFollowRepeats } from './follow-spam.js';
 export type SubscriberSource = 'twitch' | 'youtube';
 export interface Publication {
   id: string;
@@ -33,9 +34,15 @@ export class SubscriberHistory {
   }
   follow(account: string, id: string, name: string, at: number) {
     assertTimestamp(at);
-    this.db
-      .prepare('INSERT OR IGNORE INTO subscriber_follows VALUES (?,?,?,?,?)')
-      .run(account, id, at, name, Math.floor(at / 1000));
+    const nearby = this.db
+      .prepare(
+        'SELECT followed_second AS second FROM subscriber_follows WHERE account_id=? AND external_id=? AND followed_at_ms>? AND followed_at_ms<? ORDER BY followed_at_ms LIMIT 1',
+      )
+      .get(account, id, at - FOLLOW_COOLDOWN_MS, at + FOLLOW_COOLDOWN_MS) as { second: number } | undefined;
+    const second = Math.floor(at / 1000);
+    if (nearby) return nearby.second === second;
+    this.db.prepare('INSERT OR IGNORE INTO subscriber_follows VALUES (?,?,?,?,?)').run(account, id, at, name, second);
+    return true;
   }
   publications(account: string, items: Publication[], at: number) {
     assertTimestamp(at);
@@ -126,7 +133,7 @@ export class SubscriberHistory {
       from,
       to,
       counts,
-      follows,
+      follows: limitFollowRepeats(follows, (follow) => follow.id),
       streams,
       publications,
       total: last?.total ?? null,
