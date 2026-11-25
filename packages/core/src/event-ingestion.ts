@@ -70,18 +70,24 @@ export class EventIngestion {
 
   /** Writes one validated event inside the ingestion transaction. */
   private record(event: EventInput, payload: string): IngestResult {
-    if (event.source === 'twitch' && event.type === 'follow' && event.actor && event.occurredAtMs !== null)
-      new SubscriberHistory(this.db).follow(
-        event.accountId,
-        event.actor.externalId,
-        event.actor.displayName,
-        event.occurredAtMs,
-      );
     const previous = this.db.prepare(`SELECT identity_id AS id FROM events WHERE id = ?`).get(eventKey(event)) as
       { id: string | null } | undefined;
     if (previous) return this.repeated(event, previous.id);
     const duplicate = this.duplicateFollow(event);
     if (duplicate) return duplicate;
+    if (
+      event.source === 'twitch' &&
+      event.type === 'follow' &&
+      event.actor &&
+      event.occurredAtMs !== null &&
+      !new SubscriberHistory(this.db).follow(
+        event.accountId,
+        event.actor.externalId,
+        event.actor.displayName,
+        event.occurredAtMs,
+      )
+    )
+      return { inserted: false, identityId: null, personId: null };
     if (
       event.source === 'donationalerts' &&
       event.type === 'donation' &&

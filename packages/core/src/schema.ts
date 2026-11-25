@@ -642,6 +642,10 @@ CREATE INDEX IF NOT EXISTS stream_clips_stream ON stream_clips(account_id,stream
 CREATE INDEX IF NOT EXISTS stream_clips_age ON stream_clips(created_at_ms);
 PRAGMA user_version=37;
 `;
+const followCooldownSchema = `
+CREATE INDEX IF NOT EXISTS subscriber_follows_account_user_time ON subscriber_follows(account_id,external_id,followed_at_ms);
+PRAGMA user_version=38;
+`;
 export const schemaMigrations = [
   schemaV1,
   schemaV2,
@@ -680,5 +684,6 @@ export const schemaMigrations = [
   serviceAccountsSchema,
   averageOnlineSchema,
   streamClipsSchema,
+  followCooldownSchema,
 ] as const;
 export const CURRENT_SCHEMA_VERSION = schemaMigrations.length;

@@ -35,7 +35,12 @@ test('follow retries and snapshot precision count one signup, while later refoll
       at + 2 * minute,
     );
     assert.equal(s.followingAnalytics(id).newFollowers.length, 1);
-    assert.equal(s.ingest({ ...input, externalId: 'refollow', occurredAtMs: at + 3 * minute }).inserted, true);
+    assert.equal(s.ingest({ ...input, externalId: 'quick-refollow', occurredAtMs: at + 3 * minute }).inserted, false);
+    assert.equal(
+      s.ingest({ ...input, externalId: 'later-refollow', occurredAtMs: at + 7 * minute, receivedAtMs: at + 7 * minute })
+        .inserted,
+      true,
+    );
     assert.equal(s.followingAnalytics(id).newFollowers.length, 2);
     assert.equal(
       s.ingest({ ...input, externalId: 'another-viewer', actor: { externalId: 'other', displayName: 'Viewer' } })
