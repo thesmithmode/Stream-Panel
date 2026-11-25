@@ -14,7 +14,7 @@ test(
       clients = [new StoreClient(path, 'ruslan'), new StoreClient(path, 'gulnaz')];
     try {
       await Promise.all(clients.map((c) => c.ready));
-      const start = Date.now() - 120000;
+      const start = Date.now() - 180000;
       const ids = await Promise.all(
         clients.map(
           (c) =>
@@ -34,24 +34,25 @@ test(
       await Promise.all(
         clients.map(async (c, index) => {
           for (let n = 0; n < 150; n++) {
+            const at = start + n * 1000;
             await c.call('ingest', {
               source: 'twitch',
               accountId: 'owner',
               externalId: String(n),
               type: 'chat.message',
               actor: { externalId: 'viewer', displayName: 'Viewer' },
-              occurredAtMs: start + n * 100,
-              receivedAtMs: start + n * 100,
+              occurredAtMs: at,
+              receivedAtMs: at,
               sourceTime: null,
               timeQuality: 'provider',
               transport: 'eventsub',
-              payload: { text: `Profile ${index}` },
+              payload: { text: `Profile ${index}, message ${n}` },
             });
             if (n % 25 === 0) {
               await c.call(
                 'streamSample',
                 ids[index]!,
-                start + n * 100,
+                at,
                 'g',
                 'Game',
                 'Live',
@@ -59,7 +60,7 @@ test(
               );
               await c.call('recordPoll', ids[index]!, 'owner', {
                 startedAtMs: start,
-                completedAtMs: start + n * 100,
+                completedAtMs: at,
                 status: 'complete',
                 userIds: ['viewer'],
               });

@@ -52,7 +52,7 @@ test('old chat content is scrubbed and compacted for both profiles without chang
           sourceTime: null,
           timeQuality: 'provider',
           transport: 'eventsub',
-          payload: { text: marker, raw: { message: { text: marker } } },
+          payload: { text: `${marker} ${i}`, raw: { message: { text: marker } } },
         }).personId;
       store.attachPlatformStream(stream, 'youtube', 'yt-owner', 'yt-live', at, at, null, 'Live');
       store.youtubeMessages('yt-owner', 'chat', [
