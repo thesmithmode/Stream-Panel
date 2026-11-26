@@ -7,7 +7,7 @@ import { StoreClient } from '../src/db.js';
 import { YouTubeConnection } from '../src/youtube.js';
 import type { Configuration } from '../src/config.js';
 import { openProfileDatabase } from '../../../packages/core/src/profile-db.js';
-test('YouTube records fresh totals every five minutes live and once per fifteen minutes offline without a statistics failure interrupting streams', async () => {
+test('YouTube records fresh totals every five minutes live and once per hour offline without a statistics failure interrupting streams', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'subscriber-cadence-')),
     db = new StoreClient(join(dir, 'db'), 'ruslan'),
     base = Date.UTC(2026, 9, 22, 9);
@@ -15,7 +15,7 @@ test('YouTube records fresh totals every five minutes live and once per fifteen 
     live = false,
     fail = false,
     countRequests = 0;
-  const tokens = { access: 'fixture', refresh: 'fixture', userId: 'owner', expiresAt: base + 3600000, scopes: [] },
+  const tokens = { access: 'fixture', refresh: 'fixture', userId: 'owner', expiresAt: base + 7200000, scopes: [] },
     config = { value: { youtube: tokens }, save: async () => {} } as unknown as Configuration;
   const request: typeof fetch = async (input) => {
     const url = new URL(String(input));
@@ -79,7 +79,10 @@ test('YouTube records fresh totals every five minutes live and once per fifteen 
     at = base + 780000;
     assert.equal(await connection.collectOnce(), 300000);
     assert.equal(countRequests, 2);
-    at = base + 1200000;
+    at = base + 600000 + 3600000 - 1;
+    await connection.collectOnce();
+    assert.equal(countRequests, 2);
+    at++;
     await connection.collectOnce();
     assert.equal(countRequests, 3);
     assert.equal(
@@ -138,7 +141,7 @@ test('YouTube starts legacy subscriber history immediately from a fresh count, t
     at += 300000;
     await connection.collectOnce();
     assert.equal(requests, 1);
-    at += 600000;
+    at += 3300000;
     await connection.collectOnce();
     assert.equal(requests, 2);
     assert.equal((await db.call('youtubeData', 'owner')).subscriberCountAt, at);
@@ -184,7 +187,10 @@ test('an unavailable first YouTube count stays unknown and retries without inter
     assert.equal(await connection.collectOnce(), 300000);
     assert.equal(requests, 1);
     assert.equal((await db.call('youtubeData', 'owner')).subscriberCountAt, null);
-    at = base + 900000;
+    at = base + 120000 + 3600000 - 1;
+    await connection.collectOnce();
+    assert.equal(requests, 1);
+    at++;
     await connection.collectOnce();
     assert.equal(requests, 2);
     at += 300000;

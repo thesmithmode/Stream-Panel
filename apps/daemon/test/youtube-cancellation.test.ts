@@ -15,6 +15,7 @@ for (const target of [
   'youtubeViewers',
   'unknown-viewers',
   'platformMissing',
+  'snapshot:chatPoll:chat',
   'youtubeMessages',
   'snapshot:cursor:chat',
   'snapshot:report',
