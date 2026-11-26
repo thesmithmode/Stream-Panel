@@ -127,7 +127,7 @@ test('uploads pagination failures cannot partially commit, polling is bounded an
   const f = fixture();
   f.d.snapshots['cursor:publications'] = { data: true, updatedAt: at - 3600000 + 1 };
   await collectYouTubePublications(f.d);
-  assert.deepEqual(f.calls, []);
+  assert.equal(f.calls.length, 0);
   f.d.at++;
   await collectYouTubePublications(f.d);
   assert.ok(f.calls.includes('playlistItems'));

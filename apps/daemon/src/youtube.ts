@@ -778,7 +778,7 @@ export class YouTubeConnection implements ProviderConnection {
         valid,
         channel: channelSnapshot ?? object(snapshots.channel?.data ?? {}),
         snapshots,
-        lastAttemptAt: this.backgroundAttempts.get('publications'),
+        lastAttemptAt: this.backgroundAttempts.get('publications') ?? -Infinity,
         api: (resource, params) => this.api(resource, params, tokens),
         types: (params) =>
           this.authorizedJson(
