@@ -37,6 +37,7 @@ export const YOUTUBE_CHAT_PACE = {
   toleranceMs: 5_000,
 } as const;
 type ChatPace = { at: number; credits: number; quiet: boolean; floor: number };
+type BackgroundRead = 'subscriberCount' | 'subscribers' | 'publications' | 'archivedVideos';
 type Snapshots = Record<string, { data: unknown; updatedAt: number }>;
 type LiveState = { broadcasts: Record<string, any>[]; videoDetails: Map<string, Record<string, any>>; reused: boolean };
 // A reused broadcast list stays valid only while the per-minute video read still says live:
@@ -65,6 +66,7 @@ export class YouTubeConnection implements ProviderConnection {
   private broadcastCache: { at: number; items: Record<string, any>[] } | undefined;
   private readonly chatPace = new Map<string, ChatPace>();
   private readonly endedChatAttempts = new Set<string>();
+  private readonly backgroundAttempts = new Map<BackgroundRead, number>();
   constructor(
     private config: ConfigurationPort,
     private db: YoutubeStore,
@@ -390,16 +392,23 @@ export class YouTubeConnection implements ProviderConnection {
     if (!videoDetails) return null;
     return { broadcasts, videoDetails, reused: false };
   }
-  private chatDue(chat: string): boolean {
+  private chatNotBefore(chat: string, snapshots: Snapshots): number {
+    const pace = this.chatPace.get(chat),
+      saved = snapshots[`chatPoll:${chat}`];
+    return Math.max(
+      pace ? pace.at + pace.floor : 0,
+      saved && typeof saved.data === 'number' && Number.isFinite(saved.data) ? saved.updatedAt + saved.data : 0,
+    );
+  }
+  private chatDue(chat: string, snapshots: Snapshots): boolean {
+    if (this.now() < this.chatNotBefore(chat, snapshots)) return false;
     const pace = this.chatPace.get(chat);
     if (!pace) return true;
     const elapsed = this.now() - pace.at,
       credits = Math.min(YOUTUBE_CHAT_PACE.burst, pace.credits + elapsed / YOUTUBE_CHAT_PACE.averageMs);
     return (
       credits >= 1 &&
-      elapsed >=
-        Math.max(pace.quiet ? YOUTUBE_CHAT_PACE.quietMs : YOUTUBE_CHAT_PACE.activeMs, pace.floor) -
-          YOUTUBE_CHAT_PACE.toleranceMs
+      elapsed >= (pace.quiet ? YOUTUBE_CHAT_PACE.quietMs : YOUTUBE_CHAT_PACE.activeMs) - YOUTUBE_CHAT_PACE.toleranceMs
     );
   }
   private chatPolled(chat: string, messages: number, floor: number) {
@@ -409,6 +418,7 @@ export class YouTubeConnection implements ProviderConnection {
       ? Math.min(YOUTUBE_CHAT_PACE.burst, pace.credits + (now - pace.at) / YOUTUBE_CHAT_PACE.averageMs)
       : YOUTUBE_CHAT_PACE.burst;
     this.chatPace.set(chat, { at: now, credits: credits - 1, quiet: messages === 0, floor });
+    return now;
   }
   private readChat(tokens: Tokens, chat: string, cursor: string) {
     return this.api(
@@ -429,11 +439,17 @@ export class YouTubeConnection implements ProviderConnection {
     response: Record<string, any>,
     valid: () => boolean,
   ) {
-    const items = Array.isArray(response.items) ? response.items : [];
+    const items = Array.isArray(response.items) ? response.items : [],
+      requestedFloor = Number(response.pollingIntervalMillis),
+      floor = Number.isFinite(requestedFloor) && requestedFloor > 0 ? requestedFloor : YOUTUBE_CHAT_PACE.activeMs;
+    const at = this.chatPolled(chat, items.length, floor);
+    // Keep the server's deadline independently of the cursor, which advances only after the messages are saved.
+    await this.db.call('youtubeSnapshot', tokens.userId, `chatPoll:${chat}`, floor, at);
+    if (!valid()) return null;
     await this.db.call('youtubeMessages', tokens.userId, chat, items, broadcastId);
     if (!valid()) return null;
     await this.db.call('youtubeSnapshot', tokens.userId, `cursor:${chat}`, string(response.nextPageToken), this.now());
-    return valid() ? items.length : null;
+    return valid() ? floor : null;
   }
   /** Try the saved cursor once when a previously active chat disappears. YouTube may already have closed it. */
   private async collectEndedChats(
@@ -451,9 +467,8 @@ export class YouTubeConnection implements ProviderConnection {
       if (!id || !chat || activeChats.has(chat)) continue;
       activeChats.add(chat);
       if (this.endedChatAttempts.delete(chat)) continue;
-      const cursor = string(snapshots[`cursor:${chat}`]?.data),
-        pace = this.chatPace.get(chat);
-      if (!cursor || (pace && this.now() - pace.at < pace.floor)) continue;
+      const cursor = string(snapshots[`cursor:${chat}`]?.data);
+      if (!cursor || this.now() < this.chatNotBefore(chat, snapshots)) continue;
       const response = await this.readChat(tokens, chat, cursor).catch(() => undefined);
       if (!valid()) return false;
       if (response && (await this.saveChat(tokens, chat, id, response, valid)) === null) return false;
@@ -467,7 +482,7 @@ export class YouTubeConnection implements ProviderConnection {
   private async collectChats(
     tokens: Tokens,
     broadcasts: Record<string, any>[],
-    snapshots: Record<string, { data: unknown; updatedAt: number }>,
+    snapshots: Snapshots,
     valid: () => boolean,
     reused: boolean,
   ): Promise<number | null> {
@@ -478,8 +493,12 @@ export class YouTubeConnection implements ProviderConnection {
       const chat = string(broadcast.snippet?.liveChatId);
       if (!chat) continue;
       chats.add(chat);
-      if (!this.chatDue(chat)) {
-        interval = Math.max(interval, this.chatPace.get(chat)!.floor);
+      if (!this.chatDue(chat, snapshots)) {
+        interval = Math.max(
+          interval,
+          this.chatPace.get(chat)?.floor ?? 0,
+          this.chatNotBefore(chat, snapshots) - this.now(),
+        );
         continue;
       }
       const cursor = string(snapshots[`cursor:${chat}`]?.data);
@@ -497,10 +516,8 @@ export class YouTubeConnection implements ProviderConnection {
         continue;
       }
       if (!valid()) return null;
-      const items = await this.saveChat(tokens, chat, broadcast.id, response, valid);
-      if (items === null) return null;
-      const floor = Number(response.pollingIntervalMillis) || 60000;
-      this.chatPolled(chat, items, floor);
+      const floor = await this.saveChat(tokens, chat, broadcast.id, response, valid);
+      if (floor === null) return null;
       if (response.offlineAt) this.broadcastCache = undefined;
       interval = Math.max(interval, floor);
     }
@@ -527,13 +544,15 @@ export class YouTubeConnection implements ProviderConnection {
     const live = await this.liveState(tokens, valid);
     if (!live || !valid()) return 300000;
     const { broadcasts, reused } = live;
+    const countInterval = youtubeSubscriberCountInterval(broadcasts.length > 0);
     if (!(await this.collectEndedChats(tokens, broadcasts, snapshots, valid))) return 300000;
     // Legacy channel metadata is not a subscriber-history observation. Start the
     // history with a fresh API value instead of waiting on the old metadata age.
     if (
       !channelSnapshot &&
+      this.now() - (this.backgroundAttempts.get('subscriberCount') ?? -Infinity) >= countInterval &&
       ((previous.subscriberCountAt === null && !this.initialCountChecked) ||
-        this.now() - (snapshots.channel?.updatedAt ?? 0) >= youtubeSubscriberCountInterval(broadcasts.length > 0))
+        this.now() - (snapshots.channel?.updatedAt ?? 0) >= countInterval)
     ) {
       const counted = await this.subscriberCount(tokens, snapshots, valid);
       if (counted === null) return 300000;
@@ -553,12 +572,12 @@ export class YouTubeConnection implements ProviderConnection {
     await this.collectSubscribers(tokens, valid, this.now());
     if (!valid()) return 300000;
     const { cursor, removed, archivedIds } = archive;
-    if (
-      archivedIds.length &&
-      (removed.length ||
-        !Number.isFinite(Number(cursor.checkedAt)) ||
-        this.now() - Number(cursor.checkedAt ?? 0) >= 21600000)
-    )
+    const checkedAt = Number(cursor.checkedAt);
+    const lastArchiveCheck = Math.max(
+      Number.isFinite(checkedAt) ? checkedAt : 0,
+      this.backgroundAttempts.get('archivedVideos') ?? 0,
+    );
+    if (archivedIds.length && (removed.length || this.now() - lastArchiveCheck >= 21600000))
       await this.collectArchivedVideos(tokens, archivedIds, valid, this.now());
     if (!valid()) return 300000;
     await this.collectPublications(tokens, snapshots, channelSnapshot, valid);
@@ -601,6 +620,7 @@ export class YouTubeConnection implements ProviderConnection {
     valid: () => boolean,
   ): Promise<Record<string, unknown> | undefined | null> {
     this.initialCountChecked = true;
+    this.backgroundAttempts.set('subscriberCount', this.now());
     try {
       const response = await this.api('channels', { part: 'statistics', id: tokens.userId }, tokens);
       if (!valid()) return null;
@@ -758,6 +778,7 @@ export class YouTubeConnection implements ProviderConnection {
         valid,
         channel: channelSnapshot ?? object(snapshots.channel?.data ?? {}),
         snapshots,
+        lastAttemptAt: this.backgroundAttempts.get('publications') ?? -Infinity,
         api: (resource, params) => this.api(resource, params, tokens),
         types: (params) =>
           this.authorizedJson(
@@ -768,6 +789,7 @@ export class YouTubeConnection implements ProviderConnection {
         cursor: (key, data) => this.db.call('youtubeSnapshot', tokens.userId, key, data, this.now()),
       });
     } catch {
+      this.backgroundAttempts.set('publications', this.now());
       if (valid()) await this.db.call('gap', 'youtube', 'publications_unavailable', this.now(), this.now());
     }
   }
@@ -803,6 +825,7 @@ export class YouTubeConnection implements ProviderConnection {
     return Math.min(interval, 3600000);
   }
   private async collectArchivedVideos(tokens: Tokens, ids: string[], valid: () => boolean, at: number) {
+    this.backgroundAttempts.set('archivedVideos', at);
     try {
       const videos: unknown[] = [];
       for (let offset = 0; offset < ids.length; offset += 50) {
@@ -824,11 +847,12 @@ export class YouTubeConnection implements ProviderConnection {
   }
   private async collectSubscribers(tokens: Tokens, valid: () => boolean, at: number) {
     const previous = await this.db.call('youtubeData', tokens.userId);
-    if (
-      !valid() ||
-      at - (previous.snapshots['cursor:followers']?.updatedAt ?? -Infinity) < youtubeSubscriberListInterval
-    )
-      return;
+    const lastCheck = Math.max(
+      previous.snapshots['cursor:followers']?.updatedAt ?? -Infinity,
+      this.backgroundAttempts.get('subscribers') ?? -Infinity,
+    );
+    if (!valid() || at - lastCheck < youtubeSubscriberListInterval) return;
+    this.backgroundAttempts.set('subscribers', at);
     try {
       const channelStats = object(object(previous.snapshots.channel?.data ?? {}).statistics ?? {}),
         count = Number(channelStats.subscriberCount);
@@ -923,6 +947,7 @@ export class YouTubeConnection implements ProviderConnection {
     this.broadcastCache = undefined;
     this.chatPace.clear();
     this.endedChatAttempts.clear();
+    this.backgroundAttempts.clear();
     this.status = { state: 'disconnected', account: '', detail: '' };
   }
   async disconnect() {

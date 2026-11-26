@@ -5,11 +5,13 @@ interface Dependencies {
   valid: () => boolean;
   channel: Record<string, any>;
   snapshots: Record<string, { data: any; updatedAt: number }>;
+  lastAttemptAt?: number;
   api: (resource: string, params: Record<string, string>) => Promise<Record<string, any>>;
   types: (params: Record<string, string>) => Promise<Record<string, any>>;
   save: (items: Publication[], at: number) => Promise<void>;
   cursor: (key: string, data: unknown) => Promise<void>;
 }
+export const YOUTUBE_PUBLICATION_INTERVAL_MS = 60 * 60_000;
 /** Length-based display matches these channels' short clips and >15 minute videos.
  * Analytics remains authoritative when it has processed an upload. */
 export function publicationKind(duration: unknown): Publication['kind'] {
@@ -22,7 +24,8 @@ export function publicationKind(duration: unknown): Publication['kind'] {
 }
 /** Uses the uploads playlist instead of expensive search requests. */
 export async function collectYouTubePublications(d: Dependencies) {
-  if (d.at - (d.snapshots['cursor:publications']?.updatedAt ?? -Infinity) < 900000) return;
+  const lastCheck = Math.max(d.snapshots['cursor:publications']?.updatedAt ?? -Infinity, d.lastAttemptAt ?? -Infinity);
+  if (d.at - lastCheck < YOUTUBE_PUBLICATION_INTERVAL_MS) return;
   const playlist = d.channel.contentDetails?.relatedPlaylists?.uploads;
   if (typeof playlist !== 'string' || !playlist) return;
   const cutoff = d.at - 30 * 86400000,

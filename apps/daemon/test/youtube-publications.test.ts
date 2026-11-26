@@ -125,9 +125,12 @@ test('uploads pagination failures cannot partially commit, polling is bounded an
     assert.equal(saved.length, 0);
   }
   const f = fixture();
-  f.d.snapshots['cursor:publications'] = { data: true, updatedAt: at };
+  f.d.snapshots['cursor:publications'] = { data: true, updatedAt: at - 3600000 + 1 };
   await collectYouTubePublications(f.d);
-  assert.deepEqual(f.calls, []);
+  assert.equal(f.calls.length, 0);
+  f.d.at++;
+  await collectYouTubePublications(f.d);
+  assert.ok(f.calls.includes('playlistItems'));
   const g = fixture();
   g.d.channel = { contentDetails: { relatedPlaylists: { uploads: '' } } };
   await collectYouTubePublications(g.d);
