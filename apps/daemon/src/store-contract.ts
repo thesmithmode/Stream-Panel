@@ -36,6 +36,7 @@ export const storeOperations = {
   removePendingDonation: 'maintenance',
   ingestLiveDonation: 'write',
   sessions: 'cached',
+  sessionCalendar: 'cached',
   matchingStream: 'read',
   streamMatchContext: 'read',
   mergeSessions: 'write',

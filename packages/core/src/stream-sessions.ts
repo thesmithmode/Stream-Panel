@@ -2,6 +2,7 @@ import { twitchMessageFilter, youtubeMessageFilter } from './message-filters.js'
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { assertTimestamp } from './domain.js';
+import { moscowDay, type CalendarDay } from './stream-calendar.js';
 import { streamMetrics } from './stream-metrics.js';
 import { windowsFromLinks, sessionBreaks } from './session-windows.js';
 
@@ -211,7 +212,29 @@ export class StreamSessions {
       .immediate();
   }
 
-  sessions(sessionId?: string, offset = 0, limit = 100, botJson = '[]'): Record<string, unknown>[] {
+  sessionCalendar(from: number, to: number): CalendarDay[] {
+    const starts = this.reads
+      .prepare(
+        `SELECT s.started_at_ms FROM sessions s WHERE s.started_at_ms>=? AND s.started_at_ms<?
+         AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) ORDER BY s.started_at_ms`,
+      )
+      .pluck()
+      .all(from, to) as number[];
+    const counts = new Map<string, number>();
+    for (const start of starts) {
+      const day = moscowDay(start);
+      counts.set(day, (counts.get(day) ?? 0) + 1);
+    }
+    return Array.from(counts, ([day, count]) => ({ day, count }));
+  }
+
+  sessions(
+    sessionId?: string,
+    offset = 0,
+    limit = 100,
+    botJson = '[]',
+    range?: { from: number; to: number },
+  ): Record<string, unknown>[] {
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100)
       throw new Error('INVALID_PAGINATION');
     const rows = this.reads
@@ -222,9 +245,16 @@ export class StreamSessions {
           (SELECT title FROM platform_streams p WHERE p.session_id=s.id AND trim(title)<>'' ORDER BY CASE platform WHEN 'twitch' THEN 0 ELSE 1 END,last_observed_at_ms DESC,account_id,external_id LIMIT 1) AS primaryTitle,
           (SELECT json_group_array(platform) FROM (SELECT DISTINCT platform FROM platform_streams p WHERE p.session_id=s.id ORDER BY platform)) AS platforms_json,
           (SELECT json_group_array(json_object('platform',platform,'url',url)) FROM (SELECT DISTINCT platform,url FROM platform_streams p WHERE p.session_id=s.id AND url IS NOT NULL ORDER BY platform,url)) AS urls_json
-        FROM sessions s WHERE (? IS NULL OR s.id=?) AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id) ORDER BY started_at_ms DESC,s.id DESC LIMIT ? OFFSET ?`,
+        FROM sessions s WHERE (? IS NULL OR s.id=?) AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)
+         ${range ? 'AND s.started_at_ms>=? AND s.started_at_ms<?' : ''} ORDER BY started_at_ms DESC,s.id DESC LIMIT ? OFFSET ?`,
       )
-      .all(sessionId ?? null, sessionId ?? null, limit, sessionId ? 0 : offset) as Record<string, unknown>[];
+      .all(
+        sessionId ?? null,
+        sessionId ?? null,
+        ...(range ? [range.from, range.to] : []),
+        limit,
+        sessionId ? 0 : offset,
+      ) as Record<string, unknown>[];
     const ids = JSON.stringify(rows.map((row) => row.id));
     const counts = this.reads
       .prepare(

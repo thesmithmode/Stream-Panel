@@ -1,3 +1,4 @@
+import { calendarRange } from '../../../packages/core/src/stream-calendar';
 import type { ProfileName } from '../../../packages/core/src/profiles';
 export const views = [
   'overview',
@@ -10,6 +11,7 @@ export const views = [
   'settings',
 ] as const;
 export type View = (typeof views)[number];
+export type HistoryMode = 'list' | 'tiles' | 'calendar';
 export interface Route {
   view: View;
   session: string;
@@ -17,6 +19,9 @@ export interface Route {
   profile: ProfileName;
   section?: string;
   page?: number;
+  historyMode?: HistoryMode;
+  month?: string;
+  day?: string;
   returnTo?: string;
   period?: string | undefined;
 }
@@ -25,7 +30,14 @@ export function readRoute(search: string, profile: Route['profile'] = 'ruslan'):
     view = q.get('view'),
     session = q.get('stream') ?? '';
   const page = Number(q.get('page'));
+  const mode = q.get('mode'),
+    month = q.get('month') ?? '',
+    day = q.get('day') ?? '';
+  const calendar = view === 'sessions' && mode === 'calendar' && calendarRange(month, 'month');
   return {
+    ...(view === 'sessions' && (mode === 'list' || mode === 'calendar') ? { historyMode: mode } : {}),
+    ...(calendar ? { month } : {}),
+    ...(calendar && day.startsWith(month + '-') && calendarRange(day, 'day') ? { day } : {}),
     ...(Number.isSafeInteger(page) && page > 0 && page <= 100000 ? { page } : {}),
     view: views.includes(view as View) && !(view === 'stream' && !session) ? (view as View) : 'overview',
     session,
@@ -48,6 +60,18 @@ export function routeUrl(route: Route): string {
   if (route.person) q.set('person', route.person);
   if (route.page && Number.isSafeInteger(route.page) && route.page > 0 && route.page <= 100000)
     q.set('page', String(route.page));
+  if (route.view === 'sessions' && (route.historyMode === 'list' || route.historyMode === 'calendar'))
+    q.set('mode', route.historyMode);
+  if (
+    route.view === 'sessions' &&
+    route.historyMode === 'calendar' &&
+    route.month &&
+    calendarRange(route.month, 'month')
+  ) {
+    q.set('month', route.month);
+    if (route.day && route.day.startsWith(route.month + '-') && calendarRange(route.day, 'day'))
+      q.set('day', route.day);
+  }
   if (route.section) q.set('section', route.section);
   if (route.period) q.set('period', route.period);
   if (safeReturn(route.returnTo ?? null)) q.set('returnTo', route.returnTo!);

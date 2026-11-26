@@ -1,3 +1,4 @@
+import { calendarRange } from '../../../packages/core/src/stream-calendar.js';
 import { conditionalResponse } from './conditional-response.js';
 import type { FastifyInstance } from 'fastify';
 import type { ConfigurationPort } from './config.js';
@@ -22,6 +23,7 @@ type Store = StorePort<
   | 'followingAnalytics'
   | 'grid'
   | 'sessions'
+  | 'sessionCalendar'
   | 'streamMetadata'
   | 'summary'
 >;
@@ -174,15 +176,19 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
       .type('application/json')
       .send(JSON.stringify(await db.call('matchingStream', Number(q.startedAt), string(q.latest) === '1')));
   });
-  app.get('/api/v1/sessions', async (request) =>
-    db.call(
-      'sessions',
-      string(object(request.query).session) || undefined,
-      Number(object(request.query).offset ?? 0),
-      Number(object(request.query).limit ?? 100),
-      botsFor(request.query),
-    ),
-  );
+  app.get('/api/v1/sessions/calendar', (request) => {
+    const range = calendarRange(string(object(request.query).month), 'month');
+    if (!range) throw new Error('INVALID_CALENDAR_MONTH');
+    return db.call('sessionCalendar', range.from, range.to);
+  });
+  app.get('/api/v1/sessions', (request) => {
+    const q = object(request.query);
+    const id = string(q.session) || undefined;
+    const range = q.day === undefined ? undefined : calendarRange(string(q.day), 'day');
+    if (q.day !== undefined && (!range || id)) throw new Error('INVALID_CALENDAR_DAY');
+    const args = [id, Number(q.offset ?? 0), Number(q.limit ?? 100), botsFor(q)] as const;
+    return range ? db.call('sessions', ...args, range) : db.call('sessions', ...args);
+  });
   app.get('/api/v1/sessions/:id/current-chat', async (request, reply) => {
     const q = object(request.query);
     if (q.includeExcluded !== undefined && !['0', '1'].includes(string(q.includeExcluded)))

@@ -106,12 +106,22 @@ export class StreamStore {
   deleteManualSession(id: string, atMs: number) {
     return this.streams.deleteManualSession(id, atMs);
   }
-  sessions(sessionId?: string, offset = 0, limit = 100, excludedBotLogins: readonly string[] | false = []) {
+  sessionCalendar(from: number, to: number) {
+    return this.streams.sessionCalendar(from, to);
+  }
+  sessions(
+    sessionId?: string,
+    offset = 0,
+    limit = 100,
+    excludedBotLogins: readonly string[] | false = [],
+    range?: { from: number; to: number },
+  ) {
     return this.streams.sessions(
       sessionId ? this.groups.root(sessionId) : undefined,
       offset,
       limit,
       this.queries.botJson(excludedBotLogins),
+      range,
     );
   }
   mergeSessions(ids: string[]) {
