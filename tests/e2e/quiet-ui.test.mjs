@@ -86,10 +86,12 @@ test(
         await closeFilters(page);
       }
       await navigate(page, 'Стримы');
-      await page.route('**/api/v1/overview', (route) => route.fulfill({ status: 400, json: { error: 'UNAVAILABLE' } }));
+      await page.route('**/api/v1/donations/totals', (route) =>
+        route.fulfill({ status: 400, json: { error: 'UNAVAILABLE' } }),
+      );
       await page.reload();
       await page.locator('.donation-total').getByText('Недоступно', { exact: true }).first().waitFor();
-      await page.unroute('**/api/v1/overview');
+      await page.unroute('**/api/v1/donations/totals');
       await page.evaluate(() => window.dispatchEvent(new Event('sp:data-refresh')));
       await page.locator('.donation-total').getByText('250,00 RUB', { exact: true }).waitFor();
       assert.deepEqual(errors, []);

@@ -106,12 +106,22 @@ export class StreamStore {
   deleteManualSession(id: string, atMs: number) {
     return this.streams.deleteManualSession(id, atMs);
   }
-  sessions(sessionId?: string, offset = 0, limit = 100, excludedBotLogins: readonly string[] | false = []) {
+  sessionCalendar(from: number, to: number) {
+    return this.streams.sessionCalendar(from, to);
+  }
+  sessions(
+    sessionId?: string,
+    offset = 0,
+    limit = 100,
+    excludedBotLogins: readonly string[] | false = [],
+    range?: { from: number; to: number },
+  ) {
     return this.streams.sessions(
       sessionId ? this.groups.root(sessionId) : undefined,
       offset,
       limit,
       this.queries.botJson(excludedBotLogins),
+      range,
     );
   }
   mergeSessions(ids: string[]) {
@@ -733,6 +743,14 @@ export class StreamStore {
       )
       .run(at, viewers, at, at - 180000);
   }
+  donationPeriodTotals(excludedBotLogins: readonly string[] | false = []) {
+    const excluded = this.botJson(excludedBotLogins);
+    const now = Date.now();
+    return {
+      totals30: donationTotals(this.reads, now - 30 * 86400000, now, excluded),
+      totals: donationTotals(this.reads, undefined, undefined, excluded),
+    };
+  }
   channelOverview(excludedBotLogins: readonly string[] | false = []) {
     const sessions = this.reads
       .prepare(
@@ -783,13 +801,11 @@ export class StreamStore {
       list.push(link);
       windowsBySession.set(link.session_id, list);
     }
-    const now = Date.now(),
-      totals30 = donationTotals(this.reads, now - 30 * 86400000, now, excluded);
     return {
+      ...this.donationPeriodTotals(excludedBotLogins),
       maximumDonation: maximumDonation(this.reads, excluded),
       pendingExchangeDonations: new DonationFx(this.reads).pendingCount(excluded),
       records: this.records.read(excluded, excludedBotLogins === false),
-      totals30,
       streams: sessions.length,
       durationMinutes: sessions.reduce(
         (n, s) =>
@@ -802,7 +818,6 @@ export class StreamStore {
       ),
       attendees: activity.attendees,
       messages: activity.messages,
-      totals: donationTotals(this.reads, undefined, undefined, excluded),
       donations,
     };
   }
@@ -823,6 +838,14 @@ export class StreamStore {
       options.sessionId ? { ...options, sessionId: this.groups.root(options.sessionId) } : options,
     );
     return { ...report, audience: this.bots.decorate(report.audience, (p) => p.id) };
+  }
+
+  cachedStreamPreview(options: AnalyticsOptions) {
+    if (!options.sessionId) return;
+    return this.reads.transaction(() => {
+      const report = this.history.cachedStreamPreview({ ...options, sessionId: this.groups.root(options.sessionId!) });
+      return report && { ...report, audience: this.bots.decorate(report.audience, (p) => p.id) };
+    })();
   }
 
   clockAudience(options: AnalyticsOptions) {

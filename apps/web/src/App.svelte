@@ -8,7 +8,9 @@
   import PeriodSelect from './PeriodSelect.svelte';
   import { onMount, tick } from 'svelte';
   import { initializeNavigation, saveNavigation, canGoBack, rememberScroll, navigationScroll } from './navigation';
-  import { readRoute, routeUrl, type View } from './route';
+  import { readRoute, routeUrl, type HistoryMode, type View } from './route';
+  import { moscowDay, type CalendarDay } from '../../../packages/core/src/stream-calendar';
+  import { screenData } from './screen-data';
   import { PROFILES } from '../../../packages/core/src/profiles';
   import { ConnectionError } from './request';
   import { isOutdatedRelease } from './release';
@@ -70,6 +72,13 @@
   let changes = $state<Changes | null>(null);
   const accessibleProfile = (next: Profile): Profile => (allowedProfiles.includes(next) ? next : allowedProfiles[0]!);
   let sessionPage = $state(0);
+  let historyMode = $state<HistoryMode>('tiles');
+  let calendarDay = $state(moscowDay(Date.now()));
+  let calendarDays = $state<CalendarDay[] | null>(null);
+  let historyPending = $state(false);
+  let historyError = $state(false);
+  const calendarMonth = $derived(calendarDay.slice(0, 7));
+  const inCalendar = () => tab === 'sessions' && historyMode === 'calendar';
   let selectedSessions = $state<string[]>([]);
   let epoch = 0;
   let scopeReady = $state(false),
@@ -81,13 +90,20 @@
   // wait for changes/status first. Revalidate in the background on every visit.
   const screens = new Map<
     string,
-    { revision: number; status: any; changes: Changes | null; sessions: Session[]; summary: Summary }
+    {
+      revision: number;
+      status: any;
+      changes: Changes | null;
+      sessions: Session[];
+      summary: Summary;
+      calendarDays: CalendarDay[] | null;
+    }
   >();
-  const screenKey = () => JSON.stringify([profile, tab, sessionFilter, sessionPage]);
+  const screenKey = () => JSON.stringify([profile, tab, sessionFilter, sessionPage, inCalendar() ? calendarDay : null]);
   function rememberScreen() {
     const key = screenKey();
     screens.delete(key);
-    screens.set(key, { revision: getDataRevision(profile), status, changes, sessions, summary });
+    screens.set(key, { revision: getDataRevision(profile), status, changes, sessions, summary, calendarDays });
     while (screens.size > 24) screens.delete(screens.keys().next().value!);
   }
   function saveRoute(replace = false) {
@@ -99,12 +115,17 @@
       section: routeSection,
       returnTo,
       period: tab === 'people' ? peoplePeriod : undefined,
-      ...(tab === 'sessions' && sessionPage ? { page: sessionPage } : {}),
+      ...(tab === 'sessions' ? { historyMode, page: sessionPage } : {}),
+      ...(inCalendar() ? { month: calendarMonth, day: calendarDay } : {}),
     });
     saveNavigation(url, replace);
   }
-  function clearScope(resetPage = true) {
-    scopeMount++;
+  function clearScope(resetPage = true, keepHistoryMounted = false) {
+    const retainedHistory = keepHistoryMounted && scopeReady;
+    if (!keepHistoryMounted) scopeMount++;
+    historyError = false;
+    historyPending = tab === 'sessions';
+    if (!keepHistoryMounted) calendarDays = null;
     changes = null;
     selectedSessions = [];
     if (resetPage) sessionPage = 0;
@@ -114,8 +135,12 @@
     summary = { messages: 0, donations: 0, totals: {}, chatters: null, lastPollAtMs: null, events: 0 };
     const saved = screens.get(screenKey());
     if (saved && saved.revision === getDataRevision(profile)) {
-      ({ status, changes, sessions, summary } = saved);
+      ({ status, changes, sessions, summary, calendarDays } = saved);
+      historyPending = false;
       scopeReady = true;
+    } else if (tab === 'sessions') {
+      sessions = [];
+      scopeReady = retainedHistory || status?.profile === profile;
     } else if (status?.profile === profile && viewRequests(tab as View, sessionFilter).length === 1) {
       // This screen has no shell reads beyond the already authenticated status.
       scopeReady = true;
@@ -134,7 +159,11 @@
       analyticsSection = ['dynamics', 'time', 'audience'].includes(routeSection) ? routeSection : 'dynamics';
     returnTo = denied ? '' : (route.returnTo ?? '');
     peoplePeriod = route.period ?? '';
-    sessionPage = route.page ?? 0;
+    sessionPage = route.view === 'sessions' && !denied ? (route.page ?? 0) : 0;
+    historyMode = denied ? 'tiles' : (route.historyMode ?? 'tiles');
+    const today = moscowDay(Date.now());
+    calendarDay =
+      !denied && route.month ? (route.day ?? (route.month === today.slice(0, 7) ? today : route.month + '-01')) : today;
     setProfile(selected);
     profile = selected;
     clearScope(false);
@@ -247,23 +276,33 @@
         previous.versions.follows !== next.versions.follows;
       setServerVersions(profile, next);
       if (fresh && scopeReady) bumpReadRevision(profile);
-      const requests = viewRequests(tab as View, sessionFilter).filter(([key]) =>
-        key === 'status' ? connectionsChanged || fresh || !scopeReady : changed || fresh || !scopeReady,
-      );
+      const history = tab === 'sessions';
+      const calendar = inCalendar();
+      const requests = viewRequests(tab as View, sessionFilter);
+      if (calendar) requests.push(['calendar', 'sessions/calendar?month=' + calendarMonth]);
+      const historyDomain = 'stream-history:' + screenVersion('sessions', '', next);
       const values = Object.fromEntries(
         await Promise.all(
-          requests.map(async ([key, path]) => [
-            key,
-            key === 'status' && initialStatus
-              ? initialStatus
-              : await api(
-                  key === 'sessions' && tab === 'sessions' && sessionPage > 0
-                    ? `sessions?offset=${sessionPage * 100}`
-                    : path,
-                  undefined,
-                  controller.signal,
-                ),
-          ]),
+          requests
+            .filter(([key]) =>
+              key === 'status'
+                ? connectionsChanged || fresh || !scopeReady
+                : changed || fresh || !scopeReady || (history && (historyPending || historyError)),
+            )
+            .map(async ([key, path]) => {
+              if (history && (key === 'sessions' || key === 'calendar')) {
+                const q = new URLSearchParams();
+                if (sessionPage) q.set('offset', String(sessionPage * 100));
+                if (calendar) q.set('day', calendarDay);
+                const target = key === 'sessions' && q.size ? `sessions?${q}` : path;
+                const result = await screenData(target, historyDomain, controller.signal, fresh).catch(() => null);
+                return [key, result];
+              }
+              return [
+                key,
+                key === 'status' && initialStatus ? initialStatus : await api(path, undefined, controller.signal),
+              ];
+            }),
         ),
       );
       if (current !== epoch) return;
@@ -276,12 +315,17 @@
       changes = next;
       outdated = isOutdatedRelease(next.release);
       sessions = values.sessions ?? sessions;
+      if (calendar && values.calendar) calendarDays = values.calendar;
+      if (history && values.sessions !== undefined) {
+        historyPending = false;
+        historyError = values.sessions === null || (calendar && values.calendar === null);
+      }
       selectedSessions = selectedSessions.filter((id) => sessions.some((s) => s.id === id));
       summary = values.summary ?? summary;
       scopeReady = true;
       connectionLost = !navigator.onLine;
       error = '';
-      rememberScreen();
+      if (!historyError) rememberScreen();
       if (changed || fresh)
         window.dispatchEvent(new CustomEvent('sp:data-refresh', { detail: { validated: true, force: fresh } }));
       if (!previous || previous.versions.activity !== next.versions.activity)
@@ -305,7 +349,13 @@
       await fn();
       if (current === epoch) await refresh(fresh);
     } catch (e) {
-      if (current === epoch) reportFailure(e);
+      if (current === epoch) {
+        if (tab === 'sessions' && historyPending) {
+          historyPending = false;
+          historyError = true;
+        }
+        reportFailure(e);
+      }
     } finally {
       if (current === epoch && fresh) busy = false;
       retryInitialization();
@@ -318,12 +368,39 @@
     moreOpen = false;
     epoch++;
     if (next !== 'stream') sessionFilter = '';
+    if (next === 'sessions') {
+      historyMode = 'tiles';
+      calendarDay = moscowDay(Date.now());
+    }
     tab = next;
     personId = person;
     clearScope();
     saveRoute(replace);
     window.scrollTo({ top: 0, behavior: 'instant' });
     void action(async () => {}, false);
+  }
+  function loadHistoryScope(keepMonth = false) {
+    epoch++;
+    if (!keepMonth) calendarDays = null;
+    clearScope(false, true);
+    saveRoute();
+    void action(async () => {}, false);
+  }
+  function setHistoryMode(mode: HistoryMode) {
+    if (mode === historyMode) return;
+    const calendarChanged = inCalendar() || mode === 'calendar';
+    historyMode = mode;
+    if (calendarChanged) {
+      sessionPage = 0;
+      loadHistoryScope();
+    } else saveRoute();
+  }
+  function setCalendarDay(day: string) {
+    if (day === calendarDay) return;
+    const keepMonth = day.startsWith(calendarMonth + '-');
+    calendarDay = day;
+    sessionPage = 0;
+    loadHistoryScope(keepMonth);
   }
   function openPerson(id: string) {
     const origin =
@@ -802,11 +879,17 @@
               bind:selected={selectedSessions}
               {busy}
               page={sessionPage}
+              mode={historyMode}
+              {calendarDay}
+              {calendarDays}
+              pending={historyPending}
+              failed={historyError}
+              onmode={setHistoryMode}
+              onday={setCalendarDay}
+              onretry={() => void action(async () => {})}
               onpage={(page) => {
-                selectedSessions = [];
                 sessionPage = page;
-                saveRoute();
-                void action(async () => {});
+                loadHistoryScope(true);
               }}
               onopen={(id) => {
                 sessionFilter = id;
@@ -828,8 +911,9 @@
                 })}
               validUrl={isConfirmedPlatformUrl}
             />
-            {#if !sessions.length}<button class="outline" onclick={() => navigate('connections')}
-                >Открыть интеграции</button
+            {#if !inCalendar() && !historyPending && !historyError && !sessions.length}<button
+                class="outline"
+                onclick={() => navigate('connections')}>Открыть интеграции</button
               >{/if}
           {/if}
         {/if}
