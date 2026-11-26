@@ -408,8 +408,7 @@ export class YouTubeConnection implements ProviderConnection {
       credits = Math.min(YOUTUBE_CHAT_PACE.burst, pace.credits + elapsed / YOUTUBE_CHAT_PACE.averageMs);
     return (
       credits >= 1 &&
-      elapsed >=
-        (pace.quiet ? YOUTUBE_CHAT_PACE.quietMs : YOUTUBE_CHAT_PACE.activeMs) - YOUTUBE_CHAT_PACE.toleranceMs
+      elapsed >= (pace.quiet ? YOUTUBE_CHAT_PACE.quietMs : YOUTUBE_CHAT_PACE.activeMs) - YOUTUBE_CHAT_PACE.toleranceMs
     );
   }
   private chatPolled(chat: string, messages: number, floor: number) {

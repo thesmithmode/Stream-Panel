@@ -222,11 +222,17 @@ test('24 hours of active chat with full subscriber and upload pagination leave a
   try {
     delete f.snapshots['cursor:followers'];
     await f.run(86400000);
-    assert.equal(f.count('videos', (c) => c.params.get('id') === 'live'), 1440);
+    assert.equal(
+      f.count('videos', (c) => c.params.get('id') === 'live'),
+      1440,
+    );
     assert.equal(f.count('liveBroadcasts'), 288);
     assert.equal(f.count('subscriptions'), 24 * 25);
     assert.equal(f.count('playlistItems'), 24 * 20);
-    assert.equal(f.count('videos', (c) => c.params.get('id')?.startsWith('upload-') === true), 24 * 20);
+    assert.equal(
+      f.count('videos', (c) => c.params.get('id')?.startsWith('upload-') === true),
+      24 * 20,
+    );
     const units = f.quota.reduce((sum, [, , cost]) => sum + cost, 0);
     assert.ok(units <= 8500, `24-hour collection cost ${units} units`);
     t.diagnostic(`24-hour collection cost ${units} units`);
@@ -243,7 +249,10 @@ test('failed paginated background reads wait for the next hour while live checks
     await f.run(3600000);
     assert.equal(f.count('subscriptions'), 25);
     assert.equal(f.count('playlistItems'), 20);
-    assert.equal(f.count('videos', (c) => c.params.get('id') === 'live'), 60);
+    assert.equal(
+      f.count('videos', (c) => c.params.get('id') === 'live'),
+      60,
+    );
     assert.equal(f.snapshots['cursor:followers'], undefined);
     assert.equal(f.snapshots['cursor:publications'], undefined);
     f.state.backgroundError = false;
