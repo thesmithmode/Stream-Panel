@@ -122,15 +122,13 @@ test('YouTube OAuth binds state and PKCE; refresh, owner filtering, durable curs
     assert.equal(data.messages.length, 1);
     assert.equal(data.snapshots.report.data.rows[0][1], 42);
     assert.equal(data.snapshots.collectionRole.data, 'primary');
+    const chatRequests = () => calls.filter((x) => x.pathname.endsWith('/messages'));
+    assert.equal(await yt.collectOnce(), 90000);
+    assert.equal(chatRequests().length, 1);
+    now += 90000;
     assert.equal(await yt.collectOnce(), 90000);
     assert.equal((await (db.call('youtubeData', 'channel') as Promise<any>)).messages.length, 1);
-    assert.equal(
-      calls
-        .filter((x) => x.pathname.endsWith('/messages'))
-        .at(-1)
-        ?.searchParams.get('pageToken'),
-      'cursor',
-    );
+    assert.equal(chatRequests().at(-1)?.searchParams.get('pageToken'), 'cursor');
     config.value.youtube!.expiresAt = 0;
     mode = 'invalid-token';
     await assert.rejects(yt.collectOnce(), /YOUTUBE_INVALID_TOKEN/);
@@ -141,6 +139,7 @@ test('YouTube OAuth binds state and PKCE; refresh, owner filtering, durable curs
     assert.match(tokenBodies.at(-1)!, /grant_type=refresh_token/);
     assert.equal(config.value.youtube!.refresh, 'refresh');
     mode = 'empty-chat';
+    now += 90000;
     assert.equal(await yt.collectOnce(), 90000);
     assert.equal((await (db.call('youtubeData', 'channel') as Promise<any>)).messages.length, 1);
     now += 21600001;
