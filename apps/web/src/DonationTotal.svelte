@@ -13,7 +13,7 @@
       if (pending) return;
       pending = true;
       try {
-        const result = await api('overview', undefined, controller.signal);
+        const result = await api('donations/totals', undefined, controller.signal);
         if (!controller.signal.aborted) {
           totals = result.totals;
           recent = result.totals30 ?? null;

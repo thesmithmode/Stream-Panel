@@ -49,6 +49,7 @@ test('warming finishes serially and leaves unchanged facts alone until a new rev
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let calls = 0,
     failures = 0,
+    following = 0,
     enabled = false,
     revision = 1;
   const runtime = {
@@ -56,7 +57,7 @@ test('warming finishes serially and leaves unchanged facts alone until a new rev
     db: {
       call: async (method: string) =>
         method === 'followerChanges'
-          ? {}
+          ? (following++, {})
           : method === 'analytics'
             ? { preparing: false }
             : method === 'changes'
@@ -87,6 +88,7 @@ test('warming finishes serially and leaves unchanged facts alone until a new rev
     await settle();
     assert.equal(calls, 3);
     assert.equal(failures, 0);
+    assert.equal(following, 0);
     stop();
     t.mock.timers.tick(60000);
     await settle();

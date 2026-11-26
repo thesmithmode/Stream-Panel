@@ -10,7 +10,7 @@ export class AnalyticsReportCache<T> {
     private db: Database.Database,
     private limit = 64 * 1024 * 1024,
   ) {}
-  get(key: string): T | undefined {
+  get(key: string, repair = true): T | undefined {
     if (this.limit <= 0) return;
     const row = this.db.prepare('SELECT payload FROM analytics_reports WHERE cache_key=?').get(key) as
       { payload: Buffer } | undefined;
@@ -18,7 +18,7 @@ export class AnalyticsReportCache<T> {
     try {
       return JSON.parse(gunzipSync(row.payload, { maxOutputLength: 16 * 1024 * 1024 }).toString()) as T;
     } catch {
-      this.db.prepare('DELETE FROM analytics_reports WHERE cache_key=?').run(key);
+      if (repair) this.db.prepare('DELETE FROM analytics_reports WHERE cache_key=?').run(key);
       return;
     }
   }

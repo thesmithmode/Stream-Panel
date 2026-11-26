@@ -837,14 +837,23 @@ export class AnalyticsHistory {
     }
     return { preparing: false, options: { ...options, rollingCore: undefined, corePeople } };
   }
-  private sessionReport(options: AnalyticsOptions): Report {
+  cachedStreamPreview(options: AnalyticsOptions): Report | undefined {
+    if (!options.streamPreview || !options.sessionId || options.panel) return;
+    const { streamPreview: _preview, ...query } = options;
+    const report = this.sessionReport({ ...query, rollingCore: undefined, corePeople: [] }, true);
+    return report && { ...report, preparing: true, streamPreview: true };
+  }
+  private sessionReport(options: AnalyticsOptions): Report;
+  private sessionReport(options: AnalyticsOptions, cachedOnly: true): Report | undefined;
+  private sessionReport(options: AnalyticsOptions, cachedOnly = false): Report | undefined {
     validateAnalyticsOptions(options);
     options = normalizeCoreOptions(options);
     const session = this.statement(
       `SELECT s.id,s.started_at_ms,s.ended_at_ms,coalesce((SELECT sum(v.activity+v.money) FROM analytics_fact_versions v WHERE v.session_id=s.id OR v.session_id IN(SELECT member_id FROM session_groups WHERE group_id=s.id)),0) AS revision,(SELECT json_group_array(member_id) FROM session_groups WHERE group_id=s.id) members FROM sessions s WHERE s.id=? AND NOT EXISTS(SELECT 1 FROM session_tombstones t WHERE t.session_id=s.id)`,
     ).get(options.sessionId) as Session | undefined;
-    if (!session) return audienceAnalytics(this.db, options);
-    if (session.ended_at_ms === null) return this.facts.present(this.streamReport(options), options);
+    if (!session) return cachedOnly ? undefined : audienceAnalytics(this.db, options);
+    if (session.ended_at_ms === null)
+      return cachedOnly ? undefined : this.facts.present(this.streamReport(options), options);
     const canonical = {
       ...options,
       fromMs: Math.max(options.fromMs, session.started_at_ms),
@@ -878,7 +887,8 @@ export class AnalyticsHistory {
       this.completed.set(key, retained);
       return this.facts.present(retained.value, options);
     }
-    const saved = this.reportCache.get(key);
+    const saved = this.reportCache.get(key, !cachedOnly);
+    if (cachedOnly && !saved) return;
     const value = saved ?? this.facts.read(canonical, session.id, session.started_at_ms, session.ended_at_ms);
     if (!saved && (this.cachePolicy.availableBytes?.() ?? Infinity) >= 1024 * 1024 * 1024)
       this.reportCache.save(key, scope, value);

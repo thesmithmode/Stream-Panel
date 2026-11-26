@@ -253,18 +253,14 @@ test(
           payload: { text: `Message ${profile}` },
         });
       }
+      const streamIds = new Map();
+      const streamAt = Date.now() - 120000;
       for (const profile of ['ruslan', 'gulnaz']) {
         const sid = await h.runtimes
           .get(profile)
-          .db.call(
-            'startSession',
-            'same-channel',
-            `stream-${profile}`,
-            Date.now() - 120000,
-            'platform',
-            Date.now() - 120000,
-          );
-        await h.runtimes.get(profile).db.call('endSession', sid, Date.now() - 60000);
+          .db.call('startSession', 'same-channel', `stream-${profile}`, streamAt, 'platform', streamAt);
+        streamIds.set(profile, sid);
+        await h.runtimes.get(profile).db.call('endSession', sid, streamAt + 60000);
       }
       await h.app.listen({ host: '127.0.0.1', port: 47839 });
       browser = await launchBrowser();
@@ -303,6 +299,17 @@ test(
       }
       assert.deepEqual(headers[0], headers[1]);
       assert.deepEqual(headers[0], ['Длительность', 'Средние зрители', 'Пик зрителей', 'Донаты', 'Сообщения']);
+      const day = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Moscow', dateStyle: 'short' }).format(streamAt);
+      const calendar = new URL(a.url());
+      calendar.searchParams.set('mode', 'calendar');
+      calendar.searchParams.set('month', day.slice(0, 7));
+      calendar.searchParams.set('day', day);
+      await goto(a, calendar.href);
+      await a.locator(`[data-session-id="${streamIds.get('gulnaz')}"]`).waitFor();
+      await a.getByLabel('Профиль', { exact: true }).selectOption('ruslan');
+      await a.locator(`[data-session-id="${streamIds.get('ruslan')}"]`).waitFor();
+      assert.equal(await a.locator(`[data-session-id="${streamIds.get('gulnaz')}"]`).count(), 0);
+      assert.equal(new URL(a.url()).searchParams.get('day'), day);
       await a.getByLabel('Профиль', { exact: true }).selectOption('ruslan');
       await a.getByRole('button', { name: 'Аналитика', exact: true }).click();
       await a.getByRole('tab', { name: 'Аудитория', exact: true }).click();

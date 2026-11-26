@@ -42,9 +42,16 @@ test(
       });
       page.setDefaultTimeout(10000);
       page.on('pageerror', (e) => errors.push(e.message));
-      page.on('response', (r) => {
-        if (new URL(r.url()).pathname === '/api/v1/analytics') responses.push(r.json());
-      });
+      // Capture the upstream body before delivering it to the page. A cancelled
+      // browser request can release Chromium's response body during tab changes.
+      await page.route(
+        (url) => url.pathname === '/api/v1/analytics',
+        async (route) => {
+          const response = await route.fetch();
+          if (response.ok()) responses.push(await response.json());
+          await route.fulfill({ response });
+        },
+      );
       await goto(page, a.bootstrap());
       const start = performance.now();
       await page.getByRole('button', { name: 'Аналитика', exact: true }).click();
@@ -61,8 +68,7 @@ test(
         [...document.querySelectorAll('.chart-refresh')].every((el) => !el.textContent.includes('Обновляем')),
       );
       assert.ok(responses.length >= 2);
-      for (const data of await Promise.all(responses))
-        assert.notEqual(data.preparing, true, 'baked report must not restart preparation');
+      for (const data of responses) assert.notEqual(data.preparing, true, 'baked report must not restart preparation');
       assert.deepEqual(errors, []);
       assert.equal(
         clockRequests,

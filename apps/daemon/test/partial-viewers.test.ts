@@ -10,7 +10,9 @@ import type { Configuration } from '../src/config.js';
 test('real YouTube collection with omitted concurrentViewers keeps Twitch visible in HTTP history and analytics', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'sp-partial-http-')),
     a = await createApplication(dir, 47831, false);
-  const base = Date.parse('2026-10-19T06:00:00Z'),
+  // SQLite workers have their own clock. Anchor the fixture close to it so a
+  // live report cannot expand across weeks as the calendar advances.
+  const base = Math.floor(Date.now() / 60000) * 60000 - 60000,
     now = base + 10000,
     video = 'video_AAAAAA';
   // Read one complete fixture minute, rather than extending this live stream to the wall clock.
@@ -82,7 +84,15 @@ test('real YouTube collection with omitted concurrentViewers keeps Twitch visibl
     let report = await read(`/api/v1/analytics?session=${id}&source=all&timezone=Europe%2FMoscow`);
     assert.equal(report.streamComparison[0].viewers.youtube.mean, null);
     assert.equal(report.streamComparison[0].viewers.known.peak, 8);
-    assert.equal(report.hours.find((h: any) => h.day === 'пн' && h.hour === 9).knownViewersTotal, 8);
+    const parts = new Intl.DateTimeFormat('ru-RU', {
+      timeZone: 'Europe/Moscow',
+      weekday: 'short',
+      hour: 'numeric',
+      hourCycle: 'h23',
+    }).formatToParts(base);
+    const day = parts.find((p) => p.type === 'weekday')?.value;
+    const hour = Number(parts.find((p) => p.type === 'hour')?.value);
+    assert.equal(report.hours.find((h: any) => h.day === day && h.hour === hour).knownViewersTotal, 8);
     // A subsequent confirmed zero must invalidate HTTP/cache results and remove the warning.
     viewers = '0';
     await yt.collectOnce();
