@@ -1,3 +1,4 @@
+import type { AnalyticsOptions } from '../../../packages/core/src/analytics.js';
 import { calendarRange } from '../../../packages/core/src/stream-calendar.js';
 import { conditionalResponse } from './conditional-response.js';
 import type { FastifyInstance } from 'fastify';
@@ -14,8 +15,10 @@ type Store = StorePort<
   | 'mergeSessions'
   | 'unmergeSessions'
   | 'analytics'
+  | 'cachedStreamPreview'
   | 'clockAudience'
   | 'channelOverview'
+  | 'donationPeriodTotals'
   | 'deleteSession'
   | 'events'
   | 'followerPerson'
@@ -62,6 +65,9 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
         to: Math.min(Number(q.to), Date.now()),
       });
     });
+  app.get('/api/v1/donations/totals', async (request, reply) =>
+    conditionalResponse(request, reply, await db.call('donationPeriodTotals', botsFor(request.query))),
+  );
   app.get('/api/v1/overview', async (request, reply) =>
     conditionalResponse(request, reply, await db.call('channelOverview', botsFor(request.query))),
   );
@@ -90,61 +96,67 @@ export function registerStreamsRoutes(app: FastifyInstance, db: Store, configura
             (field === 'streamLimit' && Number(q[field]) > 100))
         )
           throw Error('INVALID_ANALYTICS_FILTER');
-      const result = await db.call(
-        request.routeOptions.url === '/api/v1/analytics/clock' ? 'clockAudience' : 'analytics',
-        {
-          rollingCore: true,
-          coreWindowDays: defaults.coreWindowDays,
-          ...(q.streamFrom === undefined ? {} : { streamFrom: Number(q.streamFrom) }),
-          ...(q.streamTo === undefined ? {} : { streamTo: Number(q.streamTo) }),
-          ...(q.streamOffset === undefined ? {} : { streamOffset: Number(q.streamOffset) }),
-          ...(q.streamLimit === undefined ? {} : { streamLimit: Number(q.streamLimit) }),
-          ...(sessionId ? { sessionId } : {}),
-          ...(sessionId && !panel && string(q.streamPreview) === '1' ? { streamPreview: true } : {}),
-          ...(panel ? { panel: panel as 'dynamics' | 'time' | 'audience' } : {}),
-          ...(string(q.attendanceOnly) === '1' ? { attendanceOnly: true } : {}),
-          ...(string(q.mode) === 'summary' ? { summaryOnly: true } : {}),
-          ...(string(q.insights) === '1' ? { includeInsights: true } : {}),
-          fromMs: sessionId ? 0 : Number(q.from),
-          toMs: sessionId ? Date.now() : Math.min(Number(q.to), Date.now()),
-          source,
-          category: string(q.category),
-          ...(q.audienceOffset === undefined ? {} : { audienceOffset: Number(q.audienceOffset) }),
-          ...(q.audienceSearch === undefined ? {} : { audienceSearch: string(q.audienceSearch) }),
-          ...(q.audienceSort === undefined ? {} : { audienceSort: string(q.audienceSort) }),
-          ...(q.audienceCoreOnly === undefined ? {} : { audienceCoreOnly: string(q.audienceCoreOnly) === '1' }),
-          ...(string(q.clockCompact) === '1' || request.routeOptions.url === '/api/v1/analytics/clock-summary'
-            ? {
-                clockCompact: true,
-                clockDay: string(q.clockDay) || 'all',
-                clockResolution: Number(q.clockResolution ?? 15),
-              }
-            : {}),
-          ...(q.clockMinute === undefined
-            ? {}
-            : {
-                clockMinute: Number(q.clockMinute),
-                clockDay: string(q.clockDay) || 'all',
-                clockResolution: Number(q.clockResolution ?? 60),
-                clockOffset: Number(q.clockOffset ?? 0),
-                clockBatch: string(q.clockBatch) === '1',
-              }),
-          regularThresholdPercent:
-            q.regularThresholdPercent === undefined
-              ? defaults.regularThresholdPercent
-              : Number(q.regularThresholdPercent),
-          minSessions: q.minSessions === undefined ? defaults.minSessions : Number(q.minSessions),
-          minMinutes: q.minMinutes === undefined ? defaults.minMinutes : Number(q.minMinutes),
-          minMessages: q.minMessages === undefined ? defaults.minMessages : Number(q.minMessages),
-          chatWindowMinutes:
-            q.chatWindowMinutes === undefined ? defaults.chatWindowMinutes : Number(q.chatWindowMinutes),
-          coreRule,
-          timezone: string(q.timezone) || defaults.timezone,
-          excludedLogins: botsFor(request.query),
-          ownerId: configuration.value.twitch?.userId ?? '',
-          youtubeAccount: configuration.value.youtube?.userId ?? configuration.value.youtubeAccountId ?? '',
-        },
-      );
+      const options: AnalyticsOptions = {
+        rollingCore: true,
+        coreWindowDays: defaults.coreWindowDays,
+        ...(q.streamFrom === undefined ? {} : { streamFrom: Number(q.streamFrom) }),
+        ...(q.streamTo === undefined ? {} : { streamTo: Number(q.streamTo) }),
+        ...(q.streamOffset === undefined ? {} : { streamOffset: Number(q.streamOffset) }),
+        ...(q.streamLimit === undefined ? {} : { streamLimit: Number(q.streamLimit) }),
+        ...(sessionId ? { sessionId } : {}),
+        ...(sessionId && !panel && string(q.streamPreview) === '1' ? { streamPreview: true } : {}),
+        ...(panel ? { panel: panel as 'dynamics' | 'time' | 'audience' } : {}),
+        ...(string(q.attendanceOnly) === '1' ? { attendanceOnly: true } : {}),
+        ...(string(q.mode) === 'summary' ? { summaryOnly: true } : {}),
+        ...(string(q.insights) === '1' ? { includeInsights: true } : {}),
+        fromMs: sessionId ? 0 : Number(q.from),
+        toMs: sessionId ? Date.now() : Math.min(Number(q.to), Date.now()),
+        source,
+        category: string(q.category),
+        ...(q.audienceOffset === undefined ? {} : { audienceOffset: Number(q.audienceOffset) }),
+        ...(q.audienceSearch === undefined ? {} : { audienceSearch: string(q.audienceSearch) }),
+        ...(q.audienceSort === undefined ? {} : { audienceSort: string(q.audienceSort) }),
+        ...(q.audienceCoreOnly === undefined ? {} : { audienceCoreOnly: string(q.audienceCoreOnly) === '1' }),
+        ...(string(q.clockCompact) === '1' || request.routeOptions.url === '/api/v1/analytics/clock-summary'
+          ? {
+              clockCompact: true,
+              clockDay: string(q.clockDay) || 'all',
+              clockResolution: Number(q.clockResolution ?? 15),
+            }
+          : {}),
+        ...(q.clockMinute === undefined
+          ? {}
+          : {
+              clockMinute: Number(q.clockMinute),
+              clockDay: string(q.clockDay) || 'all',
+              clockResolution: Number(q.clockResolution ?? 60),
+              clockOffset: Number(q.clockOffset ?? 0),
+              clockBatch: string(q.clockBatch) === '1',
+            }),
+        regularThresholdPercent:
+          q.regularThresholdPercent === undefined
+            ? defaults.regularThresholdPercent
+            : Number(q.regularThresholdPercent),
+        minSessions: q.minSessions === undefined ? defaults.minSessions : Number(q.minSessions),
+        minMinutes: q.minMinutes === undefined ? defaults.minMinutes : Number(q.minMinutes),
+        minMessages: q.minMessages === undefined ? defaults.minMessages : Number(q.minMessages),
+        chatWindowMinutes: q.chatWindowMinutes === undefined ? defaults.chatWindowMinutes : Number(q.chatWindowMinutes),
+        coreRule,
+        timezone: string(q.timezone) || defaults.timezone,
+        excludedLogins: botsFor(request.query),
+        ownerId: configuration.value.twitch?.userId ?? '',
+        youtubeAccount: configuration.value.youtube?.userId ?? configuration.value.youtubeAccountId ?? '',
+      };
+      const saved =
+        options.streamPreview && request.routeOptions.url === '/api/v1/analytics'
+          ? await db.call('cachedStreamPreview', options)
+          : undefined;
+      const result =
+        saved ??
+        (await db.call(
+          request.routeOptions.url === '/api/v1/analytics/clock' ? 'clockAudience' : 'analytics',
+          options,
+        ));
       if (
         request.routeOptions.url === '/api/v1/analytics/clock-summary' &&
         'clockBuckets' in result &&

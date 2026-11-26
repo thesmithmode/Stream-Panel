@@ -95,6 +95,7 @@ test('stream preview returns an archived stream while the rolling roster is bein
       options.membershipOnly ? { preparing: true, audience: [] } : resolve(options, ...args),
     );
     const q = { sessionId: selected, fromMs: 0, toMs: base + 3 * minute, rollingCore: true, timezone: 'UTC' };
+    assert.equal(s.cachedStreamPreview({ ...q, streamPreview: true }), undefined);
     const preview = s.analytics({ ...q, streamPreview: true });
     assert.equal(preview.preparing, true);
     assert.equal(preview.streamPreview, true);
@@ -106,6 +107,10 @@ test('stream preview returns an archived stream while the rolling roster is bein
       preview.streamComparison.map((stream) => stream.id),
       [selected],
     );
+    const independentReader = new AnalyticsHistory((s as any).reads);
+    const saved = independentReader.cachedStreamPreview({ ...q, streamPreview: true });
+    assert.equal(saved?.streamPreview, true);
+    assert.deepEqual(saved?.timeline, preview.timeline);
     assert.equal(s.analytics(q).preparing, true);
     assert.equal(read.mock.callCount(), 1);
     const live = s.startSession('owner', 'live', base + 3 * minute, 'platform', base + 3 * minute);

@@ -1,4 +1,4 @@
-import { calendarRange } from '../../../packages/core/src/stream-calendar';
+import { calendarRange } from '../../../packages/core/src/stream-calendar.ts';
 import type { ProfileName } from '../../../packages/core/src/profiles';
 export const views = [
   'overview',

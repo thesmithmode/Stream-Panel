@@ -3,7 +3,7 @@ import type { ConfigurationPort } from './config.js';
 import type { StorePort } from './store-contract.js';
 type Runtime = {
   configuration: ConfigurationPort;
-  db: StorePort<'warmAnalytics' | 'changes' | 'advanceAnalytics' | 'analytics' | 'followerChanges'> & {
+  db: StorePort<'warmAnalytics' | 'changes' | 'advanceAnalytics' | 'analytics'> & {
     queueStatus?: () => { pending: number };
     onChange?: (listener: () => void) => () => void;
   };
@@ -11,7 +11,6 @@ type Runtime = {
 /** Serial background catch-up: bounded SQLite chunks, then idle checks once a minute. */
 export function startAnalyticsWarmer(runtimes: () => Iterable<Runtime>, enabled: () => boolean, onError: () => void) {
   const versions = new WeakMap<object, string>();
-  const followingVersions = new WeakMap<object, string>();
   const windows = new WeakMap<object, { signature: string; toMs: number; index: number }>();
   let stopped = false,
     running = false,
@@ -65,27 +64,8 @@ export function startAnalyticsWarmer(runtimes: () => Iterable<Runtime>, enabled:
             cfg.twitch?.userId,
             cfg.youtube?.userId,
           ]);
-          // Following is independent of the expensive audience catch-up. Prepare it
-          // first, once per data version and minute, with the exact UI period bounds.
-          const followEnd = Math.floor(Date.now() / 60000) * 60000;
-          const followSignature = JSON.stringify([signature, followEnd]);
-          if (followingVersions.get(runtime.db) !== followSignature) {
-            for (const days of [0, 7, 30]) {
-              if (stopped) break;
-              if ((runtime.db.queueStatus?.().pending ?? 0) > 0) {
-                preparing = true;
-                break;
-              }
-              await runtime.db.call(
-                'followerChanges',
-                days ? followEnd - days * 86400000 : 0,
-                followEnd,
-                includeBots ? false : cfg.excludedBotLogins,
-              );
-              if (days === 30) followingVersions.set(runtime.db, followSignature);
-            }
-            if (stopped) break;
-          }
+          // Following queries use the exact requested period. Speculative moving
+          // windows would enqueue expensive reads even when the facts are unchanged.
           if (versions.get(runtime.db) === signature) continue;
           const options = {
             ...rules,

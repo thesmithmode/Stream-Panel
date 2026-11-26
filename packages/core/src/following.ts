@@ -260,7 +260,15 @@ export function followingAnalytics(
       personId: null,
     });
   };
-  for (const p of polls) for (const f of snapshot(p.payload_json).followers) add(p.source, p.account, f);
+  // Identical checks still appear in the poll history, but repeating an entire
+  // roster cannot change signups until this account's snapshot changes.
+  const lastSignupSnapshot = new Map<string, string>();
+  for (const p of polls) {
+    const key = JSON.stringify([p.source, p.account]);
+    if (lastSignupSnapshot.get(key) === p.snapshotId) continue;
+    lastSignupSnapshot.set(key, p.snapshotId);
+    for (const f of snapshot(p.payload_json).followers) add(p.source, p.account, f);
+  }
   const events = db
     .prepare(
       "SELECT e.source,e.account_id AS account,i.external_id AS id,i.display_name AS name,e.occurred_at_ms AS at FROM effective_events e JOIN identities i ON i.id=e.identity_id WHERE e.type='follow' AND e.occurred_at_ms BETWEEN ? AND ?",
