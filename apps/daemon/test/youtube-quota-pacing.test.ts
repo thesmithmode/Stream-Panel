@@ -17,8 +17,8 @@ import type { StoreClient } from '../src/db.js';
 
 type Live = { id: string; chat?: string };
 /** A YouTube channel fixture with an in-memory store, a manual clock and per-resource call logs. */
-const fixture = (options: { chatOnly?: boolean } = {}) => {
-  const base = Date.parse('2026-11-20T12:00:00Z');
+const fixture = (options: { chatOnly?: boolean; manyPages?: boolean } = {}) => {
+  const base = Date.parse('2026-11-20T08:00:00Z');
   const state = {
     at: base,
     live: [{ id: 'live', chat: 'chat' }] as Live[],
@@ -28,12 +28,18 @@ const fixture = (options: { chatOnly?: boolean } = {}) => {
     floor: 60000,
     chatError: 0,
     offlineAt: '',
+    backgroundError: false,
   };
   const calls: { path: string; params: URLSearchParams; at: number }[] = [],
     quota: [string, string, number, number][] = [],
     messages: [string, unknown[]][] = [];
+  const channel = {
+    id: 'owner',
+    statistics: { subscriberCount: '10' },
+    ...(options.manyPages ? { contentDetails: { relatedPlaylists: { uploads: 'uploads' } } } : {}),
+  };
   const snapshots: Record<string, { data: unknown; updatedAt: number }> = {
-    channel: { data: { id: 'owner', statistics: { subscriberCount: '10' } }, updatedAt: base },
+    channel: { data: channel, updatedAt: base },
     report: { data: {}, updatedAt: base },
     'cursor:followers': { data: true, updatedAt: base },
   };
@@ -52,7 +58,7 @@ const fixture = (options: { chatOnly?: boolean } = {}) => {
       return null;
     },
   } as unknown as StoreClient;
-  const tokens = { access: 'a', refresh: 'r', userId: 'owner', expiresAt: base + 86400000, scopes: [] };
+  const tokens = { access: 'a', refresh: 'r', userId: 'owner', expiresAt: base + 2 * 86400000, scopes: [] };
   const config = { value: { youtube: tokens }, save: async () => {} } as unknown as Configuration;
   let page = 0;
   const request: typeof fetch = async (input) => {
@@ -71,15 +77,23 @@ const fixture = (options: { chatOnly?: boolean } = {}) => {
         items: url.searchParams
           .get('id')!
           .split(',')
-          .map((id) => ({
-            id,
-            snippet: { liveBroadcastContent: state.ended.has(id) || state.notLive.has(id) ? 'none' : 'live' },
-            liveStreamingDetails: {
-              actualStartTime: new Date(base).toISOString(),
-              concurrentViewers: '3',
-              ...(state.ended.has(id) ? { actualEndTime: new Date(state.at).toISOString() } : {}),
-            },
-          })),
+          .map((id) =>
+            id.startsWith('upload-')
+              ? {
+                  id,
+                  snippet: { title: id, publishedAt: new Date(base).toISOString() },
+                  status: { privacyStatus: 'public' },
+                }
+              : {
+                  id,
+                  snippet: { liveBroadcastContent: state.ended.has(id) || state.notLive.has(id) ? 'none' : 'live' },
+                  liveStreamingDetails: {
+                    actualStartTime: new Date(base).toISOString(),
+                    concurrentViewers: '3',
+                    ...(state.ended.has(id) ? { actualEndTime: new Date(state.at).toISOString() } : {}),
+                  },
+                },
+          ),
       });
     if (path === 'messages') {
       if (state.chatError) {
@@ -98,15 +112,29 @@ const fixture = (options: { chatOnly?: boolean } = {}) => {
         })),
       });
     }
-    if (path === 'channels') return Response.json({ items: [{ id: 'owner', statistics: { subscriberCount: '11' } }] });
-    if (path === 'subscriptions') return Response.json({ items: [] });
+    if (path === 'channels') return Response.json({ items: [channel] });
+    if (path === 'subscriptions' || path === 'playlistItems') {
+      if (!options.manyPages) return Response.json({ items: [] });
+      const page = Number(url.searchParams.get('pageToken') ?? 1),
+        maxPages = path === 'subscriptions' ? 25 : 20;
+      if (state.backgroundError && page === maxPages) return Response.json({}, { status: 503 });
+      return Response.json({
+        items:
+          path === 'subscriptions'
+            ? [{ snippet: {}, subscriberSnippet: { channelId: `subscriber-${page}` } }]
+            : Array.from({ length: 50 }, (_, i) => ({
+                contentDetails: { videoId: `upload-${page}-${i}`, videoPublishedAt: new Date(base).toISOString() },
+              })),
+        ...(page < maxPages ? { nextPageToken: String(page + 1) } : {}),
+      });
+    }
     return Response.json({});
   };
   const yt = new YouTubeConnection(
     config,
     db,
     'https://panel.test/oauth/youtube/callback',
-    'ruslan',
+    'test-profile',
     request,
     () => state.at,
     options.chatOnly ? { chatOnly: true } : undefined,
@@ -142,7 +170,7 @@ test('local quota accounting charges Google units: chat reads cost 5, list reads
     assert.ok(
       main.quota.every(
         ([day, profile, cost, budget]) =>
-          day === '11/20/2026' && profile === 'ruslan' && budget === 9000 && (cost === 1 || cost === 5),
+          day === '11/20/2026' && profile === 'test-profile' && budget === 9000 && (cost === 1 || cost === 5),
       ),
     );
   } finally {
@@ -154,8 +182,8 @@ test('local quota accounting charges Google units: chat reads cost 5, list reads
     assert.deepEqual(
       secondary.quota.map(([, profile, cost, budget]) => [profile, cost, budget]),
       [
-        ['ruslan:secondary', 1, 3000],
-        ['ruslan:secondary', 5, 3000],
+        ['test-profile:secondary', 1, 3000],
+        ['test-profile:secondary', 5, 3000],
       ],
     );
   } finally {
@@ -163,10 +191,9 @@ test('local quota accounting charges Google units: chat reads cost 5, list reads
   }
 });
 
-test('while live, viewers stay per minute, broadcasts are rediscovered every 5 minutes, totals every 5 and the subscriber list every 15', async () => {
+test('while live, viewers stay per minute, broadcasts and totals every five minutes, and the subscriber list hourly', async () => {
   assert.equal(youtubeSubscriberCountInterval(true), 300000);
-  assert.equal(youtubeSubscriberCountInterval(false), 900000);
-  assert.equal(youtubeSubscriberListInterval, 900000);
+  assert.equal(youtubeSubscriberListInterval, 3600000);
   assert.equal(subscriberInterval(true), 60000, 'Twitch keeps its own cadence');
   const f = fixture();
   try {
@@ -175,18 +202,70 @@ test('while live, viewers stay per minute, broadcasts are rediscovered every 5 m
     assert.equal(delays.length, 60);
     assert.equal(f.count('videos'), 60, 'viewer counts are still sampled every minute');
     assert.equal(f.count('liveBroadcasts'), 3600000 / YOUTUBE_LIVE_DISCOVERY_MS);
-    // The stored total and follower list are from the start, so the first reads are due at +5 and +15 minutes.
+    // The starting snapshots defer the first reads to +5 minutes and +1 hour respectively.
     assert.equal(
       f.count('channels', (c) => c.params.get('part') === 'statistics'),
       11,
     );
-    assert.equal(f.count('subscriptions'), 3);
-    assert.deepEqual(
-      f.calls.filter((c) => c.path === 'subscriptions').map((c) => c.at - f.base),
-      [900000, 1800000, 2700000],
-    );
+    assert.equal(f.count('subscriptions'), 0);
+    await f.yt.collectOnce();
+    assert.equal(f.count('subscriptions'), 1);
     const discovered = f.calls.filter((c) => c.path === 'liveBroadcasts').map((c) => c.at - f.base);
     assert.deepEqual(discovered.slice(0, 3), [0, 300000, 600000]);
+  } finally {
+    await f.yt.stop();
+  }
+});
+
+test('24 hours of active chat with full subscriber and upload pagination leave at least 1500 Google units', async (t) => {
+  const f = fixture({ manyPages: true });
+  try {
+    delete f.snapshots['cursor:followers'];
+    await f.run(86400000);
+    assert.equal(f.count('videos', (c) => c.params.get('id') === 'live'), 1440);
+    assert.equal(f.count('liveBroadcasts'), 288);
+    assert.equal(f.count('subscriptions'), 24 * 25);
+    assert.equal(f.count('playlistItems'), 24 * 20);
+    assert.equal(f.count('videos', (c) => c.params.get('id')?.startsWith('upload-') === true), 24 * 20);
+    const units = f.quota.reduce((sum, [, , cost]) => sum + cost, 0);
+    assert.ok(units <= 8500, `24-hour collection cost ${units} units`);
+    t.diagnostic(`24-hour collection cost ${units} units`);
+  } finally {
+    await f.yt.stop();
+  }
+});
+
+test('failed paginated background reads wait for the next hour while live checks continue', async () => {
+  const f = fixture({ manyPages: true });
+  try {
+    delete f.snapshots['cursor:followers'];
+    f.state.backgroundError = true;
+    await f.run(3600000);
+    assert.equal(f.count('subscriptions'), 25);
+    assert.equal(f.count('playlistItems'), 20);
+    assert.equal(f.count('videos', (c) => c.params.get('id') === 'live'), 60);
+    assert.equal(f.snapshots['cursor:followers'], undefined);
+    assert.equal(f.snapshots['cursor:publications'], undefined);
+    f.state.backgroundError = false;
+    await f.yt.collectOnce();
+    assert.ok(f.snapshots['cursor:followers']);
+    assert.ok(f.snapshots['cursor:publications']);
+  } finally {
+    await f.yt.stop();
+  }
+});
+
+test('offline subscriber reads are hourly, while broadcast discovery still runs every five minutes', async () => {
+  const f = fixture();
+  try {
+    f.state.live = [];
+    await f.run(3600000);
+    assert.equal(f.count('liveBroadcasts'), 12);
+    assert.equal(f.count('channels'), 0);
+    assert.equal(f.count('subscriptions'), 0);
+    await f.yt.collectOnce();
+    assert.equal(f.count('channels'), 1);
+    assert.equal(f.count('subscriptions'), 1);
   } finally {
     await f.yt.stop();
   }
@@ -338,6 +417,27 @@ test('a chat read failing on a reused broadcast list confirms the broadcast befo
     assert.equal(fresh.count('liveBroadcasts'), 1, 'a fresh list is not rediscovered');
   } finally {
     await fresh.yt.stop();
+  }
+});
+
+test('a chat cannot be read before YouTube’s deadline, even after the collector restarts', async () => {
+  const f = fixture();
+  try {
+    f.state.floor = 65000;
+    await f.yt.collectOnce();
+    f.state.at += 60000;
+    await f.yt.collectOnce();
+    assert.equal(f.count('messages'), 1);
+    await f.yt.stop();
+    f.state.at += 4999;
+    await f.yt.collectOnce();
+    assert.equal(f.count('messages'), 1);
+    f.state.at += 1;
+    await f.yt.collectOnce();
+    assert.equal(f.count('messages'), 2);
+    assert.equal(f.calls.filter((call) => call.path === 'messages')[1]?.params.get('pageToken'), 'page-1');
+  } finally {
+    await f.yt.stop();
   }
 });
 
