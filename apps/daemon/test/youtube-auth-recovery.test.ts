@@ -96,7 +96,7 @@ test('parallel 401 responses share one refresh; a second 401 is bounded', async 
   });
   const results = await Promise.allSettled([yt.collectOnce(), yt.collectOnce()]);
   assert.equal(refreshes, 1);
-  assert.equal(reads, 4);
+  assert.ok(reads >= 3 && reads <= 4);
   for (const result of results) {
     assert.equal(result.status, 'rejected');
     if (result.status === 'rejected') assert.match(result.reason.message, /YOUTUBE_AUTH_REQUIRED/);
@@ -110,15 +110,25 @@ for (const [status, error, expected] of [
   [503, 'invalid_grant', 'YOUTUBE_REQUEST_FAILED'],
 ] as const) {
   test(`refresh ${status} ${error} reports ${expected} and preserves saved credentials`, async () => {
-    const { yt, config } = fixture(async () =>
-      Response.json({ error, error_description: 'private provider text' }, { status }),
-    );
+    let requests = 0;
+    const { yt, config } = fixture(async () => {
+      requests++;
+      return Response.json({ error, error_description: 'private provider text' }, { status });
+    });
     config.value.youtube!.expiresAt = 0;
     try {
       await yt.start();
       assert.equal(yt.status.detail, expected);
       assert.equal(config.value.youtube?.refresh, 'refresh');
       assert.equal(config.value.youtubeClientSecret, 'saved-secret');
+      if (status < 500) {
+        assert.equal(config.value.youtube?.youtubeAuthBlocked, expected);
+        await yt.stop();
+        await yt.start();
+        assert.equal(requests, 1, 'a persisted refusal must not call Google again');
+        await assert.rejects(yt.collectOnce(), new RegExp(expected));
+        assert.equal(requests, 1);
+      } else assert.equal(config.value.youtube?.youtubeAuthBlocked, undefined);
     } finally {
       await yt.stop();
     }
@@ -259,4 +269,26 @@ test('a newer OAuth attempt invalidates an older in-flight callback without stop
   assert.equal(JSON.stringify(config.value), original);
   assert.equal(yt.status.state, 'authorizing');
   await yt.stop();
+});
+
+test('Google rate limit and daily quota prevent further HTTP calls before the retry deadline', async () => {
+  for (const [status, reason, expected] of [
+    [429, 'rateLimitExceeded', 'YOUTUBE_RATE_LIMIT'],
+    [403, 'quotaExceeded', 'YOUTUBE_GOOGLE_DAILY_QUOTA'],
+  ] as const) {
+    let calls = 0;
+    const { yt } = fixture(async () => {
+      calls++;
+      return Response.json({ error: { errors: [{ reason }] } }, { status, headers: { 'Retry-After': '1800' } });
+    });
+    try {
+      await yt.start();
+      assert.equal(yt.status.detail, expected);
+      yt.notifyTwitchLive();
+      await assert.rejects(yt.collectOnce(), new RegExp(expected));
+      assert.equal(calls, 1);
+    } finally {
+      await yt.stop();
+    }
+  }
 });

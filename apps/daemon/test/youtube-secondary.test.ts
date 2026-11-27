@@ -118,7 +118,7 @@ test('secondary OAuth has independent credentials and callback state; restarts a
     assert.equal(response.statusCode, 400);
     await a.youtubeSecondary.stop();
     mode = 'offline';
-    assert.equal(await a.youtubeSecondary.collectOnce(), 300000);
+    assert.equal(await a.youtubeSecondary.collectOnce(), 900000);
     response = await a.app.inject({
       method: 'POST',
       url: '/api/v1/youtube/disconnect',

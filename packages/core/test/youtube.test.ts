@@ -16,6 +16,10 @@ test('YouTube reports, duplicate messages, moderation, account and profile isola
     assert.equal(b.youtubeQuota('10/07/2026', 'gulnaz', 4000), true);
     assert.equal(b.youtubeQuota('10/07/2026', 'ruslan'), false);
     assert.equal(a.youtubeQuota('10/08/2026', 'ruslan'), true);
+    assert.equal(a.youtubeQuota('10/08/2026', 'ruslan', 5999, 9000, 9000), true);
+    assert.equal(b.youtubeQuota('10/08/2026', 'gulnaz:secondary', 3000, 3000, 9000), true);
+    assert.equal(b.youtubeQuota('10/08/2026', 'gulnaz', 1, 9000, 9000), false);
+    assert.equal(b.youtubeQuota('10/09/2026', 'gulnaz', 1, 9000, 9000), true);
     assert.throws(() => a.youtubeSnapshot('', 'key', {}), /INVALID_YOUTUBE_KEY/);
     assert.throws(() => a.youtubeMessages('', 'chat', []), /INVALID_YOUTUBE_MESSAGES/);
     a.youtubeSnapshot('channel', 'report', { views: 42 });

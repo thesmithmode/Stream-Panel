@@ -1,5 +1,9 @@
-import { youtubeSubscriberCountInterval, youtubeSubscriberListInterval } from './subscriber-cadence.js';
-import { collectYouTubePublications } from './youtube-publications.js';
+import {
+  youtubeOfflineBackgroundInterval,
+  youtubeSubscriberCountInterval,
+  youtubeSubscriberListInterval,
+} from './subscriber-cadence.js';
+import { collectYouTubePublications, YOUTUBE_PUBLICATION_INTERVAL_MS } from './youtube-publications.js';
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import type { ConfigurationPort, Tokens } from './config.js';
 import type { StorePort } from './store-contract.js';
@@ -26,8 +30,31 @@ const videoParts =
 export const youtubeUnitCost = (resource: string) => (resource === 'liveChat/messages' ? 5 : 1);
 /** Local daily budgets in Google units (default project quota: 10 000 units/day, reset at midnight Pacific Time). */
 export const YOUTUBE_DAILY_UNITS = { primary: 9000, secondary: 3000 } as const;
+// Until every OAuth client is mapped to a verified Cloud project, use one conservative
+// ceiling across both profiles and channels. The shared SQLite transaction enforces it.
+export const YOUTUBE_SHARED_DAILY_UNITS = 9000;
+const quotaDay = (at: number) =>
+  new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(at);
+export function youtubeNextQuotaReset(at: number) {
+  const day = quotaDay(at);
+  let low = at,
+    high = at + 26 * 60 * 60_000;
+  while (high - low > 1000) {
+    const middle = Math.floor((low + high) / 2);
+    if (quotaDay(middle) === day) low = middle;
+    else high = middle;
+  }
+  return high + 1000;
+}
+const terminalAuth = new Set(['YOUTUBE_REFRESH_REJECTED', 'YOUTUBE_CLIENT_REJECTED', 'YOUTUBE_AUTH_REQUIRED']);
 /** While live, the active broadcast list is rediscovered at most this often; per-minute video reads confirm that known broadcasts are still live. */
 export const YOUTUBE_LIVE_DISCOVERY_MS = 5 * 60_000;
+export const YOUTUBE_IDLE_DISCOVERY_MS = 15 * 60_000;
 /** Chat pacing: 60 s while messages arrive, 120 s while quiet, never faster than a 90 s long-run average (small burst allowance). */
 export const YOUTUBE_CHAT_PACE = {
   activeMs: 60_000,
@@ -59,9 +86,14 @@ export class YouTubeConnection implements ProviderConnection {
   private generation = 0;
   private authAttempt = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
+  private wakeIdle: (() => void) | undefined;
   private running: Promise<void> | undefined;
   private requests = new Set<AbortController>();
   private refreshing: Promise<void> | undefined;
+  private retryUntil = 0;
+  private retryReason = '';
+  private rateFailures = 0;
+  private failures = 0;
   private initialCountChecked = false;
   private broadcastCache: { at: number; items: Record<string, any>[] } | undefined;
   private readonly chatPace = new Map<string, ChatPace>();
@@ -82,19 +114,62 @@ export class YouTubeConnection implements ProviderConnection {
   private requiredScopes() {
     return this.mode.chatOnly ? scopes.slice(0, 1) : scopes;
   }
+  private ensureAvailable(tokens: Tokens) {
+    if (tokens.youtubeAuthBlocked) throw new Error(tokens.youtubeAuthBlocked);
+    if (this.retryUntil > this.now()) throw new Error(this.retryReason);
+  }
+  private async blockAuthorization(tokens: Tokens, error: unknown) {
+    if (!(error instanceof Error) || !terminalAuth.has(error.message) || this.config.value.youtube !== tokens) return;
+    if (!tokens.youtubeAuthBlocked) {
+      tokens.youtubeAuthBlocked = error.message;
+      await this.config.save();
+    }
+  }
+  private pause(reason: string, until: number) {
+    if (until >= this.retryUntil) {
+      this.retryUntil = until;
+      this.retryReason = reason;
+    }
+  }
   private async json(url: string, init: RequestInit = {}) {
     const controller = new AbortController();
     this.requests.add(controller);
     const timeout = setTimeout(() => controller.abort(), 15000);
     try {
       const response = await this.request(url, { ...init, signal: controller.signal });
-      const data = object(await response.json());
+      let data: Record<string, any>;
+      try {
+        data = object(await response.json());
+      } catch (error) {
+        if (response.ok) throw error;
+        data = {};
+      }
       if (!response.ok && url === 'https://oauth2.googleapis.com/token' && response.status < 500) {
         if (data.error === 'invalid_grant') throw new Error('YOUTUBE_REFRESH_REJECTED');
         if (data.error === 'invalid_client' || data.error === 'unauthorized_client')
           throw new Error('YOUTUBE_CLIENT_REJECTED');
       }
-      if (!response.ok)
+      if (!response.ok) {
+        const reasons: string[] = Array.isArray(data.error?.errors)
+          ? data.error.errors.map((item: any) => string(item?.reason))
+          : [];
+        if (reasons.some((reason) => reason === 'quotaExceeded' || reason === 'dailyLimitExceeded')) {
+          this.pause('YOUTUBE_GOOGLE_DAILY_QUOTA', youtubeNextQuotaReset(this.now()));
+          throw new Error('YOUTUBE_GOOGLE_DAILY_QUOTA');
+        }
+        if (
+          response.status === 429 ||
+          reasons.some((reason) =>
+            ['rateLimitExceeded', 'userRateLimitExceeded', 'userRequestsExceedRateLimit'].includes(reason),
+          )
+        ) {
+          const header = response.headers.get('retry-after');
+          const seconds = header === null ? NaN : Number(header);
+          const requested = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header ?? '') - this.now();
+          const delay = Math.min(60 * 60_000, 300_000 * 2 ** Math.min(this.rateFailures++, 4));
+          this.pause('YOUTUBE_RATE_LIMIT', this.now() + Math.max(delay, Number.isFinite(requested) ? requested : 0));
+          throw new Error('YOUTUBE_RATE_LIMIT');
+        }
         throw new Error(
           response.status === 401
             ? 'YOUTUBE_AUTH_REQUIRED'
@@ -102,6 +177,7 @@ export class YouTubeConnection implements ProviderConnection {
               ? 'YOUTUBE_ACCESS_OR_QUOTA'
               : 'YOUTUBE_REQUEST_FAILED',
         );
+      }
       return data;
     } finally {
       clearTimeout(timeout);
@@ -120,6 +196,7 @@ export class YouTubeConnection implements ProviderConnection {
     });
   }
   private async refresh(tokens: Tokens) {
+    this.ensureAvailable(tokens);
     if (this.refreshing) return this.refreshing;
     const generation = this.generation;
     const operation = (async () => {
@@ -131,7 +208,10 @@ export class YouTubeConnection implements ProviderConnection {
       tokens.refresh = string(data.refresh_token) || tokens.refresh;
       tokens.expiresAt = this.now() + Number(data.expires_in) * 1000;
       await this.config.save();
-    })();
+    })().catch(async (error: unknown) => {
+      if (generation === this.generation) await this.blockAuthorization(tokens, error);
+      throw error;
+    });
     this.refreshing = operation;
     try {
       await operation;
@@ -139,7 +219,8 @@ export class YouTubeConnection implements ProviderConnection {
       if (this.refreshing === operation) this.refreshing = undefined;
     }
   }
-  private async authorizedJson(url: string, tokens: Tokens) {
+  private async authorizedJson(url: string, tokens: Tokens, reserveRetry?: () => Promise<void>) {
+    this.ensureAvailable(tokens);
     const generation = this.generation,
       access = tokens.access;
     try {
@@ -156,7 +237,16 @@ export class YouTubeConnection implements ProviderConnection {
       // Share refreshes and retry the failed request once, without replaying writes.
       if (tokens.access === access) await this.refresh(tokens);
       if (generation !== this.generation || this.config.value.youtube !== tokens) return {};
-      return this.json(url, { headers: { Authorization: `Bearer ${tokens.access}` } });
+      this.ensureAvailable(tokens);
+      if (reserveRetry) await reserveRetry();
+      if (generation !== this.generation || this.config.value.youtube !== tokens) return {};
+      this.ensureAvailable(tokens);
+      try {
+        return await this.json(url, { headers: { Authorization: `Bearer ${tokens.access}` } });
+      } catch (retryError) {
+        if (generation === this.generation) await this.blockAuthorization(tokens, retryError);
+        throw retryError;
+      }
     }
   }
   async beginAuth(clientId: string, secret: string) {
@@ -258,26 +348,44 @@ export class YouTubeConnection implements ProviderConnection {
   }
   private async api(resource: string, params: Record<string, string>, tokens: Tokens) {
     const generation = this.generation;
-    const day = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/Los_Angeles',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(this.now());
-    if (
-      !(await this.db.call(
-        'youtubeQuota',
-        day,
-        this.mode.chatOnly ? `${this.profile}:secondary` : this.profile,
-        youtubeUnitCost(resource),
-        this.mode.chatOnly ? YOUTUBE_DAILY_UNITS.secondary : YOUTUBE_DAILY_UNITS.primary,
-      ))
-    )
-      throw new Error('YOUTUBE_DAILY_BUDGET');
-    const data = await this.authorizedJson(
-      `https://www.googleapis.com/youtube/v3/${resource}?${new URLSearchParams(params)}`,
-      tokens,
-    );
+    this.ensureAvailable(tokens);
+    const reserve = async () => {
+      const day = quotaDay(this.now());
+      if (
+        !(await this.db.call(
+          'youtubeQuota',
+          day,
+          this.mode.chatOnly ? `${this.profile}:secondary` : this.profile,
+          youtubeUnitCost(resource),
+          this.mode.chatOnly ? YOUTUBE_DAILY_UNITS.secondary : YOUTUBE_DAILY_UNITS.primary,
+          YOUTUBE_SHARED_DAILY_UNITS,
+        ))
+      ) {
+        this.pause('YOUTUBE_DAILY_BUDGET', youtubeNextQuotaReset(this.now()));
+        throw new Error('YOUTUBE_DAILY_BUDGET');
+      }
+    };
+    await reserve();
+    let data: Record<string, any>;
+    try {
+      data = await this.authorizedJson(
+        `https://www.googleapis.com/youtube/v3/${resource}?${new URLSearchParams(params)}`,
+        tokens,
+        reserve,
+      );
+    } catch (error) {
+      // A real Google daily-quota refusal blocks further Data API calls from both
+      // profiles until midnight Pacific, including after a service restart.
+      if (error instanceof Error && error.message === 'YOUTUBE_GOOGLE_DAILY_QUOTA')
+        await this.db.call(
+          'youtubeQuota',
+          quotaDay(this.now()),
+          'google:daily-block',
+          YOUTUBE_SHARED_DAILY_UNITS,
+          YOUTUBE_SHARED_DAILY_UNITS,
+        );
+      throw error;
+    }
     if (generation !== this.generation) return {};
 
     return data;
@@ -486,7 +594,7 @@ export class YouTubeConnection implements ProviderConnection {
     valid: () => boolean,
     reused: boolean,
   ): Promise<number | null> {
-    let interval = broadcasts.length ? 60000 : 300000,
+    let interval = broadcasts.length ? 60000 : YOUTUBE_IDLE_DISCOVERY_MS,
       ended = false;
     const chats = new Set<string>();
     for (const broadcast of broadcasts) {
@@ -522,12 +630,13 @@ export class YouTubeConnection implements ProviderConnection {
       interval = Math.max(interval, floor);
     }
     for (const chat of this.chatPace.keys()) if (!chats.has(chat)) this.chatPace.delete(chat);
-    return ended ? 300000 : interval;
+    return ended ? YOUTUBE_IDLE_DISCOVERY_MS : interval;
   }
   async collectOnce(): Promise<number> {
     const generation = this.generation,
       tokens = this.config.value.youtube;
     if (!tokens) return 300000;
+    this.ensureAvailable(tokens);
     const valid = () => generation === this.generation && this.config.value.youtube === tokens;
     if (tokens.expiresAt <= this.now() + 60000) {
       await this.refresh(tokens);
@@ -569,7 +678,7 @@ export class YouTubeConnection implements ProviderConnection {
     const interval = await this.collectChats(tokens, broadcasts, snapshots, valid, reused);
     if (interval === null || !valid()) return 300000;
     if (!(await this.collectReport(tokens, snapshots, valid))) return 300000;
-    await this.collectSubscribers(tokens, valid, this.now());
+    await this.collectSubscribers(tokens, valid, this.now(), broadcasts.length > 0);
     if (!valid()) return 300000;
     const { cursor, removed, archivedIds } = archive;
     const checkedAt = Number(cursor.checkedAt);
@@ -580,7 +689,7 @@ export class YouTubeConnection implements ProviderConnection {
     if (archivedIds.length && (removed.length || this.now() - lastArchiveCheck >= 21600000))
       await this.collectArchivedVideos(tokens, archivedIds, valid, this.now());
     if (!valid()) return 300000;
-    await this.collectPublications(tokens, snapshots, channelSnapshot, valid);
+    await this.collectPublications(tokens, snapshots, channelSnapshot, valid, broadcasts.length > 0);
     if (!valid()) return 300000;
     this.status = {
       ...this.status,
@@ -770,6 +879,7 @@ export class YouTubeConnection implements ProviderConnection {
     snapshots: Snapshots,
     channelSnapshot: Record<string, unknown> | undefined,
     valid: () => boolean,
+    live: boolean,
   ) {
     try {
       await collectYouTubePublications({
@@ -779,6 +889,7 @@ export class YouTubeConnection implements ProviderConnection {
         channel: channelSnapshot ?? object(snapshots.channel?.data ?? {}),
         snapshots,
         lastAttemptAt: this.backgroundAttempts.get('publications') ?? -Infinity,
+        intervalMs: live ? YOUTUBE_PUBLICATION_INTERVAL_MS : youtubeOfflineBackgroundInterval,
         api: (resource, params) => this.api(resource, params, tokens),
         types: (params) =>
           this.authorizedJson(
@@ -845,13 +956,13 @@ export class YouTubeConnection implements ProviderConnection {
       if (valid()) await this.db.call('gap', 'youtube', 'archived_video_metadata_unavailable', at, at);
     }
   }
-  private async collectSubscribers(tokens: Tokens, valid: () => boolean, at: number) {
+  private async collectSubscribers(tokens: Tokens, valid: () => boolean, at: number, live: boolean) {
     const previous = await this.db.call('youtubeData', tokens.userId);
     const lastCheck = Math.max(
       previous.snapshots['cursor:followers']?.updatedAt ?? -Infinity,
       this.backgroundAttempts.get('subscribers') ?? -Infinity,
     );
-    if (!valid() || at - lastCheck < youtubeSubscriberListInterval) return;
+    if (!valid() || at - lastCheck < (live ? youtubeSubscriberListInterval : youtubeOfflineBackgroundInterval)) return;
     this.backgroundAttempts.set('subscribers', at);
     try {
       const channelStats = object(object(previous.snapshots.channel?.data ?? {}).statistics ?? {}),
@@ -906,8 +1017,17 @@ export class YouTubeConnection implements ProviderConnection {
       if (valid()) await this.db.call('gap', 'youtube', 'subscribers_unavailable', at, at);
     }
   }
+  /** A confirmed Twitch go-live can shorten only a healthy, scheduled idle wait. */
+  notifyTwitchLive() {
+    this.wakeIdle?.();
+  }
   async start() {
     if (this.running || this.timer || !this.config.value.youtube) return;
+    const blocked = this.config.value.youtube.youtubeAuthBlocked;
+    if (blocked) {
+      this.status = { state: 'error', account: this.config.value.youtube.userId, detail: blocked };
+      return;
+    }
     const generation = this.generation;
     this.status = {
       state: 'connecting',
@@ -916,11 +1036,16 @@ export class YouTubeConnection implements ProviderConnection {
     };
     const tick = async () => {
       let delay = 300000;
+      this.timer = undefined;
+      this.wakeIdle = undefined;
       this.running = this.collectOnce()
         .then((n) => {
           delay = n;
+          this.failures = 0;
+          if (this.retryUntil <= this.now()) this.rateFailures = 0;
         })
         .catch((error) => {
+          delay = Math.min(60 * 60_000, 300_000 * 2 ** Math.min(this.failures++, 4));
           if (generation === this.generation)
             this.status = {
               state: 'error',
@@ -930,7 +1055,25 @@ export class YouTubeConnection implements ProviderConnection {
         });
       await this.running;
       this.running = undefined;
-      if (generation === this.generation) this.timer = setTimeout(() => void tick(), delay);
+      if (generation !== this.generation) return;
+      const blocked = this.config.value.youtube?.youtubeAuthBlocked;
+      if (blocked || this.retryUntil > this.now()) {
+        this.status = {
+          state: 'error',
+          account: this.config.value.youtube?.userId ?? '',
+          detail: blocked ?? this.retryReason,
+        };
+      }
+      if (blocked) return;
+      delay = Math.max(delay, this.retryUntil - this.now());
+      this.timer = setTimeout(() => void tick(), Math.min(delay, 2_147_483_647));
+      if (delay === YOUTUBE_IDLE_DISCOVERY_MS && this.status.state === 'connected' && !this.broadcastCache) {
+        this.wakeIdle = () => {
+          if (generation !== this.generation || this.running || !this.timer || this.retryUntil > this.now()) return;
+          clearTimeout(this.timer);
+          void tick();
+        };
+      }
     };
     await tick();
   }
@@ -940,10 +1083,15 @@ export class YouTubeConnection implements ProviderConnection {
     this.pending = undefined;
     clearTimeout(this.timer);
     this.timer = undefined;
+    this.wakeIdle = undefined;
     for (const controller of this.requests) controller.abort();
     await this.running;
     this.running = undefined;
     this.initialCountChecked = false;
+    this.retryUntil = 0;
+    this.retryReason = '';
+    this.rateFailures = 0;
+    this.failures = 0;
     this.broadcastCache = undefined;
     this.chatPace.clear();
     this.endedChatAttempts.clear();
