@@ -31,7 +31,7 @@ const fixture = (options: { chatOnly?: boolean; manyPages?: boolean } = {}) => {
     backgroundError: false,
   };
   const calls: { path: string; params: URLSearchParams; at: number }[] = [],
-    quota: [string, string, number, number][] = [],
+    quota: [string, string, number, number, number][] = [],
     messages: [string, unknown[]][] = [];
   const channel = {
     id: 'owner',
@@ -46,7 +46,7 @@ const fixture = (options: { chatOnly?: boolean; manyPages?: boolean } = {}) => {
   const db = {
     call: async (method: string, ...args: any[]) => {
       if (method === 'youtubeQuota') {
-        quota.push(args as [string, string, number, number]);
+        quota.push(args as [string, string, number, number, number]);
         return true;
       }
       if (method === 'youtubeData') return { snapshots, messages: [], subscriberCountAt: base };
@@ -169,8 +169,12 @@ test('local quota accounting charges Google units: chat reads cost 5, list reads
     assert.equal(main.quota.length, main.calls.length);
     assert.ok(
       main.quota.every(
-        ([day, profile, cost, budget]) =>
-          day === '11/20/2026' && profile === 'test-profile' && budget === 9000 && (cost === 1 || cost === 5),
+        ([day, profile, cost, budget, sharedBudget]) =>
+          day === '11/20/2026' &&
+          profile === 'test-profile' &&
+          budget === 9000 &&
+          sharedBudget === 9000 &&
+          (cost === 1 || cost === 5),
       ),
     );
   } finally {
@@ -264,17 +268,21 @@ test('failed paginated background reads wait for the next hour while live checks
   }
 });
 
-test('offline subscriber reads are hourly, while broadcast discovery still runs every five minutes', async () => {
+test('offline subscriber reads run every three hours, while discovery still runs every five minutes', async () => {
   const f = fixture();
   try {
     f.state.live = [];
-    await f.run(3600000);
-    assert.equal(f.count('liveBroadcasts'), 12);
+    await f.run(10800000);
+    assert.equal(f.count('liveBroadcasts'), 36);
     assert.equal(f.count('channels'), 0);
     assert.equal(f.count('subscriptions'), 0);
     await f.yt.collectOnce();
     assert.equal(f.count('channels'), 1);
     assert.equal(f.count('subscriptions'), 1);
+    f.state.live = [{ id: 'live', chat: 'chat' }];
+    f.state.at += 300000;
+    assert.equal(await f.yt.collectOnce(), 60000);
+    assert.equal(f.count('messages'), 1);
   } finally {
     await f.yt.stop();
   }

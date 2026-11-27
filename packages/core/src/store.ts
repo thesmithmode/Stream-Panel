@@ -860,7 +860,7 @@ export class StreamStore {
     return result;
   }
 
-  youtubeQuota(day: string, profile: string, cost = 1, budget = 4000): boolean {
+  youtubeQuota(day: string, profile: string, cost = 1, budget = 4000, sharedBudget?: number): boolean {
     if (
       !/^\d{2}\/\d{2}\/\d{4}$/.test(day) ||
       !profile ||
@@ -869,7 +869,8 @@ export class StreamStore {
       cost > 100000 ||
       !Number.isInteger(budget) ||
       budget < 1 ||
-      budget > 100000
+      budget > 100000 ||
+      (sharedBudget !== undefined && (!Number.isInteger(sharedBudget) || sharedBudget < 1 || sharedBudget > 100000))
     )
       throw new Error('INVALID_QUOTA');
     return this.db
@@ -877,6 +878,12 @@ export class StreamStore {
         const row = this.db.prepare('SELECT used FROM sp_youtube_quota WHERE day=? AND profile=?').get(day, profile) as
           { used: number } | undefined;
         if ((row?.used ?? 0) + cost > budget) return false;
+        if (sharedBudget !== undefined) {
+          const total = this.db.prepare('SELECT COALESCE(SUM(used),0) AS used FROM sp_youtube_quota WHERE day=?').get(day) as {
+            used: number;
+          };
+          if (total.used + cost > sharedBudget) return false;
+        }
         this.db
           .prepare(
             'INSERT INTO sp_youtube_quota VALUES (?,?,?) ON CONFLICT(day,profile) DO UPDATE SET used=used+excluded.used',

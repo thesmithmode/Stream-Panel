@@ -6,6 +6,7 @@ interface Dependencies {
   channel: Record<string, any>;
   snapshots: Record<string, { data: any; updatedAt: number }>;
   lastAttemptAt?: number;
+  intervalMs?: number;
   api: (resource: string, params: Record<string, string>) => Promise<Record<string, any>>;
   types: (params: Record<string, string>) => Promise<Record<string, any>>;
   save: (items: Publication[], at: number) => Promise<void>;
@@ -25,7 +26,7 @@ export function publicationKind(duration: unknown): Publication['kind'] {
 /** Uses the uploads playlist instead of expensive search requests. */
 export async function collectYouTubePublications(d: Dependencies) {
   const lastCheck = Math.max(d.snapshots['cursor:publications']?.updatedAt ?? -Infinity, d.lastAttemptAt ?? -Infinity);
-  if (d.at - lastCheck < YOUTUBE_PUBLICATION_INTERVAL_MS) return;
+  if (d.at - lastCheck < (d.intervalMs ?? YOUTUBE_PUBLICATION_INTERVAL_MS)) return;
   const playlist = d.channel.contentDetails?.relatedPlaylists?.uploads;
   if (typeof playlist !== 'string' || !playlist) return;
   const cutoff = d.at - 30 * 86400000,
