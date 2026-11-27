@@ -31,7 +31,7 @@ const fixture = (options: { chatOnly?: boolean; manyPages?: boolean } = {}) => {
     backgroundError: false,
   };
   const calls: { path: string; params: URLSearchParams; at: number }[] = [],
-    quota: [string, string, number, number][] = [],
+    quota: [string, string, number, number, number][] = [],
     messages: [string, unknown[]][] = [];
   const channel = {
     id: 'owner',
@@ -46,7 +46,7 @@ const fixture = (options: { chatOnly?: boolean; manyPages?: boolean } = {}) => {
   const db = {
     call: async (method: string, ...args: any[]) => {
       if (method === 'youtubeQuota') {
-        quota.push(args as [string, string, number, number]);
+        quota.push(args as [string, string, number, number, number]);
         return true;
       }
       if (method === 'youtubeData') return { snapshots, messages: [], subscriberCountAt: base };
@@ -169,8 +169,12 @@ test('local quota accounting charges Google units: chat reads cost 5, list reads
     assert.equal(main.quota.length, main.calls.length);
     assert.ok(
       main.quota.every(
-        ([day, profile, cost, budget]) =>
-          day === '11/20/2026' && profile === 'test-profile' && budget === 9000 && (cost === 1 || cost === 5),
+        ([day, profile, cost, budget, sharedBudget]) =>
+          day === '11/20/2026' &&
+          profile === 'test-profile' &&
+          budget === 9000 &&
+          sharedBudget === 9000 &&
+          (cost === 1 || cost === 5),
       ),
     );
   } finally {
@@ -264,17 +268,21 @@ test('failed paginated background reads wait for the next hour while live checks
   }
 });
 
-test('offline subscriber reads are hourly, while broadcast discovery still runs every five minutes', async () => {
+test('offline subscriber reads run every three hours, while discovery runs every fifteen minutes', async () => {
   const f = fixture();
   try {
     f.state.live = [];
-    await f.run(3600000);
+    await f.run(10800000);
     assert.equal(f.count('liveBroadcasts'), 12);
     assert.equal(f.count('channels'), 0);
     assert.equal(f.count('subscriptions'), 0);
     await f.yt.collectOnce();
     assert.equal(f.count('channels'), 1);
     assert.equal(f.count('subscriptions'), 1);
+    f.state.live = [{ id: 'live', chat: 'chat' }];
+    f.state.at += 300000;
+    assert.equal(await f.yt.collectOnce(), 60000);
+    assert.equal(f.count('messages'), 1);
   } finally {
     await f.yt.stop();
   }
@@ -295,7 +303,7 @@ test('an ended or changed broadcast is rediscovered at once from the per-minute 
     f.state.ended.add('live');
     f.state.live = [];
     f.state.at += 60000;
-    assert.equal(await f.yt.collectOnce(), 300000);
+    assert.equal(await f.yt.collectOnce(), 900000);
     assert.equal(f.count('liveBroadcasts'), 2);
     assert.equal(reads('live'), 4, 'three live reads plus the existing archive read of the ended stream');
     assert.deepEqual(f.snapshots.broadcasts!.data, []);
@@ -394,7 +402,7 @@ test('a chat read failing on a reused broadcast list confirms the broadcast befo
     gone.state.at += 60000;
     gone.state.chatError = 1;
     gone.state.live = [];
-    assert.equal(await gone.yt.collectOnce(), 300000, 'an ended chat is not an error');
+    assert.equal(await gone.yt.collectOnce(), 900000, 'an ended chat is not an error');
     assert.equal(gone.count('liveBroadcasts'), 2);
   } finally {
     await gone.yt.stop();
@@ -468,7 +476,7 @@ test('the supplementary chat reuses its broadcast list for 5 minutes and redisco
     // The offline chat dropped the reused list, so the very next cycle rediscovers instead of waiting out the 5 minutes.
     f.state.live = [];
     const before = f.count('liveBroadcasts');
-    assert.equal(await f.yt.collectOnce(), 300000);
+    assert.equal(await f.yt.collectOnce(), 900000);
     assert.equal(f.count('liveBroadcasts'), before + 1);
   } finally {
     await f.yt.stop();
@@ -487,7 +495,7 @@ test('a video that stops being live in snippet.liveBroadcastContent is rediscove
     f.state.live = [];
     f.state.at += 60000;
     const videos = f.count('videos');
-    assert.equal(await f.yt.collectOnce(), 300000);
+    assert.equal(await f.yt.collectOnce(), 900000);
     assert.equal(f.count('liveBroadcasts'), 2, 'rediscovered in the same cycle');
     assert.deepEqual(f.snapshots.broadcasts!.data, []);
     assert.ok(f.count('videos') >= videos + 1);
@@ -516,7 +524,7 @@ test('the last page of an ended broadcast is read once without waiting for the q
     f.state.live = [];
     f.state.ended.add('live');
     f.state.messages = 1;
-    assert.equal(await f.yt.collectOnce(), 300000);
+    assert.equal(await f.yt.collectOnce(), 900000);
     assert.equal(f.count('messages'), 2);
     const polls = f.calls.filter((call) => call.path === 'messages');
     assert.equal(polls.at(-1)?.params.get('pageToken'), 'page-1');
@@ -536,11 +544,29 @@ test('a closed supplementary chat is not retried after the final read is rejecte
     f.state.at += YOUTUBE_LIVE_DISCOVERY_MS;
     f.state.live = [];
     f.state.chatError = 1;
-    assert.equal(await f.yt.collectOnce(), 300000);
+    assert.equal(await f.yt.collectOnce(), 900000);
     f.state.at += 300000;
     await f.yt.collectOnce();
     assert.equal(f.count('messages'), 2);
     assert.equal(f.yt.status.state, 'connected');
+  } finally {
+    await f.yt.stop();
+  }
+});
+
+test('Twitch start wakes an idle YouTube connection once without waiting fifteen minutes', async () => {
+  const f = fixture();
+  try {
+    f.state.live = [];
+    await f.yt.start();
+    assert.equal(f.count('liveBroadcasts'), 1);
+    f.state.live = [{ id: 'live', chat: 'chat' }];
+    f.state.at += 60_000;
+    f.yt.notifyTwitchLive();
+    f.yt.notifyTwitchLive();
+    for (let n = 0; n < 100 && f.count('messages') === 0; n++) await new Promise((resolve) => setTimeout(resolve, 1));
+    assert.equal(f.count('liveBroadcasts'), 2);
+    assert.equal(f.count('messages'), 1);
   } finally {
     await f.yt.stop();
   }

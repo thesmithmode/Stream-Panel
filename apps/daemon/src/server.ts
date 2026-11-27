@@ -124,6 +124,10 @@ export async function createApplication(
     Date.now,
     { chatOnly: true, otherAccount: () => configuration.value.youtube?.userId },
   );
+  twitch.onStreamStart = () => {
+    youtube.notifyTwitchLive();
+    youtubeSecondary.notifyTwitchLive();
+  };
   const same = (a: string, b: string) => {
     const left = Buffer.from(a),
       right = Buffer.from(b);

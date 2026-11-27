@@ -137,6 +137,7 @@ export class TwitchConnection implements ProviderConnection {
   private reconcilingGeneration: number | null = null;
   private reconcileRequested = false;
   private platformLive = false;
+  onStreamStart?: () => void;
   private eventSubReady = false;
   private reconcileError: string | null = null;
   private reconnectAttempt = 0;
@@ -652,8 +653,10 @@ export class TwitchConnection implements ProviderConnection {
           [externalId],
         );
         if (!current()) return;
+        const newlyLive = !this.platformLive || previousSession !== sessionId;
         this.platformLive = true;
         this.sessionId = sessionId;
+        if (newlyLive) this.onStreamStart?.();
         if (sessionId)
           await this.db.call(
             'streamSample',

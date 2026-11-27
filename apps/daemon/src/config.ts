@@ -9,6 +9,8 @@ export interface Tokens {
   expiresAt: number;
   userId: string;
   scopes: string[];
+  /** Persisted terminal YouTube authorization failure; only a new OAuth grant clears it. */
+  youtubeAuthBlocked?: string;
 }
 export interface Config {
   version: 1;
