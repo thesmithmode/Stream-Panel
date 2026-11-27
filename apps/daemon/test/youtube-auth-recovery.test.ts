@@ -270,3 +270,25 @@ test('a newer OAuth attempt invalidates an older in-flight callback without stop
   assert.equal(yt.status.state, 'authorizing');
   await yt.stop();
 });
+
+test('Google rate limit and daily quota prevent further HTTP calls before the retry deadline', async () => {
+  for (const [status, reason, expected] of [
+    [429, 'rateLimitExceeded', 'YOUTUBE_RATE_LIMIT'],
+    [403, 'quotaExceeded', 'YOUTUBE_GOOGLE_DAILY_QUOTA'],
+  ] as const) {
+    let calls = 0;
+    const { yt } = fixture(async () => {
+      calls++;
+      return Response.json({ error: { errors: [{ reason }] } }, { status, headers: { 'Retry-After': '1800' } });
+    });
+    try {
+      await yt.start();
+      assert.equal(yt.status.detail, expected);
+      yt.notifyTwitchLive();
+      await assert.rejects(yt.collectOnce(), new RegExp(expected));
+      assert.equal(calls, 1);
+    } finally {
+      await yt.stop();
+    }
+  }
+});

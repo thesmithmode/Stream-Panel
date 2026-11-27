@@ -149,7 +149,7 @@ test('YouTube OAuth binds state and PKCE; refresh, owner filtering, durable curs
     mode = 'changed';
     await assert.rejects(yt.collectOnce(), /YOUTUBE_CHANNEL_CHANGED/);
     mode = 'offline';
-    assert.equal(await yt.collectOnce(), 300000);
+    assert.equal(await yt.collectOnce(), 900000);
     mode = 'failure';
     await yt.start();
     assert.equal(yt.status.state, 'error');

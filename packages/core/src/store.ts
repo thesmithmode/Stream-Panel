@@ -879,9 +879,9 @@ export class StreamStore {
           { used: number } | undefined;
         if ((row?.used ?? 0) + cost > budget) return false;
         if (sharedBudget !== undefined) {
-          const total = this.db.prepare('SELECT COALESCE(SUM(used),0) AS used FROM sp_youtube_quota WHERE day=?').get(day) as {
-            used: number;
-          };
+          const total = this.db
+            .prepare('SELECT COALESCE(SUM(used),0) AS used FROM sp_youtube_quota WHERE day=?')
+            .get(day) as { used: number };
           if (total.used + cost > sharedBudget) return false;
         }
         this.db

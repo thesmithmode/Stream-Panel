@@ -48,7 +48,7 @@ test('YouTube records fresh totals every five minutes live and once per three ho
     await db.ready;
     await db.call('youtubeSnapshot', 'owner', 'channel', { id: 'owner', statistics: { subscriberCount: '100' } }, base);
     await db.call('youtubeSnapshot', 'owner', 'report', {}, base);
-    assert.equal(await connection.collectOnce(), 300000);
+    assert.equal(await connection.collectOnce(), 900000);
     at += 60000;
     await connection.collectOnce();
     assert.equal(countRequests, 0);
@@ -77,7 +77,7 @@ test('YouTube records fresh totals every five minutes live and once per three ho
     fail = false;
     live = false;
     at = base + 780000;
-    assert.equal(await connection.collectOnce(), 300000);
+    assert.equal(await connection.collectOnce(), 900000);
     assert.equal(countRequests, 2);
     at = base + 600000 + 10800000 - 1;
     await connection.collectOnce();
@@ -184,7 +184,7 @@ test('an unavailable first YouTube count stays unknown and retries without inter
     await db.ready;
     await db.call('youtubeSnapshot', 'owner', 'channel', { id: 'owner' }, base);
     await db.call('youtubeSnapshot', 'owner', 'report', {}, base);
-    assert.equal(await connection.collectOnce(), 300000);
+    assert.equal(await connection.collectOnce(), 900000);
     assert.equal(requests, 1);
     assert.equal((await db.call('youtubeData', 'owner')).subscriberCountAt, null);
     at = base + 120000 + 10800000 - 1;
