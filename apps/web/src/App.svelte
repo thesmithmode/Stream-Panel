@@ -2,7 +2,6 @@
   import { screenVersion, refreshInterval, type Changes } from './refresh-policy';
   import { setServerVersions, bumpReadRevision, getDataRevision } from './api';
   import { clearAnalyticsCache } from './analytics-cache';
-  import Sheet from './Sheet.svelte';
   import DonationTotal from './DonationTotal.svelte';
   import StreamHistory from './StreamHistory.svelte';
   import PeriodSelect from './PeriodSelect.svelte';
@@ -40,7 +39,6 @@
     autoRefresh = !autoRefresh;
     if (autoRefresh) void action(async () => {});
   }
-  let moreOpen = $state(false);
   let tab = $state('overview'),
     authorized = $state(false),
     loading = $state(true),
@@ -247,6 +245,8 @@
     ['analytics', 'Аналитика'],
     ['people', 'Люди'],
     ['donations', 'Донаты'],
+    ['connections', 'Интеграции'],
+    ['settings', 'Настройки'],
   ] as const;
   async function refresh(fresh = false, initialStatus?: any) {
     const current = epoch;
@@ -365,7 +365,6 @@
     if (next === 'analytics') analyticsSection = 'dynamics';
     routeSection = '';
     returnTo = '';
-    moreOpen = false;
     epoch++;
     if (next !== 'stream') sessionFilter = '';
     if (next === 'sessions') {
@@ -418,7 +417,6 @@
     saveRoute(true);
   }
   function goBack() {
-    moreOpen = false;
     if (canGoBack()) {
       rememberScroll();
       history.back();
@@ -608,8 +606,7 @@
       if (new URLSearchParams(location.hash.slice(1)).has('key')) void initialize();
     };
     const back = () => {
-      moreOpen = false;
-      if (new URLSearchParams(location.hash.slice(1)).has('key')) {
+        if (new URLSearchParams(location.hash.slice(1)).has('key')) {
         void initialize();
         return;
       }
@@ -704,14 +701,8 @@
           aria-current={tab === key ? 'page' : undefined}
           onclick={() => navigate(key)}><Icon name={key} />{label}</button
         >{/each}
-      <button
-        disabled={loading || !authorized}
-        class:active={moreOpen || ['connections', 'settings'].includes(tab)}
-        aria-expanded={moreOpen}
-        onclick={() => (moreOpen = true)}><Icon name="more" />Ещё</button
-      >
     </nav>
-    {#if authorized && viewportWidth > 720}<div class="sidebar-refresh">{@render refreshControls()}</div>{/if}
+    {#if authorized}<div class="sidebar-refresh">{@render refreshControls()}</div>{/if}
   </aside>
   <main
     class:analytics-page={tab === 'analytics'}
@@ -731,12 +722,7 @@
         {#if tab !== 'stream' && !(tab === 'people' && personId)}<h1>{titles[tab]}</h1>{/if}
       </div>
       {#if authorized}<label class="heading-profile"
-          >{#if tab === 'analytics'}<button
-              class="icon-button analytics-menu-trigger"
-              aria-label="Ещё"
-              aria-expanded={moreOpen}
-              onclick={() => (moreOpen = true)}><Icon name="more" /></button
-            >{/if}<span
+  ><span
             class="dot"
             class:off={connectionLost || !autoRefresh}
             title={connectionLost ? 'Нет связи' : autoRefresh ? 'Автообновление включено' : 'Автообновление выключено'}
@@ -922,13 +908,4 @@
   </main>
 </div>
 
-<Sheet bind:open={moreOpen} title="Ещё" compact>
-  <nav class="more-links" aria-label="Дополнительные разделы"
-    >{#each [['connections', 'Интеграции'], ['settings', 'Настройки']] as const as [key, label]}<button
-        class:active={tab === key}
-        aria-current={tab === key ? 'page' : undefined}
-        onclick={() => navigate(key)}><Icon name={key} />{label}<Icon name="arrow" size={18} /></button
-      >{/each}</nav
-  >
-  {#if viewportWidth <= 720}<div class="more-refresh"><h3>Обновление данных</h3>{@render refreshControls()}</div>{/if}
-</Sheet>
+
