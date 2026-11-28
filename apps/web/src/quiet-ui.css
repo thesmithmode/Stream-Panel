@@ -641,8 +641,8 @@ main {
     justify-content: center;
     gap: 5px;
     min-width: 0;
-    min-height: 64px;
-    padding: 8px 2px;
+    min-height: 48px;
+    padding: 4px 2px;
     font-size: 11px;
     background: none !important;
     color: var(--muted);
@@ -656,7 +656,7 @@ main {
     color: var(--accent);
   }
   main {
-    padding: 20px 16px calc(152px + env(safe-area-inset-bottom));
+    padding: 20px 16px calc(120px + env(safe-area-inset-bottom));
     margin: 0;
     width: 100%;
   }
