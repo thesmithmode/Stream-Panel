@@ -46,11 +46,12 @@ export async function withRefresh(page, work) {
     return await work();
   }
   const sheet = page.getByRole('dialog', { name: 'Обновление данных', exact: true });
-  if (!(await sheet.isVisible())) await page.getByRole('button', { name: 'Обновление данных', exact: true }).click();
+  const isOpen = async () => (await sheet.getAttribute('open').catch(() => null)) !== null;
+  if (!(await isOpen())) await page.getByRole('button', { name: 'Обновление данных', exact: true }).click();
   try {
     return await work();
   } finally {
-    if (await sheet.isVisible()) await sheet.getByRole('button', { name: 'Закрыть', exact: true }).click();
+    if (await isOpen()) await sheet.getByRole('button', { name: 'Закрыть', exact: true }).click();
   }
 }
 export async function refreshData(page) {
