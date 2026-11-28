@@ -5,7 +5,7 @@ import { application, seed } from '../helpers/application.mjs';
 import { launchBrowser } from '../helpers/browser.mjs';
 import { goto, saveCoverage } from '../helpers/browser-coverage.mjs';
 import { assertUiLayout } from '../helpers/ui-layout.mjs';
-import { refreshData } from '../helpers/navigation.mjs';
+import { refreshData, withRefresh } from '../helpers/navigation.mjs';
 
 test(
   'desktop charts use readable heights, empty stream sections stay hidden and refresh controls follow the viewport',
@@ -52,13 +52,16 @@ test(
           await page.screenshot({ path: `${process.env.STREAM_PANEL_QA_DIR}/dynamics-${width}.png` });
         }
       }
-      await page.getByRole('button', { name: 'Ещё', exact: true }).click();
-      const more = page.getByRole('dialog', { name: 'Ещё', exact: true });
-      await more.getByRole('button', { name: 'Автообновление Вкл', exact: true }).click();
-      assert.equal(await page.getByLabel('Интервал автообновления').count(), 0);
-      await more.getByRole('button', { name: 'Автообновление Выкл', exact: true }).click();
-      await more.getByLabel('Интервал автообновления').selectOption('300');
-      await page.keyboard.press('Escape');
+      await withRefresh(page, async () => {
+        const refresh =
+          page.viewportSize().width > 720
+            ? page.locator('.sidebar-refresh')
+            : page.getByRole('dialog', { name: 'Обновление данных', exact: true });
+        await refresh.getByRole('button', { name: 'Автообновление Вкл', exact: true }).click();
+        assert.equal(await refresh.getByLabel('Интервал автообновления').count(), 0);
+        await refresh.getByRole('button', { name: 'Автообновление Выкл', exact: true }).click();
+        await refresh.getByLabel('Интервал автообновления').selectOption('300');
+      });
       await page.setViewportSize({ width: 1440, height: 1000 });
       assert.equal(await page.locator('.sidebar-refresh').getByLabel('Интервал автообновления').inputValue(), '300');
       await page.getByRole('button', { name: 'Стримы', exact: true }).click();

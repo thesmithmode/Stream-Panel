@@ -1,4 +1,4 @@
-import { navigate, refreshData, withMore } from '../helpers/navigation.mjs';
+import { navigate, refreshData, withRefresh } from '../helpers/navigation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -180,7 +180,7 @@ test(
       await refreshData(page);
       await metrics.getByText('Сообщения', { exact: true }).locator('..').getByText('9', { exact: true }).waitFor();
       assert.equal(reads, initial + 1, 'manual refresh reads a new snapshot');
-      await withMore(page, () => page.getByRole('button', { name: 'Автообновление Вкл', exact: true }).click());
+      await withRefresh(page, () => page.getByRole('button', { name: 'Автообновление Вкл', exact: true }).click());
       await page.clock.install();
       await page.clock.setSystemTime(Date.now() + 61000);
       await navigate(page, 'Люди');
