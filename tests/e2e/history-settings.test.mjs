@@ -98,6 +98,7 @@ test(
       await page.getByLabel('Порог посещаемости, %').fill('70');
       const saveSettings = page.getByRole('button', { name: 'Сохранить настройки', exact: true });
       await saveSettings.scrollIntoViewIfNeeded();
+      await page.evaluate(() => window.scrollBy(0, -120));
       assert.ok(
         await saveSettings.evaluate(
           (el) => el.getBoundingClientRect().bottom <= document.querySelector('.sidebar').getBoundingClientRect().top,
