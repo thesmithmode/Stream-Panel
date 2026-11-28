@@ -15,6 +15,7 @@
   import { isOutdatedRelease } from './release';
   import { viewRequests } from './view-requests';
   import Icon from './Icon.svelte';
+  import Sheet from './Sheet.svelte';
   import Confirmation from './Confirmation.svelte';
   import { confirmAction } from './confirmation.svelte';
 
@@ -35,6 +36,7 @@
   let autoRefresh = $state(true),
     refreshSeconds = $state(60);
   let viewportWidth = $state(0);
+  let refreshOpen = $state(false);
   function toggleRefresh() {
     autoRefresh = !autoRefresh;
     if (autoRefresh) void action(async () => {});
@@ -702,7 +704,7 @@
           onclick={() => navigate(key)}><Icon name={key} />{label}</button
         >{/each}
     </nav>
-    {#if authorized}<div class="sidebar-refresh">{@render refreshControls()}</div>{/if}
+    {#if authorized && viewportWidth > 720}<div class="sidebar-refresh">{@render refreshControls()}</div>{/if}
   </aside>
   <main
     class:analytics-page={tab === 'analytics'}
@@ -721,7 +723,7 @@
           >{/if}
         {#if tab !== 'stream' && !(tab === 'people' && personId)}<h1>{titles[tab]}</h1>{/if}
       </div>
-      {#if authorized}<label class="heading-profile"
+      {#if authorized}<div class="heading-profile"
           ><span
             class="dot"
             class:off={connectionLost || !autoRefresh}
@@ -734,9 +736,17 @@
             >{#each allowedProfiles as allowed}<option value={allowed}
                 >{allowed === 'ruslan' ? 'Руслан' : 'Гульназ'}</option
               >{/each}</select
-          ></label
+          ></div
+        >{/if}
+      {#if authorized && viewportWidth <= 720}<button
+          class="icon-button mobile-refresh-trigger"
+          aria-label="Обновление данных"
+          title="Обновление данных"
+          aria-expanded={refreshOpen}
+          onclick={() => (refreshOpen = true)}><Icon name="refresh" /></button
         >{/if}
     </div>
+    <Sheet bind:open={refreshOpen} title="Обновление данных" compact>{@render refreshControls()}</Sheet>
     {#if loading}<div class="panel empty">
         <p>Загружаем профиль…</p>
       </div>{:else if !authorized && connectionLost}<section class="panel empty"
