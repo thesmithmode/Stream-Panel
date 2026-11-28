@@ -704,7 +704,7 @@
           onclick={() => navigate(key)}><Icon name={key} />{label}</button
         >{/each}
     </nav>
-    {#if authorized && viewportWidth > 720}<div class="sidebar-refresh">{@render refreshControls()}</div>{/if}
+    {#if authorized}<div class="sidebar-refresh">{@render refreshControls()}</div>{/if}
   </aside>
   <main
     class:analytics-page={tab === 'analytics'}
@@ -738,7 +738,7 @@
               >{/each}</select
           ></div
         >{/if}
-      {#if authorized && viewportWidth <= 720}<button
+      {#if authorized}<button
           class="icon-button mobile-refresh-trigger"
           aria-label="Обновление данных"
           title="Обновление данных"
