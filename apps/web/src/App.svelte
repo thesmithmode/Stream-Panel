@@ -34,7 +34,6 @@
   let retryInitialization = () => {};
   let autoRefresh = $state(true),
     refreshSeconds = $state(60);
-  let viewportWidth = $state(0);
   let refreshOpen = $state(false);
   function toggleRefresh() {
     autoRefresh = !autoRefresh;
@@ -644,7 +643,6 @@
   });
 </script>
 
-<svelte:window bind:innerWidth={viewportWidth} />
 <Confirmation />
 
 {#snippet refreshControls()}
