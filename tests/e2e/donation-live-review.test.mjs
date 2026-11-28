@@ -1,4 +1,4 @@
-import { navigate } from '../helpers/navigation.mjs';
+import { navigate, withRefresh } from '../helpers/navigation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { application } from '../helpers/application.mjs';
@@ -49,11 +49,13 @@ test(
       const errors = [];
       page.on('pageerror', (e) => errors.push(e.message));
       await goto(page, app.bootstrap());
-      const refreshControls = page.locator('.sidebar-refresh');
-      assert.equal(
-        await refreshControls.getByRole('button', { name: /Автообновление/ }).getAttribute('aria-pressed'),
-        'true',
-      );
+      await withRefresh(page, async () => {
+        const refreshControls = page.locator('.sidebar-refresh');
+        assert.equal(
+          await refreshControls.getByRole('button', { name: /Автообновление/ }).getAttribute('aria-pressed'),
+          'true',
+        );
+      });
       await page.getByRole('button', { name: 'Стримы', exact: true }).click();
       await page.locator(`[data-session-id="${sid}"]`).locator('.stream-open').click();
       const donations = page.getByRole('region', { name: 'Донаты стрима' });
@@ -100,15 +102,21 @@ test(
       assert.equal(await page.getByLabel('Порог посещаемости, %').inputValue(), '80');
       assert.equal(await page.getByLabel('Дополнительное условие ядра').count(), 0);
       assert.equal(await page.getByLabel('Минимум сообщений').count(), 0);
-      assert.equal(
-        await refreshControls.getByRole('button', { name: /Автообновление/ }).getAttribute('aria-pressed'),
-        'true',
-      );
+      await withRefresh(page, async () => {
+        const refreshControls = page.getByRole('dialog', { name: 'Обновление данных', exact: true });
+        assert.equal(
+          await refreshControls.getByRole('button', { name: /Автообновление/ }).getAttribute('aria-pressed'),
+          'true',
+        );
+      });
       await reload(page);
-      assert.equal(
-        await refreshControls.getByRole('button', { name: /Автообновление/ }).getAttribute('aria-pressed'),
-        'true',
-      );
+      await withRefresh(page, async () => {
+        const refreshControls = page.getByRole('dialog', { name: 'Обновление данных', exact: true });
+        assert.equal(
+          await refreshControls.getByRole('button', { name: /Автообновление/ }).getAttribute('aria-pressed'),
+          'true',
+        );
+      });
       await page.evaluate(() => {
         Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
         document.dispatchEvent(new Event('visibilitychange'));
