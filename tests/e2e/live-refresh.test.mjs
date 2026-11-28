@@ -25,20 +25,16 @@ test(
           analyticsReads++;
       });
       await goto(page, app.bootstrap());
-      await page.getByRole('button', { name: 'Ещё', exact: true }).click();
-      assert.equal(await page.getByRole('button', { name: /Автообновление/ }).getAttribute('aria-pressed'), 'true');
-      assert.equal(await page.getByLabel('Интервал автообновления').inputValue(), '60');
+      const refresh = page.locator('.sidebar-refresh');
+      assert.equal(await refresh.getByRole('button', { name: /Автообновление/ }).getAttribute('aria-pressed'), 'true');
+      assert.equal(await refresh.getByLabel('Интервал автообновления').inputValue(), '60');
       assert.deepEqual(
-        await page
+        await refresh
           .getByLabel('Интервал автообновления')
           .locator('option')
           .evaluateAll((es) => es.map((e) => e.value)),
         ['60', '300', '900'],
       );
-      await page
-        .getByRole('dialog', { name: 'Ещё', exact: true })
-        .getByRole('button', { name: 'Закрыть', exact: true })
-        .click();
       await page.getByRole('button', { name: 'Стримы', exact: true }).click();
       await page.locator('.stream-open').click();
       const metric = (name) => page.locator('.stream-kpis > div').filter({ hasText: name }).locator('strong');
@@ -102,12 +98,7 @@ test(
       });
       await page.clock.fastForward(60000);
       assert.equal(analyticsReads, before, 'hidden phone page stops requests');
-      await page.getByRole('button', { name: 'Ещё', exact: true }).click();
-      assert.equal(await page.getByRole('button', { name: /Автообновление/ }).getAttribute('aria-pressed'), 'true');
-      await page
-        .getByRole('dialog', { name: 'Ещё', exact: true })
-        .getByRole('button', { name: 'Закрыть', exact: true })
-        .click();
+      assert.equal(await refresh.getByRole('button', { name: /Автообновление/ }).getAttribute('aria-pressed'), 'true');
       await message(4);
       await app.db.call('streamSample', id, at, 'g', 'Game', 'Live', 41);
       await page.evaluate(() => {
