@@ -87,7 +87,7 @@ test(
       await setRefreshInterval(page, '60');
       await page.setViewportSize({ width: 390, height: 844 });
       const footer = await page.locator('.sidebar').boundingBox();
-      assert.ok(footer.height < 80, 'fixed controls must not consume the mobile viewport');
+      assert.ok(footer.height < 112, 'two rows of fixed navigation must not consume the mobile viewport');
       const evidence = process.env.STREAM_PANEL_BROWSER_COVERAGE_DIR;
       if (evidence) {
         await mkdir(evidence, { recursive: true });

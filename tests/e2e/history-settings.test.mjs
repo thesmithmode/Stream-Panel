@@ -96,14 +96,17 @@ test(
       assert.equal(await page.getByLabel('Период расчёта ядра').inputValue(), '90');
       await page.getByLabel('Период расчёта ядра').selectOption('30');
       await page.getByLabel('Порог посещаемости, %').fill('70');
-      await page.evaluate(() => window.scrollTo(0, 0));
+      const saveSettings = page.getByRole('button', { name: 'Сохранить настройки', exact: true });
+      await saveSettings.scrollIntoViewIfNeeded();
+      await saveSettings.evaluate((el) => {
+        const navTop = document.querySelector('.sidebar').getBoundingClientRect().top;
+        window.scrollBy(0, el.getBoundingClientRect().bottom - navTop + 8);
+      });
       assert.ok(
-        await page
-          .getByRole('button', { name: 'Сохранить настройки', exact: true })
-          .evaluate(
-            (el) => el.getBoundingClientRect().bottom <= document.querySelector('.sidebar').getBoundingClientRect().top,
-          ),
-        'core settings fit above phone navigation',
+        await saveSettings.evaluate(
+          (el) => el.getBoundingClientRect().bottom <= document.querySelector('.sidebar').getBoundingClientRect().top,
+        ),
+        'core settings can scroll above phone navigation',
       );
       await page.getByLabel('Окно активности YouTube, мин').fill('3');
       await page.getByLabel('Часовой пояс аналитики').selectOption('UTC');

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { application, seed } from '../helpers/application.mjs';
 import { launchBrowser } from '../helpers/browser.mjs';
 import { goto, saveCoverage } from '../helpers/browser-coverage.mjs';
-import { navigate, withMore } from '../helpers/navigation.mjs';
+import { navigate, withRefresh } from '../helpers/navigation.mjs';
 
 test(
   'events refresh in place on automatic ticks and profile stays bottom left only on desktop',
@@ -58,7 +58,7 @@ test(
       await reread;
       await page.locator('.recent-events').getByText('Событие без перезахода', { exact: true }).waitFor();
       assert.ok(reads > 0);
-      await withMore(page, () => page.getByRole('button', { name: 'Автообновление Вкл', exact: true }).click());
+      await withRefresh(page, () => page.getByRole('button', { name: 'Автообновление Вкл', exact: true }).click());
       const stopped = reads;
       await page.clock.fastForward(61000);
       assert.equal(reads, stopped);
