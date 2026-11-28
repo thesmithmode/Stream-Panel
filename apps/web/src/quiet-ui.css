@@ -680,8 +680,6 @@ main {
     justify-content: center;
     gap: 5px;
     min-width: 0;
-    min-height: 48px;
-    padding: 4px 2px;
     font-size: 11px;
     background: none !important;
     color: var(--muted);
@@ -1485,6 +1483,10 @@ textarea:focus-visible {
     border-radius: 0;
     background: transparent;
     color: var(--muted);
+  }
+  .sidebar nav button {
+    min-height: 48px;
+    padding: 4px 2px;
   }
   .sidebar nav button.active,
   .analytics-mobile-navigation button.active {
