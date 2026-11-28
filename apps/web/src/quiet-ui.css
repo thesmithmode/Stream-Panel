@@ -1712,3 +1712,20 @@ textarea:focus-visible {
     grid-column: 1/-1;
   }
 }
+
+/* Keep all seven destinations visible in one touch-friendly bottom row. */
+@media (max-width: 720px) {
+  .sidebar nav {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+  .sidebar nav button {
+    min-height: 56px;
+    padding: 3px 0;
+    gap: 2px;
+    font-size: 9px;
+  }
+  .sidebar nav button svg {
+    width: 18px;
+    height: 18px;
+  }
+}
