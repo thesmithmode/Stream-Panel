@@ -60,7 +60,12 @@ export async function withRefresh(page, work) {
   }
 }
 export async function refreshData(page) {
-  await withRefresh(page, () => refreshControls(page).locator('.manual-refresh').click());
+  await withRefresh(page, async () => {
+    const button = refreshControls(page).locator('.manual-refresh');
+    await button.click();
+    await button.getByText('Обновляем…', { exact: true }).waitFor();
+    await button.getByText('Обновить данные', { exact: true }).waitFor();
+  });
 }
 export async function setRefreshInterval(page, value) {
   await withRefresh(page, () => refreshControls(page).getByLabel('Интервал автообновления').selectOption(value));
