@@ -22,14 +22,14 @@ test(
       await goto(page, a.bootstrap());
       await page.locator('.channel-metrics').waitFor();
       assert.equal(new URL(page.url()).searchParams.get('view'), 'overview');
-      assert.deepEqual(await page.locator('.sidebar nav button').allTextContents(), [
+      assert.deepEqual(await page.locator('.sidebar nav .nav-label').allTextContents(), [
         'Обзор',
         'Стримы',
-        'Аналитика',
+        'Аналит.',
         'Люди',
         'Донаты',
-        'Интеграции',
-        'Настройки',
+        'Интегр.',
+        'Настр.',
       ]);
       await navigate(page, 'Стримы');
       await page.locator('.stream-card').waitFor();
