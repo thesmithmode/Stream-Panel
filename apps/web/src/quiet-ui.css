@@ -96,6 +96,9 @@ main {
   gap: 10px;
   flex: 0 0 auto;
 }
+.sidebar-refresh {
+  display: none;
+}
 .mobile-refresh-trigger {
   display: none;
 }
@@ -1575,6 +1578,7 @@ textarea:focus-visible {
     padding-bottom: 24px;
   }
   .sidebar-refresh {
+    display: block;
     margin-top: auto;
     padding: 12px 0 84px;
   }
