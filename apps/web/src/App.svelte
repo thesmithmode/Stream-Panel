@@ -15,7 +15,6 @@
   import { isOutdatedRelease } from './release';
   import { viewRequests } from './view-requests';
   import Icon from './Icon.svelte';
-  import Sheet from './Sheet.svelte';
   import Confirmation from './Confirmation.svelte';
   import { confirmAction } from './confirmation.svelte';
 
@@ -746,9 +745,26 @@
           onclick={() => (refreshOpen = true)}><Icon name="refresh" /></button
         >{/if}
     </div>
-    {#if refreshOpen}<Sheet bind:open={refreshOpen} title="Обновление данных" compact>
-        {@render refreshControls()}
-      </Sheet>{/if}
+    {#if refreshOpen}<button
+        class="mobile-refresh-backdrop"
+        aria-label="Закрыть панель обновления"
+        onclick={() => (refreshOpen = false)}
+      ></button><dialog
+        class="mobile-refresh-dialog"
+        aria-label="Обновление данных"
+        aria-modal="true"
+        open
+        onkeydown={(event) => {
+          if (event.key === 'Escape') refreshOpen = false;
+        }}
+        ><header
+          ><h2>Обновление данных</h2><button
+            class="icon-button"
+            aria-label="Закрыть"
+            onclick={() => (refreshOpen = false)}>×</button
+          ></header
+        >{@render refreshControls()}</dialog
+      >{/if}
     {#if loading}<div class="panel empty">
         <p>Загружаем профиль…</p>
       </div>{:else if !authorized && connectionLost}<section class="panel empty"
