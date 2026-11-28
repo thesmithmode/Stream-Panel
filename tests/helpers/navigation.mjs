@@ -40,13 +40,22 @@ export async function clockSettings(page) {
   const details = page.locator('.clock-settings');
   if (!(await details.getAttribute('open').then((x) => x !== null))) await details.locator('summary').click();
 }
-export async function withMore(page, work) {
-  await page.locator('.sidebar-refresh').waitFor({ state: 'visible' });
-  return await work();
+export async function withRefresh(page, work) {
+  if (page.viewportSize().width > 720) {
+    await page.locator('.sidebar-refresh').waitFor({ state: 'visible' });
+    return await work();
+  }
+  const sheet = page.getByRole('dialog', { name: 'Обновление данных', exact: true });
+  if (!(await sheet.isVisible())) await page.getByRole('button', { name: 'Обновление данных', exact: true }).click();
+  try {
+    return await work();
+  } finally {
+    if (await sheet.isVisible()) await sheet.getByRole('button', { name: 'Закрыть', exact: true }).click();
+  }
 }
 export async function refreshData(page) {
-  await withMore(page, () => page.getByRole('button', { name: 'Обновить данные', exact: true }).click());
+  await withRefresh(page, () => page.getByRole('button', { name: 'Обновить данные', exact: true }).click());
 }
 export async function setRefreshInterval(page, value) {
-  await withMore(page, () => page.getByLabel('Интервал автообновления').selectOption(value));
+  await withRefresh(page, () => page.getByLabel('Интервал автообновления').selectOption(value));
 }
