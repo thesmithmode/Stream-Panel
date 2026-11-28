@@ -606,7 +606,7 @@
       if (new URLSearchParams(location.hash.slice(1)).has('key')) void initialize();
     };
     const back = () => {
-        if (new URLSearchParams(location.hash.slice(1)).has('key')) {
+          if (new URLSearchParams(location.hash.slice(1)).has('key')) {
         void initialize();
         return;
       }
@@ -722,7 +722,7 @@
         {#if tab !== 'stream' && !(tab === 'people' && personId)}<h1>{titles[tab]}</h1>{/if}
       </div>
       {#if authorized}<label class="heading-profile"
-  ><span
+          ><span
             class="dot"
             class:off={connectionLost || !autoRefresh}
             title={connectionLost ? 'Нет связи' : autoRefresh ? 'Автообновление включено' : 'Автообновление выключено'}
@@ -907,5 +907,4 @@
     {/if}
   </main>
 </div>
-
 
