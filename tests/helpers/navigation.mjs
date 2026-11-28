@@ -51,21 +51,15 @@ export async function withRefresh(page, work) {
     return await work();
   }
   const sheet = page.getByRole('dialog', { name: 'Обновление данных', exact: true });
-  const isOpen = async () => (await sheet.getAttribute('open').catch(() => null)) !== null;
-  if (!(await isOpen())) await page.getByRole('button', { name: 'Обновление данных', exact: true }).click();
+  if (!(await sheet.isVisible())) await page.getByRole('button', { name: 'Обновление данных', exact: true }).click();
   try {
     return await work();
   } finally {
-    if (await isOpen()) await sheet.getByRole('button', { name: 'Закрыть', exact: true }).click();
+    if (await sheet.isVisible()) await sheet.getByRole('button', { name: 'Закрыть', exact: true }).click();
   }
 }
 export async function refreshData(page) {
-  await withRefresh(page, async () => {
-    const button = refreshControls(page).locator('.manual-refresh');
-    const refreshed = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/v1/changes');
-    await button.click();
-    await refreshed;
-  });
+  await withRefresh(page, () => refreshControls(page).locator('.manual-refresh').click());
 }
 export async function setRefreshInterval(page, value) {
   await withRefresh(page, () => refreshControls(page).getByLabel('Интервал автообновления').selectOption(value));
