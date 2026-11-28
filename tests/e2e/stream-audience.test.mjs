@@ -207,14 +207,14 @@ test(
           const cards = [...document.querySelectorAll('.stream-kpis > div')].map((c) => c.getBoundingClientRect());
           return (
             nav.length === 7 &&
-            new Set(nav.map((b) => Math.round(b.top))).size === 2 &&
+            new Set(nav.map((b) => Math.round(b.top))).size === 1 &&
             nav.every((b) => b.left >= 0 && b.right <= innerWidth) &&
             cards.length >= 2 &&
             Math.abs(cards[0].top - cards[1].top) < 1
           );
         }),
         true,
-        'seven mobile destinations fit in two rows and metrics use two columns',
+        'seven mobile destinations fit in one row and metrics use two columns',
       );
       await bars.first().click();
       await detail.waitFor();
