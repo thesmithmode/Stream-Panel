@@ -96,6 +96,9 @@ main {
   gap: 10px;
   flex: 0 0 auto;
 }
+.mobile-refresh-trigger {
+  display: none;
+}
 .heading-profile select {
   width: auto;
   max-width: 145px;
@@ -628,7 +631,7 @@ main {
   }
   .sidebar nav {
     display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0;
     padding: 0;
   }
@@ -653,7 +656,7 @@ main {
     color: var(--accent);
   }
   main {
-    padding: 20px 16px calc(88px + env(safe-area-inset-bottom));
+    padding: 20px 16px calc(152px + env(safe-area-inset-bottom));
     margin: 0;
     width: 100%;
   }
@@ -666,6 +669,15 @@ main {
   }
   .heading-profile {
     gap: 6px;
+  }
+  .mobile-refresh-trigger {
+    display: inline-flex;
+    flex: 0 0 auto;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
   }
   .heading-profile select {
     font-size: 15px;
