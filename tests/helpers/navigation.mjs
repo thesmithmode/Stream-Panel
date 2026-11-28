@@ -1,4 +1,3 @@
-/** Exercise the same progressive navigation that users see, including the More sheet. */
 /** Use the main navigation for every section on desktop and mobile. */
 export async function navigate(page, name) {
   if (name === 'Итоги канала') name = 'Обзор';
