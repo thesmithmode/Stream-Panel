@@ -22,7 +22,15 @@ test(
       await goto(page, a.bootstrap());
       await page.locator('.channel-metrics').waitFor();
       assert.equal(new URL(page.url()).searchParams.get('view'), 'overview');
-      assert.equal(await page.locator('.sidebar nav button').count(), 6);
+      assert.deepEqual(await page.locator('.sidebar nav button').allTextContents(), [
+        'Обзор',
+        'Стримы',
+        'Аналитика',
+        'Люди',
+        'Донаты',
+        'Интеграции',
+        'Настройки',
+      ]);
       await navigate(page, 'Стримы');
       await page.locator('.stream-card').waitFor();
       assert.equal(await page.getByRole('checkbox', { name: 'Выбрать стрим', exact: true }).count(), 0);
@@ -38,17 +46,14 @@ test(
         await navigate(page, name);
         await page.locator('main h1').waitFor();
       }
-      await page.getByRole('button', { name: 'Ещё', exact: true }).click();
-      const more = page.getByRole('dialog', { name: 'Ещё', exact: true });
+      const refresh = page.locator('.sidebar-refresh');
       await assertUiLayout(page);
-      await more.getByRole('button', { name: 'Автообновление Вкл', exact: true }).click();
-      assert.equal(await more.getByLabel('Интервал автообновления').count(), 0);
-      await more.getByRole('button', { name: 'Автообновление Выкл', exact: true }).click();
-      await more.getByLabel('Интервал автообновления').selectOption('300');
-      await more.getByLabel('Интервал автообновления').selectOption('900');
-      await more.getByLabel('Интервал автообновления').selectOption('60');
-      await page.keyboard.press('Escape');
-      assert.equal(await more.isVisible(), false);
+      await refresh.getByRole('button', { name: 'Автообновление Вкл', exact: true }).click();
+      assert.equal(await refresh.getByLabel('Интервал автообновления').count(), 0);
+      await refresh.getByRole('button', { name: 'Автообновление Выкл', exact: true }).click();
+      await refresh.getByLabel('Интервал автообновления').selectOption('300');
+      await refresh.getByLabel('Интервал автообновления').selectOption('900');
+      await refresh.getByLabel('Интервал автообновления').selectOption('60');
       await navigate(page, 'Стримы');
       await page.locator('.stream-open').click();
       await page.locator('.stream-kpis').waitFor();
