@@ -746,7 +746,9 @@
           onclick={() => (refreshOpen = true)}><Icon name="refresh" /></button
         >{/if}
     </div>
-    <Sheet bind:open={refreshOpen} title="Обновление данных" compact>{@render refreshControls()}</Sheet>
+    <Sheet bind:open={refreshOpen} title="Обновление данных" compact>
+      {#if refreshOpen}{@render refreshControls()}{/if}
+    </Sheet>
     {#if loading}<div class="panel empty">
         <p>Загружаем профиль…</p>
       </div>{:else if !authorized && connectionLost}<section class="panel empty"
