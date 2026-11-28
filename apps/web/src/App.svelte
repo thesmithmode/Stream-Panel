@@ -698,7 +698,7 @@
           disabled={loading || !authorized}
           class:active={tab === key || (key === 'sessions' && tab === 'stream')}
           aria-current={tab === key ? 'page' : undefined}
-          onclick={() => navigate(key)}><Icon name={key} />{label}</button
+          onclick={() => navigate(key)} aria-label={label} title={label}><Icon name={key} /><span class="nav-label">{key === 'analytics' ? 'Аналит.' : key === 'connections' ? 'Интегр.' : key === 'settings' ? 'Настр.' : label}</span></button
         >{/each}
     </nav>
     {#if authorized}<div class="sidebar-refresh">{@render refreshControls()}</div>{/if}
