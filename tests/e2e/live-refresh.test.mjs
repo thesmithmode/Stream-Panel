@@ -103,7 +103,15 @@ test(
       });
       await page.clock.fastForward(60000);
       assert.equal(analyticsReads, before, 'hidden phone page stops requests');
-      assert.equal(await refresh.getByRole('button', { name: /Автообновление/ }).getAttribute('aria-pressed'), 'true');
+      await withRefresh(page, async () => {
+        assert.equal(
+          await page
+            .getByRole('dialog', { name: 'Обновление данных', exact: true })
+            .getByRole('button', { name: /Автообновление/ })
+            .getAttribute('aria-pressed'),
+          'true',
+        );
+      });
       await message(4);
       await app.db.call('streamSample', id, at, 'g', 'Game', 'Live', 41);
       await page.evaluate(() => {
