@@ -40,6 +40,11 @@ export async function clockSettings(page) {
   const details = page.locator('.clock-settings');
   if (!(await details.getAttribute('open').then((x) => x !== null))) await details.locator('summary').click();
 }
+function refreshControls(page) {
+  return page.viewportSize().width > 720
+    ? page.locator('.sidebar-refresh')
+    : page.getByRole('dialog', { name: 'Обновление данных', exact: true });
+}
 export async function withRefresh(page, work) {
   if (page.viewportSize().width > 720) {
     await page.locator('.sidebar-refresh').waitFor({ state: 'visible' });
@@ -55,8 +60,8 @@ export async function withRefresh(page, work) {
   }
 }
 export async function refreshData(page) {
-  await withRefresh(page, () => page.locator('.manual-refresh').click());
+  await withRefresh(page, () => refreshControls(page).locator('.manual-refresh').click());
 }
 export async function setRefreshInterval(page, value) {
-  await withRefresh(page, () => page.getByLabel('Интервал автообновления').selectOption(value));
+  await withRefresh(page, () => refreshControls(page).getByLabel('Интервал автообновления').selectOption(value));
 }
