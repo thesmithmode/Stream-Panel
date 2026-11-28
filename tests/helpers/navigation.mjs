@@ -55,7 +55,7 @@ export async function withRefresh(page, work) {
   }
 }
 export async function refreshData(page) {
-  await withRefresh(page, () => page.getByRole('button', { name: 'Обновить данные', exact: true }).click());
+  await withRefresh(page, () => page.locator('.manual-refresh').click());
 }
 export async function setRefreshInterval(page, value) {
   await withRefresh(page, () => page.getByLabel('Интервал автообновления').selectOption(value));
