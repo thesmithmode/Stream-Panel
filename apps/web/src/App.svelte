@@ -606,7 +606,7 @@
       if (new URLSearchParams(location.hash.slice(1)).has('key')) void initialize();
     };
     const back = () => {
-          if (new URLSearchParams(location.hash.slice(1)).has('key')) {
+      if (new URLSearchParams(location.hash.slice(1)).has('key')) {
         void initialize();
         return;
       }
