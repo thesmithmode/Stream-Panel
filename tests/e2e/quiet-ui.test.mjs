@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { application, seed } from '../helpers/application.mjs';
 import { launchBrowser } from '../helpers/browser.mjs';
 import { goto, saveCoverage } from '../helpers/browser-coverage.mjs';
-import { navigate, openFilters, closeFilters } from '../helpers/navigation.mjs';
+import { navigate, openFilters, closeFilters, withRefresh } from '../helpers/navigation.mjs';
 import { assertUiLayout } from '../helpers/ui-layout.mjs';
 test(
   'quiet navigation preserves secondary functions, keyboard tabs, filters and phone scroll access',
@@ -46,14 +46,16 @@ test(
         await navigate(page, name);
         await page.locator('main h1').waitFor();
       }
-      const refresh = page.locator('.sidebar-refresh');
       await assertUiLayout(page);
-      await refresh.getByRole('button', { name: 'Автообновление Вкл', exact: true }).click();
-      assert.equal(await refresh.getByLabel('Интервал автообновления').count(), 0);
-      await refresh.getByRole('button', { name: 'Автообновление Выкл', exact: true }).click();
-      await refresh.getByLabel('Интервал автообновления').selectOption('300');
-      await refresh.getByLabel('Интервал автообновления').selectOption('900');
-      await refresh.getByLabel('Интервал автообновления').selectOption('60');
+      await withRefresh(page, async () => {
+        const refresh = page.getByRole('dialog', { name: 'Обновление данных', exact: true });
+        await refresh.getByRole('button', { name: 'Автообновление Вкл', exact: true }).click();
+        assert.equal(await refresh.getByLabel('Интервал автообновления').count(), 0);
+        await refresh.getByRole('button', { name: 'Автообновление Выкл', exact: true }).click();
+        await refresh.getByLabel('Интервал автообновления').selectOption('300');
+        await refresh.getByLabel('Интервал автообновления').selectOption('900');
+        await refresh.getByLabel('Интервал автообновления').selectOption('60');
+      });
       await navigate(page, 'Стримы');
       await page.locator('.stream-open').click();
       await page.locator('.stream-kpis').waitFor();
