@@ -121,7 +121,13 @@ test(
         Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
         document.dispatchEvent(new Event('visibilitychange'));
       });
-      assert.equal(await page.getByRole('button', { name: /Автообновление/ }).getAttribute('aria-pressed'), 'true');
+      await withRefresh(page, async () => {
+        const refreshControls = page.getByRole('dialog', { name: 'Обновление данных', exact: true });
+        assert.equal(
+          await refreshControls.getByRole('button', { name: /Автообновление/ }).getAttribute('aria-pressed'),
+          'true',
+        );
+      });
       assert.deepEqual(errors, []);
       await saveCoverage(page);
     } finally {
