@@ -1,4 +1,4 @@
-import { refreshData, setRefreshInterval } from '../helpers/navigation.mjs';
+import { refreshData, setRefreshInterval, withRefresh } from '../helpers/navigation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { application, seed } from '../helpers/application.mjs';
@@ -25,16 +25,21 @@ test(
           analyticsReads++;
       });
       await goto(page, app.bootstrap());
-      const refresh = page.locator('.sidebar-refresh');
-      assert.equal(await refresh.getByRole('button', { name: /Автообновление/ }).getAttribute('aria-pressed'), 'true');
-      assert.equal(await refresh.getByLabel('Интервал автообновления').inputValue(), '60');
-      assert.deepEqual(
-        await refresh
-          .getByLabel('Интервал автообновления')
-          .locator('option')
-          .evaluateAll((es) => es.map((e) => e.value)),
-        ['60', '300', '900'],
-      );
+      await withRefresh(page, async () => {
+        const refresh = page.getByRole('dialog', { name: 'Обновление данных', exact: true });
+        assert.equal(
+          await refresh.getByRole('button', { name: /Автообновление/ }).getAttribute('aria-pressed'),
+          'true',
+        );
+        assert.equal(await refresh.getByLabel('Интервал автообновления').inputValue(), '60');
+        assert.deepEqual(
+          await refresh
+            .getByLabel('Интервал автообновления')
+            .locator('option')
+            .evaluateAll((es) => es.map((e) => e.value)),
+          ['60', '300', '900'],
+        );
+      });
       await page.getByRole('button', { name: 'Стримы', exact: true }).click();
       await page.locator('.stream-open').click();
       const metric = (name) => page.locator('.stream-kpis > div').filter({ hasText: name }).locator('strong');
