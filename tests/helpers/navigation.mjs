@@ -62,9 +62,9 @@ export async function withRefresh(page, work) {
 export async function refreshData(page) {
   await withRefresh(page, async () => {
     const button = refreshControls(page).locator('.manual-refresh');
+    const refreshed = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/v1/changes');
     await button.click();
-    await button.getByText('Обновляем…', { exact: true }).waitFor();
-    await button.getByText('Обновить данные', { exact: true }).waitFor();
+    await refreshed;
   });
 }
 export async function setRefreshInterval(page, value) {
